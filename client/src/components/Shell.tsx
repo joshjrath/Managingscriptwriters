@@ -141,7 +141,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
         <div className="side-foot">
           {settings.isDemo && <div className="demo-flag"><b>Demo workspace.</b> Sample data only — separate from your real workspace.</div>}
           {me.role === 'owner' && (
-            <nav className="nav" aria-label="Owner">
+            <nav className="nav" aria-label="Admin">
               <NavItem to="/log" icon={<ScrollText />} label="Master log" collapsed={collapsed} />
             </nav>
           )}

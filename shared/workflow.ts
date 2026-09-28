@@ -168,9 +168,9 @@ export function nextMilestone(draft: Milestone, final: Milestone): Milestone | n
 
 export type Role = 'owner' | 'manager' | 'writer';
 
-/** Owners can do everything managers can. */
+/** Admins (stored as 'owner') can do everything managers can. */
 export const isManager = (role: Role) => role === 'manager' || role === 'owner';
-export const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', manager: 'Manager', writer: 'Writer' };
+export const ROLE_LABEL: Record<Role, string> = { owner: 'Admin', manager: 'Manager', writer: 'Writer' };
 
 export const SCRIPT_ACTIONS = [
   'start', 'reset', 'submit', 'withdraw', 'approve', 'request_revisions', 'deliver', 'undo_delivery',

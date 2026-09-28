@@ -30,7 +30,7 @@ A batch reads e.g. **"20 / 45 drafts ready · 44%"**, with approved and delivere
 ### Workflow rules (enforced on the server)
 
 - Writers move their own scripts: start, submit for review, withdraw, and confirm delivery.
-- **Owners and managers have exactly the same permissions** (Owner is a label; the first account is the owner). Only they approve, request revisions (a note is required), assign/reassign, change deadlines or script counts, move shoots, and manage clients, briefings, the team and settings.
+- **Admins and managers have exactly the same permissions** (Admin is a label; the first account is the admin). Only they approve, request revisions (a note is required), assign/reassign, change deadlines or script counts, move shoots, and manage clients, briefings, the team and settings.
 - **A script must be approved before it can be marked delivered** — no action, bulk selection or quick control can skip review.
 - Partial review is normal: approve ten scripts while the rest are still being written.
 - Lowering a batch's script count needs an explicit choice of which not-started / in-progress scripts to remove. Submitted, approved and delivered work is never removed; removed scripts stay in history and come back first if the count goes up again.
@@ -69,7 +69,7 @@ Change a shoot's dates from **Change dates** on the batch or client page, by cli
 
 **What's new**, at the very bottom of the sidebar, lists every change to the platform since the first version, with a dot when there's something you haven't seen. Entries live in `shared/changelog.ts`; every change adds one (see `CLAUDE.md`).
 
-### Master log (owners only)
+### Master log (admins only)
 
 **Master log**, next to your name in the sidebar, lists every change (from the activity history), every page or file someone opened, sign-ins and failed sign-ins, and anything someone tried that they weren't allowed to do. Filter by person or kind, or search. Repeat views of the same page by the same person within 10 minutes count once. Page views are kept for 400 days; changes and sign-ins are kept indefinitely. Managers and writers can't open it.
 
@@ -106,7 +106,7 @@ Every meaningful change (creation, assignments, status changes, reviews, deliver
 
 ## Screens
 
-Overview · My work · Production (board + table, filters, search) · Calendar (month + list; writing periods, drafts due, final delivery, shoots) · Clients and client detail · Batch detail (drafts & documents, script checklist with range selection and bulk actions, brief, deadlines, review notes, delivery records, history) · Review queue (one card per document) · Resources · Settings (deadline rules, timezone & cutoff, reminders, team) · Master log (owners) · What's new. Dashboard cards link to the matching filtered records; chart bars reveal the underlying batches.
+Overview · My work · Production (board + table, filters, search) · Calendar (month + list; writing periods, drafts due, final delivery, shoots) · Clients and client detail · Batch detail (drafts & documents, script checklist with range selection and bulk actions, brief, deadlines, review notes, delivery records, history) · Review queue (one card per document) · Resources · Settings (deadline rules, timezone & cutoff, reminders, team) · Master log (admins) · What's new. Dashboard cards link to the matching filtered records; chart bars reveal the underlying batches.
 
 Responsive: full sidebar on wide screens, collapsible icon rail on smaller desktops/tablets, navigation drawer and card layouts on phones (My work, deadlines, briefs and delivery confirmation are prioritised).
 
@@ -118,7 +118,7 @@ Responsive: full sidebar on wide screens, collapsible icon rail on smaller deskt
 2. When Render asks, fill in `MANAGER_EMAIL`, `MANAGER_NAME` and `MANAGER_PASSWORD` (at least 10 characters). That account is created on first start.
 3. Open the `.onrender.com` URL, sign in, and add your second manager and writers in **Settings → Team**. The app doesn't send email: after you add someone (or reset their password) it shows a ready-to-send message with the sign-in link, their email and a generated temporary password, with a **Copy message** button to paste into WhatsApp, Slack or email.
 
-**Team:** roles are Owner, Manager and Writer. A person's temporary password stays readable in Team (with **Copy sign-in details**) until they set their own; passwords people choose themselves are never stored readable — use **Reset password** to issue a new temporary one. **Remove** signs someone out for good, hands their unfinished scripts to a person you pick (or leaves them unassigned), and keeps their name in the history; adding the same email again restores the account.
+**Team:** roles are Admin, Manager and Writer. A person's temporary password stays readable in Team (with **Copy sign-in details**) until they set their own; passwords people choose themselves are never stored readable — use **Reset password** to issue a new temporary one. **Remove** signs someone out for good, hands their unfinished scripts to a person you pick (or leaves them unassigned), and keeps their name in the history; adding the same email again restores the account.
 
 `MANAGER_*` values are only used the first time the server starts with an empty database; changing them later does nothing. To change your password, use **Change password** in the menu under your name. If you're locked out, set `MANAGER_RESET_PASSWORD=1`, deploy (that account's password becomes `MANAGER_PASSWORD`, and it's created as a manager if missing), then remove the variable again.
 
@@ -146,7 +146,7 @@ TEST_DATABASE_URL=postgres://user@host/db npm test    # a real PostgreSQL (the s
 npm run typecheck
 ```
 
-They cover: deadline maths across month and year boundaries, leap days, DST, multi-day shoots, business-day mode, timezones and the daily cutoff; progress (20 / 45 · 44%), stages and partial delivery; workflow permissions; the quick-entry parser; and through the real API — creating a client with a recording, document and uploaded file (and denying anonymous file access), both example shoots, the 20 / 25 split without double counting, draft completion not delivering, partial review and delivery, delivery records, moving a shoot with a manual override, batches without shoots, the dashboard's overdue / blocked / unassigned lists, writers being refused on every manager action sent directly to the API, CSRF, stale-edit rejection, target changes that protect work, reminder deduplication, sending ten scripts as one PDF and getting one review card and one revision request back, versioned resubmissions, script titles, the owner-only master log (views, sign-ins, blocked attempts), celebration moments (once each, never for your own decisions, milestones never twice), the "written so far" counter never touching script statuses, moving a shoot shifting writing starts, batch names and (optionally) manual dates, the changelog staying complete and ordered, and data persisting across restarts.
+They cover: deadline maths across month and year boundaries, leap days, DST, multi-day shoots, business-day mode, timezones and the daily cutoff; progress (20 / 45 · 44%), stages and partial delivery; workflow permissions; the quick-entry parser; and through the real API — creating a client with a recording, document and uploaded file (and denying anonymous file access), both example shoots, the 20 / 25 split without double counting, draft completion not delivering, partial review and delivery, delivery records, moving a shoot with a manual override, batches without shoots, the dashboard's overdue / blocked / unassigned lists, writers being refused on every manager action sent directly to the API, CSRF, stale-edit rejection, target changes that protect work, reminder deduplication, sending ten scripts as one PDF and getting one review card and one revision request back, versioned resubmissions, script titles, the admin-only master log (views, sign-ins, blocked attempts), celebration moments (once each, never for your own decisions, milestones never twice), the "written so far" counter never touching script statuses, moving a shoot shifting writing starts, batch names and (optionally) manual dates, the changelog staying complete and ordered, and data persisting across restarts.
 
 ## Layout
 

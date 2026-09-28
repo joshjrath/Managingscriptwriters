@@ -3,7 +3,7 @@
 // Changes come from the activity history (which already describes each change
 // in words). Views, sign-ins and blocked attempts are recorded here. Repeat
 // views of the same thing by the same person within 10 minutes count once,
-// so background refreshes don't flood the log. Only owners can read it.
+// so background refreshes don't flood the log. Only admins can read it.
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -96,7 +96,7 @@ export async function auditEvent(db: Db, e: { userId: number | null; kind: 'view
 
 export function requireOwner(req: Parameters<typeof requireUser>[0]): Me {
   const me = requireUser(req);
-  if (me.role !== 'owner') throw new HttpError(403, 'Only owners can see the master log');
+  if (me.role !== 'owner') throw new HttpError(403, 'Only admins can see the master log');
   return me;
 }
 

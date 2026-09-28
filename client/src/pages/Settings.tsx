@@ -126,7 +126,7 @@ function TeamPanel() {
           </div>
         ))}
       </div>
-      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>Owners and managers have the same permissions. The temporary password stays copyable here until the person sets their own. Writers only show as over capacity when a capacity is set.</p>
+      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>Admins and managers have the same permissions. The temporary password stays copyable here until the person sets their own. Writers only show as over capacity when a capacity is set.</p>
       {adding && <PersonDialog onClose={() => setAdding(false)} />}
       {editing && <PersonDialog user={editing} onClose={() => setEditing(null)} />}
       {sharing && <ShareDetails name={firstName(sharing.name)} onClose={() => setSharing(null)}
@@ -184,7 +184,7 @@ export function signInMessage(p: { name: string; email: string; password: string
   return [
     p.reset
       ? `Hi ${first}, your ${p.orgName} password has been reset.`
-      : `Hi ${first}, you've been added to ${p.orgName}'s script production workspace as ${p.role === 'owner' ? 'an owner' : `a ${p.role}`}.`,
+      : `Hi ${first}, you've been added to ${p.orgName}'s script production workspace as ${p.role === 'owner' ? 'an admin' : `a ${p.role}`}.`,
     '',
     `Sign in: ${p.url}`,
     `Email: ${p.email}`,
@@ -264,8 +264,8 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
         <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} /></Field>
         <Field label="Email" htmlFor={ids.e} error={f.email} help={user ? 'Email can’t be changed here.' : 'They sign in with this.'}><input className="input" type="email" value={email} disabled={!!user} onChange={(e) => setEmail(e.target.value)} {...inputProps(ids.e, f.email)} /></Field>
-        <Field label="Role" htmlFor={ids.r} help="Owners and managers can do everything. Writers see everything but can only update their own scripts, blockers, resources and deliveries.">
-          <select className="select" id={ids.r} value={role} onChange={(e) => setRole(e.target.value as Role)}><option value="writer">Writer</option><option value="manager">Manager</option><option value="owner">Owner</option></select>
+        <Field label="Role" htmlFor={ids.r} help="Admins and managers can do everything. Writers see everything but can only update their own scripts, blockers, resources and deliveries.">
+          <select className="select" id={ids.r} value={role} onChange={(e) => setRole(e.target.value as Role)}><option value="writer">Writer</option><option value="manager">Manager</option><option value="owner">Admin</option></select>
         </Field>
         <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates and over-capacity warnings."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>
         <Field label={user ? 'Reset password' : 'Temporary password'} optional={!!user} htmlFor={ids.p} error={f.password} help={user ? 'Leave empty to keep their password. Set one and you’ll get a message to send them.' : 'At least 10 characters. After saving you’ll get a ready-to-send message with this and the sign-in link.'}>

@@ -105,7 +105,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
   const ROLES = ['owner', 'manager', 'writer'] as const;
   const MANAGER_ROLES = `role in ('owner', 'manager')`;
 
-  /** The team list. Owners and managers also see temporary passwords that haven't been replaced yet. */
+  /** The team list. Admins and managers also see temporary passwords that haven't been replaced yet. */
   async function teamFor(me: Me): Promise<UserSummary[]> {
     const users = await loadUsers(db);
     if (!isManager(me.role)) return users;
@@ -115,7 +115,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
 
   async function keepAManager(excludeId: number) {
     const others = await db.one<{ n: number }>(`select count(*) as n from users where ${MANAGER_ROLES} and active and removed_at is null and id <> $1`, [excludeId]);
-    if (!others?.n) throw new HttpError(400, 'Keep at least one active owner or manager');
+    if (!others?.n) throw new HttpError(400, 'Keep at least one active admin or manager');
   }
 
   app.get('/api/users', async (req) => {

@@ -1,4 +1,4 @@
-// Master log (owners only): every change, page view, sign-in and blocked
+// Master log (admins only): every change, page view, sign-in and blocked
 // attempt, newest first, filterable by person and kind.
 
 import { useEffect, useState } from 'react';
@@ -46,7 +46,7 @@ export function MasterLogPage() {
     refetchInterval: 60_000,
   });
   if (!owner) {
-    return <><PageHeader title="Master log" /><Panel><Empty icon={<Lock />} title="Only owners can see the master log" /></Panel></>;
+    return <><PageHeader title="Master log" /><Panel><Empty icon={<Lock />} title="Only admins can see the master log" /></Panel></>;
   }
   const entries = log.data?.pages.flatMap((p) => p.entries) ?? [];
   const seen = new Set<string>();
@@ -54,7 +54,7 @@ export function MasterLogPage() {
   let lastDay = '';
   return (
     <>
-      <PageHeader title="Master log" sub="Every change, view and sign-in by everyone on the team. Only owners can see this page." hideNewWork />
+      <PageHeader title="Master log" sub="Every change, view and sign-in by everyone on the team. Only admins can see this page." hideNewWork />
       <Panel>
         <div className="filters row-flex s2" style={{ marginBottom: 16 }}>
           <Seg role="group" aria-label="Show">

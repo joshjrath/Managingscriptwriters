@@ -17,6 +17,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-28-admin-name',
+    date: '2026-09-28',
+    title: '“Owner” is now called “Admin”',
+    summary: 'Just a new name — nothing else changes.',
+    changes: [
+      { tag: 'improved', text: 'The Owner role is now shown as Admin everywhere. Permissions are exactly the same, and Admins are still the only ones who can see the Master log.' },
+    ],
+  },
+  {
     id: '2026-09-28-calendar-days',
     date: '2026-09-28',
     title: 'A free-scrolling Days view on the calendar',
