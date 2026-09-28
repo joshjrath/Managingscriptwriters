@@ -17,6 +17,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-28-potential-clients',
+    date: '2026-09-28',
+    title: 'Potential clients',
+    summary: 'Keep track of people you’re talking to, and drag them into Clients when they sign.',
+    changes: [
+      { tag: 'new', text: 'A Potential clients section on the Clients page. Add one with “Potential client”, or choose Potential client in New work.' },
+      { tag: 'new', text: 'When they sign, drag their card into Clients (or press Mark as client). Confetti included.' },
+      { tag: 'new', text: 'Potential clients can hold notes, calls and files. Shoots and batches unlock once they’re a client. A client with no work yet can be dragged back.' },
+    ],
+  },
+  {
     id: '2026-09-28-plan-later',
     date: '2026-09-28',
     title: 'Book shoots now, plan scripts later',

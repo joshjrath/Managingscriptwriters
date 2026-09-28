@@ -273,7 +273,7 @@ function SearchBox() {
           {res.isLoading && <div className="empty">Searching…</div>}
           {res.isError && <div className="empty">Search failed. Try again.</div>}
           {none && <div className="empty">Nothing matches “{debounced}”.</div>}
-          {!!r?.clients.length && <><h4>Clients</h4>{r.clients.map((c) => <button className="res" key={c.id} onClick={() => go(`/clients/${c.id}`)}><span className="t">{c.name}</span>{c.status === 'archived' && <span className="s">Archived</span>}</button>)}</>}
+          {!!r?.clients.length && <><h4>Clients</h4>{r.clients.map((c) => <button className="res" key={c.id} onClick={() => go(`/clients/${c.id}`)}><span className="t">{c.name}</span>{c.status === 'archived' && <span className="s">Archived</span>}{c.status === 'prospect' && <span className="s">Potential client</span>}</button>)}</>}
           {!!r?.batches.length && <><h4>Batches</h4>{r.batches.map((b) => <button className="res" key={b.id} onClick={() => go(`/batches/${b.id}`)}><span className="t">{b.title}</span><span className="s">{b.clientName}</span></button>)}</>}
           {!!r?.resources.length && <><h4>Resources</h4>{r.resources.map((x) => <button className="res" key={x.id} onClick={() => go(`/resources?q=${encodeURIComponent(x.title)}`)}><span className="t">{x.title}</span><span className="s">{x.clientName}</span></button>)}</>}
         </div>

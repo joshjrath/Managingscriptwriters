@@ -26,6 +26,8 @@ const briefingSchema = z.object({
 
 const clientCreate = z.object({
   name: zs.name('Client name', 160),
+  /** a potential client: tracked, but no shoots or batches until they sign */
+  prospect: z.boolean().default(false),
   ownerId: zs.id.nullable().optional(),
   description: zs.text(),
   brandVoice: zs.text(),
@@ -67,10 +69,11 @@ async function duplicateName(db: Db, name: string, exceptId?: number) {
   }
 }
 
-async function clientSummaries(ctx: Ctx, status: 'active' | 'archived' | 'all'): Promise<ClientSummary[]> {
-  const rows = await ctx.db.query<{ id: number; name: string; status: 'active' | 'archived'; owner_id: number | null; owner_name: string | null; description: string | null }>(
-    `select c.id, c.name, c.status, c.owner_id, u.name as owner_name, c.description from clients c left join users u on u.id = c.owner_id
-      ${status === 'all' ? '' : `where c.status = '${status}'`} order by lower(c.name)`,
+async function clientSummaries(ctx: Ctx, status: 'prospect' | 'active' | 'archived' | 'all' | 'current'): Promise<ClientSummary[]> {
+  const where = status === 'all' ? '' : status === 'current' ? `where c.status in ('active', 'prospect')` : `where c.status = '${status}'`;
+  const rows = await ctx.db.query<{ id: number; name: string; status: 'prospect' | 'active' | 'archived'; owner_id: number | null; owner_name: string | null; description: string | null; created_at: string; became_client_at: string | null }>(
+    `select c.id, c.name, c.status, c.owner_id, u.name as owner_name, c.description, c.created_at, c.became_client_at from clients c left join users u on u.id = c.owner_id
+      ${where} order by lower(c.name)`,
   );
   const clock = await clockFor(ctx);
   const { summaries } = await loadBatches(ctx, {}, clock);
@@ -85,6 +88,7 @@ async function clientSummaries(ctx: Ctx, status: 'active' | 'archived' | 'all'):
       scriptsDelivered: active.reduce((n, b) => n + b.progress.delivered, 0),
       nextShoot: shoots.find((s) => s.clientId === c.id && !s.cancelledAt)?.startDate ?? null,
       overdueBatches: active.filter((b) => b.draft.overdue || b.final.overdue).length,
+      createdAt: c.created_at, becameClientAt: c.became_client_at,
     };
   });
 }
@@ -133,7 +137,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.get('/api/clients', async (req) => {
     requireUser(req);
-    const { status } = parse(z.object({ status: z.enum(['active', 'archived', 'all']).default('active') }), req.query);
+    const { status } = parse(z.object({ status: z.enum(['prospect', 'active', 'archived', 'all', 'current']).default('active') }), req.query);
     return { clients: await clientSummaries(ctx, status) };
   });
 
@@ -163,13 +167,14 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     await duplicateName(db, input.name);
     const settings = await loadSettings(db);
     const clock = await clockFor(ctx, settings);
+    if (input.prospect && input.initialBatch) throw new HttpError(400, 'Potential clients can’t have batches yet. Mark them as a client first.', { initialBatch: 'Not for potential clients' });
     const out = await db.tx(async (t) => {
       const row = await t.one<{ id: number }>(
-        `insert into clients (name, owner_id, description, brand_voice, guidance, created_by) values ($1,$2,$3,$4,$5,$6) returning id`,
-        [input.name, input.ownerId ?? me.id, input.description ?? null, input.brandVoice ?? null, input.guidance ?? null, me.id],
+        `insert into clients (name, status, owner_id, description, brand_voice, guidance, created_by) values ($1,$2,$3,$4,$5,$6,$7) returning id`,
+        [input.name, input.prospect ? 'prospect' : 'active', input.ownerId ?? me.id, input.description ?? null, input.brandVoice ?? null, input.guidance ?? null, me.id],
       );
       const clientId = row!.id;
-      await logActivity(t, { actor: me, action: 'client.created', entityType: 'client', entityId: clientId, clientId, summary: `Created client ${input.name}` });
+      await logActivity(t, { actor: me, action: 'client.created', entityType: 'client', entityId: clientId, clientId, summary: input.prospect ? `Added ${input.name} as a potential client` : `Created client ${input.name}` });
       let briefingId: number | null = null;
       if (input.briefing && input.briefing.title) briefingId = await insertBriefing(t, me, clientId, input.briefing);
       for (const l of input.links) {
@@ -201,6 +206,33 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     if (!r) throw notFound('Client');
     await logActivity(db, { actor: me, action: 'client.updated', entityType: 'client', entityId: id, clientId: id, summary: `Updated client ${keys.map((k) => k.replace('_', ' ').replace(' id', '')).join(', ')}` });
     return { ok: true };
+  });
+
+  /**
+   * Potential client → client (dragged into Clients, or "Mark as client"). Moving
+   * back is allowed only while they have no shoots or batches.
+   */
+  app.post('/api/clients/:id/stage', async (req) => {
+    const me = requireManager(req);
+    const { id } = parse(z.object({ id: zs.id }), req.params);
+    const { stage } = parse(z.object({ stage: z.enum(['client', 'prospect']) }), req.body);
+    return db.tx(async (t) => {
+      const c = await t.one<{ name: string; status: string }>(`select name, status from clients where id = $1 for update`, [id]);
+      if (!c) throw notFound('Client');
+      if (c.status === 'archived') throw new HttpError(409, `${c.name} is archived. Restore them first.`);
+      if (stage === 'client') {
+        if (c.status === 'active') return { ok: true, changed: false };
+        await t.query(`update clients set status = 'active', became_client_at = now(), updated_at = now() where id = $1`, [id]);
+        await logActivity(t, { actor: me, action: 'client.converted', entityType: 'client', entityId: id, clientId: id, summary: `${c.name} became a client (moved from Potential clients)` });
+      } else {
+        if (c.status === 'prospect') return { ok: true, changed: false };
+        const work = await t.one<{ n: number }>(`select (select count(*) from batches where client_id = $1) + (select count(*) from shoots where client_id = $1) as n`, [id]);
+        if (Number(work?.n)) throw new HttpError(409, `${c.name} already has shoots or batches, so they stay a client.`);
+        await t.query(`update clients set status = 'prospect', became_client_at = null, updated_at = now() where id = $1`, [id]);
+        await logActivity(t, { actor: me, action: 'client.to_prospect', entityType: 'client', entityId: id, clientId: id, summary: `Moved ${c.name} back to Potential clients` });
+      }
+      return { ok: true, changed: true };
+    });
   });
 
   app.post('/api/clients/:id/archive', async (req) => {
@@ -359,7 +391,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     const { q } = parse(z.object({ q: z.string().trim().min(1).max(100) }), req.query);
     const like = `%${q.toLowerCase()}%`;
     const [clients, batches, resources] = await Promise.all([
-      db.query<{ id: number; name: string; status: 'active' | 'archived' }>(`select id, name, status from clients where lower(name) like $1 order by status, lower(name) limit 6`, [like]),
+      db.query<{ id: number; name: string; status: 'prospect' | 'active' | 'archived' }>(`select id, name, status from clients where lower(name) like $1 order by status, lower(name) limit 6`, [like]),
       db.query<{ id: number; title: string; client_name: string }>(
         `select b.id, b.title, c.name as client_name from batches b join clients c on c.id = b.client_id
           where b.archived_at is null and (lower(b.title) like $1 or lower(c.name) like $1) order by b.final_due nulls last limit 8`, [like]),

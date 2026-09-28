@@ -17,7 +17,7 @@ import type { BatchSummary, ClientDetail, Priority, ResourceCategory } from '../
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
 
 export type NewWorkTab = 'quick' | 'shoot' | 'batch' | 'client';
-export interface NewWorkPreset { clientId?: number; shootId?: number; text?: string; start?: ISODate; end?: ISODate | null; count?: number; split?: SplitPart[] }
+export interface NewWorkPreset { prospect?: boolean; clientId?: number; shootId?: number; text?: string; start?: ISODate; end?: ISODate | null; count?: number; split?: SplitPart[] }
 
 interface Created {
   kind: 'shoot' | 'batch' | 'client';
@@ -57,7 +57,7 @@ export function NewWorkDialog({ state, onClose }: { state: { tab: NewWorkTab; pr
           </Seg>
           {tab === 'shoot' && <ShootForm key={`s${formKey}`} preset={preset} onCreated={setCreated} />}
           {tab === 'batch' && <BatchForm key={`b${formKey}`} preset={preset} onCreated={setCreated} />}
-          {tab === 'client' && <ClientForm key={`c${formKey}`} onCreated={setCreated} />}
+          {tab === 'client' && <ClientForm key={`c${formKey}`} preset={preset} onCreated={setCreated} />}
           {tab === 'quick' && <QuickEntry key={`q${formKey}`} preset={preset} onCreated={setCreated} onOpenForm={(p) => { setPreset(p); setTab('shoot'); setFormKey((k) => k + 1); }} />}
         </>
       )}
@@ -531,8 +531,9 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
 
 // ── new client ───────────────────────────────────────────────────────────
 
-function ClientForm({ onCreated }: { onCreated: (c: Created) => void }) {
+function ClientForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (c: Created) => void }) {
   const { me, users } = useBoot();
+  const [prospect, setProspect] = useState(!!preset?.prospect);
   const toast = useToast();
   const managers = users.filter((u) => u.active && isManager(u.role));
   const [name, setName] = useState('');
@@ -567,9 +568,10 @@ function ClientForm({ onCreated }: { onCreated: (c: Created) => void }) {
         finally { setUploading(false); }
       }
       onCreated({
-        kind: 'client', title: `${name} added`, clientId: out.clientId, batchId: out.batch?.batchId ?? null, warnings,
+        kind: 'client', title: prospect ? `${name} added to Potential clients` : `${name} added`, clientId: out.clientId, batchId: out.batch?.batchId ?? null, warnings,
         lines: [
-          { k: 'Client', v: name },
+          { k: prospect ? 'Potential client' : 'Client', v: name },
+          ...(prospect ? [{ k: 'Next', v: 'When they sign, drag them into Clients (or open them and press Mark as client).' }] : []),
           ...(out.briefingId ? [{ k: 'Briefing', v: `${call.title}${call.callDate ? ` · ${fmtDate(call.callDate)}` : ''}${call.recordingUrl ? ' · recording linked' : ''}${file ? ` · ${file.name}` : ''}` }] : []),
           ...(links.length ? [{ k: 'Resources', v: plural(links.length, 'link') }] : []),
           ...(out.batch ? [{ k: 'Initial batch', v: `${batch.title} · ${plural(Number(batch.targetCount), 'script')}` }, { k: 'Drafts due', v: batch.draftDue ? fmtLong(batch.draftDue) : 'Not set' }, { k: 'Final delivery', v: batch.finalDue ? fmtLong(batch.finalDue) : 'Not set' }] : []),
@@ -581,25 +583,30 @@ function ClientForm({ onCreated }: { onCreated: (c: Created) => void }) {
   const submit = () => {
     const errs: Record<string, string> = {};
     if (!name.trim()) errs.name = 'Client name is required';
-    if (withBatch && (!batch.targetCount || Number(batch.targetCount) < 1)) errs['initialBatch.targetCount'] = 'How many scripts?';
-    if (withBatch && !batch.title.trim()) errs['initialBatch.title'] = 'Name the batch';
+    if (withBatch && !prospect && (!batch.targetCount || Number(batch.targetCount) < 1)) errs['initialBatch.targetCount'] = 'How many scripts?';
+    if (withBatch && !prospect && !batch.title.trim()) errs['initialBatch.title'] = 'Name the batch';
     for (const [k, v] of [['briefing.recordingUrl', call.recordingUrl], ['briefing.documentUrl', call.documentUrl]] as const) {
       if (withCall && v && !/^https?:\/\/\S+$/i.test(v)) errs[k] = 'Use a full link starting with https://';
     }
     setLocal(errs);
     if (Object.keys(errs).length) return;
     save.mutate({
-      name, ownerId, description: description || null, brandVoice: brandVoice || null, guidance: guidance || null,
+      name, prospect, ownerId, description: description || null, brandVoice: brandVoice || null, guidance: guidance || null,
       briefing: withCall ? { ...call, callDate: call.callDate || null, recordingUrl: call.recordingUrl || null, documentUrl: call.documentUrl || null, summary: call.summary || null, instructions: call.instructions || null } : undefined,
       links: links.filter((l) => l.url.trim()).map((l) => ({ ...l, title: l.title || l.url })),
-      initialBatch: withBatch ? { title: batch.title, targetCount: Number(batch.targetCount), draftDue: batch.draftDue || null, finalDue: batch.finalDue || null, split: cleanSplit(parts), priority: 'normal' } : undefined,
+      initialBatch: withBatch && !prospect ? { title: batch.title, targetCount: Number(batch.targetCount), draftDue: batch.draftDue || null, finalDue: batch.finalDue || null, split: cleanSplit(parts), priority: 'normal' } : undefined,
     });
   };
   return (
     <form className="form" onSubmit={(e) => { e.preventDefault(); submit(); }} noValidate>
       <FormError error={save.error && !Object.keys(save.error.fields).length ? save.error : null} />
+      <Seg role="group" aria-label="Client or potential client" style={{ alignSelf: 'flex-start' }}>
+        <button type="button" aria-pressed={!prospect} onClick={() => setProspect(false)}>Client</button>
+        <button type="button" aria-pressed={prospect} onClick={() => setProspect(true)}>Potential client</button>
+      </Seg>
+      {prospect && <span className="help" style={{ marginTop: -8 }}>Not signed yet. They sit in Potential clients until you drag them into Clients. Shoots and batches can be added once they’re a client.</span>}
       <div className="form-grid">
-        <Field label="Client name" htmlFor={ids.name} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.name, f.name)} /></Field>
+        <Field label={prospect ? 'Name' : 'Client name'} htmlFor={ids.name} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.name, f.name)} /></Field>
         <Field label="Internal owner" htmlFor={ids.owner}><select className="select" id={ids.owner} value={ownerId} onChange={(e) => setOwnerId(Number(e.target.value))}>{managers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
       </div>
       <label className="check"><input type="checkbox" checked={withCall} onChange={(e) => setWithCall(e.target.checked)} />Attach an ideation / briefing call</label>
@@ -632,8 +639,8 @@ function ClientForm({ onCreated }: { onCreated: (c: Created) => void }) {
           </div>
         </div>
       </Advanced>
-      <label className="check"><input type="checkbox" checked={withBatch} onChange={(e) => setWithBatch(e.target.checked)} />Create an initial batch (no shoot needed)</label>
-      {withBatch && (
+      {!prospect && <label className="check"><input type="checkbox" checked={withBatch} onChange={(e) => setWithBatch(e.target.checked)} />Create an initial batch (no shoot needed)</label>}
+      {withBatch && !prospect && (
         <div className="form-grid">
           <Field label="Batch name" htmlFor={ids.bt} error={f['initialBatch.title']}><input className="input" value={batch.title} onChange={(e) => setBatch({ ...batch, title: e.target.value })} {...inputProps(ids.bt, f['initialBatch.title'])} /></Field>
           <Field label="Scripts" htmlFor={ids.bn} error={f['initialBatch.targetCount']}><input className="input num" type="number" min={1} value={batch.targetCount} onChange={(e) => setBatch({ ...batch, targetCount: e.target.value === '' ? '' : Number(e.target.value) })} {...inputProps(ids.bn, f['initialBatch.targetCount'])} /></Field>
@@ -642,7 +649,7 @@ function ClientForm({ onCreated }: { onCreated: (c: Created) => void }) {
           <div className="field full"><span className="lbl">Writers</span><SplitEditor total={Number(batch.targetCount) || 0} parts={parts} onChange={setParts} /></div>
         </div>
       )}
-      <div className="form-actions"><Button type="submit" variant="primary pill lg" busy={save.isPending || uploading} onClick={submit}>Create client</Button></div>
+      <div className="form-actions"><Button type="submit" variant="primary pill lg" busy={save.isPending || uploading} onClick={submit}>{prospect ? 'Add potential client' : 'Create client'}</Button></div>
     </form>
   );
 }

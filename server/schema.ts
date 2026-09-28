@@ -312,4 +312,10 @@ create table writer_progress (
   `
 alter table settings add column plan_reminder_days int not null default 14 check (plan_reminder_days between 3 and 60);
 `,
+  // 6 · potential clients: tracked alongside clients until they sign
+  `
+alter table clients drop constraint if exists clients_status_check;
+alter table clients add constraint clients_status_check check (status in ('prospect', 'active', 'archived'));
+alter table clients add column became_client_at timestamptz;
+`,
 ];

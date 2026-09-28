@@ -1,12 +1,15 @@
 // Clients list and client detail: guidance, briefings, resources, shoots,
 // batches and history in one place.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { LayoutGroup, m } from 'framer-motion';
 import { isManager } from '../../../shared/workflow';
 import { Link, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Archive, ArchiveRestore, Building2, Camera, FileText, Link2, Pencil, PlayCircle, Plus } from 'lucide-react';
-import { api, useSave } from '../api';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, Archive, ArchiveRestore, Building2, Camera, FileText, GripVertical, Link2, Pencil, PlayCircle, Plus, Sparkles, UserPlus } from 'lucide-react';
+import { api, useSave, type ApiError } from '../api';
+import { confetti } from '../fx';
+import { SOFT } from '../motion';
 import type { Briefing, ClientDetail, ClientSummary } from '../../../shared/types';
 import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
 import { PageHeader, useBoot, useNewWork } from '../components/Shell';
@@ -16,43 +19,119 @@ import { RescheduleDialog, ResourceDialog, ResourceRow } from './BatchDetail';
 
 export function ClientsPage() {
   const { me } = useBoot();
+  const manager = isManager(me.role);
   const openNew = useNewWork();
-  const [status, setStatus] = useState<'active' | 'archived'>('active');
+  const toast = useToast();
+  const qc = useQueryClient();
+  const [status, setStatus] = useState<'current' | 'archived'>('current');
   const [search, setSearch] = useState('');
-  const q = useQuery({ queryKey: ['clients', status], queryFn: () => api<{ clients: ClientSummary[] }>(`/api/clients?status=${status}`) });
-  const list = (q.data?.clients ?? []).filter((c) => !search || c.name.toLowerCase().includes(search.toLowerCase()));
+  const [drag, setDrag] = useState<{ id: number; from: 'prospect' | 'active' } | null>(null);
+  const [over, setOver] = useState<'prospect' | 'active' | null>(null);
+  const key = ['clients', status];
+  const q = useQuery({ queryKey: key, queryFn: () => api<{ clients: ClientSummary[] }>(`/api/clients?status=${status}`) });
+  const all = (q.data?.clients ?? []).filter((c) => !search || c.name.toLowerCase().includes(search.toLowerCase()));
+  const clients = all.filter((c) => c.status !== 'prospect');
+  const prospects = all.filter((c) => c.status === 'prospect');
+
+  // moving a card: it flies across straight away, then the server confirms
+  const move = useMutation({
+    mutationFn: (v: { id: number; to: 'prospect' | 'active'; at?: { x: number; y: number } }) => api(`/api/clients/${v.id}/stage`, { body: { stage: v.to === 'active' ? 'client' : 'prospect' } }),
+    onMutate: (v) => {
+      qc.setQueryData<{ clients: ClientSummary[] }>(key, (d) => d && { clients: d.clients.map((c) => (c.id === v.id ? { ...c, status: v.to, becameClientAt: v.to === 'active' ? new Date().toISOString() : null } : c)) });
+    },
+    onSuccess: (_o, v) => {
+      const name = q.data?.clients.find((c) => c.id === v.id)?.name ?? 'They';
+      if (v.to === 'active') { confetti({ x: v.at?.x, y: v.at?.y, count: 90, spread: 100, power: 13 }); toast(`${name} is now a client`); }
+      else toast(`${name} moved back to Potential clients`);
+    },
+    onError: (err: ApiError) => toast(err.message, 'error'),
+    onSettled: () => qc.invalidateQueries(),
+  });
+  const dropOn = (to: 'prospect' | 'active') => ({
+    onDragOver: (x: DragEvent) => { if (!drag || drag.from === to) return; x.preventDefault(); x.dataTransfer.dropEffect = 'move'; if (over !== to) setOver(to); },
+    onDragLeave: (x: DragEvent) => { if (!(x.currentTarget as HTMLElement).contains(x.relatedTarget as Node)) setOver(null); },
+    onDrop: (x: DragEvent) => { if (!drag || drag.from === to) return; x.preventDefault(); move.mutate({ id: drag.id, to, at: { x: x.clientX, y: x.clientY } }); setDrag(null); setOver(null); },
+  });
+  const dragProps = (c: ClientSummary) => manager && status === 'current' ? {
+    draggable: true,
+    onDragStart: (x: DragEvent) => { x.dataTransfer.effectAllowed = 'move'; x.dataTransfer.setData('text/plain', `client:${c.id}`); setDrag({ id: c.id, from: c.status === 'prospect' ? 'prospect' : 'active' }); },
+    onDragEnd: () => { setDrag(null); setOver(null); },
+  } : {};
+
   return (
     <>
       <PageHeader title="Clients" hideNewWork>
-        {isManager(me.role) && <Button variant="primary pill lg" icon={<Plus aria-hidden />} onClick={() => openNew('client')}>New client</Button>}
+        {manager && <Button icon={<UserPlus aria-hidden />} onClick={() => openNew('client', { prospect: true })}>Potential client</Button>}
+        {manager && <Button variant="primary pill lg" icon={<Plus aria-hidden />} onClick={() => openNew('client')}>New client</Button>}
       </PageHeader>
       <div className="filters">
         <input className="input search" type="search" placeholder="Search clients" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search clients" />
         <Seg role="group" aria-label="Status">
-          <button aria-pressed={status === 'active'} onClick={() => setStatus('active')}>Active</button>
+          <button aria-pressed={status === 'current'} onClick={() => setStatus('current')}>Current</button>
           <button aria-pressed={status === 'archived'} onClick={() => setStatus('archived')}>Archived</button>
         </Seg>
       </div>
       {q.isLoading && <Loading />}
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
-      {q.data && !list.length && <div className="panel"><Empty icon={<Building2 />} title={search ? 'No clients match' : status === 'active' ? 'No active clients yet' : 'No archived clients'} action={isManager(me.role) && status === 'active' && !search ? <Button onClick={() => openNew('client')}>Add a client</Button> : undefined} /></div>}
-      <div className="client-grid">
-        {list.map((c) => (
-          <Link key={c.id} to={`/clients/${c.id}`} className="client-card">
-            <div className="row-flex s2" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'nowrap' }}>
-              <h3>{c.name}</h3>
-              {c.overdueBatches > 0 && <Chip color="red" icon={<AlertTriangle aria-hidden />}>{c.overdueBatches} overdue</Chip>}
-            </div>
-            {c.description ? <p className="desc">{c.description}</p> : <p className="desc">No description yet.</p>}
-            <span className="muted" style={{ fontSize: 12.5 }}>Owner: {c.ownerName ?? '—'}</span>
-            <div className="stats">
-              <div><b>{c.activeBatches}</b><span>active batches</span></div>
-              <div><b className="num">{c.scriptsDelivered}/{c.scriptsTotal}</b><span>delivered</span></div>
-              <div><b>{c.nextShoot ? fmtDate(c.nextShoot) : '—'}</b><span>next shoot</span></div>
-            </div>
-          </Link>
-        ))}
-      </div>
+      {q.data && (
+        <LayoutGroup>
+          <div className={`clients-board${status === 'archived' ? ' single' : ''}`}>
+            <section className={`clients-zone${over === 'active' ? ' over' : ''}${drag?.from === 'prospect' ? ' ready' : ''}`} aria-label="Clients" {...dropOn('active')}>
+              {status === 'current' && <div className="zone-head"><h2>Clients</h2><span className="count">{clients.length}</span>{drag?.from === 'prospect' && <span className="drop-hint"><Sparkles aria-hidden />Drop here — they’ve signed</span>}</div>}
+              {!clients.length ? <div className="panel"><Empty icon={<Building2 />} title={search ? 'No clients match' : status === 'current' ? 'No clients yet' : 'No archived clients'} action={manager && status === 'current' && !search ? <Button onClick={() => openNew('client')}>Add a client</Button> : undefined} /></div> : (
+                <div className="client-grid">
+                  {clients.map((c) => (
+                    <m.div key={c.id} layoutId={`client-${c.id}`} layout transition={SOFT} className={drag?.id === c.id ? 'lifting' : ''}>
+                      <div className="drag-handle-area" {...dragProps(c)}>
+                      <Link to={`/clients/${c.id}`} className="client-card" draggable={false}>
+                        <div className="row-flex s2" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'nowrap' }}>
+                          <h3>{c.name}</h3>
+                          {c.overdueBatches > 0 && <Chip color="red" icon={<AlertTriangle aria-hidden />}>{c.overdueBatches} overdue</Chip>}
+                          {c.becameClientAt && Date.now() - Date.parse(c.becameClientAt) < 7 * 86400_000 && !c.overdueBatches && <Chip color="mint" icon={<Sparkles aria-hidden />}>New client</Chip>}
+                        </div>
+                        {c.description ? <p className="desc">{c.description}</p> : <p className="desc">No description yet.</p>}
+                        <span className="muted" style={{ fontSize: 12.5 }}>Owner: {c.ownerName ?? '—'}</span>
+                        <div className="stats">
+                          <div><b>{c.activeBatches}</b><span>active batches</span></div>
+                          <div><b className="num">{c.scriptsDelivered}/{c.scriptsTotal}</b><span>delivered</span></div>
+                          <div><b>{c.nextShoot ? fmtDate(c.nextShoot) : '—'}</b><span>next shoot</span></div>
+                        </div>
+                      </Link>
+                      </div>
+                    </m.div>
+                  ))}
+                </div>
+              )}
+            </section>
+            {status === 'current' && (
+              <section className={`prospects-zone${over === 'prospect' ? ' over' : ''}`} aria-label="Potential clients" {...dropOn('prospect')}>
+                <div className="zone-head">
+                  <h2>Potential clients</h2><span className="count">{prospects.length}</span>
+                  {manager && <Button variant="sm ghost" icon={<Plus aria-hidden />} onClick={() => openNew('client', { prospect: true })} aria-label="Add a potential client" />}
+                </div>
+                {manager && <p className="zone-help">{drag?.from === 'active' ? 'Drop to move them back (only if they have no work yet)' : 'Drag a card into Clients when they sign.'}</p>}
+                {!prospects.length ? <div className="prospect-empty"><UserPlus aria-hidden /><span>{search ? 'None match' : 'People you’re talking to go here.'}</span></div> : (
+                  <div className="prospect-list">
+                    {prospects.map((c) => (
+                      <m.div key={c.id} layoutId={`client-${c.id}`} layout transition={SOFT} className={drag?.id === c.id ? 'lifting' : ''}>
+                      <div className="prospect-card" {...dragProps(c)}>
+                        {manager && <GripVertical className="grip" aria-hidden />}
+                        <div className="pbody">
+                          <Link to={`/clients/${c.id}`} className="pname" draggable={false}>{c.name}</Link>
+                          {c.description && <p className="desc">{c.description}</p>}
+                          <span className="meta">{c.ownerName ?? 'No owner'} · added {fmtDate(c.createdAt.slice(0, 10))}</span>
+                        </div>
+                        {manager && <Button variant="sm mint" onClick={(x) => { const r = (x.currentTarget as HTMLElement).getBoundingClientRect(); move.mutate({ id: c.id, to: 'active', at: { x: r.left + r.width / 2, y: r.top } }); }}>Mark as client</Button>}
+                      </div>
+                      </m.div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+          </div>
+        </LayoutGroup>
+      )}
     </>
   );
 }
@@ -71,6 +150,10 @@ export function ClientPage() {
   const [tab, setTab] = useState<'active' | 'done'>('active');
   const archive = useSave((archived: boolean) => api(`/api/clients/${id}/archive`, { body: { archived } }), { onSuccess: (_o, a) => toast(a ? 'Client archived' : 'Client restored') });
   const remove = useSave((rid: number) => api(`/api/resources/${rid}`, { method: 'DELETE' }), { onSuccess: () => toast('Resource removed') });
+  const convertAt = useRef<{ x: number; y: number } | null>(null);
+  const convert = useSave(() => api(`/api/clients/${id}/stage`, { body: { stage: 'client' } }), {
+    onSuccess: () => { confetti({ ...(convertAt.current ?? {}), count: 90, spread: 100, power: 13 }); toast(`${q.data?.name ?? 'They'} ${q.data?.name ? 'is' : 'are'} now a client`); },
+  });
   if (q.isLoading) return <><div style={{ height: 90 }} /><Loading height={480} /></>;
   if (q.isError) return <ErrorState error={q.error} retry={() => q.refetch()} />;
   const c = q.data!;
@@ -83,10 +166,17 @@ export function ClientPage() {
   return (
     <>
       <PageHeader title={c.name} crumbs={<Link to="/clients">Clients</Link>}
-        sub={<span className="row-flex s2">{c.status === 'archived' ? <Chip icon={<Archive aria-hidden />}>Archived</Chip> : <Chip color="mint" dot>Active</Chip>}<span>Owner: {c.ownerName ?? '—'}</span></span>} hideNewWork>
+        sub={<span className="row-flex s2">{c.status === 'archived' ? <Chip icon={<Archive aria-hidden />}>Archived</Chip> : c.status === 'prospect' ? <Chip color="yellow" icon={<UserPlus aria-hidden />}>Potential client</Chip> : <Chip color="mint" dot>Active</Chip>}<span>Owner: {c.ownerName ?? '—'}</span></span>} hideNewWork>
+        {manager && c.status === 'prospect' && <Button variant="mint" icon={<Sparkles aria-hidden />} busy={convert.isPending} onClick={(x) => { const r = (x.currentTarget as HTMLElement).getBoundingClientRect(); convertAt.current = { x: r.left + r.width / 2, y: r.top }; convert.mutate(undefined); }}>Mark as client</Button>}
         {manager && c.status === 'active' && <><Button icon={<Camera aria-hidden />} onClick={() => openNew('shoot', { clientId: c.id })}>New shoot</Button><Button icon={<Plus aria-hidden />} onClick={() => openNew('batch', { clientId: c.id })}>New batch</Button></>}
         {manager && <Button icon={<Pencil aria-hidden />} onClick={() => setEdit(true)}>Edit</Button>}
       </PageHeader>
+      {c.status === 'prospect' && (
+        <div className="banner yellow" style={{ marginBottom: 'var(--gap)' }}>
+          <UserPlus aria-hidden />
+          <div className="txt"><b>{c.name} is a potential client.</b><span>Keep notes, calls and files here. When they sign, mark them as a client (or drag their card into Clients) to schedule shoots and batches.</span></div>
+        </div>
+      )}
       <div className="grid g-side-main">
         <div className="stack" style={{ gap: 'var(--gap)' }}>
           <Panel title="About & guidance">

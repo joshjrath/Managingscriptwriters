@@ -198,6 +198,14 @@ export async function seedDemo(db: Db, now = new Date()): Promise<boolean> {
   // 10 · Harbor & Pine · a shoot booked before anyone knows the script count
   await insertShoot(db, josh, { clientId: harbor, title: 'Neighbourhood tours', startDate: d(12), endDate: null, location: 'Riverside', notes: null }, settings, clock);
 
+  // 11 · people we're still talking to
+  for (const [name, desc] of [
+    ['Sunny Side Bakery', 'Met at the food expo. Wants 20 short scripts a month for Reels; proposal sent.'],
+    ['Peak Physio Group', 'Intro call booked for next week. Three clinics, interested in patient stories.'],
+  ]) {
+    await db.query(`insert into clients (name, status, owner_id, description, created_by) values ($1, 'prospect', $2, $3, $2)`, [name, ids.josh, desc]);
+  }
+
   // leave a few celebrations to greet people on their first visit; the rest are history
   await db.query(
     `update moments set seen_at = now()

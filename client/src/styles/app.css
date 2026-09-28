@@ -1014,6 +1014,42 @@ dialog.moment::backdrop { background: rgba(8, 8, 10, 0.72); backdrop-filter: blu
 
 .ev.shoot.unplanned { background: transparent; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--salmon) 70%, transparent); background-image: repeating-linear-gradient(135deg, color-mix(in srgb, var(--salmon) 12%, transparent) 0 6px, transparent 6px 12px); }
 
+/* clients and potential clients: drag a card across when they sign */
+.clients-board { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 340px); gap: var(--gap); align-items: start; }
+.clients-board.single { grid-template-columns: minmax(0, 1fr); }
+.clients-zone, .prospects-zone { border-radius: var(--r-panel); transition: background 180ms ease, box-shadow 180ms ease; min-width: 0; }
+.clients-zone { padding: 4px; margin: -4px; }
+.clients-zone.ready { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--mint) 35%, transparent); }
+.clients-zone.over { background: color-mix(in srgb, var(--mint) 8%, transparent); box-shadow: inset 0 0 0 2px var(--mint); }
+.zone-head { display: flex; align-items: center; gap: 10px; margin: 2px 4px 12px; min-height: 32px; }
+.zone-head h2 { font-size: var(--fs-h2); font-weight: 700; letter-spacing: -0.02em; }
+.zone-head .count { font: 700 13px/1 var(--font-ui); color: var(--text-2); background: var(--row); padding: 5px 9px; border-radius: 999px; }
+.zone-head .btn { margin-left: auto; }
+.drop-hint { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; background: var(--mint); color: var(--on-accent); font: 700 12px/1.3 var(--font-ui); animation: rise 220ms var(--ease-out-quint); }
+.drop-hint svg { width: 14px; height: 14px; }
+.prospects-zone { background: var(--panel); padding: 18px 16px; position: sticky; top: 16px; }
+.prospects-zone.over { box-shadow: inset 0 0 0 2px var(--yellow); background: color-mix(in srgb, var(--yellow) 6%, var(--panel)); }
+.zone-help { font-size: 12.5px; color: var(--text-2); margin: -6px 4px 12px; }
+.prospect-list { display: flex; flex-direction: column; gap: 8px; }
+.prospect-card { display: flex; gap: 10px; align-items: flex-start; padding: 12px 12px 12px 8px; border-radius: 16px; background: var(--row); box-shadow: inset 3px 0 0 color-mix(in srgb, var(--yellow) 70%, transparent); transition: background var(--t), transform 200ms var(--ease-out-quint), box-shadow 200ms ease; flex-wrap: wrap; }
+.prospect-card[draggable="true"] { cursor: grab; }
+.prospect-card:hover { background: var(--row-hover); transform: translateY(-1px); }
+.prospect-card .grip { width: 16px; height: 16px; color: var(--text-3); margin-top: 2px; flex: none; }
+.prospect-card .pname { font-weight: 700; font-size: 14.5px; display: block; overflow-wrap: anywhere; }
+.prospect-card .pname:hover { text-decoration: underline; }
+.prospect-card .desc { font-size: 12.5px; color: var(--text-2); margin: 3px 0 4px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.prospect-card .meta { font-size: 11.5px; color: var(--text-3); }
+.prospect-card .pbody { flex: 1 1 calc(100% - 30px); min-width: 0; }
+.prospect-card .btn { margin-left: 26px; }
+.prospect-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 26px 10px; border-radius: 16px; border: 1.5px dashed var(--line); color: var(--text-2); font-size: 13px; text-align: center; }
+.prospect-empty svg { width: 22px; height: 22px; }
+.drag-handle-area[draggable="true"] { cursor: grab; }
+.lifting { opacity: 0.4; }
+@media (max-width: 1180px) {
+  .clients-board { grid-template-columns: minmax(0, 1fr); }
+  .prospects-zone { position: static; order: -1; }
+}
+
 /* a small on/off switch in menus */
 .switch { margin-left: auto; width: 34px; height: 20px; border-radius: 999px; background: var(--track); position: relative; transition: background 200ms ease; flex: none; }
 .switch i { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-2); transition: transform 240ms var(--ease-out-back), background 200ms ease; }

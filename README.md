@@ -54,6 +54,10 @@ Writers work in one master document, so each batch on **My work** has a **Writte
 
 **Days** is a timeline you scroll left and right freely (trackpad, swipe, or grab the background and fling it); more days load in both directions as you go. Choose 1, 3 or 5 days, a week or 2 weeks on screen; wider days show each event's details. **Month** slides between months, and **List** is an agenda. Shoots can be dragged between days in Days and Month.
 
+### Potential clients
+
+The Clients page has a **Potential clients** section for people you're talking to (add one with **Potential client**, or pick *Potential client* in New work → New client). They can hold a description, briefing calls, links and files, but not shoots or batches. When they sign, **drag the card into Clients** — or press **Mark as client** (on the card or their page) — and it moves across; the history records when they became a client, and new clients get a "New client" tag for a week. A client with no shoots or batches yet can be dragged back.
+
 ### Shoots before scripts
 
 A shoot can be booked on its own: New shoot → **Plan scripts later**. Writers are optional too — scripts can be created unassigned. When you know more, use **Add scripts** on the shoot (calendar, client page or Overview). Managers get a **planning reminder** a set number of days before the shoot (Settings → *Remind managers to plan scripts*, default 14) while a shoot has no scripts or has unassigned scripts, then again at 7, 3 and 1 days — each once. Batches without a shoot are counted from their drafts-due date.

@@ -42,7 +42,8 @@ export interface Settings {
 export interface ClientLite {
   id: number;
   name: string;
-  status: 'active' | 'archived';
+  /** prospect = a potential client, not signed yet */
+  status: 'prospect' | 'active' | 'archived';
 }
 
 export interface Counts {
@@ -247,7 +248,8 @@ export interface BatchDetail extends BatchSummary {
 export interface ClientSummary {
   id: number;
   name: string;
-  status: 'active' | 'archived';
+  /** prospect = a potential client, not signed yet */
+  status: 'prospect' | 'active' | 'archived';
   ownerId: number | null;
   ownerName: string | null;
   description: string | null;
@@ -256,6 +258,8 @@ export interface ClientSummary {
   scriptsDelivered: number;
   nextShoot: ISODate | null;
   overdueBatches: number;
+  createdAt: string;
+  becameClientAt: string | null;
 }
 
 export interface ClientDetail extends ClientSummary {

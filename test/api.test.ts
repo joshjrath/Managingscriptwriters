@@ -741,3 +741,37 @@ describe('scheduling a shoot before its scripts are planned', () => {
     await manager.patch('/api/settings', { planReminderDays: 14 });
   });
 });
+
+describe('potential clients', () => {
+  it('tracks potential clients separately and turns them into clients when they sign', async () => {
+    const r = await manager.post('/api/clients', { name: 'Sunny Side Bakery', prospect: true, description: 'Met at the expo — wants 20 scripts a month' });
+    expect(r.status).toBe(200);
+    const id = r.body.clientId as number;
+    const prospects = (await manager.get('/api/clients?status=prospect')).body.clients;
+    expect(prospects.map((c: any) => c.name)).toContain('Sunny Side Bakery');
+    expect((await manager.get('/api/clients?status=active')).body.clients.some((c: any) => c.id === id)).toBe(false);
+    const current = (await manager.get('/api/clients?status=current')).body.clients.find((c: any) => c.id === id);
+    expect(current).toMatchObject({ status: 'prospect', becameClientAt: null });
+
+    // no work until they sign
+    const shoot = await manager.post('/api/shoots', { clientId: id, startDate: '2026-12-01' });
+    expect(shoot.status).toBe(400);
+    expect(shoot.body.error.message).toMatch(/still a potential client/);
+    expect((await manager.post('/api/batches', { clientId: id, title: 'x', targetCount: 2, split: [] })).status).toBe(400);
+    expect((await sarah.post(`/api/clients/${id}/stage`, { stage: 'client' })).status).toBe(403);
+
+    const conv = await manager.post(`/api/clients/${id}/stage`, { stage: 'client' });
+    expect(conv.body).toMatchObject({ ok: true, changed: true });
+    const detail = (await manager.get(`/api/clients/${id}`)).body;
+    expect(detail.status ?? detail.client?.status).toBe('active');
+    expect((await manager.get('/api/clients?status=current')).body.clients.find((c: any) => c.id === id).becameClientAt).toBeTruthy();
+    const log = (await manager.get(`/api/clients/${id}`)).body;
+    expect(JSON.stringify(log)).toMatch(/Sunny Side Bakery became a client/);
+
+    // can move back while there's no work; not once there is
+    expect((await manager.post(`/api/clients/${id}/stage`, { stage: 'prospect' })).body.changed).toBe(true);
+    await manager.post(`/api/clients/${id}/stage`, { stage: 'client' });
+    expect((await manager.post('/api/shoots', { clientId: id, startDate: '2026-12-01' })).status).toBe(200);
+    expect((await manager.post(`/api/clients/${id}/stage`, { stage: 'prospect' })).status).toBe(409);
+  });
+});

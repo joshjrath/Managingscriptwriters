@@ -8,7 +8,7 @@
 import { isISODate, makeDate, type ISODate } from './dates';
 
 export interface ParseContext {
-  clients: { id: number; name: string; status: 'active' | 'archived' }[];
+  clients: { id: number; name: string; status: 'prospect' | 'active' | 'archived' }[];
   users: { id: number; name: string; active: boolean }[];
   today: ISODate;
 }
