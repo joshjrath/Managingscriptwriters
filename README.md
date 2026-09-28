@@ -80,7 +80,7 @@ Responsive: full sidebar on wide screens, collapsible icon rail on smaller deskt
    - the web service (`npm ci && npm run build`, then `npm start`, health check `/healthz`, Node 22)
    - a PostgreSQL 16 database, with `DATABASE_URL` wired in automatically
 2. When Render asks, fill in `MANAGER_EMAIL`, `MANAGER_NAME` and `MANAGER_PASSWORD` (at least 10 characters). That account is created on first start.
-3. Open the `.onrender.com` URL, sign in, and add writers in **Settings → Team**.
+3. Open the `.onrender.com` URL, sign in, and add your second manager and writers in **Settings → Team**. The app doesn't send email: after you add someone (or reset their password) it shows a ready-to-send message with the sign-in link, their email and a generated temporary password, with a **Copy message** button to paste into WhatsApp, Slack or email.
 
 `MANAGER_*` values are only used the first time the server starts with an empty database; changing them later does nothing. To change your password, use **Change password** in the menu under your name. If you're locked out, set `MANAGER_RESET_PASSWORD=1`, deploy (that account's password becomes `MANAGER_PASSWORD`, and it's created as a manager if missing), then remove the variable again.
 

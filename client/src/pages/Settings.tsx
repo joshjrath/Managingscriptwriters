@@ -1,7 +1,7 @@
 // Settings (managers): deadline rules, timezone and cutoff, reminders, team.
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CalendarClock, Plus, UserPlus } from 'lucide-react';
+import { AlertTriangle, CalendarClock, Check, Copy, Plus, RefreshCw, UserPlus } from 'lucide-react';
 import { api, useSave } from '../api';
 import type { Settings, UserSummary } from '../../../shared/types';
 import { computeDeadlines, DEFAULT_RULES, isValidTimeZone } from '../../../shared/dates';
@@ -111,6 +111,65 @@ function TeamPanel() {
   );
 }
 
+// Readable temporary passwords: no 0/O, 1/l/I. 3 groups of 4 = 14 characters.
+const PW_CHARS = 'abcdefghjkmnpqrstuvwxyz23456789';
+export function generatePassword(): string {
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  const chars = [...bytes].map((b) => PW_CHARS[b % PW_CHARS.length]).join('');
+  return `${chars.slice(0, 4)}-${chars.slice(4, 8)}-${chars.slice(8, 12)}`;
+}
+
+export function signInMessage(p: { name: string; email: string; password: string; role: 'manager' | 'writer'; orgName: string; url: string; reset?: boolean }): string {
+  const first = p.name.trim().split(/\s+/)[0] || 'there';
+  return [
+    p.reset
+      ? `Hi ${first}, your ${p.orgName} password has been reset.`
+      : `Hi ${first}, you've been added to ${p.orgName}'s script production workspace as a ${p.role}.`,
+    '',
+    `Sign in: ${p.url}`,
+    `Email: ${p.email}`,
+    `Temporary password: ${p.password}`,
+    '',
+    p.reset
+      ? 'Once you’re in, set your own password: click your name at the bottom left → Change password.'
+      : `Once you’re in, set your own password: click your name at the bottom left → Change password. ${p.role === 'writer' ? 'Your scripts, deadlines and briefs are under “My work”.' : ''}`.trim(),
+  ].join('\n');
+}
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // fallback for browsers that block the clipboard API
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  }
+}
+
+function ShareDetails({ message, name, onClose }: { message: string; name: string; onClose: () => void }) {
+  const [copied, setCopied] = useState<'idle' | 'ok' | 'fail'>('idle');
+  const copy = async () => setCopied((await copyText(message)) ? 'ok' : 'fail');
+  return (
+    <Dialog open onClose={onClose} title={`Send ${name} their sign-in details`} sub="Copy this and paste it into WhatsApp, Slack, text or email. The password is only shown now — it isn’t stored anywhere readable." size="narrow"
+      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Done</Button><Button variant="primary pill" icon={copied === 'ok' ? <Check aria-hidden /> : <Copy aria-hidden />} onClick={copy}>{copied === 'ok' ? 'Copied' : 'Copy message'}</Button></div>}>
+      <div className="form">
+        <pre className="share-block" aria-label="Sign-in message">{message}</pre>
+        {copied === 'fail' && <span className="err" role="alert" style={{ color: '#FF9C94', fontSize: 12.5, fontWeight: 600 }}>Your browser blocked copying — select the text above and copy it manually.</span>}
+        {copied === 'ok' && <span className="muted" style={{ fontSize: 12.5 }} role="status">Copied to your clipboard.</span>}
+      </div>
+    </Dialog>
+  );
+}
+
 function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => void }) {
   const toast = useToast();
   const { me } = useBoot();
@@ -118,13 +177,27 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
   const [email, setEmail] = useState(user?.email ?? '');
   const [role, setRole] = useState<'manager' | 'writer'>(user?.role ?? 'writer');
   const [capacity, setCapacity] = useState(user?.capacityPerDay != null ? String(user.capacityPerDay) : '');
-  const [password, setPassword] = useState('');
+  const { settings } = useBoot();
+  const [password, setPassword] = useState(() => (user ? '' : generatePassword()));
   const [active, setActive] = useState(user?.active ?? true);
+  const [share, setShare] = useState<string | null>(null);
   const save = useSave(() => user
     ? api(`/api/users/${user.id}`, { method: 'PATCH', body: { name, role, active, capacityPerDay: capacity ? Number(capacity) : null, password: password || undefined } })
-    : api('/api/users', { body: { name, email, role, password, capacityPerDay: capacity ? Number(capacity) : null } }), { onSuccess: () => { toast(user ? `${name} updated` : `${name} added — share their email and temporary password with them`); onClose(); } });
+    : api('/api/users', { body: { name, email, role, password, capacityPerDay: capacity ? Number(capacity) : null } }), {
+    onSuccess: () => {
+      if (!user || password) {
+        // only now, right after saving, is the plain password known
+        setShare(signInMessage({ name, email: user?.email ?? email.trim().toLowerCase(), password, role, orgName: settings.orgName, url: window.location.origin, reset: !!user }));
+        toast(user ? `New password set for ${name}` : `${name} added`);
+      } else {
+        toast(`${name} updated`);
+        onClose();
+      }
+    },
+  });
   const f = save.error?.fields ?? {};
   const ids = { n: useFieldId('n'), e: useFieldId('e'), r: useFieldId('r'), c: useFieldId('c'), p: useFieldId('p') };
+  if (share) return <ShareDetails message={share} name={name.split(/\s+/)[0] || name} onClose={onClose} />;
   return (
     <Dialog open onClose={onClose} title={user ? `Edit ${user.name}` : 'Add a person'} size="narrow"
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={save.isPending} onClick={() => save.mutate(undefined)} icon={user ? undefined : <Plus aria-hidden />}>{user ? 'Save' : 'Add person'}</Button></div>}>
@@ -136,7 +209,12 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
           <select className="select" id={ids.r} value={role} onChange={(e) => setRole(e.target.value as 'manager' | 'writer')}><option value="writer">Writer</option><option value="manager">Manager</option></select>
         </Field>
         <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates and over-capacity warnings."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>
-        <Field label={user ? 'Reset password' : 'Temporary password'} optional={!!user} htmlFor={ids.p} error={f.password} help="At least 10 characters. They can change it from their menu."><input className="input" type="text" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} {...inputProps(ids.p, f.password)} /></Field>
+        <Field label={user ? 'Reset password' : 'Temporary password'} optional={!!user} htmlFor={ids.p} error={f.password} help={user ? 'Leave empty to keep their password. Set one and you’ll get a message to send them.' : 'At least 10 characters. After saving you’ll get a ready-to-send message with this and the sign-in link.'}>
+          <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>
+            <input className="input" type="text" autoComplete="new-password" spellCheck={false} value={password} onChange={(e) => setPassword(e.target.value)} {...inputProps(ids.p, f.password)} />
+            <Button variant="sm" icon={<RefreshCw aria-hidden />} onClick={() => setPassword(generatePassword())}>Generate</Button>
+          </div>
+        </Field>
         {user && user.id !== me.id && (
           <label className="check"><input type="checkbox" checked={!active} onChange={(e) => setActive(!e.target.checked)} />Deactivate (signs them out; their history is kept)</label>
         )}
