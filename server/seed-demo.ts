@@ -193,6 +193,13 @@ export async function seedDemo(db: Db, now = new Date()): Promise<boolean> {
     [n2.batchId, 'Shoot moved by the client. The manual final delivery date was kept — confirm it still works.'],
   );
 
+  // leave a few celebrations to greet people on their first visit; the rest are history
+  await db.query(
+    `update moments set seen_at = now()
+      where not (kind = 'approved' and user_id = $1 and batch_id = $4) and not (kind in ('approved', 'revisions') and user_id = $2 and batch_id = $5) and not (kind = 'team_batch_done' and user_id = $3)`,
+    [ids.sarah, ids.marcus, ids.josh, a.batchId, l.batchId],
+  );
+
   // make the first few days of history look like history
   await db.query(`update activity set created_at = created_at - interval '2 days' where action in ('client.created','briefing.created','shoot.created','batch.created')`);
   return true;

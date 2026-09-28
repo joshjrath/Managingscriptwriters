@@ -12,7 +12,7 @@ import { compressRanges, isManager } from '../../../shared/workflow';
 import { PageHeader, useBoot, useNewWork } from '../components/Shell';
 import { DueChart } from '../components/DueChart';
 import { AttentionRow, BatchItem } from '../components/BatchBits';
-import { Avatar, Chip, DateTile, Empty, ErrorState, Loading, Panel } from '../components/ui';
+import { Avatar, Chip, CountUp, DateTile, Empty, ErrorState, Loading, Panel } from '../components/ui';
 
 export function Overview() {
   const { me, clock } = useBoot();
@@ -35,22 +35,22 @@ export function Overview() {
           <div className="cards4">
             <button className="stat-card salmon" onClick={() => nav('/production?flag=overdue&view=table')} aria-label={`${d.cards.overdueBatches} overdue batches, ${d.cards.overdueScripts} scripts behind. Show them.`}>
               <span className="corner"><AlertTriangle /></span>
-              <span className={`n${d.cards.overdueBatches ? '' : ' zero'}`}>{d.cards.overdueBatches}</span>
+              <span className={`n${d.cards.overdueBatches ? '' : ' zero'}`}><CountUp value={d.cards.overdueBatches} /></span>
               <span><span className="cap">Overdue batches</span><span className="sub" style={{ display: 'block' }}>{d.cards.overdueScripts ? `${plural(d.cards.overdueScripts, 'script')} behind` : 'Nothing overdue'}</span></span>
             </button>
             <button className="stat-card yellow" onClick={() => nav('/production?flag=due_today&view=table')} aria-label={`${d.cards.dueTodayBatches} batches due today. Show them.`}>
               <span className="corner"><CalendarClock /></span>
-              <span className={`n${d.cards.dueTodayBatches ? '' : ' zero'}`}>{d.cards.dueTodayBatches}</span>
+              <span className={`n${d.cards.dueTodayBatches ? '' : ' zero'}`}><CountUp value={d.cards.dueTodayBatches} /></span>
               <span><span className="cap">Batches due today</span><span className="sub" style={{ display: 'block' }}>{d.cards.dueTodayScripts ? `${plural(d.cards.dueTodayScripts, 'script')} left to finish` : 'No deadlines today'}</span></span>
             </button>
             <button className="stat-card" onClick={() => nav(isManager(me.role) ? '/review' : '/production?flag=review&view=table')} style={{ ['--c' as string]: 'var(--lavender)' }} aria-label={`${d.cards.awaitingReviewScripts} scripts awaiting review. Open the review queue.`}>
               <span className="corner"><ClipboardCheck /></span>
-              <span className={`n${d.cards.awaitingReviewScripts ? '' : ' zero'}`}>{d.cards.awaitingReviewScripts}</span>
+              <span className={`n${d.cards.awaitingReviewScripts ? '' : ' zero'}`}><CountUp value={d.cards.awaitingReviewScripts} /></span>
               <span><span className="cap">Scripts awaiting review</span><span className="sub" style={{ display: 'block' }}>{d.cards.awaitingReviewBatches ? `across ${plural(d.cards.awaitingReviewBatches, 'batch', 'batches')}` : 'Queue is clear'}</span></span>
             </button>
             <button className="stat-card elev" onClick={() => nav('/production?stage=delivered&view=table&completed=1')} style={{ ['--c' as string]: 'var(--mint)' }} aria-label={`${d.cards.deliveredThisWeekScripts} scripts delivered this week.`}>
               <span className="corner"><Send /></span>
-              <span className={`n${d.cards.deliveredThisWeekScripts ? '' : ' zero'}`}>{d.cards.deliveredThisWeekScripts}</span>
+              <span className={`n${d.cards.deliveredThisWeekScripts ? '' : ' zero'}`}><CountUp value={d.cards.deliveredThisWeekScripts} /></span>
               <span><span className="cap">Delivered this week</span><span className="sub" style={{ display: 'block' }}>scripts, writer-confirmed{d.cards.deliveredThisWeekBatches ? ` · ${plural(d.cards.deliveredThisWeekBatches, 'batch', 'batches')}` : ''}</span></span>
             </button>
           </div>

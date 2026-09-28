@@ -285,4 +285,27 @@ create table audit_log (
 create index audit_log_created_idx on audit_log (created_at desc);
 create index audit_log_user_idx on audit_log (user_id, created_at desc);
 `,
+  // 4 · celebration moments (shown once, the next time someone opens the app), What's new, and writers' progress counters
+  `
+create table moments (
+  id bigint generated always as identity primary key,
+  user_id bigint not null references users(id),
+  kind text not null check (kind in ('approved','revisions','drafts_done','batch_done','team_drafts_done','team_batch_done')),
+  batch_id bigint references batches(id),
+  payload jsonb not null default '{}'::jsonb,
+  dedupe_key text unique,
+  created_at timestamptz not null default now(),
+  seen_at timestamptz
+);
+create index moments_unseen_idx on moments (user_id, created_at) where seen_at is null;
+alter table users add column whats_new_seen text;
+-- a writer's own "written so far" count: an update for their manager, separate from script statuses
+create table writer_progress (
+  batch_id bigint not null references batches(id),
+  user_id bigint not null references users(id),
+  written int not null check (written >= 0),
+  updated_at timestamptz not null default now(),
+  primary key (batch_id, user_id)
+);
+`,
 ];

@@ -7,14 +7,18 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bell, Building2, CalendarDays, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
-  PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings,
+  PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Wand2,
 } from 'lucide-react';
+import { LayoutGroup, m } from 'framer-motion';
 import { api, queryClient, useSave } from '../api';
 import type { Bootstrap, Notification, SearchResults } from '../../../shared/types';
 import { fmtStamp, fmtTimeZoneAbbr } from '../../../shared/format';
 import { nowInZone } from '../../../shared/dates';
 import { Avatar, Button, Dialog, Field, FormError, inputProps, useFieldId, useToast } from './ui';
 import { NewWorkDialog, type NewWorkTab, type NewWorkPreset } from './NewWork';
+import { MomentsHost } from './Moments';
+import { SPRING, setMotionEnabled, useMotionSetting } from '../motion';
+import { LATEST_CHANGE } from '../../../shared/changelog';
 
 // ── bootstrap context ────────────────────────────────────────────────────
 
@@ -77,10 +81,11 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
           </div>
           {drawer && <MobileNav onClose={() => setDrawer(false)} />}
           <main className="page-main" id="main">
-            <Outlet />
+            <div key={loc.pathname} className="page-enter"><Outlet /></div>
           </main>
         </div>
         <NewWorkDialog state={newWork} onClose={() => setNewWork(null)} />
+        <MomentsHost />
       </NewWorkCtx.Provider>
     </BootCtx.Provider>
   );
@@ -118,47 +123,65 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
         <span>{collapsed && !mobile ? 'S' : 'Media'}</span>
       </NavLink>
       <SearchBox />
-      <nav className="nav">
-        {items.map((it) => (
-          <NavLink key={it.to} to={it.to} className={({ isActive }) => (isActive ? 'active' : '')} title={collapsed ? it.label : undefined}>
-            {it.icon}
-            <span className="label">{it.label}</span>
-            {it.count != null && <span className={`count${it.hot ? ' hot' : ''}`} aria-label={`${it.count} ${it.to === '/review' ? 'awaiting review' : it.to === '/overview' ? 'need attention' : 'open scripts'}`}>{it.count}</span>}
-            {it.hot && <span className="dot-badge" aria-hidden />}
+      <LayoutGroup id={mobile ? 'nav-mobile' : 'nav'}>
+        <nav className="nav">
+          {items.map((it) => (
+            <NavItem key={it.to} to={it.to} icon={it.icon} label={it.label} collapsed={collapsed}>
+              {it.count != null && <span className={`count${it.hot ? ' hot' : ''}`} aria-label={`${it.count} ${it.to === '/review' ? 'awaiting review' : it.to === '/overview' ? 'need attention' : 'open scripts'}`}>{it.count}</span>}
+              {it.hot && <span className="dot-badge" aria-hidden />}
+            </NavItem>
+          ))}
+          {manager && (
+            <>
+              <div className="nav-label">Manage</div>
+              <NavItem to="/settings" icon={<Settings />} label="Settings" collapsed={collapsed} />
+            </>
+          )}
+        </nav>
+        <div className="side-foot">
+          {settings.isDemo && <div className="demo-flag"><b>Demo workspace.</b> Sample data only — separate from your real workspace.</div>}
+          {me.role === 'owner' && (
+            <nav className="nav" aria-label="Owner">
+              <NavItem to="/log" icon={<ScrollText />} label="Master log" collapsed={collapsed} />
+            </nav>
+          )}
+          <UserMenu />
+          {onToggle && !mobile && (
+            <button className="collapse-btn" onClick={onToggle} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+              {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
+              <span className="label">Collapse</span>
+            </button>
+          )}
+          <NavLink to="/whats-new" className={({ isActive }) => `collapse-btn whats-new${isActive ? ' on' : ''}`} title={collapsed ? 'What’s new' : undefined}>
+            <Sparkles size={17} aria-hidden />
+            <span className="label">What’s new</span>
+            {boot.whatsNewSeen !== LATEST_CHANGE && <span className="new-dot" aria-label="New updates" />}
           </NavLink>
-        ))}
-        {manager && (
-          <>
-            <div className="nav-label">Manage</div>
-            <NavLink to="/settings" className={({ isActive }) => (isActive ? 'active' : '')} title={collapsed ? 'Settings' : undefined}>
-              <Settings /><span className="label">Settings</span>
-            </NavLink>
-          </>
-        )}
-      </nav>
-      <div className="side-foot">
-        {settings.isDemo && <div className="demo-flag"><b>Demo workspace.</b> Sample data only — separate from your real workspace.</div>}
-        {me.role === 'owner' && (
-          <nav className="nav" aria-label="Owner">
-            <NavLink to="/log" className={({ isActive }) => (isActive ? 'active' : '')} title={collapsed ? 'Master log' : undefined}>
-              <ScrollText /><span className="label">Master log</span>
-            </NavLink>
-          </nav>
-        )}
-        <UserMenu />
-        {onToggle && !mobile && (
-          <button className="collapse-btn" onClick={onToggle} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
-            {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
-            <span className="label">Collapse</span>
-          </button>
-        )}
-      </div>
+        </div>
+      </LayoutGroup>
     </div>
+  );
+}
+
+/** A sidebar link; the highlight glides between links as you move around. */
+function NavItem({ to, icon, label, collapsed, children }: { to: string; icon: ReactNode; label: string; collapsed?: boolean; children?: ReactNode }) {
+  return (
+    <NavLink to={to} className={({ isActive }) => (isActive ? 'active' : '')} title={collapsed ? label : undefined}>
+      {({ isActive }) => (
+        <>
+          {isActive && <m.span layoutId="nav-pill" className="nav-pill" transition={SPRING} />}
+          {icon}
+          <span className="label">{label}</span>
+          {children}
+        </>
+      )}
+    </NavLink>
   );
 }
 
 function UserMenu() {
   const { me } = useBoot();
+  const motionOn = useMotionSetting();
   const [open, setOpen] = useState(false);
   const [pw, setPw] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -180,6 +203,7 @@ function UserMenu() {
       {open && (
         <div className="menu" role="menu">
           <button role="menuitem" onClick={() => { setPw(true); setOpen(false); }}><KeyRound />Change password</button>
+          <button role="menuitemcheckbox" aria-checked={motionOn} onClick={() => setMotionEnabled(!motionOn)}><Wand2 />Animations<span className={`switch${motionOn ? ' on' : ''}`} aria-hidden><i /></span></button>
           <button role="menuitem" onClick={logout}><LogOut />Sign out</button>
         </div>
       )}

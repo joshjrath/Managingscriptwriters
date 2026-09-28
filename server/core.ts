@@ -156,7 +156,20 @@ export async function loadScriptsFor(db: Db, batchIds: number[]): Promise<Map<nu
 
 export const lite = (r: ScriptLiteRow): ScriptLite => ({ id: r.id, number: r.number, status: r.status, assigneeId: r.assignee_id });
 
-export function buildSummary(row: BatchRow, scriptRows: ScriptLiteRow[], names: Map<number, string>, clock: Clock): BatchSummary {
+/** Writers' "written so far" counters, keyed `${batchId}:${userId}`. */
+export type WrittenMap = Map<string, { written: number; at: string }>;
+
+export async function loadWritten(db: Db, batchIds: number[]): Promise<WrittenMap> {
+  const map: WrittenMap = new Map();
+  if (!batchIds.length) return map;
+  const rows = await db.query<{ batch_id: number; user_id: number; written: number; updated_at: string }>(
+    `select batch_id, user_id, written, updated_at from writer_progress where batch_id in (${batchIds.map((_, i) => `$${i + 1}`).join(',')})`, batchIds,
+  );
+  for (const r of rows) map.set(`${r.batch_id}:${r.user_id}`, { written: Number(r.written), at: r.updated_at });
+  return map;
+}
+
+export function buildSummary(row: BatchRow, scriptRows: ScriptLiteRow[], names: Map<number, string>, clock: Clock, written: WrittenMap = new Map()): BatchSummary {
   const scripts = scriptRows.map(lite);
   const progress = summarize(scripts);
   const draft = milestone('draft', row.draft_due, progress, clock);
@@ -171,10 +184,12 @@ export function buildSummary(row: BatchRow, scriptRows: ScriptLiteRow[], names: 
   const writers: WriterShare[] = [...groups.entries()]
     .map(([uid, list]) => {
       const p = summarize(list);
+      const rep = uid == null ? undefined : written.get(`${row.id}:${uid}`);
       return {
         userId: uid, name: uid == null ? 'Unassigned' : names.get(uid) ?? 'Unknown',
         count: list.length, ranges: compressRanges(list.map((s) => s.number)),
         draftReady: p.draftReady, delivered: p.delivered,
+        written: Math.min(list.length, Math.max(p.draftReady, rep?.written ?? 0)), writtenAt: rep?.at ?? null,
         first: Math.min(...list.map((s) => s.number)),
       };
     })
@@ -188,7 +203,7 @@ export function buildSummary(row: BatchRow, scriptRows: ScriptLiteRow[], names: 
     draftDue: row.draft_due, draftDueMode: row.draft_due_mode, finalDue: row.final_due, finalDueMode: row.final_due_mode,
     blocked: row.blocked, blockerNote: row.blocker_note, blockedAt: row.blocked_at, blockedByName: row.blocked_by_name,
     nextAction: row.next_action, needsDateReview: row.needs_date_review, dateReviewNote: row.date_review_note,
-    archivedAt: row.archived_at, progress, stage: deriveStage(progress), writers,
+    archivedAt: row.archived_at, progress, written: writers.reduce((n, w) => n + w.written, 0), stage: deriveStage(progress), writers,
     draft, final, next: nextMilestone(draft, final),
     unresolvedRevisions: row.open_revisions, updatedAt: row.updated_at,
   };
@@ -221,7 +236,8 @@ export async function loadBatches(ctx: Ctx, q: BatchQuery = {}, clock?: Clock): 
   const users = await loadUsers(ctx.db);
   const names = new Map(users.map((u) => [u.id, u.name]));
   const c = clock ?? (await clockFor(ctx));
-  return { rows, scripts, summaries: rows.map((r) => buildSummary(r, scripts.get(r.id) ?? [], names, c)) };
+  const written = await loadWritten(ctx.db, rows.map((r) => r.id));
+  return { rows, scripts, summaries: rows.map((r) => buildSummary(r, scripts.get(r.id) ?? [], names, c, written)) };
 }
 
 export async function loadBatch(ctx: Ctx, id: number, clock?: Clock): Promise<BatchSummary | null> {

@@ -9,6 +9,7 @@ import type { DueCategory, DueDay } from '../../../shared/types';
 import { DUE_CATEGORIES, DUE_CATEGORY_LABEL } from '../../../shared/types';
 import { fmtDow, fmtWeekday, plural } from '../../../shared/format';
 import { weekday } from '../../../shared/dates';
+import { CountUp, Seg } from './ui';
 
 export const CAT_COLOR: Record<DueCategory, string> = {
   not_started: 'var(--neutral)',
@@ -37,16 +38,16 @@ export function DueChart({ draft, final, today }: { draft: DueDay[]; final: DueD
       <div className="due-head">
         <div>
           <h2 style={{ fontSize: 'var(--fs-h2)', fontWeight: 700 }}>Work due by day</h2>
-          <div className="due-total" aria-hidden>{upcoming}</div>
+          <div className="due-total" aria-hidden><CountUp value={upcoming} /></div>
           <div className="due-total-sub">
             scripts due for {noun} in the next 14 days
             {overdue.total > 0 && <> · <b>{overdue.total} overdue</b></>}
           </div>
         </div>
-        <div className="seg" role="group" aria-label="Deadline type">
+        <Seg role="group" aria-label="Deadline type">
           <button aria-pressed={mode === 'final'} onClick={() => { setMode('final'); setPicked(null); }}>Final delivery</button>
           <button aria-pressed={mode === 'draft'} onClick={() => { setMode('draft'); setPicked(null); }}>Drafts</button>
-        </div>
+        </Seg>
       </div>
       <div className="due-legend-row">
         <div className="legend" aria-label="Legend">
@@ -56,8 +57,8 @@ export function DueChart({ draft, final, today }: { draft: DueDay[]; final: DueD
       </div>
       <p className="sr-only">{upcoming} scripts due for {noun} in the next 14 days, {overdue.total} overdue. {summary || 'Nothing due.'}</p>
       <div className="bars-scroll">
-        <div className="bars" role="group" aria-label={`Scripts due per day for ${noun}`}>
-          {days.map((d) => {
+        <div className="bars" key={mode} role="group" aria-label={`Scripts due per day for ${noun}`}>
+          {days.map((d, i) => {
             const isLate = d.date === 'overdue';
             const isToday = d.date === today;
             const wd = isLate ? -1 : weekday(d.date as string);
@@ -75,7 +76,7 @@ export function DueChart({ draft, final, today }: { draft: DueDay[]; final: DueD
                 <span className="col-wrap" style={{ ['--bar-h' as string]: '190px', ['--pct' as string]: `${pct}%` }}>
                   <span className="track">
                     {d.total > 0 && (
-                      <span className="stackfill" style={{ height: `${pct}%` }}>
+                      <span className="stackfill" style={{ height: `${pct}%`, ['--i' as string]: i }}>
                         {cats.filter((c) => d.byCategory[c]).map((c) => (
                           <span key={c} className="seg-fill" style={{ flex: d.byCategory[c], ['--c' as string]: CAT_COLOR[c] }} />
                         ))}

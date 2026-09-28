@@ -40,6 +40,7 @@ const MUTATIONS: Record<string, string> = {
   '/api/batches/:id/archive': 'archive a batch',
   '/api/batches/:id/blocker': 'flag a blocker',
   '/api/batches/:id/quick-progress': 'update progress',
+  '/api/batches/:id/written': 'update writing progress',
   '/api/scripts/:id': 'edit a script',
   '/api/shoots': 'schedule a shoot',
   '/api/shoots/:id/reschedule': 'move a shoot',
@@ -54,6 +55,8 @@ const MUTATIONS: Record<string, string> = {
   '/api/users': 'add a team member',
   '/api/users/:id': 'edit a team member',
   '/api/users/:id/remove': 'remove a team member',
+  '/api/moments/seen': 'dismiss a celebration',
+  '/api/me/whats-new': 'open What’s new',
 };
 
 async function describeView(db: Db, route: string, params: Record<string, string>, query: Record<string, string>, me: Me): Promise<{ key: string; summary: string; link: string | null } | null> {

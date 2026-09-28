@@ -39,7 +39,7 @@ export function BatchItem({ b, action, extra, onOpen, ring }: { b: BatchSummary;
           {b.priority === 'urgent' || b.priority === 'high' ? <Chip color={b.priority === 'urgent' ? 'red' : 'salmon'}>{PRIORITY_LABEL[b.priority]}</Chip> : null}
         </div>
         {extra}
-        <BatchProgress p={b.progress} thin />
+        <BatchProgress p={b.progress} written={b.written} thin />
       </div>
       <div className="side">
         <DueChip m={b.next} today={clock.today} />
@@ -103,7 +103,7 @@ export function BatchDrawer({ id, onClose }: { id: number | null; onClose: () =>
         <div className="stack s4">
           <div className="row-flex s2"><StageChip stage={b.stage} /><DueChip m={b.next} today={clock.today} />{b.blocked && <Chip color="red" icon={<Ban aria-hidden />}>Blocked</Chip>}</div>
           {b.blocked && <div className="banner red"><OctagonAlert aria-hidden /><div className="txt"><b>{b.blockerNote}</b><span>Flagged by {b.blockedByName ?? 'someone'} · {fmtStamp(b.blockedAt, settings.timezone)}</span></div></div>}
-          <BatchProgress p={b.progress} />
+          <BatchProgress p={b.progress} written={b.written} />
           <div className="deadline-list">
             {b.shootStart && <div className="deadline" style={{ ['--c' as string]: 'var(--salmon)' }}><span className="ic"><Camera /></span><div><div className="k">Shoot</div><div className="v">{fmtRange(b.shootStart, b.shootEnd)}</div></div></div>}
             <div className="deadline" style={{ ['--c' as string]: 'var(--lavender)' }}><span className="ic"><CalendarClock /></span><div><div className="k">Drafts due</div><div className="v">{b.draftDue ? fmtLong(b.draftDue) : 'Not set'}</div>{b.draftRule && <div className="rule">{b.draftRule}</div>}</div><div className="right"><DueChip m={b.draft} today={clock.today} prefix={false} /></div></div>

@@ -28,6 +28,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "esbuild": "^0.28.2",
     "fastify": "^5.12.5",
+    "framer-motion": "^12.43.0",
     "lucide-react": "^1.48.0",
     "pg": "^8.23.0",
     "react": "^19.3.0",

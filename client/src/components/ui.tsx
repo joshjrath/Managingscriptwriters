@@ -1,7 +1,10 @@
 // Small building blocks shared by every screen.
 
-import { createContext, forwardRef, useCallback, useContext, useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react';
+import { createContext, forwardRef, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ButtonHTMLAttributes, type HTMLAttributes, type ReactNode, type TransitionEvent } from 'react';
+import { AnimatePresence, m } from 'framer-motion';
 import { AlertTriangle, Check, CheckCheck, CircleAlert, Loader2, RotateCcw, X } from 'lucide-react';
+import { useMotionAllowed, SPRING } from '../motion';
+import { burst } from '../fx';
 import type { ApiError } from '../api';
 import { STATUS_LABEL, STAGE_LABEL, type Milestone, type Progress, type ScriptStatus, type Stage } from '../../../shared/workflow';
 import { fmtDate } from '../../../shared/format';
@@ -64,36 +67,172 @@ export const edgeFor = (m: Milestone | null, blocked?: boolean) =>
 
 // ── progress ─────────────────────────────────────────────────────────────
 
-/** "20 / 45 drafts ready · 44%" with a segmented bar: delivered, approved, in review. */
-export function BatchProgress({ p, thin, showSecondary = true }: { p: Progress; thin?: boolean; showSecondary?: boolean }) {
-  const w = (n: number) => (p.total ? `${(n / p.total) * 100}%` : '0%');
-  const label = `${p.draftReady} / ${p.total} drafts ready · ${p.pctDraft}%`;
+/** Starts at 0 and follows `target`, so CSS transitions animate the first fill as well as later changes. */
+function useRise(target: number, ready = true) {
+  const allowed = useMotionAllowed();
+  const [shown, setShown] = useState(allowed ? 0 : target);
+  const prev = useRef<number | null>(null);
+  const rose = useRef(false);
+  useEffect(() => {
+    if (!allowed) { setShown(target); prev.current = target; return; }
+    if (!ready && prev.current === null) return;
+    rose.current = prev.current !== null && target > prev.current + 0.01;
+    prev.current = target;
+    const id = requestAnimationFrame(() => setShown(target));
+    return () => cancelAnimationFrame(id);
+  }, [target, allowed, ready]);
+  return { shown, rose };
+}
+
+/** True while the element is on (or near) the screen; continuous animations pause otherwise. */
+function useOnScreen<T extends Element>() {
+  const ref = useRef<T>(null);
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || typeof IntersectionObserver === 'undefined') { setOn(true); return; }
+    const io = new IntersectionObserver(([e]) => setOn(e.isIntersecting), { rootMargin: '60px' });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+  return [ref, on] as const;
+}
+
+// bubble positions (left %, size px, delay s, duration s, drift px), fixed so bars don't reshuffle on re-render
+const BUBBLES: [number, number, number, number, number][] = [[8, 3, 0, 2.8, 3], [21, 4, 1.4, 3.4, -2], [34, 2.5, 0.6, 2.4, 2], [47, 3.5, 2.1, 3.1, -3], [61, 3, 0.3, 2.7, 2], [74, 4, 1.8, 3.6, -2], [88, 2.5, 1.1, 2.5, 3]];
+
+/** A pill that fills like liquid: layered colours, a sloshing edge, rising bubbles, sparks when it goes up. */
+export function LiquidBar({ total, segs, thin }: { total: number; segs: { n: number; c: string }[]; thin?: boolean }) {
+  const filled = segs.reduce((n, x) => n + x.n, 0);
+  const pct = total ? Math.min(100, (filled / total) * 100) : 0;
+  const [ref, on] = useOnScreen<HTMLDivElement>();
+  const allowed = useMotionAllowed();
+  const { shown, rose } = useRise(pct, on);
+  const liq = useRef<HTMLDivElement>(null);
+  const edge = [...segs].reverse().find((x) => x.n > 0)?.c ?? 'var(--track)';
+  const onEnd = (e: TransitionEvent) => {
+    if (e.target !== liq.current || e.propertyName !== 'width' || !rose.current) return;
+    rose.current = false;
+    const r = liq.current!.getBoundingClientRect();
+    burst(r.right, r.top + r.height / 2, { colors: ['#FFFFFF', '#9D89EF', '#60D1BE', '#F4ED70'], count: 12, distance: 30 });
+  };
+  const full = shown >= 99.9;
+  return (
+    <div ref={ref} className={`bar-line liquid${thin ? ' thin' : ''}`} data-live={on && allowed ? '' : undefined} aria-hidden>
+      <div ref={liq} className={`liq${full ? ' full' : ''}`} style={{ width: `${shown}%`, ['--edge' as string]: edge }} onTransitionEnd={onEnd}>
+        <div className="liq-layers">
+          {segs.map((x, i) => <span key={i} style={{ flexGrow: x.n, ['--c' as string]: x.c }} />)}
+        </div>
+        <span className="liq-shine" />
+        {!thin && shown > 0 && BUBBLES.map(([l, sz, d, t, x], i) => (
+          <i key={i} className="bub" style={{ left: `${l}%`, ['--s' as string]: `${sz}px`, ['--d' as string]: `${d}s`, ['--t' as string]: `${t}s`, ['--x' as string]: `${x}px` }} />
+        ))}
+        {shown > 0 && !full && (
+          <svg className="liq-wave" viewBox="0 0 8 60" preserveAspectRatio="none"><path d="M0 0H4Q7 5 4 10Q1 15 4 20Q7 25 4 30Q1 35 4 40Q7 45 4 50Q1 55 4 60H0Z" /></svg>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * "20 / 45 drafts ready · 44%" with a liquid bar: delivered, approved, in review,
+ * and (lighter) what writers say they've written but not sent yet.
+ */
+export function BatchProgress({ p, thin, showSecondary = true, written = 0 }: { p: Progress; thin?: boolean; showSecondary?: boolean; written?: number }) {
+  const extra = Math.max(0, Math.min(p.total, written) - p.draftReady);
+  const label = `${p.draftReady} / ${p.total} drafts ready · ${p.pctDraft}%${extra ? ` · ${p.draftReady + extra} written` : ''}`;
   return (
     <div className="prog" role="group" aria-label={`${label}. ${p.approved} approved, ${p.delivered} delivered.`}>
-      <div className={`bar-line${thin ? ' thin' : ''}`} aria-hidden>
-        {p.delivered > 0 && <span style={{ width: w(p.delivered), ['--c' as string]: 'var(--mint)' }} />}
-        {p.awaitingDelivery > 0 && <span style={{ width: w(p.awaitingDelivery), ['--c' as string]: 'color-mix(in srgb, var(--mint) 55%, var(--track))' }} />}
-        {p.inReview > 0 && <span style={{ width: w(p.inReview), ['--c' as string]: 'var(--lavender)' }} />}
-      </div>
+      <LiquidBar total={p.total} thin={thin} segs={[
+        { n: p.delivered, c: 'var(--mint)' },
+        { n: p.awaitingDelivery, c: 'color-mix(in srgb, var(--mint) 55%, var(--track))' },
+        { n: p.inReview, c: 'var(--lavender)' },
+        { n: extra, c: 'color-mix(in srgb, var(--cyan) 70%, var(--track))' },
+      ]} />
       <div className="label">
-        <span><b>{p.draftReady} / {p.total}</b> drafts ready · <span className="n">{p.pctDraft}%</span></span>
+        <span><b>{p.draftReady} / {p.total}</b> drafts ready · <span className="n">{p.pctDraft}%</span>{extra > 0 && <span className="written-tag"> · {p.draftReady + extra} written</span>}</span>
         {showSecondary && <span className="n">{p.approved} approved · {p.delivered} delivered{p.revisions ? ` · ${p.revisions} revisions` : ''}</span>}
       </div>
     </div>
   );
 }
 
+/** A number that counts up to its value (and eases between values when it changes). */
+export function CountUp({ value, duration = 800 }: { value: number; duration?: number }) {
+  const allowed = useMotionAllowed();
+  const [shown, setShown] = useState(allowed ? 0 : value);
+  const cur = useRef(allowed ? 0 : value);
+  useEffect(() => {
+    if (!allowed) { cur.current = value; setShown(value); return; }
+    const from = cur.current;
+    if (from === value) return;
+    const start = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - start) / duration);
+      const v = Math.round(from + (value - from) * (1 - Math.pow(1 - t, 3)));
+      cur.current = v;
+      setShown(v);
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value, allowed, duration]);
+  return <><span aria-hidden>{shown}</span><span className="sr-only">{value}</span></>;
+}
+
 export function Ring({ pct, size = 44, stroke = 5, color = 'var(--cyan)', children, large }: { pct: number; size?: number; stroke?: number; color?: string; children?: ReactNode; large?: boolean }) {
+  const [ref, on] = useOnScreen<HTMLDivElement>();
+  const { shown } = useRise(Math.min(100, Math.max(0, pct)), on);
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
-  const off = c * (1 - Math.min(100, Math.max(0, pct)) / 100);
+  const off = c * (1 - shown / 100);
   return (
-    <div className={`ring-wrap${large ? ' lg' : ''}`} style={{ width: size, height: size }}>
+    <div ref={ref} className={`ring-wrap${large ? ' lg' : ''}`} style={{ width: size, height: size }} data-live={on ? '' : undefined}>
+      {large && (
+        <span className="ring-water" style={{ ['--c' as string]: color }} aria-hidden>
+          <span className="rw" style={{ transform: `translateY(${(100 - shown) / 2}%)` }}><i /><i /></span>
+        </span>
+      )}
       <svg className="ring" width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden style={{ ['--c' as string]: color }}>
         <circle className="trk" cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} />
         {pct > 0 && <circle className="arc" cx={size / 2} cy={size / 2} r={r} fill="none" strokeWidth={stroke} strokeLinecap="round" strokeDasharray={c} strokeDashoffset={off} transform={`rotate(-90 ${size / 2} ${size / 2})`} />}
       </svg>
-      <div className="ring-c">{children ?? `${pct}%`}</div>
+      <div className="ring-c">{children ?? <span><CountUp value={pct} />%</span>}</div>
+    </div>
+  );
+}
+
+/** Segmented control: a pill glides to the pressed button. */
+export function Seg({ children, className = '', ...rest }: HTMLAttributes<HTMLDivElement>) {
+  const ref = useRef<HTMLDivElement>(null);
+  const glider = useRef<HTMLSpanElement>(null);
+  const [ready, setReady] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const g = glider.current;
+    if (!el || !g) return;
+    const place = () => {
+      const on = el.querySelector<HTMLElement>('button[aria-pressed="true"], button[aria-selected="true"]');
+      if (!on) { g.style.opacity = '0'; return; }
+      g.style.opacity = '1';
+      g.style.width = `${on.offsetWidth}px`;
+      g.style.height = `${on.offsetHeight}px`;
+      g.style.transform = `translate(${on.offsetLeft}px, ${on.offsetTop}px)`;
+    };
+    place();
+    if (!ready) requestAnimationFrame(() => setReady(true));
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(place) : null;
+    ro?.observe(el);
+    const mo = new MutationObserver(place);
+    mo.observe(el, { attributes: true, subtree: true, attributeFilter: ['aria-pressed', 'aria-selected'] });
+    return () => { ro?.disconnect(); mo.disconnect(); };
+  });
+  return (
+    <div ref={ref} className={`seg glide${ready ? ' ready' : ''} ${className}`} {...rest}>
+      <span ref={glider} className="seg-glider" aria-hidden />
+      {children}
     </div>
   );
 }
@@ -238,13 +377,16 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     <ToastCtx.Provider value={push}>
       {children}
       <div className="toasts" role="status" aria-live="polite">
-        {toasts.map((t) => (
-          <div key={t.id} className={`toast ${t.kind === 'error' ? 'error' : ''}`}>
-            {t.kind === 'error' ? <CircleAlert aria-hidden /> : <Check aria-hidden />}
-            <span>{t.text}</span>
-            <button className="x" onClick={() => setToasts((all) => all.filter((x) => x.id !== t.id))} aria-label="Dismiss"><X size={15} /></button>
-          </div>
-        ))}
+        <AnimatePresence initial={false}>
+          {toasts.map((t) => (
+            <m.div key={t.id} layout className={`toast ${t.kind === 'error' ? 'error' : ''}`}
+              initial={{ opacity: 0, y: 18, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, x: 40, transition: { duration: 0.16, ease: [0.32, 0, 0.67, 0] } }} transition={SPRING}>
+              {t.kind === 'error' ? <CircleAlert aria-hidden /> : <Check aria-hidden className="toast-check" />}
+              <span>{t.text}</span>
+              <button className="x" onClick={() => setToasts((all) => all.filter((x) => x.id !== t.id))} aria-label="Dismiss"><X size={15} /></button>
+            </m.div>
+          ))}
+        </AnimatePresence>
       </div>
     </ToastCtx.Provider>
   );

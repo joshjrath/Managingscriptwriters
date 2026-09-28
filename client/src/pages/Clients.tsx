@@ -11,7 +11,7 @@ import type { Briefing, ClientDetail, ClientSummary } from '../../../shared/type
 import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
 import { PageHeader, useBoot, useNewWork } from '../components/Shell';
 import { BatchItem } from '../components/BatchBits';
-import { Button, Chip, Dialog, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel, useFieldId, useToast, DateTile } from '../components/ui';
+import { Button, Chip, DateTile, Dialog, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel, Seg, useFieldId, useToast } from '../components/ui';
 import { RescheduleDialog, ResourceDialog, ResourceRow } from './BatchDetail';
 
 export function ClientsPage() {
@@ -28,10 +28,10 @@ export function ClientsPage() {
       </PageHeader>
       <div className="filters">
         <input className="input search" type="search" placeholder="Search clients" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search clients" />
-        <div className="seg" role="group" aria-label="Status">
+        <Seg role="group" aria-label="Status">
           <button aria-pressed={status === 'active'} onClick={() => setStatus('active')}>Active</button>
           <button aria-pressed={status === 'archived'} onClick={() => setStatus('archived')}>Archived</button>
-        </div>
+        </Seg>
       </div>
       {q.isLoading && <Loading />}
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
@@ -103,7 +103,7 @@ export function ClientPage() {
                   <div key={s.id} className="item with-tile">
                     <DateTile date={s.startDate} color={(s.endDate ?? s.startDate) < today ? 'var(--text-3)' : undefined} />
                     <div className="body"><div className="title">{s.title ?? 'Shoot'}</div><div className="meta"><span>{fmtRange(s.startDate, s.endDate)}</span>{s.location && <span>{s.location}</span>}<span>{plural(s.batchIds.length, 'batch', 'batches')}</span></div></div>
-                    <div className="side">{(s.endDate ?? s.startDate) < today ? <Chip>Past</Chip> : manager ? <Button variant="sm" onClick={() => setResched({ id: s.id, start: s.startDate, end: s.endDate })}>Move shoot</Button> : null}</div>
+                    <div className="side">{(s.endDate ?? s.startDate) < today ? <Chip>Past</Chip> : manager ? <Button variant="sm" onClick={() => setResched({ id: s.id, start: s.startDate, end: s.endDate })}>Change dates</Button> : null}</div>
                   </div>
                 ))}
               </div>
@@ -137,7 +137,7 @@ export function ClientPage() {
               </div>
             )}
           </Panel>
-          <Panel title="Batches" tools={<div className="seg" role="group" aria-label="Batches"><button aria-pressed={tab === 'active'} onClick={() => setTab('active')}>Active {active.length}</button><button aria-pressed={tab === 'done'} onClick={() => setTab('done')}>Completed {done.length}</button></div>}>
+          <Panel title="Batches" tools={<Seg role="group" aria-label="Batches"><button aria-pressed={tab === 'active'} onClick={() => setTab('active')}>Active {active.length}</button><button aria-pressed={tab === 'done'} onClick={() => setTab('done')}>Completed {done.length}</button></Seg>}>
             {(tab === 'active' ? active : done).length === 0 ? <Empty boxed title={tab === 'active' ? 'No active batches' : 'Nothing completed yet'} /> : (
               <div className="rows">{(tab === 'active' ? active : done).map((b) => <BatchItem key={b.id} b={b} ring />)}</div>
             )}

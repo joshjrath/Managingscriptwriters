@@ -13,7 +13,7 @@ import { buildApp } from '../server/app';
 import { openDb, type Db } from '../server/db';
 import { runReminders } from '../server/reminders';
 import type { Ctx } from '../server/core';
-import type { BatchDetail, Dashboard } from '../shared/types';
+import type { BatchDetail, Dashboard, Moment } from '../shared/types';
 
 // Monday Sep 28, 2026, noon in New York
 let NOW = new Date('2026-09-28T16:00:00Z');
@@ -293,6 +293,29 @@ describe('moving a shoot', () => {
     const notes = (await sarah.get('/api/notifications')).body.notifications;
     expect(notes.some((n: any) => n.type === 'deadline_change' && /Shoot moved/.test(n.title))).toBe(true);
   });
+
+  it('moves everything with it: writing start, the batch name, and manual dates when asked', async () => {
+    const created = await manager.post('/api/shoots', {
+      clientId: acmeId, startDate: '2026-11-10', endDate: '2026-11-11',
+      batch: { targetCount: 4, plannedStart: '2026-11-01', finalDue: '2026-11-06', split: [{ writerId: ids.sarah, count: 4 }] },
+    });
+    expect(created.status).toBe(200);
+    const id = created.body.batchId as number;
+    const shootId = created.body.shootId as number;
+    expect(created.body.batch.title).toBe('Shoot · Nov 10–11, 2026');
+    const pv = (await manager.post(`/api/shoots/${shootId}/reschedule-preview`, { startDate: '2026-11-17', endDate: '2026-11-18' })).body;
+    expect(pv).toMatchObject({ days: 7, manualCount: 1 });
+    expect(pv.plannedStarts).toEqual([expect.objectContaining({ batchId: id, from: '2026-11-01', to: '2026-11-08' })]);
+    expect(pv.renames).toEqual([{ batchId: id, from: 'Shoot · Nov 10–11, 2026', to: 'Shoot · Nov 17–18, 2026' }]);
+    expect(pv.changes.find((c: any) => c.field === 'finalDue')).toMatchObject({ kept: true, to: '2026-11-06' });
+    const withManual = (await manager.post(`/api/shoots/${shootId}/reschedule-preview`, { startDate: '2026-11-17', endDate: '2026-11-18', shiftManual: true })).body;
+    expect(withManual.changes.find((c: any) => c.field === 'finalDue')).toMatchObject({ kept: false, mode: 'manual', to: '2026-11-13' });
+
+    expect((await manager.post(`/api/shoots/${shootId}/reschedule`, { startDate: '2026-11-17', endDate: '2026-11-18', shiftManual: true })).status).toBe(200);
+    const b = (await manager.get(`/api/batches/${id}`)).body as BatchDetail;
+    expect(b).toMatchObject({ title: 'Shoot · Nov 17–18, 2026', plannedStart: '2026-11-08', draftDue: '2026-11-12', finalDue: '2026-11-13', finalDueMode: 'manual', needsDateReview: false });
+    expect(b.activity[0].summary).toMatch(/Writing start Nov 1 → Nov 8.*Renamed to “Shoot · Nov 17–18, 2026”/);
+  });
 });
 
 describe('dashboard', () => {
@@ -566,5 +589,100 @@ describe('master log', () => {
     const mia = as(await login('mia@scale.test', 'manager-temp-1'));
     expect((await mia.get('/api/audit')).status).toBe(403);
     expect((await sarah.get('/api/audit')).status).toBe(403);
+  });
+});
+
+describe('celebration moments', () => {
+  let batchId: number;
+  let scripts: { id: number; number: number }[];
+  const clear = async (who: typeof manager) => {
+    const all = (await who.get('/api/moments')).body as Moment[];
+    await who.post('/api/moments/seen', { ids: all.map((m) => m.id) });
+  };
+
+  it('finishing your drafts is celebrated once for you and for the managers', async () => {
+    await clear(manager); await clear(sarah);
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Party batch', targetCount: 3, finalDue: '2026-10-21', split: [{ writerId: ids.sarah, count: 3 }] });
+    batchId = b.body.batchId;
+    scripts = (await sarah.get(`/api/batches/${batchId}`)).body.scripts;
+    await sarah.post(`/api/batches/${batchId}/submissions`, { scriptIds: [scripts[0].id], url: 'https://docs.google.com/document/d/one' });
+    expect((await sarah.get('/api/moments')).body).toHaveLength(0); // not done yet
+    await sarah.post(`/api/batches/${batchId}/submissions`, { scriptIds: scripts.slice(1).map((s) => s.id), url: 'https://docs.google.com/document/d/rest' });
+    const mine = (await sarah.get('/api/moments')).body as Moment[];
+    expect(mine).toHaveLength(1);
+    expect(mine[0]).toMatchObject({ kind: 'drafts_done', batchTitle: 'Party batch', count: 3, self: true });
+    const boss = (await manager.get('/api/moments')).body as Moment[];
+    expect(boss.filter((m) => m.batchId === batchId)).toEqual([expect.objectContaining({ kind: 'team_drafts_done', byName: 'Sarah Chen', count: 3 })]);
+    // once seen, it's gone
+    await sarah.post('/api/moments/seen', { ids: mine.map((m) => m.id) });
+    expect((await sarah.get('/api/moments')).body).toHaveLength(0);
+  });
+
+  it('the writer gets a congrats when their scripts are approved, and a heads-up when sent back', async () => {
+    await clear(manager);
+    await manager.post(`/api/batches/${batchId}/review`, { action: 'revisions', scriptIds: [scripts[2].id], note: 'Shorter hook please' });
+    await manager.post(`/api/batches/${batchId}/review`, { action: 'approve', scriptIds: scripts.slice(0, 2).map((s) => s.id) });
+    const got = (await sarah.get('/api/moments')).body as Moment[];
+    expect(got.map((m) => m.kind)).toEqual(['revisions', 'approved']);
+    expect(got[0]).toMatchObject({ numbers: [3], note: 'Shorter hook please', byName: 'Josh Rath' });
+    expect(got[1]).toMatchObject({ numbers: [1, 2], count: 2, allMine: false, byName: 'Josh Rath' });
+    // the reviewer isn't congratulated on their own decision
+    expect(((await manager.get('/api/moments')).body as Moment[]).filter((m) => m.batchId === batchId)).toHaveLength(0);
+    // resubmitting after revisions doesn't celebrate finished drafts a second time
+    await clear(sarah);
+    await sarah.post(`/api/batches/${batchId}/submissions`, { scriptIds: [scripts[2].id], url: 'https://docs.google.com/document/d/v2' });
+    expect((await sarah.get('/api/moments')).body).toHaveLength(0);
+    await manager.post(`/api/batches/${batchId}/review`, { action: 'approve', scriptIds: [scripts[2].id] });
+    expect(((await sarah.get('/api/moments')).body as Moment[])[0]).toMatchObject({ kind: 'approved', allMine: true });
+  });
+
+  it('delivering the last scripts celebrates the finished batch', async () => {
+    await clear(sarah); await clear(manager);
+    const r = await sarah.post(`/api/batches/${batchId}/scripts/action`, { action: 'deliver', scriptIds: scripts.map((s) => s.id), timelinerUrl: null, note: null });
+    expect(r.status).toBe(200);
+    expect(((await sarah.get('/api/moments')).body as Moment[]).map((m) => [m.kind, m.self])).toEqual([['batch_done', true]]);
+    expect(((await manager.get('/api/moments')).body as Moment[]).filter((m) => m.batchId === batchId).map((m) => m.kind)).toEqual(['team_batch_done']);
+    // people can only dismiss their own
+    const theirs = (await manager.get('/api/moments')).body as Moment[];
+    await sarah.post('/api/moments/seen', { ids: theirs.map((m) => m.id) });
+    expect(((await manager.get('/api/moments')).body as Moment[]).length).toBe(theirs.length);
+  });
+
+  it('remembers the newest What’s new entry each person has opened', async () => {
+    expect((await sarah.get('/api/bootstrap')).body.whatsNewSeen).toBeNull();
+    expect((await sarah.post('/api/me/whats-new', { seen: '2026-09-28-animations' })).status).toBe(200);
+    expect((await sarah.get('/api/bootstrap')).body.whatsNewSeen).toBe('2026-09-28-animations');
+    expect((await manager.get('/api/bootstrap')).body.whatsNewSeen).toBeNull();
+  });
+});
+
+describe('writer progress counter', () => {
+  it('is only an update: it never changes script statuses, and stays between what was sent and the total', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Counter batch', targetCount: 10, finalDue: '2026-10-22', split: [{ writerId: ids.sarah, count: 10 }] });
+    const id = b.body.batchId as number;
+    const r = await sarah.post(`/api/batches/${id}/written`, { written: 4 });
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ written: 4, total: 10, sent: 0 });
+    let d = (await manager.get(`/api/batches/${id}`)).body as BatchDetail;
+    expect(d.written).toBe(4);
+    expect(d.writers[0]).toMatchObject({ name: 'Sarah Chen', written: 4, draftReady: 0 });
+    expect(d.progress.draftReady).toBe(0);
+    expect(d.scripts.every((s) => s.status === 'not_started')).toBe(true);
+    // more than they have is capped; sending scripts raises the floor
+    expect((await sarah.post(`/api/batches/${id}/written`, { written: 99 })).body.written).toBe(10);
+    await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: d.scripts.slice(0, 6).map((s) => s.id), url: 'https://docs.google.com/document/d/counter' });
+    expect((await sarah.post(`/api/batches/${id}/written`, { written: 2 })).body.written).toBe(6);
+    d = (await manager.get(`/api/batches/${id}`)).body as BatchDetail;
+    expect(d.written).toBe(6);
+    // several taps are one line in the history
+    const lines = d.activity.filter((a) => a.action === 'progress.written');
+    expect(lines).toHaveLength(1);
+    expect(lines[0].summary).toBe('Progress update: 6 of 10 scripts written');
+    // other writers can't touch it; managers can, on the writer's behalf
+    expect((await marcus.post(`/api/batches/${id}/written`, { written: 8, writerId: ids.sarah })).status).toBe(403);
+    expect((await marcus.post(`/api/batches/${id}/written`, { written: 8 })).status).toBe(400);
+    const onBehalf = await manager.post(`/api/batches/${id}/written`, { written: 8, writerId: ids.sarah });
+    expect(onBehalf.body.written).toBe(8);
+    expect(((await manager.get(`/api/batches/${id}`)).body as BatchDetail).activity.find((a) => a.action === 'progress.written' && a.summary.includes('for Sarah Chen'))).toBeTruthy();
   });
 });

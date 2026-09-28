@@ -9,7 +9,7 @@ import { api, qs } from '../api';
 import type { AuditEntry } from '../../../shared/types';
 import { fmtWeekday } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
-import { Button, Chip, Empty, ErrorState, Loading, Panel } from '../components/ui';
+import { Button, Chip, Empty, ErrorState, Loading, Panel, Seg } from '../components/ui';
 
 type Kind = 'all' | AuditEntry['kind'];
 const KINDS: { k: Kind; label: string }[] = [
@@ -57,9 +57,9 @@ export function MasterLogPage() {
       <PageHeader title="Master log" sub="Every change, view and sign-in by everyone on the team. Only owners can see this page." hideNewWork />
       <Panel>
         <div className="filters row-flex s2" style={{ marginBottom: 16 }}>
-          <div className="seg" role="group" aria-label="Show">
+          <Seg role="group" aria-label="Show">
             {KINDS.map((x) => <button key={x.k} type="button" aria-pressed={kind === x.k} onClick={() => setKind(x.k)}>{x.label}</button>)}
-          </div>
+          </Seg>
           <select className="select sm" style={{ width: 'auto' }} aria-label="Person" value={userId} onChange={(e) => setUserId(e.target.value)}>
             <option value="">Everyone</option>
             {users.map((u) => <option key={u.id} value={u.id}>{u.name}{u.removed ? ' (removed)' : !u.active ? ' (deactivated)' : ''}</option>)}

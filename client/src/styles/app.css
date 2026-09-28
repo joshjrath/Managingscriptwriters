@@ -161,7 +161,7 @@ main.page-main { padding: 28px 28px 72px 22px; min-width: 0; }
 }
 .btn svg { width: 17px; height: 17px; stroke-width: 2; }
 .btn:hover:not(:disabled) { background: var(--btn-hover); }
-.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:active:not(:disabled) { transform: scale(0.97); }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn.primary { background: var(--yellow); color: var(--on-accent); font-weight: 700; }
 .btn.primary:hover:not(:disabled) { background: #F8F296; }
@@ -377,17 +377,15 @@ main.page-main { padding: 28px 28px 72px 22px; min-width: 0; }
 
 /* ── progress ──────────────────────────────────────────────────────────── */
 .prog { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
-.prog .bar-line { position: relative; height: 10px; border-radius: 6px; background: var(--track); overflow: hidden; display: flex; gap: 2px; }
+.prog .bar-line { position: relative; height: 14px; border-radius: 999px; background: var(--track); overflow: hidden; box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35); }
 .item .prog .bar-line { background: #1F1F24; }
-.prog .bar-line.thin { height: 6px; }
-.prog .bar-line > span { display: block; height: 100%; background: var(--c); min-width: 0; transition: width 600ms var(--ease); }
-.prog .bar-line > span:last-child { border-radius: 0 6px 6px 0; }
+.prog .bar-line.thin { height: 7px; }
 .prog .label { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; color: var(--text-2); flex-wrap: wrap; }
 .prog .label b { color: var(--text); font-weight: 700; font-variant-numeric: tabular-nums; }
 .prog .label .n { font-variant-numeric: tabular-nums; }
 .ring { display: block; overflow: visible; }
 .ring .trk { stroke: var(--track); }
-.ring .arc { stroke: var(--c); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--c) 45%, transparent)); transition: stroke-dashoffset 800ms var(--ease); }
+.ring .arc { stroke: var(--c); filter: drop-shadow(0 0 5px color-mix(in srgb, var(--c) 45%, transparent)); transition: stroke-dashoffset 1100ms var(--ease-out-quint); }
 .ring-wrap { position: relative; flex: none; display: grid; place-items: center; }
 .ring-wrap .ring-c { position: absolute; inset: 0; display: grid; place-items: center; font: 800 12px/1 var(--font-display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 .ring-wrap.lg .ring-c { font-size: 26px; }
@@ -502,9 +500,11 @@ dialog .sheet-foot { padding: 16px 26px 22px; border-top: 1px solid var(--line-s
 dialog.drawer { margin: 0 0 0 auto; height: 100vh; max-height: 100vh; width: min(560px, 100vw); }
 dialog.drawer .sheet { height: 100%; max-height: 100vh; border-radius: var(--r-panel) 0 0 var(--r-panel); }
 dialog[open].drawer .sheet { animation: slidein 180ms var(--ease); }
-dialog[open].modal .sheet { animation: pop 160ms var(--ease); }
+dialog[open].modal .sheet { animation: pop 240ms var(--ease-out-back); }
+dialog[open]::backdrop { animation: fade 200ms ease-out; }
 @keyframes slidein { from { transform: translateX(24px); opacity: 0.6; } }
-@keyframes pop { from { transform: translateY(8px) scale(0.99); opacity: 0.6; } }
+@keyframes pop { from { transform: translateY(12px) scale(0.96); opacity: 0; } }
+@keyframes fade { from { opacity: 0; } }
 
 .popover {
   position: absolute; right: 0; top: 52px; z-index: 50; width: min(420px, calc(100vw - 24px)); background: var(--panel-2);
@@ -527,7 +527,9 @@ dialog[open].modal .sheet { animation: pop 160ms var(--ease); }
 
 /* toasts */
 .toasts { position: fixed; bottom: 22px; right: 22px; z-index: 100; display: flex; flex-direction: column; gap: 10px; max-width: min(420px, calc(100vw - 32px)); }
-.toast { display: flex; gap: 10px; align-items: flex-start; padding: 13px 14px 13px 16px; border-radius: 16px; background: var(--panel-2); box-shadow: var(--shadow-pop); font-size: 13.5px; animation: pop 160ms var(--ease); }
+.toast { display: flex; gap: 10px; align-items: flex-start; padding: 13px 14px 13px 16px; border-radius: 16px; background: var(--panel-2); box-shadow: var(--shadow-pop); font-size: 13.5px; }
+.toast-check { animation: tick 420ms var(--ease-out-back) 80ms backwards; }
+@keyframes tick { from { transform: scale(0) rotate(-40deg); opacity: 0; } }
 .toast > svg { width: 18px; height: 18px; flex: none; margin-top: 1px; color: var(--c, var(--mint)); }
 .toast.error { --c: var(--red); }
 .toast .x { margin-left: auto; border: 0; background: none; color: var(--text-2); cursor: pointer; padding: 2px; }
@@ -818,3 +820,153 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0 6px; font-
   .log-row .what { grid-column: 1 / -1; }
   .rc-more { margin-left: 0; }
 }
+
+
+/* ── motion ────────────────────────────────────────────────────────────── */
+/* liquid progress pills */
+.bar-line.liquid .liq { position: relative; height: 100%; width: 0; transition: width 1200ms cubic-bezier(.34, 1.25, .64, 1); will-change: width; }
+.bar-line.liquid .liq-layers { position: absolute; inset: 0; display: flex; border-radius: 999px 0 0 999px; overflow: hidden; }
+.bar-line.liquid .liq.full .liq-layers { border-radius: 999px; }
+.bar-line.liquid .liq-layers > span { flex: 0 1 0; min-width: 0; background: var(--c); transition: flex-grow 900ms var(--ease-out-quint), background-color 500ms ease; }
+.bar-line.liquid .liq::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0) 55%, rgba(0, 0, 0, 0.12)); pointer-events: none; }
+.bar-line.liquid .liq-shine { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; }
+.bar-line.liquid .liq-shine::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 40%; background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.35), transparent); transform: translateX(-120%); animation: shine 3.6s ease-in-out infinite; }
+@keyframes shine { 0%, 30% { transform: translateX(-120%); } 100% { transform: translateX(320%); } }
+.bar-line.liquid .liq-wave { position: absolute; left: calc(100% - 1px); top: -100%; width: 6px; height: 300%; fill: var(--edge); animation: slosh 1.4s linear infinite; transition: fill 500ms ease; }
+.bar-line.liquid.thin .liq-wave { width: 4px; }
+@keyframes slosh { to { transform: translateY(33.333%); } }
+.bar-line.liquid .bub { position: absolute; bottom: -5px; width: var(--s); height: var(--s); border-radius: 50%; background: radial-gradient(circle at 35% 35%, rgba(255, 255, 255, 0.95), rgba(255, 255, 255, 0.35) 55%, rgba(255, 255, 255, 0) 72%); opacity: 0; animation: bubble var(--t) ease-in var(--d) infinite; pointer-events: none; }
+@keyframes bubble { 0% { transform: translate(0, 0) scale(0.5); opacity: 0; } 20% { opacity: 0.9; } 100% { transform: translate(var(--x), -22px) scale(1.1); opacity: 0; } }
+.bar-line.liquid:not([data-live]) *, .ring-wrap:not([data-live]) .ring-water i { animation-play-state: paused; }
+
+/* water inside the big progress ring */
+.ring-water { position: absolute; inset: 15%; border-radius: 50%; overflow: hidden; background: color-mix(in srgb, var(--c) 6%, transparent); }
+.ring-water .rw { position: absolute; left: -50%; top: 0; width: 200%; height: 200%; transition: transform 1400ms cubic-bezier(.34, 1.2, .64, 1); }
+.ring-water i { position: absolute; inset: 0; border-radius: 42%; background: color-mix(in srgb, var(--c) 30%, transparent); animation: spin 7s linear infinite; }
+.ring-water i + i { border-radius: 38%; background: color-mix(in srgb, var(--c) 18%, transparent); animation-duration: 11s; animation-direction: reverse; }
+.ring-wrap .ring { position: relative; }
+.ring-wrap .ring-c { z-index: 1; }
+
+/* segmented controls: a pill glides to the choice */
+.seg.glide { position: relative; }
+.seg.glide > button { position: relative; z-index: 1; transition: color 200ms ease; }
+.seg-glider { position: absolute; top: 0; left: 0; z-index: 0; border-radius: var(--r-pill); background: var(--yellow); opacity: 0; pointer-events: none; }
+.seg.glide.ready .seg-glider { transition: transform 320ms var(--ease-out-quint), width 320ms var(--ease-out-quint), height 320ms var(--ease-out-quint), opacity 150ms ease; }
+.seg.glide.ready > button[aria-pressed="true"], .seg.glide.ready > button[aria-selected="true"] { background: transparent; }
+
+/* sliding nav highlight */
+.nav a { position: relative; isolation: isolate; }
+.nav a.active { background: transparent; }
+.nav a .nav-pill { position: absolute; inset: 0; z-index: -1; border-radius: inherit; background: var(--salmon); }
+
+/* pages glide in; rows and cards follow in a quick cascade */
+.page-enter { animation: page-in 380ms var(--ease-out-quint) backwards; }
+@keyframes page-in { from { opacity: 0; transform: translateY(10px); } }
+.page-enter .panel, .page-enter .stat-card { animation: rise 460ms var(--ease-out-quint) backwards; }
+.page-enter .stack > :nth-child(2), .page-enter .grid > :nth-child(2), .page-enter .dash > :nth-child(2) { animation-delay: 50ms; }
+.page-enter .stack > :nth-child(3), .page-enter .grid > :nth-child(3), .page-enter .dash > :nth-child(3) { animation-delay: 100ms; }
+.page-enter .stack > :nth-child(4), .page-enter .grid > :nth-child(4), .page-enter .dash > :nth-child(4) { animation-delay: 150ms; }
+.page-enter .stack > :nth-child(n+5), .page-enter .grid > :nth-child(n+5), .page-enter .dash > :nth-child(n+5) { animation-delay: 200ms; }
+.rows > * { animation: rise 420ms var(--ease-out-quint) backwards; }
+.rows > :nth-child(2) { animation-delay: 30ms; } .rows > :nth-child(3) { animation-delay: 60ms; } .rows > :nth-child(4) { animation-delay: 90ms; }
+.rows > :nth-child(5) { animation-delay: 120ms; } .rows > :nth-child(6) { animation-delay: 150ms; } .rows > :nth-child(n+7) { animation-delay: 180ms; }
+@keyframes rise { from { opacity: 0; transform: translateY(12px); } }
+.item.clickable, .review-card, .res, .todo-block { transition: background var(--t), transform 200ms var(--ease-out-quint), box-shadow 200ms var(--ease-out-quint); }
+.item.clickable:hover { transform: translateY(-1px); }
+.item.clickable:active { transform: scale(0.995); }
+
+/* chart bars pour in from the bottom */
+.bar .stackfill { transform-origin: bottom; animation: pour 800ms cubic-bezier(.34, 1.3, .64, 1) backwards; animation-delay: calc(var(--i, 0) * 28ms); }
+@keyframes pour { from { transform: scaleY(0); } }
+
+/* collapsible sections open smoothly where the browser supports it */
+:root { interpolate-size: allow-keywords; }
+.details::details-content { block-size: 0; overflow: hidden; transition: block-size 320ms var(--ease-out-quint), content-visibility 320ms allow-discrete; }
+.details[open]::details-content { block-size: auto; }
+
+/* one-off effects */
+.fx-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 2147483000; }
+.fx-spark, .fx-trail { position: fixed; z-index: 2147483001; pointer-events: none; border-radius: 50%; }
+.fx-trail { width: 5px; height: 5px; background: var(--yellow); }
+.fx-plane { position: fixed; z-index: 2147483001; pointer-events: none; filter: drop-shadow(0 6px 10px rgba(0, 0, 0, 0.4)); }
+
+/* the person switched animations off (account menu): same as the system setting */
+:root[data-motion="off"] *, :root[data-motion="off"] *::before, :root[data-motion="off"] *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; animation-delay: 0ms !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+@media (prefers-reduced-motion: reduce) { .bar-line.liquid .bub, .bar-line.liquid .liq-shine { display: none; } }
+:root[data-motion="off"] .bar-line.liquid .bub, :root[data-motion="off"] .bar-line.liquid .liq-shine { display: none; }
+
+/* celebration moments */
+dialog.moment { width: min(520px, calc(100vw - 32px)); margin: auto; border: 0; padding: 0; background: transparent; color: var(--text); overflow: visible; }
+dialog.moment::backdrop { background: rgba(8, 8, 10, 0.72); backdrop-filter: blur(6px); animation: fade 260ms ease-out; }
+.moment { --c: var(--salmon); }
+.moment.tone-mint { --c: var(--mint); } .moment.tone-pink { --c: var(--pink); } .moment.tone-lavender { --c: var(--lavender); } .moment.tone-yellow { --c: var(--yellow); }
+.moment-sheet { position: relative; padding: 48px 30px 26px; border-radius: 30px; text-align: center; overflow: hidden;
+  background: radial-gradient(120% 80% at 50% -10%, color-mix(in srgb, var(--c) 28%, var(--panel)) 0%, var(--panel) 62%); box-shadow: 0 40px 120px -40px color-mix(in srgb, var(--c) 55%, transparent), var(--shadow-pop); }
+.moment-badge { position: relative; width: 88px; height: 88px; margin: 0 auto 18px; border-radius: 50%; display: grid; place-items: center; background: var(--c); color: var(--on-accent); box-shadow: 0 12px 40px -8px color-mix(in srgb, var(--c) 70%, transparent); }
+.moment-badge svg { width: 40px; height: 40px; stroke-width: 2.2; position: relative; }
+.moment-badge .ring1, .moment-badge .ring2 { position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--c); animation: ripple 2.4s var(--ease-out-quint) infinite; }
+.moment-badge .ring2 { animation-delay: 1.2s; }
+@keyframes ripple { from { transform: scale(1); opacity: 0.7; } to { transform: scale(1.9); opacity: 0; } }
+.moment-kicker { font: 700 11px/1.2 var(--font-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); margin-bottom: 10px; }
+.moment-title { font: 800 26px/1.15 var(--font-display); letter-spacing: -0.035em; margin: 0 auto 12px; max-width: 420px; }
+.moment-title span { display: inline-block; white-space: pre; }
+.moment-body { color: var(--text-2); font-size: 14.5px; line-height: 1.55; margin: 0 auto; max-width: 420px; overflow-wrap: anywhere; }
+.moment-more { margin: 20px 0 0; text-align: left; padding: 14px 16px; border-radius: 18px; background: var(--row); }
+.moment-more .lbl { font: 700 10.5px/1.2 var(--font-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); margin-bottom: 8px; }
+.moment-more ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; font-size: 13.5px; }
+.moment-more li { display: flex; gap: 10px; align-items: center; }
+.moment-more li .ic { width: 26px; height: 26px; border-radius: 9px; display: grid; place-items: center; flex: none; background: color-mix(in srgb, var(--c) 18%, transparent); color: var(--c); }
+.moment-more li .ic svg { width: 14px; height: 14px; }
+.moment-more li.tone-mint { --c: var(--mint); } .moment-more li.tone-pink { --c: var(--pink); } .moment-more li.tone-lavender { --c: var(--lavender); } .moment-more li.tone-yellow { --c: var(--yellow); }
+.moment-actions { display: flex; gap: 10px; justify-content: center; margin-top: 24px; flex-wrap: wrap; }
+
+/* What's new */
+.changelog { display: flex; flex-direction: column; gap: 22px; max-width: 880px; }
+.cl-date { display: flex; align-items: center; gap: 10px; margin: 0 0 10px 6px; font: 700 12px/1.2 var(--font-ui); letter-spacing: .1em; text-transform: uppercase; color: var(--text-2); }
+.cl-date .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--salmon); box-shadow: 0 0 0 4px color-mix(in srgb, var(--salmon) 20%, transparent); }
+.cl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.cl-list li { display: grid; grid-template-columns: 86px minmax(0, 1fr); gap: 12px; align-items: baseline; font-size: 14px; line-height: 1.5; }
+.cl-list li .chip { justify-self: start; }
+@media (max-width: 760px) { .cl-list li { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+.whats-new { position: relative; text-decoration: none; }
+.whats-new.on { color: var(--text); background: #1E1E22; }
+.whats-new .new-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--salmon); margin-left: auto; animation: beacon 2s ease-out infinite; }
+.app.collapsed .sidebar .whats-new .new-dot { position: absolute; top: 8px; right: 12px; }
+@keyframes beacon { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--salmon) 60%, transparent); } 70%, 100% { box-shadow: 0 0 0 7px transparent; } }
+
+/* "written so far" counter */
+.counter-block { display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 14px 16px 14px 18px; border-radius: var(--r-row); background: color-mix(in srgb, var(--cyan) 9%, var(--row)); }
+.counter-block .t { font-weight: 700; font-size: 15px; }
+.counter-block .s { font-size: 12.5px; color: var(--text-2); margin-top: 3px; }
+.counter-block .stepper { display: flex; align-items: center; gap: 8px; }
+.counter-block .stepper .icon-btn { width: 44px; height: 44px; background: var(--bg); }
+.counter-block .stepper .icon-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--cyan) 22%, var(--bg)); }
+.counter-block .stepper .icon-btn:active:not(:disabled) { transform: scale(0.92); }
+.counter-block .val { min-width: 86px; text-align: center; font: 800 26px/1 var(--font-display); letter-spacing: -0.04em; }
+.counter-block .val small { font: 700 14px/1 var(--font-display); color: var(--text-2); margin-left: 3px; letter-spacing: -0.02em; }
+.counter-block .val .pop { display: inline-block; animation: numpop 320ms var(--ease-out-back); }
+@keyframes numpop { from { transform: translateY(-6px) scale(1.25); color: var(--cyan); } }
+.counter-block .save-state { flex-basis: 100%; font-size: 12px; color: var(--text-2); min-height: 16px; display: inline-flex; align-items: center; gap: 4px; margin-top: -8px; }
+.counter-block .save-state svg { width: 13px; height: 13px; color: var(--mint); }
+.counter-block .save-state:empty { display: none; }
+.written-tag { color: color-mix(in srgb, var(--cyan) 80%, #fff); }
+
+/* calendar: dragging shoots to new days */
+.ev-wrap { min-width: 0; }
+.ev-wrap > .ev { width: 100%; }
+.ev.movable { cursor: grab; }
+.ev.movable:active { cursor: grabbing; }
+.ev .grip { margin-left: auto; opacity: 0; transition: opacity 150ms ease; }
+.ev.movable:hover .grip, .ev.movable:focus-visible .grip { opacity: 0.8; }
+.ev.dragging { opacity: 0.35; }
+.cal-grid.dragging-shoot .cell { transition: background 150ms ease, box-shadow 150ms ease; }
+.cal .cell.landing { background: color-mix(in srgb, var(--salmon) 16%, var(--row)); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--salmon) 70%, transparent); }
+.landing-tag { display: inline-flex; align-items: center; gap: 5px; align-self: flex-start; padding: 2px 8px; border-radius: 999px; background: var(--salmon); color: var(--on-accent); font: 700 10.5px/1.6 var(--font-ui); animation: rise 200ms var(--ease-out-quint); }
+.landing-tag svg { width: 11px; height: 11px; }
+@media (max-width: 760px) { .landing-tag { display: none; } .ev .grip { display: none; } }
+
+/* a small on/off switch in menus */
+.switch { margin-left: auto; width: 34px; height: 20px; border-radius: 999px; background: var(--track); position: relative; transition: background 200ms ease; flex: none; }
+.switch i { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-2); transition: transform 240ms var(--ease-out-back), background 200ms ease; }
+.switch.on { background: color-mix(in srgb, var(--mint) 55%, var(--track)); }
+.switch.on i { transform: translateX(14px); background: #fff; }

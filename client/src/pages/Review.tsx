@@ -11,7 +11,7 @@ import { isManager } from '../../../shared/workflow';
 import { plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
 import { Empty, ErrorState, Loading, Panel } from '../components/ui';
-import { SendDialog, SentBackCard, WaitingCard } from '../components/Review';
+import { CardList, SendDialog, SentBackCard, WaitingCard } from '../components/Review';
 
 export function ReviewPage() {
   const { me } = useBoot();
@@ -28,13 +28,13 @@ export function ReviewPage() {
         <div className="stack" style={{ gap: 'var(--gap)' }}>
           <Panel title="Waiting for review" count={q.data.waiting.length} sub={q.data.waiting.length ? plural(scripts(q.data.waiting), 'script') : undefined}>
             {!q.data.waiting.length ? <Empty boxed icon={<CheckCheck />} title="Nothing waiting for review">When a writer sends their scripts (a PDF or a Google Doc link), it shows up here as one card.</Empty> : (
-              <div className="stack s4">{q.data.waiting.map((g) => <WaitingCard key={g.key} group={g} />)}</div>
+              <div className="stack s4"><CardList groups={q.data.waiting}>{(g) => <WaitingCard group={g} />}</CardList></div>
             )}
           </Panel>
           <Panel title="Sent back for revisions" count={q.data.sentBack.length} sub={q.data.sentBack.length ? `${plural(scripts(q.data.sentBack), 'script')} · waiting on the writer` : undefined}>
             {!q.data.sentBack.length ? <Empty boxed icon={<RotateCcw />} title="Nothing waiting on revisions" /> : (
               <div className="stack s4">
-                {q.data.sentBack.map((g) => <SentBackCard key={g.key} group={g} onResend={g.writerId === me.id ? () => setResend(g) : undefined} />)}
+                <CardList groups={q.data.sentBack}>{(g) => <SentBackCard group={g} onResend={g.writerId === me.id ? () => setResend(g) : undefined} />}</CardList>
               </div>
             )}
           </Panel>

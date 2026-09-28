@@ -16,10 +16,10 @@ import { addDays, computeDeadlines, diffDays, isISODate, suggestStart, type ISOD
 import { fmtBytes, fmtCutoff, fmtDate, fmtLong, fmtRange, fmtStamp, fmtTimeZoneAbbr, plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
 import {
-  Avatar, BatchProgress, Button, Chip, Dialog, DueChip, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel,
-  Ring, ringColor, StageChip, StatusChip, useFieldId, useToast,
+  Avatar, BatchProgress, Button, Chip, CountUp, Dialog, DueChip, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel,
+  Ring, ringColor, StageChip, StatusChip, useFieldId, useToast, Seg,
 } from '../components/ui';
-import { DecisionDialog, DocumentHistory, SendDialog, SentBackCard, TitlesDialog, WaitingCard } from '../components/Review';
+import { CardList, DecisionDialog, DocumentHistory, SendDialog, SentBackCard, TitlesDialog, WaitingCard } from '../components/Review';
 
 export function BatchPage() {
   const { id } = useParams();
@@ -78,13 +78,13 @@ function BatchView({ b }: { b: BatchDetail }) {
         <div className="grid g-main-side">
           <Panel title="Progress" tools={manager ? <Button variant="sm ghost" icon={<SlidersHorizontal aria-hidden />} onClick={() => setTarget(true)}>Change script count</Button> : undefined}>
             <div className="row-flex" style={{ alignItems: 'center', gap: 22, flexWrap: 'nowrap', marginBottom: 18 }}>
-              <Ring pct={b.progress.pctDraft} size={104} stroke={9} color={ringColor(b.progress)} large><span>{b.progress.pctDraft}%<small>drafts</small></span></Ring>
-              <div style={{ flex: 1, minWidth: 0 }}><BatchProgress p={b.progress} /></div>
+              <Ring pct={b.progress.pctDraft} size={104} stroke={9} color={ringColor(b.progress)} large><span><CountUp value={b.progress.pctDraft} />%<small>drafts</small></span></Ring>
+              <div style={{ flex: 1, minWidth: 0 }}><BatchProgress p={b.progress} written={b.written} /></div>
             </div>
             <div className="triple">
-              <div style={{ ['--c' as string]: 'var(--lavender)' }}><span className="k"><i />Draft-ready</span><span className="v">{b.progress.draftReady}<small>/ {b.progress.total}</small></span><span className="p">{b.progress.pctDraft}% · {b.progress.inReview} waiting for review</span></div>
-              <div style={{ ['--c' as string]: 'color-mix(in srgb, var(--mint) 60%, var(--track))' }}><span className="k"><i />Approved</span><span className="v">{b.progress.approved}<small>/ {b.progress.total}</small></span><span className="p">{b.progress.pctApproved}% · {b.progress.awaitingDelivery} to deliver</span></div>
-              <div style={{ ['--c' as string]: 'var(--mint)' }}><span className="k"><i />Delivered</span><span className="v">{b.progress.delivered}<small>/ {b.progress.total}</small></span><span className="p">{b.progress.pctDelivered}% · writer-confirmed</span></div>
+              <div style={{ ['--c' as string]: 'var(--lavender)' }}><span className="k"><i />Draft-ready</span><span className="v"><CountUp value={b.progress.draftReady} /><small>/ {b.progress.total}</small></span><span className="p">{b.progress.pctDraft}% · {b.progress.inReview} waiting for review</span></div>
+              <div style={{ ['--c' as string]: 'color-mix(in srgb, var(--mint) 60%, var(--track))' }}><span className="k"><i />Approved</span><span className="v"><CountUp value={b.progress.approved} /><small>/ {b.progress.total}</small></span><span className="p">{b.progress.pctApproved}% · {b.progress.awaitingDelivery} to deliver</span></div>
+              <div style={{ ['--c' as string]: 'var(--mint)' }}><span className="k"><i />Delivered</span><span className="v"><CountUp value={b.progress.delivered} /><small>/ {b.progress.total}</small></span><span className="p">{b.progress.pctDelivered}% · writer-confirmed</span></div>
             </div>
             {b.progress.revisions > 0 && <div className="banner pink" style={{ marginTop: 12 }}><RotateCcw aria-hidden /><div className="txt"><b>{plural(b.progress.revisions, 'script')} returned for revisions</b><span>These don’t count as draft-ready until they’re resubmitted.</span></div></div>}
             <div className="section-title" style={{ marginTop: 22 }}>Assignments</div>
@@ -95,7 +95,10 @@ function BatchView({ b }: { b: BatchDetail }) {
                     <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>{w.userId != null && <Avatar name={w.name} id={w.userId} small />}<span className="title">{w.name}</span></div>
                     <div className="meta">Scripts {w.ranges} · {plural(w.count, 'script')}</div>
                   </div>
-                  <div className="side"><span className="when num">{w.draftReady} / {w.count} drafts ready</span><span className="muted num" style={{ fontSize: 12 }}>{w.delivered} delivered</span></div>
+                  <div className="side">
+                    <span className="when num">{w.userId != null && w.written > w.draftReady ? `${w.written} / ${w.count} written` : `${w.draftReady} / ${w.count} drafts ready`}</span>
+                    <span className="muted num" style={{ fontSize: 12 }}>{w.written > w.draftReady ? `${w.draftReady} sent · ` : ''}{w.delivered} delivered{w.writtenAt ? ` · updated ${fmtStamp(w.writtenAt, settings.timezone)}` : ''}</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -106,7 +109,7 @@ function BatchView({ b }: { b: BatchDetail }) {
               <div className="deadline" style={{ ['--c' as string]: 'var(--salmon)' }}>
                 <span className="ic"><Camera /></span>
                 <div><div className="k">Shoot</div><div className="v">{b.shootStart ? fmtRange(b.shootStart, b.shootEnd) : 'No shoot'}</div>{b.shootStart && <div className="rule">Deadlines count back from {fmtDate(b.shootStart)}</div>}</div>
-                <div className="right">{manager && b.shootId && <Button variant="sm" onClick={() => setResched(true)}>Move shoot</Button>}</div>
+                <div className="right">{manager && b.shootId && <Button variant="sm" onClick={() => setResched(true)}>Change dates</Button>}</div>
               </div>
               <div className="deadline" style={{ ['--c' as string]: 'var(--cyan)' }}>
                 <span className="ic"><Pencil /></span>
@@ -201,8 +204,10 @@ function DocumentsPanel({ b }: { b: BatchDetail }) {
             {b.isAssigned ? 'When your scripts are written, send them as one PDF or Google Doc link — the reviewer sees one card, not one per script.' : 'Writers send their scripts here as one PDF or Google Doc link.'}
           </Empty>
         )}
-        {waiting.map((g) => <WaitingCard key={g.key} group={g} showBatch={false} onReplace={canResend(g.writerId) ? () => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id) }) : undefined} />)}
-        {sentBack.map((g) => <SentBackCard key={g.key} group={g} showBatch={false} onResend={canResend(g.writerId) ? () => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id), resend: true }) : undefined} />)}
+        <CardList groups={[...waiting, ...sentBack]}>{(g) => g.kind === 'waiting'
+          ? <WaitingCard group={g} showBatch={false} onReplace={canResend(g.writerId) ? () => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id) }) : undefined} />
+          : <SentBackCard group={g} showBatch={false} onResend={canResend(g.writerId) ? () => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id), resend: true }) : undefined} />}
+        </CardList>
         {b.submissions.length > 0 && (
           <details className="details">
             <summary><ChevronDown aria-hidden />Every version and decision ({b.submissions.length} {b.submissions.length === 1 ? 'document' : 'documents'})</summary>
@@ -702,10 +707,10 @@ function DateModeField({ label, id, hasShoot, mode, setMode, date, setDate, auto
   return (
     <Field label={label} htmlFor={id} error={error} help={hasShoot && mode === 'auto' && auto ? `${fmtLong(auto)} · ${rule}` : hasShoot && mode === 'manual' ? 'Manual override — kept if the shoot moves, and flagged for review.' : undefined}>
       {hasShoot && (
-        <div className="seg" role="group" aria-label={`${label} mode`} style={{ marginBottom: 6, alignSelf: 'flex-start' }}>
+        <Seg role="group" aria-label={`${label} mode`} style={{ marginBottom: 6, alignSelf: 'flex-start' }}>
           <button type="button" aria-pressed={mode === 'auto'} onClick={() => setMode('auto')}>Automatic</button>
           <button type="button" aria-pressed={mode === 'manual'} onClick={() => { setMode('manual'); if (!date && auto) setDate(auto); }}>Manual date</button>
-        </div>
+        </Seg>
       )}
       {(!hasShoot || mode === 'manual') && <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} {...inputProps(id, error)} />}
     </Field>
@@ -764,20 +769,34 @@ function TargetDialog({ b, onClose }: { b: BatchDetail; onClose: () => void }) {
   );
 }
 
-export function RescheduleDialog({ shootId, start, end, onClose }: { shootId: number; start: string; end: string | null; onClose: () => void }) {
+/**
+ * Change a shoot's dates. Shows exactly what moves with it (deadlines, the
+ * planned writing start, batch names) before anything changes. Opened from
+ * the batch page, the client page, or by dragging a shoot on the calendar.
+ */
+export function RescheduleDialog({ shootId, start, end, initialStart, initialEnd, onClose }: { shootId: number; start: string; end: string | null; initialStart?: string; initialEnd?: string | null; onClose: () => void }) {
   const toast = useToast();
-  const [s, setS] = useState(start);
-  const [e, setE] = useState(end ?? '');
+  const [s, setS] = useState(initialStart ?? start);
+  const [e, setE] = useState((initialStart ? initialEnd : end) ?? '');
+  const [shiftManual, setShiftManual] = useState(false);
   const [preview, setPreview] = useState<ReschedulePreview | null>(null);
-  const load = useSave(() => api<ReschedulePreview>(`/api/shoots/${shootId}/reschedule-preview`, { body: { startDate: s, endDate: e || null } }), { onSuccess: (p) => setPreview(p) });
-  const apply = useSave(() => api(`/api/shoots/${shootId}/reschedule`, { body: { startDate: s, endDate: e || null } }), { onSuccess: () => { toast('Shoot moved and deadlines updated'); onClose(); } });
+  const load = useSave((v: { s: string; e: string; shiftManual: boolean }) => api<ReschedulePreview>(`/api/shoots/${shootId}/reschedule-preview`, { body: { startDate: v.s, endDate: v.e || null, shiftManual: v.shiftManual } }), { onSuccess: (p) => setPreview(p) });
+  const apply = useSave(() => api(`/api/shoots/${shootId}/reschedule`, { body: { startDate: s, endDate: e || null, shiftManual } }), { onSuccess: () => { toast(`Shoot moved to ${fmtRange(s, e || null)} — everything updated`); onClose(); } });
+  // dragged on the calendar: show what will change straight away
+  useEffect(() => { if (initialStart) load.mutate({ s, e, shiftManual }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const reload = (next: Partial<{ s: string; e: string; shiftManual: boolean }>) => {
+    const v = { s, e, shiftManual, ...next };
+    if (preview && v.s && isISODate(v.s)) load.mutate(v);
+  };
   const f = load.error?.fields ?? {};
+  const unchanged = s === start && (e || null) === (end ?? null);
+  const moved = preview?.days ? `${Math.abs(preview.days)} day${Math.abs(preview.days) === 1 ? '' : 's'} ${preview.days > 0 ? 'later' : 'earlier'}` : null;
   return (
-    <Dialog open onClose={onClose} title="Move shoot" sub={`Currently ${fmtRange(start, end)}`} size="wide"
+    <Dialog open onClose={onClose} title="Change shoot dates" sub={`Currently ${fmtRange(start, end)}${preview && !unchanged ? ` → ${fmtRange(preview.newStart, preview.newEnd)}${moved ? ` (${moved})` : ''}` : ''}`} size="wide"
       footer={<div className="form-actions">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        {!preview ? <Button variant="salmon pill" busy={load.isPending} onClick={() => load.mutate(undefined)}>Preview changes</Button>
-          : <Button variant="primary pill" busy={apply.isPending} onClick={() => apply.mutate(undefined)}>Apply changes</Button>}
+        {!preview ? <Button variant="salmon pill" busy={load.isPending} disabled={!s} onClick={() => load.mutate({ s, e, shiftManual })}>Preview changes</Button>
+          : <Button variant="primary pill" busy={apply.isPending} disabled={unchanged || load.isPending} onClick={() => apply.mutate(undefined)}>Move shoot & update everything</Button>}
       </div>}>
       <div className="form">
         <FormError error={(load.error && !Object.keys(f).length ? load.error : null) ?? apply.error} />
@@ -785,33 +804,47 @@ export function RescheduleDialog({ shootId, start, end, onClose }: { shootId: nu
           <Field label="New start date" htmlFor="rs-s" error={f.startDate} help={end ? 'The end date moves with it, keeping the shoot the same length.' : undefined}>
             <input id="rs-s" className="input" type="date" value={s} onChange={(x) => {
               const v = x.target.value;
-              if (v && e && s && isISODate(v)) setE(addDays(v, diffDays(e, s)));
-              setS(v); setPreview(null);
+              const nextE = v && e && s && isISODate(v) ? addDays(v, diffDays(e, s)) : e;
+              setS(v); setE(nextE); reload({ s: v, e: nextE });
             }} />
           </Field>
-          <Field label="New end date" optional htmlFor="rs-e" error={f.endDate}><input id="rs-e" className="input" type="date" value={e} min={s} onChange={(x) => { setE(x.target.value); setPreview(null); }} /></Field>
+          <Field label="New end date" optional htmlFor="rs-e" error={f.endDate}><input id="rs-e" className="input" type="date" value={e} min={s} onChange={(x) => { setE(x.target.value); reload({ e: x.target.value }); }} /></Field>
         </div>
+        {preview && preview.manualCount > 0 && (
+          <label className="check" style={{ alignSelf: 'flex-start' }}>
+            <input type="checkbox" checked={shiftManual} onChange={(x) => { setShiftManual(x.target.checked); reload({ shiftManual: x.target.checked }); }} />
+            Move {preview.manualCount === 1 ? 'the manually set deadline' : `the ${preview.manualCount} manually set deadlines`} by the same number of days too
+          </label>
+        )}
         {preview && (
-          <>
+          <div style={{ opacity: load.isPending ? 0.55 : 1, transition: 'opacity 200ms ease' }}>
             <div className="section-title">What will change</div>
-            <div className="table-scroll">
-              <table className="tbl">
-                <thead><tr><th>Batch</th><th>Deadline</th><th>Now</th><th>After</th><th>Rule</th></tr></thead>
-                <tbody>
-                  {preview.changes.map((c, i) => (
-                    <tr key={i}>
-                      <td className="strong">{c.batchTitle}</td>
-                      <td>{c.field === 'draftDue' ? 'Drafts due' : 'Final delivery'}</td>
-                      <td className="nowrap">{fmtDate(c.from)}</td>
-                      <td className="nowrap"><b>{fmtDate(c.to)}</b>{c.inPast && <div><Chip color="red" icon={<AlertTriangle aria-hidden />}>Already past</Chip></div>}</td>
-                      <td>{c.kept ? <Chip color="yellow">Manual — kept, flagged for review</Chip> : <Chip color="cyan">Recalculated</Chip>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <p className="muted" style={{ fontSize: 13 }}>{preview.affectedWriters.length ? `${preview.affectedWriters.join(', ')} will be notified.` : 'No writers to notify.'} The change is recorded in each batch’s history.</p>
-          </>
+            {unchanged ? <p className="muted">Those are the current dates, so nothing changes.</p> : (
+              <div className="table-scroll">
+                <table className="tbl">
+                  <thead><tr><th>Batch</th><th>What</th><th>Now</th><th>After</th><th>How</th></tr></thead>
+                  <tbody>
+                    {preview.changes.map((c, i) => (
+                      <tr key={i}>
+                        <td className="strong">{c.batchTitle}</td>
+                        <td>{c.field === 'draftDue' ? 'Drafts due' : 'Final delivery'}</td>
+                        <td className="nowrap">{fmtDate(c.from)}</td>
+                        <td className="nowrap"><b>{fmtDate(c.to)}</b>{c.inPast && <div><Chip color="red" icon={<AlertTriangle aria-hidden />}>Already past</Chip></div>}</td>
+                        <td>{c.kept ? <Chip color="yellow">Manual — kept, flagged for review</Chip> : c.mode === 'manual' ? <Chip color="salmon">Manual — moved too</Chip> : <Chip color="cyan">Recalculated</Chip>}</td>
+                      </tr>
+                    ))}
+                    {preview.plannedStarts.map((x) => (
+                      <tr key={`p${x.batchId}`}><td className="strong">{x.batchTitle}</td><td>Writing start</td><td className="nowrap">{fmtDate(x.from)}</td><td className="nowrap"><b>{fmtDate(x.to)}</b></td><td><Chip color="cyan">Moves with the shoot</Chip></td></tr>
+                    ))}
+                    {preview.renames.map((x) => (
+                      <tr key={`r${x.batchId}`}><td className="strong">{x.from}</td><td>Batch name</td><td>{x.from}</td><td><b>{x.to}</b></td><td><Chip color="cyan">Named after the shoot</Chip></td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>{preview.affectedWriters.length ? `${preview.affectedWriters.join(', ')} will be notified.` : 'No writers to notify.'} The calendar, My work and every batch update straight away, and the change is recorded in each batch’s history.</p>
+          </div>
         )}
       </div>
     </Dialog>
@@ -869,10 +902,10 @@ export function ResourceDialog({ open, onClose, clientId, batchId, briefingId }:
     <Dialog open={open} onClose={onClose} title="Add a resource" sub="Resources stay linked to this record and show up in Resources search." size="narrow"
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={save.isPending} onClick={submit}>{mode === 'link' ? 'Add link' : 'Upload'}</Button></div>}>
       <div className="form">
-        <div className="seg" role="group" aria-label="Resource type" style={{ alignSelf: 'flex-start' }}>
+        <Seg role="group" aria-label="Resource type" style={{ alignSelf: 'flex-start' }}>
           <button aria-pressed={mode === 'link'} onClick={() => setMode('link')}><Link2 aria-hidden />Link</button>
           <button aria-pressed={mode === 'file'} onClick={() => setMode('file')}><Upload aria-hidden />File</button>
-        </div>
+        </Seg>
         <FormError error={save.error && !Object.keys(save.error.fields).length ? save.error : null} />
         <Field label="Title" optional={mode === 'file'} htmlFor={ids.t} error={f.title}><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} {...inputProps(ids.t, f.title)} /></Field>
         {mode === 'link'

@@ -12,7 +12,7 @@ import { STAGES, STAGE_LABEL, type Stage } from '../../../shared/workflow';
 import { fmtDate, fmtRange } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
 import { BatchDrawer, writersText } from '../components/BatchBits';
-import { BatchProgress, Chip, DueChip, Empty, ErrorState, Loading, StageChip, edgeFor } from '../components/ui';
+import { BatchProgress, Chip, DueChip, edgeFor, Empty, ErrorState, Loading, Seg, StageChip } from '../components/ui';
 
 const FLAGS = [
   { id: 'overdue', label: 'Overdue', c: 'var(--red)' },
@@ -65,10 +65,10 @@ export function Production() {
   return (
     <>
       <PageHeader title="Production" sub="Stage comes from the script records. Blocked is tracked separately.">
-        <div className="seg" role="group" aria-label="View">
+        <Seg role="group" aria-label="View">
           <button aria-pressed={view === 'board'} onClick={() => set('view', '')}><Columns3 aria-hidden />Board</button>
           <button aria-pressed={view === 'table'} onClick={() => set('view', 'table')}><Rows3 aria-hidden />Table</button>
-        </div>
+        </Seg>
       </PageHeader>
 
       <div className="filters" role="search">
@@ -117,7 +117,7 @@ export function Production() {
                       <span className="client ellipsis">{b.clientName}</span>
                       <span className="t">{b.title}</span>
                       <span className="muted ellipsis" style={{ fontSize: 12 }}>{writersText(b)}</span>
-                      <BatchProgress p={b.progress} thin showSecondary={false} />
+                      <BatchProgress p={b.progress} written={b.written} thin showSecondary={false} />
                       <span className="foot">
                         <DueChip m={b.next} today={clock.today} />
                         <span className="row-flex s2">
@@ -157,7 +157,7 @@ export function Production() {
                   <tr key={b.id} className="clickable" onClick={() => setInspect(b.id)}>
                     <td style={{ maxWidth: 280 }}><div className="sub ellipsis">{b.clientName}</div><Link to={`/batches/${b.id}`} className="strong" onClick={(e) => e.stopPropagation()}>{b.title}</Link></td>
                     <td style={{ maxWidth: 220 }}>{b.writers.map((w) => <div key={String(w.userId)} className={`nowrap ${w.userId == null ? '' : ''}`} style={{ fontSize: 12.5, color: w.userId == null ? '#F7B8D8' : undefined }}>{w.name} <span className="sub">{w.ranges}</span></div>)}</td>
-                    <td><BatchProgress p={b.progress} thin /></td>
+                    <td><BatchProgress p={b.progress} written={b.written} thin /></td>
                     <td className="nowrap"><DueChip m={b.next} today={clock.today} />{b.next?.date && <div className="sub" style={{ marginTop: 4 }}>{b.next.kind === 'draft' ? 'Drafts' : 'Final'} {fmtDate(b.next.date, clock.today)}</div>}</td>
                     <td className="nowrap">{b.shootStart ? fmtRange(b.shootStart, b.shootEnd) : <span className="sub">No shoot</span>}</td>
                     <td><StageChip stage={b.stage} /></td>

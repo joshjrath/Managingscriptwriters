@@ -3,18 +3,19 @@
 // briefs and recordings, and delivery confirmation. Managers who also write
 // use the same view.
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, Camera, CheckCheck, FileText, PenLine, PlayCircle, Plus, Send, Type } from 'lucide-react';
+import { ArrowRight, Camera, Check, CheckCheck, FileText, Minus, PenLine, PlayCircle, Plus, Send, Type } from 'lucide-react';
 import { api, useSave } from '../api';
 import type { MyWork, Script } from '../../../shared/types';
 import { compressRanges, isApproved, isManager, type Milestone } from '../../../shared/workflow';
 import { fmtDate, fmtLong, fmtRange, fmtStamp, fmtWeekday, plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
-import { BatchProgress, Button, Chip, DueChip, Empty, ErrorState, ExtLink, Loading, Panel, Ring, ringColor, useToast } from '../components/ui';
-import { SendDialog, SentBackCard, TitlesDialog, WaitingCard } from '../components/Review';
+import { BatchProgress, Button, Chip, CountUp, DueChip, Empty, ErrorState, ExtLink, Loading, Panel, Ring, ringColor, useToast } from '../components/ui';
+import { CardList, SendDialog, SentBackCard, TitlesDialog, WaitingCard } from '../components/Review';
 import { DeliverDialog } from './BatchDetail';
+import { confetti } from '../fx';
 
 type Entry = MyWork['batches'][number];
 
@@ -41,8 +42,8 @@ export function MyWorkPage() {
       {q.data && (
         <div className="stack" style={{ gap: 'var(--gap)' }}>
           {!q.data.batches.length && <Panel><Empty icon={<CheckCheck />} title="Nothing assigned right now">New assignments show up here and in your notifications.</Empty></Panel>}
-          {next && <NextUp e={next} today={clock.today} />}
-          {active.map((e) => <MyBatch key={e.batch.id} e={e} />)}
+          {next && <NextUp e={next} today={clock.today} writerId={viewing} />}
+          {active.map((e) => <MyBatch key={e.batch.id} e={e} writerId={viewing} />)}
           {done.length > 0 && (
             <Panel title="Recently finished" sub="all your scripts delivered">
               <div className="rows">{done.map((e) => (
@@ -92,7 +93,9 @@ function split(mine: Script[]) {
   };
 }
 
-function NextUp({ e, today }: { e: Entry; today: string }) {
+const writtenOf = (e: Entry, writerId: number) => e.batch.writers.find((w) => w.userId === writerId)?.written ?? e.myProgress.draftReady;
+
+function NextUp({ e, today, writerId }: { e: Entry; today: string; writerId: number }) {
   const b = e.batch;
   const recUrl = e.briefings.find((x) => x.recordingUrl)?.recordingUrl ?? e.resources.find((r) => r.category === 'recording' && r.url)?.url;
   const p = e.myProgress;
@@ -113,7 +116,7 @@ function NextUp({ e, today }: { e: Entry; today: string }) {
           <div style={{ font: '800 30px/1.1 var(--font-display)', letterSpacing: '-0.04em', overflowWrap: 'anywhere' }}>{doing}</div>
           <div className="sub" style={{ fontSize: 14, marginTop: 8 }}>{b.clientName} · {b.title}</div>
           <div className="sub" style={{ fontSize: 14, marginTop: 4 }}>{dueText(b.draft, 'Drafts', today)} · {dueText(b.final, 'Final delivery', today)}</div>
-          <div className="sub num" style={{ fontSize: 14, marginTop: 4 }}>{p.draftReady} / {p.total} of yours sent for review or approved</div>
+          <div className="sub num" style={{ fontSize: 14, marginTop: 4 }}>{writtenOf(e, writerId)} / {p.total} written · {p.draftReady} sent for review or approved</div>
         </div>
         <div className="row-flex s2">
           {recUrl && <ExtLink href={recUrl} className="btn"><PlayCircle aria-hidden />Recording</ExtLink>}
@@ -124,23 +127,24 @@ function NextUp({ e, today }: { e: Entry; today: string }) {
   );
 }
 
-function MyBatch({ e }: { e: Entry }) {
-  const { clock } = useBoot();
+function MyBatch({ e, writerId }: { e: Entry; writerId: number }) {
+  const { clock, me } = useBoot();
   const toast = useToast();
   const b = e.batch;
   const p = e.myProgress;
   const st = split(e.mine);
   const notSent = [...st.notStarted, ...st.writing];
   const sendable = e.mine.filter((s) => !isApproved(s.status));
+  const written = writtenOf(e, writerId);
   const [dialog, setDialog] = useState<null | { kind: 'send'; preselect: number[]; resend?: boolean } | { kind: 'titles' } | { kind: 'deliver' }>(null);
   const deliver = useSave((v: { url: string | null; note: string | null }) => api(`/api/batches/${b.id}/scripts/action`, {
     body: { action: 'deliver', scriptIds: st.approved.map((s) => s.id), timelinerUrl: v.url, note: v.note, versions: Object.fromEntries(st.approved.map((s) => [s.id, s.version])) },
-  }), { onSuccess: () => { toast(`Delivery confirmed for scripts ${nums(st.approved)}`); setDialog(null); } });
+  }), { onSuccess: () => { confetti({ y: innerHeight * 0.55, count: 70, spread: 120, power: 13 }); toast(`Delivery confirmed for scripts ${nums(st.approved)}`); setDialog(null); } });
   const edge = b.next?.overdue || b.blocked ? 'edge-red' : b.next?.dueToday ? 'edge-yellow' : '';
   const waiting = e.groups.filter((g) => g.kind === 'waiting');
   const sentBack = e.groups.filter((g) => g.kind === 'sent_back');
   const tiles: { k: string; n: number; c: string; detail?: string }[] = [
-    { k: 'Not sent', n: notSent.length, c: 'var(--neutral)', detail: notSent.length ? `${st.notStarted.length} not started · ${st.writing.length} writing` : undefined },
+    { k: 'Not sent', n: notSent.length, c: 'var(--neutral)', detail: notSent.length ? (written > p.draftReady ? `${written - p.draftReady} written so far` : 'none written yet') : undefined },
     { k: 'In review', n: st.inReview.length, c: 'var(--lavender)' },
     { k: 'Sent back', n: st.sentBack.length, c: 'var(--pink)' },
     { k: 'Approved', n: st.approved.length, c: 'color-mix(in srgb, var(--mint) 60%, var(--track))', detail: st.approved.length ? 'to deliver' : undefined },
@@ -154,21 +158,22 @@ function MyBatch({ e }: { e: Entry }) {
             <Ring pct={p.pctDraft} color={ringColor(p)} size={64} stroke={7} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="muted" style={{ fontSize: 12.5, marginBottom: 6 }}>Your scripts: {nums(e.mine)}</div>
-              <BatchProgress p={p} />
+              <BatchProgress p={p} written={written} />
             </div>
           </div>
           <div className="state-tiles" role="list" aria-label="Where your scripts are">
             {tiles.map((t) => (
               <div key={t.k} role="listitem" className={t.n ? '' : 'zero'} style={{ ['--c' as string]: t.c }}>
                 <span className="k"><i />{t.k}</span>
-                <span className="v num">{t.n}</span>
+                <span className="v num"><CountUp value={t.n} /></span>
                 {t.detail && <span className="p">{t.detail}</span>}
               </div>
             ))}
           </div>
           {b.blocked && <div className="banner red"><div className="txt"><b>Blocked: {b.blockerNote}</b></div></div>}
+          {notSent.length + st.sentBack.length > 0 && <WrittenCounter batchId={b.id} writerId={writerId} forOther={writerId !== me.id} total={p.total} sent={p.draftReady} written={written} />}
 
-          {sentBack.map((g) => <SentBackCard key={g.key} group={g} showBatch={false} onResend={() => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id), resend: true })} />)}
+          <CardList groups={sentBack}>{(g) => <SentBackCard group={g} showBatch={false} onResend={() => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id), resend: true })} />}</CardList>
 
           {notSent.length > 0 && (
             <div className="todo-block">
@@ -180,7 +185,7 @@ function MyBatch({ e }: { e: Entry }) {
             </div>
           )}
 
-          {waiting.map((g) => <WaitingCard key={g.key} group={g} showBatch={false} onReplace={() => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id) })} />)}
+          <CardList groups={waiting}>{(g) => <WaitingCard group={g} showBatch={false} onReplace={() => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id) })} />}</CardList>
 
           {st.approved.length > 0 && (
             <div className="todo-block mint">
@@ -238,5 +243,44 @@ function MyBatch({ e }: { e: Entry }) {
       {dialog?.kind === 'titles' && <TitlesDialog batchId={b.id} scripts={e.mine} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'deliver' && <DeliverDialog count={st.approved.length} nums={nums(st.approved)} busy={deliver.isPending} error={deliver.error} onClose={() => setDialog(null)} onSubmit={(url, note) => deliver.mutate({ url, note })} />}
     </Panel>
+  );
+}
+
+/**
+ * "Written so far": a counter the writer taps to keep managers posted while
+ * they work in their one master document. It never sends or changes scripts.
+ */
+function WrittenCounter({ batchId, writerId, forOther, total, sent, written }: { batchId: number; writerId: number; forOther: boolean; total: number; sent: number; written: number }) {
+  const [value, setValue] = useState(written);
+  const [state, setState] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const timer = useRef<number | undefined>(undefined);
+  const dirty = useRef(false);
+  useEffect(() => { if (!dirty.current) setValue(written); }, [written]);
+  useEffect(() => () => window.clearTimeout(timer.current), []);
+  const save = useSave((n: number) => api<{ written: number }>(`/api/batches/${batchId}/written`, { body: { written: n, writerId: forOther ? writerId : undefined } }), {
+    onSuccess: (out) => { dirty.current = false; setValue(out.written); setState('saved'); },
+  });
+  const change = (n: number) => {
+    const v = Math.max(sent, Math.min(total, n));
+    if (v === value) return;
+    setValue(v);
+    dirty.current = true;
+    setState('saving');
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => save.mutate(v), 650);
+  };
+  return (
+    <div className="counter-block" role="group" aria-label="Written so far">
+      <div style={{ minWidth: 0, flex: '1 1 220px' }}>
+        <div className="t">Written so far</div>
+        <div className="s">{forOther ? 'Updates the writer’s progress for managers.' : 'Keeps your manager posted.'} It doesn’t send or change any scripts.{sent ? ` Includes the ${sent} already sent.` : ''}</div>
+      </div>
+      <div className="stepper">
+        <button type="button" className="icon-btn" aria-label="One fewer written" disabled={value <= sent} onClick={() => change(value - 1)}><Minus /></button>
+        <div className="val"><b key={value} className="num pop">{value}</b><small>/ {total}</small></div>
+        <button type="button" className="icon-btn" aria-label="One more written" disabled={value >= total} onClick={() => change(value + 1)}><Plus /></button>
+      </div>
+      <span className="save-state" role="status">{save.isError ? 'Not saved. Try again.' : state === 'saving' ? 'Saving…' : state === 'saved' ? <><Check aria-hidden /> Saved</> : ''}</span>
+    </div>
   );
 }

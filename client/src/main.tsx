@@ -22,6 +22,8 @@ import { ReviewPage } from './pages/Review';
 import { ResourcesPage } from './pages/Resources';
 import { SettingsPage } from './pages/Settings';
 import { MasterLogPage } from './pages/MasterLog';
+import { WhatsNewPage } from './pages/WhatsNew';
+import { MotionProvider } from './motion';
 
 function Gate() {
   const status = useQuery({ queryKey: ['auth-status'], queryFn: () => api<AuthStatus>('/api/auth/status'), staleTime: Infinity });
@@ -54,6 +56,7 @@ function Gate() {
         <Route path="/resources" element={<ResourcesPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/log" element={<MasterLogPage />} />
+        <Route path="/whats-new" element={<WhatsNewPage />} />
         <Route path="*" element={<div className="panel"><h2>Page not found</h2><p className="muted" style={{ marginTop: 8 }}>That page doesn’t exist.</p></div>} />
       </Route>
     </Routes>
@@ -63,11 +66,13 @@ function Gate() {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <ToastProvider>
-        <BrowserRouter>
-          <Gate />
-        </BrowserRouter>
-      </ToastProvider>
+      <MotionProvider>
+        <ToastProvider>
+          <BrowserRouter>
+            <Gate />
+          </BrowserRouter>
+        </ToastProvider>
+      </MotionProvider>
     </QueryClientProvider>
   </StrictMode>,
 );

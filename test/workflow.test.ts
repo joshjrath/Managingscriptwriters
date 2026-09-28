@@ -142,3 +142,16 @@ describe('script titles', () => {
     expect(parseTitleLines('13. Not mine\n29. Mine', [29])).toEqual([{ number: 29, title: 'Mine' }]);
   });
 });
+
+describe('What’s new', () => {
+  it('lists every change newest first, with unique ids that never repeat', async () => {
+    const { CHANGELOG, LATEST_CHANGE } = await import('../shared/changelog');
+    expect(CHANGELOG.length).toBeGreaterThan(5);
+    expect(new Set(CHANGELOG.map((e) => e.id)).size).toBe(CHANGELOG.length);
+    expect(LATEST_CHANGE).toBe(CHANGELOG[0].id);
+    const dates = CHANGELOG.map((e) => e.date);
+    expect([...dates].sort().reverse()).toEqual(dates);
+    expect(CHANGELOG.at(-1)!.title).toMatch(/launches/);
+    for (const e of CHANGELOG) expect(e.changes.length).toBeGreaterThan(0);
+  });
+});

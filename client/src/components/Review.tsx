@@ -3,15 +3,18 @@
 // approve with their own edits. Used by the Review queue, My work and the
 // batch page so all three read the same way.
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
+import { AnimatePresence, m } from 'framer-motion';
 import { Check, ChevronDown, ExternalLink, FileText, Link2, PenLine, RotateCcw, Send, Upload } from 'lucide-react';
 import { api, ApiError, useSave } from '../api';
 import type { Attachment, ReviewGroup, Script, Submission } from '../../../shared/types';
 import { compressRanges, parseRanges, parseTitleLines } from '../../../shared/workflow';
 import { fmtBytes, fmtStamp, plural } from '../../../shared/format';
 import { useBoot } from './Shell';
-import { Button, Chip, Dialog, DueChip, Field, FormError, inputProps, useFieldId, useToast } from './ui';
+import { burst, centerOf, confetti, plane } from '../fx';
+import { SPRING } from '../motion';
+import { Button, Chip, Dialog, DueChip, Field, FormError, inputProps, Seg, useFieldId, useToast } from './ui';
 
 export const docHref = (a: Attachment) => (a.fileId ? `/api/files/${a.fileId}` : a.url ?? '#');
 export const hasDoc = (a: Attachment | null | undefined): a is Attachment => !!a && !!(a.fileId || a.url);
@@ -40,6 +43,35 @@ export function DocRow({ a, label, tone }: { a: Attachment; label?: string; tone
   );
 }
 
+// ── cards that glide in, and out the way they were decided ───────────────
+
+/** How a card left the list: approved cards glide right, sent-back cards glide left. */
+const leaving = new Map<string, 'approved' | 'sent_back'>();
+const MINT = ['#60D1BE', '#A6F0E2', '#F4ED70', '#FFFFFF'];
+const PINK = ['#E77AB5', '#F7B8D8', '#F2A599'];
+
+const exitFor = (key: string) => (map: Map<string, string>) => {
+  const why = map.get(key);
+  const ease = [0.32, 0, 0.67, 0] as const;
+  if (why === 'approved') return { opacity: 0, x: 80, scale: 0.96, transition: { duration: 0.32, ease } };
+  if (why === 'sent_back') return { opacity: 0, x: -80, scale: 0.96, transition: { duration: 0.32, ease } };
+  return { opacity: 0, scale: 0.97, transition: { duration: 0.18, ease } };
+};
+
+export function CardList({ groups, children }: { groups: ReviewGroup[]; children: (g: ReviewGroup) => ReactNode }) {
+  return (
+    <AnimatePresence initial={false} mode="popLayout" custom={leaving}>
+      {groups.map((g) => (
+        <m.div key={g.key} layout="position" custom={leaving}
+          variants={{ enter: { opacity: 0, y: 18, scale: 0.98 }, shown: { opacity: 1, y: 0, scale: 1, transition: SPRING }, exit: exitFor(g.key) }}
+          initial="enter" animate="shown" exit="exit">
+          {children(g)}
+        </m.div>
+      ))}
+    </AnimatePresence>
+  );
+}
+
 // ── attachment input (upload or link) ────────────────────────────────────
 
 export interface AttachValue { mode: 'none' | 'file' | 'link'; file: File | null; url: string }
@@ -50,11 +82,11 @@ function AttachInput({ value, onChange, allowNone, error, fileHelp, linkHelp }: 
   const l = useFieldId('att-l');
   return (
     <div className="stack s2">
-      <div className="seg" role="group" aria-label="Attachment type" style={{ alignSelf: 'flex-start' }}>
+      <Seg role="group" aria-label="Attachment type" style={{ alignSelf: 'flex-start' }}>
         {allowNone && <button type="button" aria-pressed={value.mode === 'none'} onClick={() => onChange({ ...value, mode: 'none' })}>Nothing</button>}
         <button type="button" aria-pressed={value.mode === 'file'} onClick={() => onChange({ ...value, mode: 'file' })}><Upload aria-hidden />Upload PDF</button>
         <button type="button" aria-pressed={value.mode === 'link'} onClick={() => onChange({ ...value, mode: 'link' })}><Link2 aria-hidden />Paste link</button>
-      </div>
+      </Seg>
       {value.mode === 'file' && (
         <Field label="File" htmlFor={f} error={error} help={fileHelp}>
           <input className="input" type="file" accept=".pdf,.doc,.docx,.txt,.rtf,.pages,.png,.jpg,.jpeg" onChange={(e) => onChange({ ...value, file: e.target.files?.[0] ?? null })} {...inputProps(f, error)} />
@@ -136,11 +168,13 @@ export function SendDialog({ batchId, batchTitle, candidates, preselect, resend,
     const nums = parseRanges(range, Math.max(0, ...candidates.map((s) => s.number)));
     return nums ? candidates.filter((s) => nums.includes(s.number)) : [];
   }, [scope, range, pre, candidates]);
+  const from = useRef<{ x: number; y: number } | null>(null);
   const save = useSave(() => postWith(`/api/batches/${batchId}/submissions`, {
     scriptIds: chosen.map((s) => s.id), note: note.trim() || null,
     titles: showTitles ? parseTitleLines(titles, chosen.map((s) => s.number)) : [],
-  }, att), { onSuccess: () => { toast(`Sent ${plural(chosen.length, 'script')} for review as one document`); onClose(); } });
+  }, att), { onSuccess: () => { plane(from.current ?? centerOf(null)); toast(`Sent ${plural(chosen.length, 'script')} for review as one document`); onClose(); } });
   const submit = () => {
+    from.current = centerOf(document.activeElement);
     const e: Record<string, string> = {};
     const a = attachError(att, true);
     if (a) e.document = a;
@@ -182,17 +216,29 @@ export function SendDialog({ batchId, batchTitle, candidates, preselect, resend,
 
 // ── the manager's decision ───────────────────────────────────────────────
 
-export function DecisionDialog({ batchId, scripts, submissionId, mode, onClose }: { batchId: number; scripts: Script[]; submissionId: number | null; mode: 'revisions' | 'approve_edits'; onClose: () => void }) {
+export function DecisionDialog({ batchId, scripts, submissionId, mode, groupKey, onClose }: { batchId: number; scripts: Script[]; submissionId: number | null; mode: 'revisions' | 'approve_edits'; groupKey?: string; onClose: () => void }) {
+  const from = useRef<{ x: number; y: number } | null>(null);
   const toast = useToast();
   const [note, setNote] = useState('');
   const [att, setAtt] = useState<AttachValue>(emptyAttach(mode === 'approve_edits' ? 'file' : 'none'));
   const [errs, setErrs] = useState<Record<string, string>>({});
   const nid = useFieldId('dn');
   const nums = compressRanges(scripts.map((s) => s.number));
-  const save = useSave(() => postWith(`/api/batches/${batchId}/review`, {
-    action: mode === 'revisions' ? 'revisions' : 'approve', scriptIds: scripts.map((s) => s.id), submissionId, note: note.trim() || null,
-  }, att), { onSuccess: () => { toast(mode === 'revisions' ? `Sent ${plural(scripts.length, 'script')} back for revisions` : `Approved ${plural(scripts.length, 'script')} with your edits`); onClose(); } });
+  const save = useSave(async () => {
+    const out = await postWith(`/api/batches/${batchId}/review`, {
+      action: mode === 'revisions' ? 'revisions' : 'approve', scriptIds: scripts.map((s) => s.id), submissionId, note: note.trim() || null,
+    }, att);
+    if (groupKey) leaving.set(groupKey, mode === 'revisions' ? 'sent_back' : 'approved');
+    return out;
+  }, { onSuccess: () => {
+    const at = from.current ?? centerOf(null);
+    if (mode === 'revisions') burst(at.x, at.y, { colors: PINK, count: 14 });
+    else { burst(at.x, at.y, { colors: MINT, count: 18 }); confetti({ x: at.x, y: at.y, count: 40, spread: 80, power: 10 }); }
+    toast(mode === 'revisions' ? `Sent ${plural(scripts.length, 'script')} back for revisions` : `Approved ${plural(scripts.length, 'script')} with your edits`);
+    onClose();
+  } });
   const submit = () => {
+    from.current = centerOf(document.activeElement);
     const e: Record<string, string> = {};
     if (mode === 'revisions' && !note.trim()) e.note = 'Say what needs to change';
     const a = attachError(att, mode === 'approve_edits');
@@ -247,9 +293,21 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
   const sub = group.submission;
   const n = group.scripts.length;
   const nums = compressRanges(group.scripts.map((s) => s.number));
-  const approve = useSave((scripts: Script[]) => api(`/api/batches/${group.batch.id}/review`, { body: { action: 'approve', scriptIds: scripts.map((s) => s.id), submissionId: sub?.id ?? null } }), {
-    onSuccess: (_o, scripts) => { toast(`Approved ${plural(scripts.length, 'script')}`); setPicked(new Set()); },
+  const from = useRef<{ x: number; y: number } | null>(null);
+  const approve = useSave(async (scripts: Script[]) => {
+    const out = await api(`/api/batches/${group.batch.id}/review`, { body: { action: 'approve', scriptIds: scripts.map((s) => s.id), submissionId: sub?.id ?? null } });
+    if (scripts.length === n) leaving.set(group.key, 'approved');
+    return out;
+  }, {
+    onSuccess: (_o, scripts) => {
+      const at = from.current ?? centerOf(null);
+      burst(at.x, at.y, { colors: MINT, count: 20, distance: 70 });
+      confetti({ x: at.x, y: at.y, count: scripts.length === n ? 50 : 24, spread: 70, power: 11 });
+      toast(`Approved ${plural(scripts.length, 'script')}`);
+      setPicked(new Set());
+    },
   });
+  const approveNow = (scripts: Script[], el: EventTarget) => { from.current = centerOf(el as Element); approve.mutate(scripts); };
   const pickedScripts = group.scripts.filter((s) => picked.has(s.id));
   return (
     <section className="review-card edge-lavender" aria-label={`${group.writerName}: scripts ${nums}`}>
@@ -272,7 +330,7 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
       {manager && (
         <>
           <div className="rc-actions">
-            <Button variant="mint" icon={<Check aria-hidden />} busy={approve.isPending && approve.variables?.length === n} onClick={() => approve.mutate(group.scripts)}>{n === 1 ? 'Approve' : `Approve all ${n}`}</Button>
+            <Button variant="mint" icon={<Check aria-hidden />} busy={approve.isPending && approve.variables?.length === n} onClick={(e) => approveNow(group.scripts, e.currentTarget)}>{n === 1 ? 'Approve' : `Approve all ${n}`}</Button>
             <Button variant="danger" icon={<RotateCcw aria-hidden />} onClick={() => setDialog({ mode: 'revisions', scripts: group.scripts })}>Send back for revisions</Button>
             <Button variant="ghost" icon={<PenLine aria-hidden />} onClick={() => setDialog({ mode: 'approve_edits', scripts: group.scripts })}>Approve with my edits</Button>
             {n > 1 && <button type="button" className="linkbtn rc-more" aria-expanded={oneByOne} onClick={() => setOneByOne(!oneByOne)}>{oneByOne ? 'Hide script list' : 'Review scripts one by one'}</button>}
@@ -288,7 +346,7 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
                 </label>
               ))}
               <div className="row-flex s2">
-                <Button variant="sm mint" disabled={!pickedScripts.length} onClick={() => approve.mutate(pickedScripts)}>Approve {pickedScripts.length || ''} selected</Button>
+                <Button variant="sm mint" disabled={!pickedScripts.length} onClick={(e) => approveNow(pickedScripts, e.currentTarget)}>Approve {pickedScripts.length || ''} selected</Button>
                 <Button variant="sm danger" disabled={!pickedScripts.length} onClick={() => setDialog({ mode: 'revisions', scripts: pickedScripts })}>Send selected back</Button>
               </div>
             </div>
@@ -302,7 +360,7 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
         </div>
       )}
       {manager && onReplace && <button type="button" className="linkbtn" style={{ alignSelf: 'flex-start' }} onClick={onReplace}>Replace the document</button>}
-      {dialog && <DecisionDialog batchId={group.batch.id} scripts={dialog.scripts} submissionId={sub?.id ?? null} mode={dialog.mode} onClose={() => setDialog(null)} />}
+      {dialog && <DecisionDialog batchId={group.batch.id} scripts={dialog.scripts} submissionId={sub?.id ?? null} mode={dialog.mode} groupKey={dialog.scripts.length === n ? group.key : undefined} onClose={() => setDialog(null)} />}
     </section>
   );
 }

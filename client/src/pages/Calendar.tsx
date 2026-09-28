@@ -1,17 +1,23 @@
 // Calendar: writing periods, draft deadlines, final delivery deadlines and
 // shoot dates, each with its own colour, icon and label. Click an event to
-// open its batch. Month grid on desktop, agenda list on phones.
+// open its batch. Managers can drag a shoot to another day (or click it and
+// choose "Change dates"); a preview shows everything that moves with it
+// before anything changes. Month grid on desktop, agenda list on phones.
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type DragEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, Camera, Check, ChevronLeft, ChevronRight, FileText, PenLine, Send } from 'lucide-react';
+import { m } from 'framer-motion';
+import { AlertTriangle, ArrowRight, CalendarClock, Camera, Check, ChevronLeft, ChevronRight, FileText, GripVertical, PenLine, Send } from 'lucide-react';
 import { api, qs } from '../api';
 import type { CalendarEvent } from '../../../shared/types';
-import { addDays, addMonths, eachDay, startOfMonth, startOfWeek, type ISODate } from '../../../shared/dates';
-import { fmtMonth, fmtWeekday, fmtDate } from '../../../shared/format';
+import { addDays, addMonths, diffDays, eachDay, startOfMonth, startOfWeek, type ISODate } from '../../../shared/dates';
+import { isManager } from '../../../shared/workflow';
+import { fmtMonth, fmtWeekday, fmtDate, fmtRange } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
-import { Button, Empty, ErrorState, Loading } from '../components/ui';
+import { Button, Dialog, Empty, ErrorState, Loading, Seg } from '../components/ui';
+import { SOFT } from '../motion';
+import { RescheduleDialog } from './BatchDetail';
 
 const TYPE = {
   writing: { label: 'Writing', icon: PenLine, c: 'var(--cyan)' },
@@ -20,8 +26,12 @@ const TYPE = {
   shoot: { label: 'Shoot', icon: Camera, c: 'var(--salmon)' },
 } as const;
 
+/** A shoot being moved: where it is now, and (when dragged) where it's going. */
+interface Move { shootId: number; start: ISODate; end: ISODate | null; toStart?: ISODate; toEnd?: ISODate | null }
+
 export function CalendarPage() {
-  const { clock, users, clients } = useBoot();
+  const { clock, users, clients, me } = useBoot();
+  const manager = isManager(me.role);
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   const month = params.get('m') && /^\d{4}-\d{2}$/.test(params.get('m')!) ? `${params.get('m')}-01` : startOfMonth(clock.today);
@@ -29,6 +39,9 @@ export function CalendarPage() {
   const clientId = params.get('clientId') ?? '';
   const [view, setView] = useState<'month' | 'list'>(() => (window.matchMedia('(max-width: 760px)').matches ? 'list' : 'month'));
   const [hidden, setHidden] = useState<Set<CalendarEvent['type']>>(new Set());
+  const [drag, setDrag] = useState<{ e: CalendarEvent; offset: number; over: ISODate | null } | null>(null);
+  const [move, setMove] = useState<Move | null>(null);
+  const [picked, setPicked] = useState<CalendarEvent | null>(null);
   const gridStart = startOfWeek(month);
   const gridEnd = addDays(startOfWeek(addDays(addMonths(month, 1), -1)), 6);
   const q = useQuery({
@@ -38,36 +51,79 @@ export function CalendarPage() {
   const setP = (k: string, v: string) => { const p = new URLSearchParams(params); if (v) p.set(k, v); else p.delete(k); setParams(p, { replace: true }); };
   const events = (q.data?.events ?? []).filter((e) => !hidden.has(e.type));
   const byDay = useMemo(() => {
-    const m = new Map<string, CalendarEvent[]>();
+    const map = new Map<string, CalendarEvent[]>();
     const order = { shoot: 0, final: 1, draft: 2, writing: 3 };
-    for (const e of events) for (const d of eachDay(e.start > gridStart ? e.start : gridStart, e.end < gridEnd ? e.end : gridEnd)) m.set(d, [...(m.get(d) ?? []), e]);
-    for (const list of m.values()) list.sort((a, b) => order[a.type] - order[b.type]);
-    return m;
+    for (const e of events) for (const d of eachDay(e.start > gridStart ? e.start : gridStart, e.end < gridEnd ? e.end : gridEnd)) map.set(d, [...(map.get(d) ?? []), e]);
+    for (const list of map.values()) list.sort((a, b) => order[a.type] - order[b.type]);
+    return map;
   }, [events, gridStart, gridEnd]);
-  const open = (e: CalendarEvent) => { if (e.batchId) nav(`/batches/${e.batchId}`); else if (e.shootId) nav('/production'); };
   const days = eachDay(gridStart, gridEnd);
 
-  const Ev = ({ e, day }: { e: CalendarEvent; day: ISODate }) => {
+  const canMove = (e: CalendarEvent) => manager && e.type === 'shoot' && e.shootId != null;
+  const open = (e: CalendarEvent) => {
+    if (canMove(e)) setPicked(e);
+    else if (e.batchId) nav(`/batches/${e.batchId}`);
+    else if (e.shootId) nav('/production');
+  };
+  const moveOf = (e: CalendarEvent, toStart?: ISODate): Move => {
+    const len = diffDays(e.end, e.start);
+    return { shootId: e.shootId!, start: e.start, end: len ? e.end : null, toStart, toEnd: toStart && len ? addDays(toStart, len) : null };
+  };
+
+  // where the dragged shoot would land, or is waiting to be confirmed
+  const landing = drag?.over
+    ? { from: addDays(drag.over, -drag.offset), len: diffDays(drag.e.end, drag.e.start) }
+    : move?.toStart ? { from: move.toStart, len: move.toEnd ? diffDays(move.toEnd, move.toStart) : 0 } : null;
+  const isLanding = (d: ISODate) => !!landing && d >= landing.from && d <= addDays(landing.from, landing.len);
+  const onOver = (x: DragEvent, d: ISODate) => {
+    if (!drag) return;
+    x.preventDefault();
+    x.dataTransfer.dropEffect = 'move';
+    if (drag.over !== d) setDrag({ ...drag, over: d });
+  };
+  const onDrop = (x: DragEvent, d: ISODate) => {
+    if (!drag) return;
+    x.preventDefault();
+    const to = addDays(d, -drag.offset);
+    const e = drag.e;
+    setDrag(null);
+    if (to !== e.start) setMove(moveOf(e, to));
+  };
+
+  const ev = (e: CalendarEvent, day: ISODate) => {
     const T = TYPE[e.type];
     const Icon = e.overdue && e.type !== 'writing' ? AlertTriangle : e.complete && e.type !== 'writing' ? Check : T.icon;
     const showLabel = e.type !== 'writing' || day === e.start || new Date(day + 'T00:00:00Z').getUTCDay() === 1;
     const status = e.overdue ? ' (overdue)' : e.complete ? ' (complete)' : '';
+    const k = diffDays(day, e.start);
+    const movable = canMove(e);
     return (
-      <button className={`ev ${e.type}${showLabel ? '' : ' cont'}${e.overdue ? ' overdue' : ''}${e.complete ? ' done' : ''}`} onClick={() => open(e)} title={`${T.label}: ${e.clientName} · ${e.title}${status}`}
-        aria-label={`${T.label}${status}: ${e.clientName}, ${e.title}${e.type === 'writing' ? `, ${fmtDate(e.start)} to ${fmtDate(e.end)}` : ''}`}>
-        <Icon aria-hidden />
-        <span>{showLabel ? `${e.type === 'writing' ? 'Writing · ' : ''}${e.clientName}` : ' '}</span>
-      </button>
+      // each day of a shoot keeps its identity, so a moved shoot glides to its new days
+      <m.div key={`${e.id}:${k}`} className="ev-wrap" layout="position" layoutId={e.type === 'shoot' ? `ev-${e.id}-${k}` : undefined} transition={SOFT}>
+        <button
+          className={`ev ${e.type}${showLabel ? '' : ' cont'}${e.overdue ? ' overdue' : ''}${e.complete ? ' done' : ''}${movable ? ' movable' : ''}${drag?.e.id === e.id ? ' dragging' : ''}`}
+          onClick={() => open(e)}
+          title={`${T.label}: ${e.clientName} · ${e.title}${status}${movable ? ' — drag to another day to move it' : ''}`}
+          draggable={movable || undefined}
+          onDragStart={movable ? (x) => { x.dataTransfer.effectAllowed = 'move'; x.dataTransfer.setData('text/plain', `shoot:${e.shootId}`); setDrag({ e, offset: k, over: null }); } : undefined}
+          onDragEnd={movable ? () => setDrag(null) : undefined}
+          aria-label={`${T.label}${status}: ${e.clientName}, ${e.title}${e.type === 'writing' || (e.type === 'shoot' && e.end !== e.start) ? `, ${fmtDate(e.start)} to ${fmtDate(e.end)}` : ''}${movable ? '. Press to change the dates.' : ''}`}
+        >
+          <Icon aria-hidden />
+          <span>{showLabel ? `${e.type === 'writing' ? 'Writing · ' : ''}${e.clientName}` : ' '}</span>
+          {movable && <GripVertical className="grip" aria-hidden />}
+        </button>
+      </m.div>
     );
   };
 
   return (
     <>
-      <PageHeader title="Calendar" sub="Writing periods, draft deadlines, final deliveries and shoots.">
-        <div className="seg" role="group" aria-label="Calendar view">
+      <PageHeader title="Calendar" sub={manager ? 'Writing periods, draft deadlines, final deliveries and shoots. Drag a shoot to another day to move it — its deadlines follow.' : 'Writing periods, draft deadlines, final deliveries and shoots.'}>
+        <Seg role="group" aria-label="Calendar view">
           <button aria-pressed={view === 'month'} onClick={() => setView('month')}>Month</button>
           <button aria-pressed={view === 'list'} onClick={() => setView('list')}>List</button>
-        </div>
+        </Seg>
       </PageHeader>
       <div className="cal-bar">
         <Button variant="sm" onClick={() => setP('m', addMonths(month, -1).slice(0, 7))} aria-label="Previous month" icon={<ChevronLeft aria-hidden />} />
@@ -93,15 +149,17 @@ export function CalendarPage() {
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
       {q.data && view === 'month' && (
         <div className="cal">
-          <div className="cal-grid month">
+          <div className={`cal-grid month${drag ? ' dragging-shoot' : ''}`} onDragLeave={(x) => { if (drag && !(x.currentTarget as HTMLElement).contains(x.relatedTarget as Node)) setDrag({ ...drag, over: null }); }}>
             {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => <div key={d} className="wd">{d}</div>)}
             {days.map((d) => {
               const list = byDay.get(d) ?? [];
               const out = d.slice(0, 7) !== month.slice(0, 7);
+              const land = isLanding(d);
               return (
-                <div key={d} className={`cell${out ? ' out' : ''}${d === clock.today ? ' today' : ''}`}>
+                <div key={d} className={`cell${out ? ' out' : ''}${d === clock.today ? ' today' : ''}${land ? ' landing' : ''}`} onDragOver={(x) => onOver(x, d)} onDrop={(x) => onDrop(x, d)}>
                   <span className="dn"><span>{Number(d.slice(8))}</span>{d === clock.today && <span style={{ fontSize: 10, letterSpacing: '.12em', textTransform: 'uppercase' }}>Today</span>}</span>
-                  {list.slice(0, 5).map((e) => <Ev key={e.id} e={e} day={d} />)}
+                  {land && landing && d === landing.from && <span className="landing-tag"><Camera aria-hidden />{drag ? 'Drop to move here' : 'Moving here…'}</span>}
+                  {list.slice(0, 5).map((e) => ev(e, d))}
                   {list.length > 5 && <button className="more" onClick={() => setView('list')}>+{list.length - 5} more</button>}
                 </div>
               );
@@ -126,7 +184,7 @@ export function CalendarPage() {
                             <div className="title">{e.clientName}</div>
                             <div className="meta">{e.title}</div>
                           </div>
-                          <div className="side">{e.overdue ? <span className="chip red"><AlertTriangle aria-hidden />Overdue</span> : e.complete ? <span className="chip mint"><Check aria-hidden />Complete</span> : null}</div>
+                          <div className="side">{e.overdue ? <span className="chip red"><AlertTriangle aria-hidden />Overdue</span> : e.complete ? <span className="chip mint"><Check aria-hidden />Complete</span> : canMove(e) ? <span className="btn sm"><CalendarClock aria-hidden />Change dates</span> : null}</div>
                         </button>
                       );
                     })}
@@ -137,6 +195,16 @@ export function CalendarPage() {
           )}
         </div>
       )}
+      {picked && (
+        <Dialog open onClose={() => setPicked(null)} size="narrow" title={`${picked.clientName} · ${picked.title}`} sub={fmtRange(picked.start, picked.end !== picked.start ? picked.end : null)}
+          footer={<div className="form-actions">
+            {picked.batchId && <Button variant="ghost" icon={<ArrowRight aria-hidden />} onClick={() => { const id = picked.batchId; setPicked(null); nav(`/batches/${id}`); }}>Open batch</Button>}
+            <Button variant="primary pill" icon={<CalendarClock aria-hidden />} onClick={() => { setMove(moveOf(picked)); setPicked(null); }}>Change dates</Button>
+          </div>}>
+          <p className="muted" style={{ fontSize: 13.5 }}>Changing the dates moves the draft and final delivery deadlines and the planned writing start with it. You’ll see every change before it’s applied. You can also drag the shoot to another day on the calendar.</p>
+        </Dialog>
+      )}
+      {move && <RescheduleDialog shootId={move.shootId} start={move.start} end={move.end} initialStart={move.toStart} initialEnd={move.toEnd} onClose={() => setMove(null)} />}
     </>
   );
 }

@@ -7,17 +7,18 @@ import { z } from 'zod';
 import type { Db } from '../db';
 import {
   assigneesOf, batchLink, buildSummary, clockFor, isAssignedTo, lastDeliveredAt, loadBatch, loadBatches,
-  loadSettings, loadUsers, logActivity, managerIds, notify, rulesOf, type BatchRow, type Ctx, BATCH_SELECT, loadScriptsFor,
+  loadSettings, loadUsers, loadWritten, logActivity, managerIds, notify, rulesOf, type BatchRow, type Ctx, BATCH_SELECT, loadScriptsFor,
 } from '../core';
 import { requireManager, requireUser } from '../auth';
 import { buildGroups, publicSubmission } from '../submissions';
+import { recordMoments } from '../moments';
 import { conflict, forbidden, HttpError, notFound, optionalDate, parse, zs } from '../http';
 import {
   loadActivity, loadBriefings, loadDeliveries, loadResources, loadRevisions, loadScripts,
 } from '../records';
 import { computeDeadlines, dueState, ruleText, type Clock, type ISODate } from '../../shared/dates';
 import {
-  ACTION_RULES, checkAction, compressRanges, SCRIPT_ACTIONS, splitAssignments, STAGES, summarize,
+  ACTION_RULES, checkAction, compressRanges, isDraftReady, SCRIPT_ACTIONS, splitAssignments, STAGES, summarize,
   type ScriptAction, type ScriptStatus,
 } from '../../shared/workflow';
 import { fmtDate, plural } from '../../shared/format';
@@ -187,7 +188,7 @@ export async function loadBatchDetail(ctx: Ctx, id: number, me: Me): Promise<Bat
   if (!row) throw notFound('Batch');
   const scriptsLite = (await loadScriptsFor(ctx.db, [id])).get(id) ?? [];
   const users = await loadUsers(ctx.db);
-  const summary = buildSummary(row, scriptsLite, new Map(users.map((u) => [u.id, u.name])), clock);
+  const summary = buildSummary(row, scriptsLite, new Map(users.map((u) => [u.id, u.name])), clock, await loadWritten(ctx.db, [id]));
   const [scripts, briefings, batchResources, clientResources, revisions, deliveries, activity] = await Promise.all([
     loadScripts(ctx.db, { batchId: id }),
     loadBriefings(ctx.db, { batchId: id }),
@@ -596,6 +597,41 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   // quick count control: moves the writer's own script records, never a separate counter
+  /**
+   * A writer's "written so far" count. Purely an update for managers: it never
+   * submits, withdraws or changes any script. It can't go below what they've
+   * already sent, or above how many scripts they have.
+   */
+  app.post('/api/batches/:id/written', async (req) => {
+    const me = requireUser(req);
+    const { id } = parse(z.object({ id: zs.id }), req.params);
+    const input = parse(z.object({ written: z.number().int().min(0).max(100000), writerId: zs.id.optional() }), req.body);
+    const uid = input.writerId ?? me.id;
+    if (uid !== me.id && !isManager(me.role)) throw forbidden('You can only update your own progress');
+    return db.tx(async (t) => {
+      const b = await t.one<{ client_id: number; title: string }>(`select client_id, title from batches where id = $1`, [id]);
+      if (!b) throw notFound('Batch');
+      const mine = await t.query<{ status: ScriptStatus }>(`select status from scripts where batch_id = $1 and assignee_id = $2 and removed_at is null`, [id, uid]);
+      if (!mine.length) throw new HttpError(400, 'No scripts in this batch are assigned to them');
+      const sent = mine.filter((s) => isDraftReady(s.status)).length;
+      const written = Math.min(mine.length, Math.max(sent, input.written));
+      await t.query(
+        `insert into writer_progress (batch_id, user_id, written) values ($1, $2, $3)
+         on conflict (batch_id, user_id) do update set written = excluded.written, updated_at = now()`, [id, uid, written],
+      );
+      const who = uid === me.id ? '' : ` for ${(await t.one<{ name: string }>(`select name from users where id = $1`, [uid]))?.name ?? 'the writer'}`;
+      const summary = `Progress update: ${written} of ${mine.length} scripts written${who}`;
+      // tapping + a few times is one update in the history, not five
+      const recent = await t.one<{ id: number }>(
+        `select id from activity where batch_id = $1 and actor_id = $2 and action = 'progress.written' and created_at > now() - interval '15 minutes'
+          and detail->>'writerId' = $3 order by created_at desc limit 1`, [id, me.id, String(uid)],
+      );
+      if (recent) await t.query(`update activity set summary = $2, created_at = now() where id = $1`, [recent.id, summary]);
+      else await logActivity(t, { actor: me, action: 'progress.written', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id, summary, detail: { writerId: String(uid), written, total: mine.length } });
+      return { written, total: mine.length, sent };
+    });
+  });
+
   app.post('/api/batches/:id/quick-progress', async (req) => {
     const me = requireUser(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
@@ -782,6 +818,7 @@ export async function applyScriptAction(
     } else if (action === 'undo_delivery') {
       await notify(t, writers, { type: 'delivery', title: `Delivery undone · ${b.title}`, body: `${me.name} moved script${rows.length > 1 ? 's' : ''} ${nums} back to approved.`, link }, me.id);
     }
+    await recordMoments(t, me, batchId, action, rows, b, { note: opts.note, attached });
     await t.query(`update batches set updated_at = now() where id = $1`, [batchId]);
     return { changed: idList, deliveryId, reviewId };
   });

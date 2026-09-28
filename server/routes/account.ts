@@ -92,6 +92,14 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     return { ok: true };
   });
 
+  /** Remembers the newest What's new entry this person has opened, for the "new" dot. */
+  app.post('/api/me/whats-new', async (req) => {
+    const me = requireUser(req);
+    const { seen } = parse(z.object({ seen: z.string().trim().min(1).max(80) }), req.body);
+    await db.query(`update users set whats_new_seen = $2 where id = $1`, [me.id, seen]);
+    return { ok: true };
+  });
+
   // ── team ───────────────────────────────────────────────────────────────
 
   const ROLES = ['owner', 'manager', 'writer'] as const;

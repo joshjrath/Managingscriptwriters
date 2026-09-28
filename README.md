@@ -46,6 +46,25 @@ Writers don't send scripts one at a time. On **My work** (or the batch page) the
 - Script titles can also be set from **Titles** on the batch page or My work: paste a list and it's applied in order, or keep the "3. Title" numbers.
 - Everything is still recorded per script, so progress, deadlines and delivery rules work exactly as before.
 
+### "Written so far" counter
+
+Writers work in one master document, so each batch on **My work** has a **Written so far** counter (+ / −) they tap to keep their manager posted. It is only an update: it never sends, withdraws or changes any script. It can't go below the scripts they've already sent or above how many they have. Managers see it as a lighter "written" layer in every progress bar, as "12 / 25 written · 8 sent" next to each writer on the batch page, and as one line in the history per writing session (repeated taps within 15 minutes update the same line).
+
+### Moving a shoot
+
+Change a shoot's dates from **Change dates** on the batch or client page, by clicking the shoot on the calendar, or by **dragging it to another day on the calendar** (multi-day shoots keep their length). A preview lists everything that moves before anything changes: automatic draft and final deadlines are recalculated, the planned writing start moves by the same number of days, and batches named after the shoot's dates ("Shoot · Oct 7, 2026") get the new dates. Manually set deadlines are kept and flagged for a check, or moved by the same number of days if you tick that option. Writers are notified and each batch's history records the change.
+
+### Celebrations and animation
+
+- Progress bars fill like liquid, with a moving edge and rising bubbles; they spark when a batch moves forward, and the big ring on a batch page fills with water.
+- Sending scripts launches a paper plane. Approving throws a little confetti from the button and the card glides out of the queue (sent-back cards glide the other way).
+- **Moments**: when a writer's scripts are approved, the next time they open the app they get "Congrats! Your scripts for … just got approved". Finishing all your drafts or delivering your whole batch gets full-screen confetti; managers are told when a writer finishes their drafts and when a whole batch is delivered. A send-back shows a calm heads-up with the note instead. Each moment shows once.
+- Pages, lists, dialogs, toasts, tabs, the sidebar highlight and numbers animate smoothly. Animations follow the device's "reduce motion" setting, and anyone can switch them off in their account menu (remembered in that browser).
+
+### What's new
+
+**What's new**, at the very bottom of the sidebar, lists every change to the platform since the first version, with a dot when there's something you haven't seen. Entries live in `shared/changelog.ts`; every change adds one (see `CLAUDE.md`).
+
 ### Master log (owners only)
 
 **Master log**, next to your name in the sidebar, lists every change (from the activity history), every page or file someone opened, sign-ins and failed sign-ins, and anything someone tried that they weren't allowed to do. Filter by person or kind, or search. Repeat views of the same page by the same person within 10 minutes count once. Page views are kept for 400 days; changes and sign-ins are kept indefinitely. Managers and writers can't open it.
@@ -83,7 +102,7 @@ Every meaningful change (creation, assignments, status changes, reviews, deliver
 
 ## Screens
 
-Overview · My work · Production (board + table, filters, search) · Calendar (month + list; writing periods, drafts due, final delivery, shoots) · Clients and client detail · Batch detail (drafts & documents, script checklist with range selection and bulk actions, brief, deadlines, review notes, delivery records, history) · Review queue (one card per document) · Resources · Settings (deadline rules, timezone & cutoff, reminders, team) · Master log (owners). Dashboard cards link to the matching filtered records; chart bars reveal the underlying batches.
+Overview · My work · Production (board + table, filters, search) · Calendar (month + list; writing periods, drafts due, final delivery, shoots) · Clients and client detail · Batch detail (drafts & documents, script checklist with range selection and bulk actions, brief, deadlines, review notes, delivery records, history) · Review queue (one card per document) · Resources · Settings (deadline rules, timezone & cutoff, reminders, team) · Master log (owners) · What's new. Dashboard cards link to the matching filtered records; chart bars reveal the underlying batches.
 
 Responsive: full sidebar on wide screens, collapsible icon rail on smaller desktops/tablets, navigation drawer and card layouts on phones (My work, deadlines, briefs and delivery confirmation are prioritised).
 
@@ -123,7 +142,7 @@ TEST_DATABASE_URL=postgres://user@host/db npm test    # a real PostgreSQL (the s
 npm run typecheck
 ```
 
-They cover: deadline maths across month and year boundaries, leap days, DST, multi-day shoots, business-day mode, timezones and the daily cutoff; progress (20 / 45 · 44%), stages and partial delivery; workflow permissions; the quick-entry parser; and through the real API — creating a client with a recording, document and uploaded file (and denying anonymous file access), both example shoots, the 20 / 25 split without double counting, draft completion not delivering, partial review and delivery, delivery records, moving a shoot with a manual override, batches without shoots, the dashboard's overdue / blocked / unassigned lists, writers being refused on every manager action sent directly to the API, CSRF, stale-edit rejection, target changes that protect work, reminder deduplication, sending ten scripts as one PDF and getting one review card and one revision request back, versioned resubmissions, script titles, the owner-only master log (views, sign-ins, blocked attempts), and data persisting across restarts.
+They cover: deadline maths across month and year boundaries, leap days, DST, multi-day shoots, business-day mode, timezones and the daily cutoff; progress (20 / 45 · 44%), stages and partial delivery; workflow permissions; the quick-entry parser; and through the real API — creating a client with a recording, document and uploaded file (and denying anonymous file access), both example shoots, the 20 / 25 split without double counting, draft completion not delivering, partial review and delivery, delivery records, moving a shoot with a manual override, batches without shoots, the dashboard's overdue / blocked / unassigned lists, writers being refused on every manager action sent directly to the API, CSRF, stale-edit rejection, target changes that protect work, reminder deduplication, sending ten scripts as one PDF and getting one review card and one revision request back, versioned resubmissions, script titles, the owner-only master log (views, sign-ins, blocked attempts), celebration moments (once each, never for your own decisions, milestones never twice), the "written so far" counter never touching script statuses, moving a shoot shifting writing starts, batch names and (optionally) manual dates, the changelog staying complete and ordered, and data persisting across restarts.
 
 ## Layout
 

@@ -1,6 +1,8 @@
 // Shoots. Creating one also creates its script batch with calculated
 // deadlines. Moving one previews the changes, recalculates automatic dates,
-// keeps manual overrides (flagging them for review), logs, and notifies.
+// moves planned writing starts by the same number of days, renames batches
+// that were named after the shoot's dates, keeps manual overrides (flagging
+// them for review) unless asked to move them too, logs, and notifies.
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -10,7 +12,7 @@ import { requireManager, requireUser } from '../auth';
 import { HttpError, notFound, optionalDate, parse, zs } from '../http';
 import { loadShoots } from '../records';
 import { batchFields, insertBatch } from './batches';
-import { computeDeadlines, dueState, type Clock, type ISODate } from '../../shared/dates';
+import { addDays, computeDeadlines, diffDays, dueState, type Clock, type ISODate } from '../../shared/dates';
 import { fmtDate, fmtRange } from '../../shared/format';
 import type { Me, ReschedulePreview, Settings } from '../../shared/types';
 
@@ -35,7 +37,7 @@ const shootCreate = z.object({
   }),
 });
 
-const datesSchema = z.object({ startDate: zs.date, endDate: optionalDate });
+const datesSchema = z.object({ startDate: zs.date, endDate: optionalDate, shiftManual: z.boolean().optional() });
 
 export async function insertShoot(t: Db, me: Me, input: z.infer<typeof shootCreate>, settings: Settings, clock: Clock) {
   if (input.endDate && input.endDate < input.startDate) {
@@ -59,21 +61,32 @@ export async function insertShoot(t: Db, me: Me, input: z.infer<typeof shootCrea
   return { shootId, ...created };
 }
 
-export async function reschedulePreview(db: Db, settings: Settings, clock: Clock, shootId: number, startDate: ISODate, endDate: ISODate | null): Promise<ReschedulePreview> {
+/** The name a batch gets when it's created with its shoot and no title of its own. */
+const autoTitle = (shootTitle: string | null, start: ISODate, end: ISODate | null) => `${shootTitle || 'Shoot'} · ${fmtRange(start, end)}`;
+
+export async function reschedulePreview(db: Db, settings: Settings, clock: Clock, shootId: number, startDate: ISODate, endDate: ISODate | null, shiftManual = false): Promise<ReschedulePreview> {
   const [shoot] = await loadShoots(db, { id: shootId });
   if (!shoot) throw notFound('Shoot');
+  const days = diffDays(startDate, shoot.startDate);
   const next = computeDeadlines(startDate, rulesOf(settings));
-  const batches = await db.query<{ id: number; title: string; draft_due: ISODate | null; draft_due_mode: 'auto' | 'manual'; final_due: ISODate | null; final_due_mode: 'auto' | 'manual' }>(
-    `select id, title, draft_due, draft_due_mode, final_due, final_due_mode from batches where shoot_id = $1 and archived_at is null order by id`, [shootId],
+  const batches = await db.query<{ id: number; title: string; planned_start: ISODate | null; draft_due: ISODate | null; draft_due_mode: 'auto' | 'manual'; final_due: ISODate | null; final_due_mode: 'auto' | 'manual' }>(
+    `select id, title, planned_start, draft_due, draft_due_mode, final_due, final_due_mode from batches where shoot_id = $1 and archived_at is null order by id`, [shootId],
   );
   const changes: ReschedulePreview['changes'] = [];
+  const plannedStarts: ReschedulePreview['plannedStarts'] = [];
+  const renames: ReschedulePreview['renames'] = [];
+  const oldName = autoTitle(shoot.title, shoot.startDate, shoot.endDate);
+  const newName = autoTitle(shoot.title, startDate, endDate && endDate !== startDate ? endDate : null);
   for (const b of batches) {
     for (const field of ['draftDue', 'finalDue'] as const) {
       const mode = field === 'draftDue' ? b.draft_due_mode : b.final_due_mode;
       const from = field === 'draftDue' ? b.draft_due : b.final_due;
-      const to = mode === 'auto' ? (field === 'draftDue' ? next.draftDue : next.finalDue) : from;
-      changes.push({ batchId: b.id, batchTitle: b.title, field, mode, from, to, kept: mode === 'manual', inPast: !!to && dueState(to, clock).overdue });
+      const shifted = mode === 'manual' && shiftManual && !!from;
+      const to = mode === 'auto' ? (field === 'draftDue' ? next.draftDue : next.finalDue) : shifted ? addDays(from!, days) : from;
+      changes.push({ batchId: b.id, batchTitle: b.title, field, mode, from, to, kept: mode === 'manual' && !shifted, inPast: !!to && dueState(to, clock).overdue });
     }
+    if (b.planned_start && days) plannedStarts.push({ batchId: b.id, batchTitle: b.title, from: b.planned_start, to: addDays(b.planned_start, days) });
+    if (b.title === oldName && oldName !== newName) renames.push({ batchId: b.id, from: b.title, to: newName });
   }
   const writerRows = batches.length
     ? await db.query<{ name: string }>(
@@ -82,7 +95,10 @@ export async function reschedulePreview(db: Db, settings: Settings, clock: Clock
       batches.map((b) => b.id),
     )
     : [];
-  return { shoot, newStart: startDate, newEnd: endDate && endDate !== startDate ? endDate : null, changes, affectedWriters: writerRows.map((r) => r.name) };
+  return {
+    shoot, newStart: startDate, newEnd: endDate && endDate !== startDate ? endDate : null, days, changes, plannedStarts, renames,
+    manualCount: changes.filter((c) => c.mode === 'manual' && c.from).length, affectedWriters: writerRows.map((r) => r.name),
+  };
 }
 
 export function registerShootRoutes(app: FastifyInstance, ctx: Ctx) {
@@ -123,7 +139,7 @@ export function registerShootRoutes(app: FastifyInstance, ctx: Ctx) {
     const input = parse(datesSchema, req.body);
     if (input.endDate && input.endDate < input.startDate) throw new HttpError(400, 'The shoot can’t end before it starts', { endDate: 'The shoot can’t end before it starts' });
     const settings = await loadSettings(db);
-    return reschedulePreview(db, settings, await clockFor(ctx, settings), id, input.startDate, input.endDate ?? null);
+    return reschedulePreview(db, settings, await clockFor(ctx, settings), id, input.startDate, input.endDate ?? null, input.shiftManual);
   });
 
   app.post('/api/shoots/:id/reschedule', async (req) => {
@@ -138,7 +154,7 @@ export function registerShootRoutes(app: FastifyInstance, ctx: Ctx) {
     const preview = await db.tx(async (t) => {
       const old = await t.one<{ client_id: number; start_date: ISODate; end_date: ISODate | null }>(`select client_id, start_date, end_date from shoots where id = $1 for update`, [id]);
       if (!old) throw notFound('Shoot');
-      const p = await reschedulePreview(t, settings, clock, id, input.startDate, endDate);
+      const p = await reschedulePreview(t, settings, clock, id, input.startDate, endDate, input.shiftManual);
       if (old.start_date === input.startDate && old.end_date === endDate) return p;
       await t.query(`update shoots set start_date = $2, end_date = $3, updated_at = now() where id = $1`, [id, input.startDate, endDate]);
       const moved = `Shoot moved ${fmtRange(old.start_date, old.end_date)} → ${fmtRange(input.startDate, endDate)}`;
@@ -152,16 +168,23 @@ export function registerShootRoutes(app: FastifyInstance, ctx: Ctx) {
         const note = kept.length
           ? `${moved}. Manual ${kept.map((k) => `${k.field === 'draftDue' ? 'draft' : 'final delivery'} date (${fmtDate(k.from)})`).join(' and ')} kept — confirm ${kept.length > 1 ? 'they still work' : 'it still works'}.`
           : null;
+        const planned = p.plannedStarts.find((x) => x.batchId === batchId);
+        const rename = p.renames.find((x) => x.batchId === batchId);
         await t.query(
-          `update batches set draft_due = $2, final_due = $3, needs_date_review = needs_date_review or $4, date_review_note = coalesce($5, date_review_note), updated_at = now() where id = $1`,
-          [batchId, draft.to, final.to, kept.length > 0, note],
+          `update batches set draft_due = $2, final_due = $3, needs_date_review = needs_date_review or $4, date_review_note = coalesce($5, date_review_note),
+                  planned_start = coalesce($6, planned_start), title = coalesce($7, title), updated_at = now() where id = $1`,
+          [batchId, draft.to, final.to, kept.length > 0, note, planned?.to ?? null, rename?.to ?? null],
         );
-        const parts = rows.filter((c) => !c.kept && c.from !== c.to).map((c) => `${c.field === 'draftDue' ? 'Drafts' : 'Final delivery'} ${fmtDate(c.from)} → ${fmtDate(c.to)}`);
+        const parts = [
+          ...rows.filter((c) => !c.kept && c.from !== c.to).map((c) => `${c.field === 'draftDue' ? 'Drafts' : 'Final delivery'}${c.mode === 'manual' ? ' (manual, moved too)' : ''} ${fmtDate(c.from)} → ${fmtDate(c.to)}`),
+          ...(planned ? [`Writing start ${fmtDate(planned.from)} → ${fmtDate(planned.to)}`] : []),
+          ...(rename ? [`Renamed to “${rename.to}”`] : []),
+        ];
         const past = rows.filter((c) => c.inPast).map((c) => `${c.field === 'draftDue' ? 'Drafts' : 'Final delivery'} date ${fmtDate(c.to)} is already past`);
         const summary = [moved, ...parts, ...(kept.length ? [`kept manual ${kept.map((k) => (k.field === 'draftDue' ? 'draft' : 'final')).join(' & ')} date`] : []), ...past].join(' · ');
         await logActivity(t, { actor: me, action: 'batch.deadlines', entityType: 'batch', entityId: batchId, batchId, clientId: old.client_id, summary, detail: { changes: rows } });
         await notify(t, await assigneesOf(t, batchId, { undeliveredOnly: true }), {
-          type: 'deadline_change', title: `Shoot moved · ${draft.batchTitle}`,
+          type: 'deadline_change', title: `Shoot moved · ${rename?.to ?? draft.batchTitle}`,
           body: [moved + '.', ...parts.map((x) => x + '.'), ...(kept.length ? ['Manual dates were kept for now.'] : []), ...past.map((x) => x + '.')].join(' '),
           link: batchLink(batchId),
         }, me.id);

@@ -9,7 +9,7 @@ import type { Settings, UserSummary } from '../../../shared/types';
 import { computeDeadlines, DEFAULT_RULES, isValidTimeZone } from '../../../shared/dates';
 import { fmtCutoff, fmtLong, fmtStamp, plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
-import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, useFieldId, useToast } from '../components/ui';
+import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, useFieldId, useToast } from '../components/ui';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const ZONES = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Phoenix', 'America/Toronto', 'Europe/London', 'Europe/Dublin', 'Europe/Berlin', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Australia/Sydney', 'Pacific/Auckland', 'UTC'];
@@ -54,10 +54,10 @@ function RulesPanel() {
         </div>
         <div className="field">
           <span className="lbl">Count days as</span>
-          <div className="seg" role="group" aria-label="Day counting" style={{ alignSelf: 'flex-start' }}>
+          <Seg role="group" aria-label="Day counting" style={{ alignSelf: 'flex-start' }}>
             <button type="button" aria-pressed={v.dayMode === 'calendar'} onClick={() => setV({ ...v, dayMode: 'calendar' })}>Calendar days</button>
             <button type="button" aria-pressed={v.dayMode === 'business'} onClick={() => setV({ ...v, dayMode: 'business' })}>Working days</button>
-          </div>
+          </Seg>
           <span className="help">{v.dayMode === 'calendar' ? 'Every day counts, weekends included. Deadlines are never shifted silently.' : 'Only the working days below count, so deadlines always land on a working day.'}</span>
         </div>
         <div className="field">

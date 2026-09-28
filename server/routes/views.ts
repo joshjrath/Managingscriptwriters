@@ -149,7 +149,8 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     const { summaries, scripts } = await loadBatches(ctx, {}, clock);
     const users = await loadUsers(db);
     const clients = await db.query<{ id: number; name: string; status: 'active' | 'archived' }>(`select id, name, status from clients order by lower(name)`);
-    return { me, settings, users, clients, clock, counts: await computeCounts(ctx, me, summaries, scripts) };
+    const seen = await db.one<{ whats_new_seen: string | null }>(`select whats_new_seen from users where id = $1`, [me.id]);
+    return { me, whatsNewSeen: seen?.whats_new_seen ?? null, settings, users, clients, clock, counts: await computeCounts(ctx, me, summaries, scripts) };
   });
 
   app.get('/api/counts', async (req) => computeCounts(ctx, requireUser(req)));

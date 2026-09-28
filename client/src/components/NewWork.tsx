@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CalendarDays, Camera, CheckCheck, ChevronDown, FileText, Plus, Sparkles, Trash2, Type, Users } from 'lucide-react';
 import { api, ApiError, queryClient, useSave } from '../api';
 import { useBoot } from './Shell';
-import { Button, Dialog, Field, FormError, inputProps, useFieldId, useToast } from './ui';
+import { Button, Dialog, Field, FormError, inputProps, Seg, useFieldId, useToast } from './ui';
 import { addDays, computeDeadlines, dueState, suggestStart, type ISODate } from '../../../shared/dates';
 import { evenSplit, isManager } from '../../../shared/workflow';
 import { fmtBytes, fmtDate, fmtLong, fmtRange, plural } from '../../../shared/format';
@@ -50,11 +50,11 @@ export function NewWorkDialog({ state, onClose }: { state: { tab: NewWorkTab; pr
         <CreatedView created={created} onClose={onClose} onAgain={again} />
       ) : (
         <>
-          <div className="seg" role="tablist" aria-label="What to create" style={{ marginBottom: 20 }}>
+          <Seg role="tablist" aria-label="What to create" style={{ marginBottom: 20 }}>
             {TABS.map((t) => (
               <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>{t.icon}{t.label}</button>
             ))}
-          </div>
+          </Seg>
           {tab === 'shoot' && <ShootForm key={`s${formKey}`} preset={preset} onCreated={setCreated} />}
           {tab === 'batch' && <BatchForm key={`b${formKey}`} preset={preset} onCreated={setCreated} />}
           {tab === 'client' && <ClientForm key={`c${formKey}`} onCreated={setCreated} />}

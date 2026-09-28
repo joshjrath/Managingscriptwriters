@@ -52,6 +52,8 @@ export interface Counts {
 
 export interface Bootstrap {
   me: Me;
+  /** the newest What's new entry this person has opened */
+  whatsNewSeen: string | null;
   settings: Settings;
   users: UserSummary[];
   clients: ClientLite[];
@@ -66,6 +68,9 @@ export interface WriterShare {
   ranges: string;
   draftReady: number;
   delivered: number;
+  /** the writer's own "written so far" count (never less than what they've sent) */
+  written: number;
+  writtenAt: string | null;
 }
 
 export interface BatchSummary {
@@ -93,6 +98,8 @@ export interface BatchSummary {
   dateReviewNote: string | null;
   archivedAt: string | null;
   progress: Progress;
+  /** scripts written so far, from writers' progress counters plus everything already sent */
+  written: number;
   stage: Stage;
   writers: WriterShare[];
   draft: Milestone;
@@ -431,10 +438,40 @@ export interface AuditEntry {
   ip: string | null;
 }
 
+export type MomentKind = 'approved' | 'revisions' | 'drafts_done' | 'batch_done' | 'team_drafts_done' | 'team_batch_done';
+
+/** Something worth celebrating (or knowing about), shown once as an animation. */
+export interface Moment {
+  id: number;
+  kind: MomentKind;
+  batchId: number | null;
+  batchTitle: string;
+  clientName: string;
+  numbers: number[];
+  count: number;
+  /** who approved / sent back, or which writer finished */
+  byName: string | null;
+  note: string | null;
+  /** approved: every one of their scripts in the batch is now approved */
+  allMine: boolean;
+  withAttachment: boolean;
+  /** the person did this themselves (shown straight away) */
+  self: boolean;
+  createdAt: string;
+}
+
 export interface ReschedulePreview {
   shoot: Shoot;
   newStart: ISODate;
   newEnd: ISODate | null;
+  /** how many days the shoot moves (negative = earlier) */
+  days: number;
+  /** planned writing starts move by the same number of days */
+  plannedStarts: { batchId: number; batchTitle: string; from: ISODate; to: ISODate }[];
+  /** batches named after the shoot's dates get the new dates in their name */
+  renames: { batchId: number; from: string; to: string }[];
+  /** manual deadlines that could be moved too (see shiftManual) */
+  manualCount: number;
   changes: {
     batchId: number;
     batchTitle: string;
