@@ -81,7 +81,7 @@ export function MyWorkPage() {
 
 function NextUp({ e, today }: { e: Entry; today: string }) {
   const b = e.batch;
-  const rec = e.briefings.find((x) => x.recordingUrl);
+  const recUrl = e.briefings.find((x) => x.recordingUrl)?.recordingUrl ?? e.resources.find((r) => r.category === 'recording' && r.url)?.url;
   const p = e.myProgress;
   const nextScript = e.mine.find((s) => s.status === 'revisions_needed') ?? e.mine.find((s) => s.status === 'in_progress') ?? e.mine.find((s) => s.status === 'not_started');
   const toDeliver = e.mine.filter((s) => s.status === 'approved').length;
@@ -99,7 +99,7 @@ function NextUp({ e, today }: { e: Entry; today: string }) {
           </div>
         </div>
         <div className="row-flex s2">
-          {rec && <ExtLink href={rec.recordingUrl!} className="btn" ><PlayCircle aria-hidden />Recording</ExtLink>}
+          {recUrl && <ExtLink href={recUrl} className="btn" ><PlayCircle aria-hidden />Recording</ExtLink>}
           <Link to={`/batches/${b.id}#scripts`} className="btn" style={{ background: 'var(--on-accent)', color: 'var(--text)' }}>Open batch <ArrowRight aria-hidden /></Link>
         </div>
       </div>
@@ -146,6 +146,18 @@ function MyBatch({ e, writerId }: { e: Entry; writerId: number }) {
             <div className="deadline" style={{ ['--c' as string]: 'var(--lavender)' }}><span className="ic"><FileText /></span><div><div className="k">Drafts due</div><div className="v">{b.draftDue ? fmtLong(b.draftDue) : 'Not set'}</div></div><div className="right"><DueChip m={b.draft} today={clock.today} prefix={false} /></div></div>
             <div className="deadline" style={{ ['--c' as string]: 'var(--yellow)' }}><span className="ic"><Send /></span><div><div className="k">Final delivery</div><div className="v">{b.finalDue ? fmtLong(b.finalDue) : 'Not set'}</div></div><div className="right"><DueChip m={b.final} today={clock.today} prefix={false} /></div></div>
           </div>
+          {e.resources.length > 0 && (
+            <div className="stack s2" style={{ marginTop: 6 }}>
+              <div className="section-title">Recording & files</div>
+              <div className="links row-flex s2">
+                {e.resources.map((r) => (
+                  <a key={r.id} className={`btn sm${r.category === 'recording' ? ' salmon' : ''}`} href={r.kind === 'file' ? `/api/files/${r.fileId}` : r.url!} target="_blank" rel="noopener noreferrer">
+                    {r.category === 'recording' ? <PlayCircle aria-hidden /> : <FileText aria-hidden />}{r.title}
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
           {e.briefings.length > 0 && (
             <div className="stack s2" style={{ marginTop: 6 }}>
               <div className="section-title">Brief</div>

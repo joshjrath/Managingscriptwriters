@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { clockFor, lastDeliveredAt, loadBatches, loadSettings, loadUsers, type Ctx, type ScriptLiteRow } from '../core';
 import { requireUser } from '../auth';
 import { parse, zs } from '../http';
-import { loadBriefings, loadDeliveries, loadRevisions, loadScripts, loadShoots } from '../records';
+import { loadBriefings, loadDeliveries, loadResources, loadRevisions, loadScripts, loadShoots } from '../records';
 import { addDays, diffDays, nowInZone, startOfWeek, workingDaysBetween, type Clock, type ISODate } from '../../shared/dates';
 import { isDraftReady, summarize, type ScriptStatus } from '../../shared/workflow';
 import { plural } from '../../shared/format';
@@ -270,10 +270,11 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     });
     const allScripts = await loadScripts(db, { assigneeId: uid });
     const briefings = await Promise.all(mineBatches.map((b) => loadBriefings(db, { batchId: b.id })));
+    const resources = await Promise.all(mineBatches.map((b) => loadResources(db, { batchId: b.id, includeArchivedClients: true })));
     const rank = (b: BatchSummary) => (b.next?.overdue ? 0 : b.next?.dueToday ? 1 : 2);
     const list = mineBatches.map((b, i) => {
       const mine = allScripts.filter((s) => s.batchId === b.id);
-      return { batch: b, mine, myProgress: summarize(mine.map((s) => ({ status: s.status, assigneeId: s.assigneeId }))), briefings: briefings[i] };
+      return { batch: b, mine, myProgress: summarize(mine.map((s) => ({ status: s.status, assigneeId: s.assigneeId }))), briefings: briefings[i], resources: resources[i] };
     }).sort((a, b) => {
       const doneA = a.myProgress.delivered === a.myProgress.total ? 1 : 0;
       const doneB = b.myProgress.delivered === b.myProgress.total ? 1 : 0;

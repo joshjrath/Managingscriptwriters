@@ -358,7 +358,7 @@ export interface ReviewQueue {
 }
 
 export interface MyWork {
-  batches: { batch: BatchSummary; mine: Script[]; myProgress: Progress; briefings: Briefing[] }[];
+  batches: { batch: BatchSummary; mine: Script[]; myProgress: Progress; briefings: Briefing[]; resources: Resource[] }[];
   revisions: ReviewQueue['revisions'];
   recentDeliveries: (Delivery & { batchTitle: string; clientName: string })[];
 }

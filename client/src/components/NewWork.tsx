@@ -5,13 +5,13 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, CalendarDays, Camera, CheckCheck, ChevronDown, Plus, Sparkles, Trash2, Type, Users } from 'lucide-react';
+import { AlertTriangle, CalendarDays, Camera, CheckCheck, ChevronDown, FileText, Plus, Sparkles, Trash2, Type, Users } from 'lucide-react';
 import { api, ApiError, queryClient, useSave } from '../api';
 import { useBoot } from './Shell';
 import { Button, Dialog, Field, FormError, inputProps, useFieldId, useToast } from './ui';
 import { addDays, computeDeadlines, dueState, suggestStart, type ISODate } from '../../../shared/dates';
 import { evenSplit, isManager } from '../../../shared/workflow';
-import { fmtDate, fmtLong, fmtRange, plural } from '../../../shared/format';
+import { fmtBytes, fmtDate, fmtLong, fmtRange, plural } from '../../../shared/format';
 import { parseEntry, type ParsedEntry } from '../../../shared/parse';
 import type { BatchSummary, ClientDetail, Priority, ResourceCategory } from '../../../shared/types';
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
@@ -227,6 +227,78 @@ function useNames() {
   return (id: number) => users.find((u) => u.id === id)?.name ?? 'Unknown';
 }
 
+// ── recording & files for a new batch ────────────────────────────────────
+
+interface Attach { recordingUrl: string; documentUrl: string; files: File[] }
+const emptyAttach = (): Attach => ({ recordingUrl: '', documentUrl: '', files: [] });
+const isUrl = (v: string) => /^https?:\/\/\S+$/i.test(v.trim());
+
+function attachErrors(a: Attach): Record<string, string> {
+  const e: Record<string, string> = {};
+  if (a.recordingUrl.trim() && !isUrl(a.recordingUrl)) e.recordingUrl = 'Use a full link starting with https://';
+  if (a.documentUrl.trim() && !isUrl(a.documentUrl)) e.documentUrl = 'Use a full link starting with https://';
+  return e;
+}
+
+/** Saves the links and files onto the new batch. Returns warnings for anything that failed. */
+async function saveAttachments(clientId: number, batchId: number, a: Attach): Promise<{ saved: string[]; warnings: string[] }> {
+  const saved: string[] = [];
+  const warnings: string[] = [];
+  const links = [
+    a.recordingUrl.trim() && { category: 'recording', title: 'Recording', url: a.recordingUrl.trim() },
+    a.documentUrl.trim() && { category: 'document', title: 'Brief document', url: a.documentUrl.trim() },
+  ].filter(Boolean) as { category: ResourceCategory; title: string; url: string }[];
+  for (const l of links) {
+    try { await api('/api/resources', { body: { clientId, batchId, ...l } }); saved.push(l.title.toLowerCase()); }
+    catch (err) { warnings.push(`The batch was saved, but the ${l.title.toLowerCase()} link wasn’t (${(err as ApiError).message}). Add it from the batch page.`); }
+  }
+  for (const file of a.files) {
+    const form = new FormData();
+    form.set('clientId', String(clientId));
+    form.set('batchId', String(batchId));
+    form.set('category', /pdf|word|document|text/i.test(file.type) || /\.(pdf|docx?|txt)$/i.test(file.name) ? 'document' : 'asset');
+    form.set('title', file.name);
+    form.set('file', file);
+    try { await api('/api/resources/upload', { form }); saved.push(file.name); }
+    catch (err) { warnings.push(`The batch was saved, but “${file.name}” didn’t upload (${(err as ApiError).message}). Upload it from the batch page.`); }
+  }
+  return { saved, warnings };
+}
+
+function AttachmentsSection({ value, onChange, errors: shown }: { value: Attach; onChange: (a: Attach) => void; errors: Record<string, string> }) {
+  const ids = { r: useFieldId('ar'), d: useFieldId('ad'), f: useFieldId('af') };
+  // an error disappears as soon as the link is fixed
+  const live = attachErrors(value);
+  const errors = { recordingUrl: live.recordingUrl && shown.recordingUrl, documentUrl: live.documentUrl && shown.documentUrl };
+  return (
+    <div className="form-grid">
+      <Field label="Recording link" optional htmlFor={ids.r} error={errors.recordingUrl} help="e.g. the Phantom recording of the ideation call">
+        <input className="input" type="url" placeholder="https://" value={value.recordingUrl} onChange={(e) => onChange({ ...value, recordingUrl: e.target.value })} {...inputProps(ids.r, errors.recordingUrl)} />
+      </Field>
+      <Field label="Document link" optional htmlFor={ids.d} error={errors.documentUrl} help="Google Doc, Notion page, Drive folder…">
+        <input className="input" type="url" placeholder="https://" value={value.documentUrl} onChange={(e) => onChange({ ...value, documentUrl: e.target.value })} {...inputProps(ids.d, errors.documentUrl)} />
+      </Field>
+      <Field label="Upload PDFs or files" optional htmlFor={ids.f} className="full" help="Choose one or several, up to 25 MB each. Only signed-in team members can open them.">
+        <input className="input" type="file" multiple id={ids.f} accept=".pdf,.doc,.docx,.txt,.rtf,.png,.jpg,.jpeg,.webp,.key,.ppt,.pptx,.xls,.xlsx,.csv"
+          onChange={(e) => { onChange({ ...value, files: [...value.files, ...Array.from(e.target.files ?? [])] }); e.target.value = ''; }} />
+      </Field>
+      {value.files.length > 0 && (
+        <div className="full stack s2">
+          {value.files.map((f, i) => (
+            <div key={`${f.name}-${i}`} className="res">
+              <span className="ic"><FileText /></span>
+              <div style={{ minWidth: 0 }}><div className="t">{f.name}</div><div className="s">{fmtBytes(f.size)}</div></div>
+              <button type="button" className="icon-btn sm" aria-label={`Remove ${f.name}`} onClick={() => onChange({ ...value, files: value.files.filter((_, j) => j !== i) })}><Trash2 size={15} /></button>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const attachedLine = (saved: string[]) => (saved.length ? [{ k: 'Attached', v: saved.join(', ') }] : []);
+
 // ── new shoot ────────────────────────────────────────────────────────────
 
 function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (c: Created) => void }) {
@@ -248,6 +320,8 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   const [brief, setBrief] = useState('');
   const [location, setLocation] = useState('');
   const [local, setLocal] = useState<Record<string, string>>({});
+  const [attach, setAttach] = useState<Attach>(emptyAttach);
+  const [uploading, setUploading] = useState(false);
   const client = useClient(clientId);
   const ids = { client: useFieldId('client'), start: useFieldId('start'), end: useFieldId('end'), count: useFieldId('count'), title: useFieldId('st'), bt: useFieldId('bt'), pr: useFieldId('pr'), ps: useFieldId('ps'), dd: useFieldId('dd'), fd: useFieldId('fd'), loc: useFieldId('loc'), brief: useFieldId('brief') };
 
@@ -257,12 +331,15 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   }, [count, parts]);
 
   const save = useSave((body: Record<string, unknown>) => api<{ shootId: number; batchId: number; warnings: string[]; batch: BatchSummary }>('/api/shoots', { body }), {
-    onSuccess: (out) => {
+    onSuccess: async (out) => {
       const d = computeDeadlines(start, settings);
       const split = cleanSplit(parts);
+      setUploading(true);
+      const att = await saveAttachments(out.batch.clientId, out.batchId, attach).finally(() => setUploading(false));
+      await queryClient.invalidateQueries();
       onCreated({
         kind: 'shoot', title: `Shoot scheduled for ${out.batch.clientName}`, batchId: out.batchId, clientId: undefined,
-        warnings: out.warnings,
+        warnings: [...out.warnings, ...att.warnings],
         lines: [
           { k: 'Shoot', v: fmtRange(start, end || null) },
           { k: 'Batch', v: `${out.batch.title} · ${plural(Number(count), 'script')}` },
@@ -270,6 +347,7 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
           { k: 'Drafts due', v: fmtLong(out.batch.draftDue!), rule: out.batch.draftDueMode === 'auto' ? d.draftRule : 'Manual override' },
           { k: 'Final delivery', v: fmtLong(out.batch.finalDue!), rule: out.batch.finalDueMode === 'auto' ? d.finalRule : 'Manual override' },
           ...(planned ? [{ k: 'Writing starts', v: fmtLong(planned) }] : []),
+          ...attachedLine(att.saved),
         ],
       });
     },
@@ -281,6 +359,7 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
     if (!start) errs.startDate = 'Enter the first shoot day';
     if (end && start && end < start) errs.endDate = 'The shoot can’t end before it starts';
     if (!count || Number(count) < 1) errs['batch.targetCount'] = 'How many scripts are needed?';
+    Object.assign(errs, attachErrors(attach));
     setLocal(errs);
     if (Object.keys(errs).length) return;
     save.mutate({
@@ -303,6 +382,7 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
         <div className="field full"><span className="lbl">Deadlines</span><DeadlinePreview start={start as ISODate} draftOverride={draftOverride as ISODate} finalOverride={finalOverride as ISODate} /></div>
         <div className="field full"><span className="lbl">Writers</span><SplitEditor total={Number(count) || 0} parts={parts} onChange={setParts} error={f['batch.split']} /></div>
       </div>
+      <div className="field"><span className="lbl">Recording & files <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional</span></span><AttachmentsSection value={attach} onChange={setAttach} errors={f} /></div>
       <Advanced>
         <div className="form-grid">
           <Field label="Shoot name" optional htmlFor={ids.title}><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Autumn range shoot" id={ids.title} /></Field>
@@ -317,7 +397,7 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
         </div>
       </Advanced>
       <div className="form-actions">
-        <Button type="submit" variant="primary pill lg" busy={save.isPending} onClick={submit}>Create shoot & batch</Button>
+        <Button type="submit" variant="primary pill lg" busy={save.isPending || uploading} onClick={submit}>{uploading ? 'Uploading files…' : 'Create shoot & batch'}</Button>
       </div>
     </form>
   );
@@ -341,6 +421,8 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   const [brief, setBrief] = useState('');
   const [nextAction, setNextAction] = useState('');
   const [local, setLocal] = useState<Record<string, string>>({});
+  const [attach, setAttach] = useState<Attach>(emptyAttach);
+  const [uploading, setUploading] = useState(false);
   const client = useClient(clientId);
   const shoots = (client.data?.shoots ?? []).filter((s) => !s.cancelledAt && (s.endDate ?? s.startDate) >= addDays(clock.today, -1));
   const shoot = shoots.find((s) => s.id === shootId);
@@ -351,16 +433,20 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   }, [count, parts]);
 
   const save = useSave((body: Record<string, unknown>) => api<{ batchId: number; warnings: string[]; batch: BatchSummary }>('/api/batches', { body }), {
-    onSuccess: (out) => {
+    onSuccess: async (out) => {
       const split = cleanSplit(parts);
+      setUploading(true);
+      const att = await saveAttachments(out.batch.clientId, out.batchId, attach).finally(() => setUploading(false));
+      await queryClient.invalidateQueries();
       onCreated({
-        kind: 'batch', title: `Batch created for ${out.batch.clientName}`, batchId: out.batchId, warnings: out.warnings,
+        kind: 'batch', title: `Batch created for ${out.batch.clientName}`, batchId: out.batchId, warnings: [...out.warnings, ...att.warnings],
         lines: [
           { k: 'Batch', v: `${out.batch.title} · ${plural(out.batch.targetCount, 'script')}` },
           { k: 'Shoot', v: out.batch.shootStart ? fmtRange(out.batch.shootStart, out.batch.shootEnd) : 'No shoot — standalone batch' },
           { k: 'Writers', v: split.length ? splitLines(split, out.batch.targetCount, names) : 'None yet — all scripts unassigned' },
           { k: 'Drafts due', v: out.batch.draftDue ? fmtLong(out.batch.draftDue) : 'Not set', rule: out.batch.draftDueMode === 'auto' ? auto?.draftRule : out.batch.draftDue ? 'Entered manually' : undefined },
           { k: 'Final delivery', v: out.batch.finalDue ? fmtLong(out.batch.finalDue) : 'Not set', rule: out.batch.finalDueMode === 'auto' ? auto?.finalRule : out.batch.finalDue ? 'Entered manually' : undefined },
+          ...attachedLine(att.saved),
         ],
       });
     },
@@ -372,6 +458,7 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
     if (!title.trim()) errs.title = 'Give the batch a name';
     if (!count || Number(count) < 1) errs.targetCount = 'How many scripts are needed?';
     if (draft && final && draft > final) errs.draftDue = 'Drafts must be due on or before final delivery';
+    Object.assign(errs, attachErrors(attach));
     setLocal(errs);
     if (Object.keys(errs).length) return;
     save.mutate({
@@ -400,6 +487,7 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
         </Field>
         <div className="field full"><span className="lbl">Writers</span><SplitEditor total={Number(count) || 0} parts={parts} onChange={setParts} error={f.split} /></div>
       </div>
+      <div className="field"><span className="lbl">Recording & files <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional</span></span><AttachmentsSection value={attach} onChange={setAttach} errors={f} /></div>
       <Advanced>
         <div className="form-grid">
           <Field label="Priority" htmlFor={ids.pr}><select className="select" id={ids.pr} value={priority} onChange={(e) => setPriority(e.target.value as Priority)}>{PRIORITIES.map((x) => <option key={x} value={x}>{PRIORITY_LABEL[x]}</option>)}</select></Field>
@@ -409,7 +497,7 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
           <Field label="Next action" optional htmlFor={ids.na} className="full"><input className="input" id={ids.na} value={nextAction} onChange={(e) => setNextAction(e.target.value)} placeholder="e.g. Confirm tone with the client" /></Field>
         </div>
       </Advanced>
-      <div className="form-actions"><Button type="submit" variant="primary pill lg" busy={save.isPending} onClick={submit}>Create batch</Button></div>
+      <div className="form-actions"><Button type="submit" variant="primary pill lg" busy={save.isPending || uploading} onClick={submit}>{uploading ? 'Uploading files…' : 'Create batch'}</Button></div>
     </form>
   );
 }

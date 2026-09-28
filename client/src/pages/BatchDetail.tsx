@@ -494,6 +494,9 @@ function BriefSection({ b }: { b: BatchDetail }) {
           </div>
         </details>
       )}
+      {batchRes.some((r) => r.category === 'recording' && r.url) && (
+        <div className="links row-flex s2">{batchRes.filter((r) => r.category === 'recording' && r.url).map((r) => <ExtLink key={r.id} href={r.url!} className="btn sm salmon"><PlayCircle aria-hidden />{r.title}</ExtLink>)}</div>
+      )}
       {batchRes.length > 0 && <div className="stack s2"><div className="section-title">This batch</div>{batchRes.map((r) => <ResourceRow key={r.id} r={r} onRemove={isManager(me.role) || r.createdById === me.id ? () => remove.mutate(r.id) : undefined} />)}</div>}
       {clientRes.length > 0 && <div className="stack s2"><div className="section-title">Client folders, examples & assets</div>{clientRes.map((r) => <ResourceRow key={r.id} r={r} />)}</div>}
       {!b.briefings.length && !batchRes.length && !clientRes.length && <Empty boxed title="No briefing materials yet">Attach a briefing call or add links so writers know what applies.</Empty>}
