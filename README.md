@@ -64,7 +64,7 @@ There is no Timeliner integration and no fake "send to Timeliner" button. The wr
 
 In-app notifications cover assignments, deadline changes, approaching / due-today / overdue deadlines, review requests, revision requests, blockers and delivery confirmations. Reminder notifications are deduplicated per user, batch, milestone and date. Overdue badges on the dashboard, production board and batch pages come from the data, so they stay visible after a notification is read.
 
-**Reminders run inside the web server every 10 minutes while it is running** (Railway keeps a service running unless you enable serverless sleeping). Running several instances is safe: a Postgres advisory lock lets one run at a time, and deduplication prevents repeats. To use an external scheduler instead, set `REMINDERS=off` and run `npm run reminders` from a cron service.
+**Reminders run inside the web server every 10 minutes while it is running** (on Render that means a paid instance; free instances sleep). Running several instances is safe: a Postgres advisory lock lets one run at a time, and deduplication prevents repeats. To use an external scheduler instead, set `REMINDERS=off` and run `npm run reminders` from a cron service.
 
 Every meaningful change (creation, assignments, status changes, reviews, deliveries, deadline moves, blockers, target changes, archiving) is written to the activity history with actor and timestamp, shown on batch and client pages.
 
@@ -74,18 +74,21 @@ Overview · My work · Production (board + table, filters, search) · Calendar (
 
 Responsive: full sidebar on wide screens, collapsible icon rail on smaller desktops/tablets, navigation drawer and card layouts on phones (My work, deadlines, briefs and delivery confirmation are prioritised).
 
-## Deploy to Railway
+## Deploy to Render
 
-1. **New Project → Deploy from GitHub repo →** this repository. `railway.json` runs `npm run build`, then `npm start`, with a health check on `/healthz`.
-2. **+ New → Database → PostgreSQL** in the same project.
-3. In the web service's **Variables**, add:
-   - `DATABASE_URL` = `${{Postgres.DATABASE_URL}}`
-   - `MANAGER_EMAIL`, `MANAGER_NAME`, `MANAGER_PASSWORD` — the first manager, created on first start (at least 10 characters)
-4. **Settings → Networking → Generate Domain.** Sign in, then add writers in **Settings → Team** (you set a temporary password; they can change it from the menu under their name).
+1. Push this repo to GitHub, then in Render choose **New → Blueprint** and pick the repo. `render.yaml` creates:
+   - the web service (`npm ci && npm run build`, then `npm start`, health check `/healthz`, Node 22)
+   - a PostgreSQL 16 database, with `DATABASE_URL` wired in automatically
+2. When Render asks, fill in `MANAGER_EMAIL`, `MANAGER_NAME` and `MANAGER_PASSWORD` (at least 10 characters). That account is created on first start.
+3. Open the `.onrender.com` URL, sign in, and add writers in **Settings → Team**.
 
-The server creates its tables on first start and refuses to start in production without `DATABASE_URL` (so data is never written to an ephemeral disk). See `.env.example` for optional settings. There are no other credentials or third-party services to configure.
+**Keep the web service on a paid instance (the blueprint uses Starter).** Render's free web services sleep when nobody is using them, and the deadline reminders run inside the server, so they would stop. If you want the free plan anyway, set `REMINDERS=off` and add a Render **Cron Job** on the same repo that runs `npm run reminders` every 15 minutes with the same `DATABASE_URL`.
 
-Any Node 22 host with PostgreSQL works the same way: `npm ci && npm run build && npm start`.
+The server creates its tables on first start and refuses to start without `DATABASE_URL`, so nothing is ever written to Render's temporary disk. Uploaded files are stored in Postgres, so no Render disk is needed. Pick a database plan with backups; check Render's current terms, because free databases are time-limited.
+
+To set it up by hand instead of using the blueprint: create a PostgreSQL database, then a Node web service with build command `npm ci && npm run build`, start command `npm start`, health check path `/healthz`, and environment variables `NODE_VERSION=22`, `DATABASE_URL` (the database's internal connection string) and the three `MANAGER_*` values.
+
+Any other Node 22 host with PostgreSQL works the same way (`railway.json` is kept for Railway).
 
 ## Security
 

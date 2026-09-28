@@ -12,7 +12,7 @@ import { seedDemo } from './seed-demo';
 import type { Ctx } from './core';
 
 const env = process.env;
-const production = env.NODE_ENV === 'production' || !!env.RAILWAY_ENVIRONMENT;
+const production = env.NODE_ENV === 'production' || !!env.RENDER || !!env.RAILWAY_ENVIRONMENT;
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 async function main() {
