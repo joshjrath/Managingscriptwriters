@@ -1,20 +1,22 @@
 // Settings (managers): deadline rules, timezone and cutoff, reminders, team.
 
 import { useEffect, useState } from 'react';
-import { AlertTriangle, CalendarClock, Check, Copy, Plus, RefreshCw, UserPlus } from 'lucide-react';
+import { isManager, ROLE_LABEL, type Role } from '../../../shared/workflow';
+import { AlertTriangle, CalendarClock, Check, Copy, KeyRound, Plus, RefreshCw, UserPlus } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
 import { api, useSave } from '../api';
 import type { Settings, UserSummary } from '../../../shared/types';
 import { computeDeadlines, DEFAULT_RULES, isValidTimeZone } from '../../../shared/dates';
 import { fmtCutoff, fmtLong, fmtStamp, plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
-import { Avatar, Button, Chip, Dialog, Field, FormError, inputProps, Panel, useFieldId, useToast } from '../components/ui';
+import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, useFieldId, useToast } from '../components/ui';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const ZONES = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Phoenix', 'America/Toronto', 'Europe/London', 'Europe/Dublin', 'Europe/Berlin', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Australia/Sydney', 'Pacific/Auckland', 'UTC'];
 
 export function SettingsPage() {
   const { me } = useBoot();
-  if (me.role !== 'manager') {
+  if (!isManager(me.role)) {
     return <><PageHeader title="Settings" /><Panel><p className="muted">Only managers can change organisation settings. You can change your password from the menu under your name.</p></Panel></>;
   }
   return (
@@ -84,30 +86,87 @@ function RulesPanel() {
   );
 }
 
+const ROLE_COLOR: Record<Role, string> = { owner: 'salmon', manager: 'salmon', writer: 'cyan' };
+
 function TeamPanel() {
-  const { users, me } = useBoot();
+  const { me, settings } = useBoot();
+  const q = useQuery({ queryKey: ['team'], queryFn: () => api<{ users: UserSummary[] }>('/api/users') });
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<UserSummary | null>(null);
+  const [sharing, setSharing] = useState<UserSummary | null>(null);
+  const [removing, setRemoving] = useState<UserSummary | null>(null);
+  const team = (q.data?.users ?? []).filter((u) => !u.removed);
+  const order: Record<Role, number> = { owner: 0, manager: 1, writer: 2 };
+  team.sort((a, b) => Number(b.active) - Number(a.active) || order[a.role] - order[b.role] || a.name.localeCompare(b.name));
   return (
-    <Panel title="Team" count={users.filter((u) => u.active).length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setAdding(true)}>Add person</Button>}>
+    <Panel title="Team" count={team.filter((u) => u.active).length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setAdding(true)}>Add person</Button>}>
+      {q.isLoading && <Loading height={200} />}
+      {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
       <div className="rows">
-        {users.map((u) => (
-          <button key={u.id} className="item clickable" style={{ border: 0, textAlign: 'left', color: 'inherit', font: 'inherit', opacity: u.active ? 1 : 0.55 }} onClick={() => setEditing(u)}>
-            <div className="row-flex" style={{ flexWrap: 'nowrap', minWidth: 0 }}>
+        {team.map((u) => (
+          <div key={u.id} className="item" style={{ opacity: u.active ? 1 : 0.6 }}>
+            <button className="row-flex" style={{ flexWrap: 'nowrap', minWidth: 0, border: 0, background: 'none', color: 'inherit', font: 'inherit', textAlign: 'left', padding: 0, cursor: 'pointer' }} onClick={() => setEditing(u)} aria-label={`Edit ${u.name}`}>
               <Avatar name={u.name} id={u.id} />
-              <div className="body"><div className="title">{u.name}{u.id === me.id ? ' (you)' : ''}</div><div className="meta ellipsis">{u.email}</div></div>
-            </div>
+              <div className="body">
+                <div className="title">{u.name}{u.id === me.id ? ' (you)' : ''}</div>
+                <div className="meta ellipsis">{u.email}</div>
+                <div className="meta">{u.active ? (u.capacityPerDay ? `${u.capacityPerDay} scripts / working day` : 'Capacity not set') : 'Deactivated'}</div>
+              </div>
+            </button>
             <div className="side">
-              <Chip color={u.role === 'manager' ? 'salmon' : 'cyan'}>{u.role === 'manager' ? 'Manager' : 'Writer'}</Chip>
-              <span className="muted" style={{ fontSize: 12 }}>{u.active ? (u.capacityPerDay ? `${u.capacityPerDay} scripts / working day` : 'Capacity not set') : 'Deactivated'}</span>
+              <Chip color={ROLE_COLOR[u.role]}>{ROLE_LABEL[u.role]}</Chip>
+              {u.tempPassword
+                ? <Button variant="sm" icon={<Copy aria-hidden />} onClick={() => setSharing(u)} title="They haven’t set their own password yet">Copy sign-in details</Button>
+                : u.id !== me.id && u.active ? <span className="muted" style={{ fontSize: 12 }}>Set their own password</span> : null}
+              <div className="row-flex s2">
+                <Button variant="sm ghost" onClick={() => setEditing(u)}>Edit</Button>
+                {u.id !== me.id && <Button variant="sm ghost" onClick={() => setRemoving(u)}>Remove</Button>}
+              </div>
             </div>
-          </button>
+          </div>
         ))}
       </div>
-      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>Writers only show as over capacity when a capacity is set. Managers can be assigned scripts too.</p>
+      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>Owners and managers have the same permissions. The temporary password stays copyable here until the person sets their own. Writers only show as over capacity when a capacity is set.</p>
       {adding && <PersonDialog onClose={() => setAdding(false)} />}
       {editing && <PersonDialog user={editing} onClose={() => setEditing(null)} />}
+      {sharing && <ShareDetails name={firstName(sharing.name)} onClose={() => setSharing(null)}
+        message={signInMessage({ name: sharing.name, email: sharing.email, password: sharing.tempPassword!, role: sharing.role, orgName: settings.orgName, url: window.location.origin })} />}
+      {removing && <RemoveDialog user={removing} team={team} onClose={() => setRemoving(null)} />}
     </Panel>
+  );
+}
+
+const firstName = (name: string) => name.trim().split(/\s+/)[0] || name;
+
+function RemoveDialog({ user, team, onClose }: { user: UserSummary; team: UserSummary[]; onClose: () => void }) {
+  const toast = useToast();
+  const [to, setTo] = useState('');
+  const work = useQuery({ queryKey: ['open-work', user.id], queryFn: () => api<{ scripts: number; batches: { id: number; title: string; clientName: string; scripts: number }[] }>(`/api/users/${user.id}/open-work`) });
+  const remove = useSave(() => api<{ moved: number }>(`/api/users/${user.id}/remove`, { body: { reassignTo: to ? Number(to) : null } }), {
+    onSuccess: (out) => { toast(`${user.name} removed${out.moved ? ` · ${plural(out.moved, 'script')} ${to ? 'reassigned' : 'unassigned'}` : ''}`); onClose(); },
+  });
+  const id = useFieldId('rm');
+  const n = work.data?.scripts ?? 0;
+  return (
+    <Dialog open onClose={onClose} title={`Remove ${user.name}?`} sub="They’re signed out and can’t sign in any more. Their name stays in the history, and you can add them back later with the same email." size="narrow"
+      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="danger" busy={remove.isPending} disabled={work.isLoading} onClick={() => remove.mutate(undefined)}>Remove {firstName(user.name)}</Button></div>}>
+      <div className="form">
+        <FormError error={remove.error} />
+        {work.isLoading && <span className="muted">Checking their work…</span>}
+        {work.data && !n && <p className="muted">They have no unfinished scripts.</p>}
+        {work.data && n > 0 && (
+          <>
+            <div className="banner yellow"><AlertTriangle aria-hidden /><div className="txt"><b>{plural(n, 'unfinished script')}</b><span>{work.data.batches.map((b) => `${b.clientName} · ${b.title} (${b.scripts})`).join(' · ')}</span></div></div>
+            <Field label="Give their unfinished scripts to" htmlFor={id} help="Delivered scripts keep their name.">
+              <select className="select" id={id} value={to} onChange={(e) => setTo(e.target.value)}>
+                <option value="">Nobody — leave them unassigned</option>
+                {team.filter((u) => u.active && u.id !== user.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+              </select>
+            </Field>
+          </>
+        )}
+      </div>
+    </Dialog>
   );
 }
 
@@ -120,12 +179,12 @@ export function generatePassword(): string {
   return `${chars.slice(0, 4)}-${chars.slice(4, 8)}-${chars.slice(8, 12)}`;
 }
 
-export function signInMessage(p: { name: string; email: string; password: string; role: 'manager' | 'writer'; orgName: string; url: string; reset?: boolean }): string {
+export function signInMessage(p: { name: string; email: string; password: string; role: Role; orgName: string; url: string; reset?: boolean }): string {
   const first = p.name.trim().split(/\s+/)[0] || 'there';
   return [
     p.reset
       ? `Hi ${first}, your ${p.orgName} password has been reset.`
-      : `Hi ${first}, you've been added to ${p.orgName}'s script production workspace as a ${p.role}.`,
+      : `Hi ${first}, you've been added to ${p.orgName}'s script production workspace as ${p.role === 'owner' ? 'an owner' : `a ${p.role}`}.`,
     '',
     `Sign in: ${p.url}`,
     `Email: ${p.email}`,
@@ -159,7 +218,7 @@ function ShareDetails({ message, name, onClose }: { message: string; name: strin
   const [copied, setCopied] = useState<'idle' | 'ok' | 'fail'>('idle');
   const copy = async () => setCopied((await copyText(message)) ? 'ok' : 'fail');
   return (
-    <Dialog open onClose={onClose} title={`Send ${name} their sign-in details`} sub="Copy this and paste it into WhatsApp, Slack, text or email. The password is only shown now — it isn’t stored anywhere readable." size="narrow"
+    <Dialog open onClose={onClose} title={`Send ${name} their sign-in details`} sub="Copy this and paste it into WhatsApp, Slack, text or email. You can copy it again from Team until they set their own password." size="narrow"
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Done</Button><Button variant="primary pill" icon={copied === 'ok' ? <Check aria-hidden /> : <Copy aria-hidden />} onClick={copy}>{copied === 'ok' ? 'Copied' : 'Copy message'}</Button></div>}>
       <div className="form">
         <pre className="share-block" aria-label="Sign-in message">{message}</pre>
@@ -175,7 +234,7 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
   const { me } = useBoot();
   const [name, setName] = useState(user?.name ?? '');
   const [email, setEmail] = useState(user?.email ?? '');
-  const [role, setRole] = useState<'manager' | 'writer'>(user?.role ?? 'writer');
+  const [role, setRole] = useState<Role>(user?.role ?? 'writer');
   const [capacity, setCapacity] = useState(user?.capacityPerDay != null ? String(user.capacityPerDay) : '');
   const { settings } = useBoot();
   const [password, setPassword] = useState(() => (user ? '' : generatePassword()));
@@ -197,7 +256,7 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
   });
   const f = save.error?.fields ?? {};
   const ids = { n: useFieldId('n'), e: useFieldId('e'), r: useFieldId('r'), c: useFieldId('c'), p: useFieldId('p') };
-  if (share) return <ShareDetails message={share} name={name.split(/\s+/)[0] || name} onClose={onClose} />;
+  if (share) return <ShareDetails message={share} name={firstName(name)} onClose={onClose} />;
   return (
     <Dialog open onClose={onClose} title={user ? `Edit ${user.name}` : 'Add a person'} size="narrow"
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={save.isPending} onClick={() => save.mutate(undefined)} icon={user ? undefined : <Plus aria-hidden />}>{user ? 'Save' : 'Add person'}</Button></div>}>
@@ -205,8 +264,8 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
         <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} /></Field>
         <Field label="Email" htmlFor={ids.e} error={f.email} help={user ? 'Email can’t be changed here.' : 'They sign in with this.'}><input className="input" type="email" value={email} disabled={!!user} onChange={(e) => setEmail(e.target.value)} {...inputProps(ids.e, f.email)} /></Field>
-        <Field label="Role" htmlFor={ids.r} help="Writers see everything but can only update their own scripts, blockers, resources and deliveries.">
-          <select className="select" id={ids.r} value={role} onChange={(e) => setRole(e.target.value as 'manager' | 'writer')}><option value="writer">Writer</option><option value="manager">Manager</option></select>
+        <Field label="Role" htmlFor={ids.r} help="Owners and managers can do everything. Writers see everything but can only update their own scripts, blockers, resources and deliveries.">
+          <select className="select" id={ids.r} value={role} onChange={(e) => setRole(e.target.value as Role)}><option value="writer">Writer</option><option value="manager">Manager</option><option value="owner">Owner</option></select>
         </Field>
         <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates and over-capacity warnings."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>
         <Field label={user ? 'Reset password' : 'Temporary password'} optional={!!user} htmlFor={ids.p} error={f.password} help={user ? 'Leave empty to keep their password. Set one and you’ll get a message to send them.' : 'At least 10 characters. After saving you’ll get a ready-to-send message with this and the sign-in link.'}>
@@ -215,6 +274,9 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
             <Button variant="sm" icon={<RefreshCw aria-hidden />} onClick={() => setPassword(generatePassword())}>Generate</Button>
           </div>
         </Field>
+        {user?.tempPassword && (
+          <div className="banner"><KeyRound aria-hidden /><div className="txt"><b>Temporary password: <span className="tnum" style={{ userSelect: 'all' }}>{user.tempPassword}</span></b><span>They haven’t set their own password yet.</span></div></div>
+        )}
         {user && user.id !== me.id && (
           <label className="check"><input type="checkbox" checked={!active} onChange={(e) => setActive(!e.target.checked)} />Deactivate (signs them out; their history is kept)</label>
         )}

@@ -11,7 +11,7 @@ import {
 import { api, useSave, type ApiError } from '../api';
 import type { BatchDetail, ClientDetail, Priority, ReschedulePreview, Resource, ResourceCategory, Script } from '../../../shared/types';
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
-import { ACTION_RULES, checkAction, compressRanges, parseRanges, STATUS_LABEL, type ScriptAction, type ScriptStatus } from '../../../shared/workflow';
+import { ACTION_RULES, checkAction, compressRanges, parseRanges, STATUS_LABEL, type ScriptAction, type ScriptStatus, isManager } from '../../../shared/workflow';
 import { addDays, computeDeadlines, diffDays, isISODate, suggestStart, type ISODate } from '../../../shared/dates';
 import { fmtBytes, fmtCutoff, fmtDate, fmtLong, fmtRange, fmtStamp, fmtTimeZoneAbbr, plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
@@ -30,7 +30,7 @@ export function BatchPage() {
 
 function BatchView({ b }: { b: BatchDetail }) {
   const { me, clock, settings } = useBoot();
-  const manager = me.role === 'manager';
+  const manager = isManager(me.role);
   const toast = useToast();
   const [edit, setEdit] = useState(false);
   const [target, setTarget] = useState(false);
@@ -177,7 +177,7 @@ const ACTION_SHORT: Record<ScriptAction, string> = { start: 'Mark in progress', 
 
 function ScriptChecklist({ b }: { b: BatchDetail }) {
   const { me, users } = useBoot();
-  const manager = me.role === 'manager';
+  const manager = isManager(me.role);
   const toast = useToast();
   const [sel, setSel] = useState<Set<number>>(new Set());
   const [anchor, setAnchor] = useState<number | null>(null);
@@ -396,7 +396,7 @@ function AssignDialog({ count, busy, error, onClose, onSubmit }: { count: number
         <Field label="Writer" htmlFor={id} help="Each script has exactly one writer, so moving scripts never double-counts them.">
           <select className="select" id={id} value={uid} onChange={(e) => setUid(e.target.value)}>
             <option value="">Choose…</option>
-            {users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}{u.role === 'manager' ? ' (manager)' : ''}</option>)}
+            {users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}{u.role !== 'writer' ? ` (${u.role})` : ''}</option>)}
             <option value="none">Unassigned</option>
           </select>
         </Field>
@@ -408,7 +408,7 @@ function AssignDialog({ count, busy, error, onClose, onSubmit }: { count: number
 function ScriptDialog({ s, b, onClose }: { s: Script; b: BatchDetail; onClose: () => void }) {
   const { me, settings } = useBoot();
   const toast = useToast();
-  const canEdit = me.role === 'manager' || s.assigneeId === me.id;
+  const canEdit = isManager(me.role) || s.assigneeId === me.id;
   const [title, setTitle] = useState(s.title ?? '');
   const [docUrl, setDocUrl] = useState(s.docUrl ?? '');
   const [tl, setTl] = useState(s.timelinerUrl ?? '');
@@ -472,7 +472,7 @@ function BriefSection({ b }: { b: BatchDetail }) {
   const clientRes = b.resources.filter((r) => r.batchId !== b.id);
   return (
     <div className="stack s4">
-      {b.brief ? <div><div className="section-title">Batch brief</div><p className="prose">{b.brief}</p></div> : <p className="muted">No batch-specific brief.{me.role === 'manager' ? ' Add one with “Edit batch”.' : ''}</p>}
+      {b.brief ? <div><div className="section-title">Batch brief</div><p className="prose">{b.brief}</p></div> : <p className="muted">No batch-specific brief.{isManager(me.role) ? ' Add one with “Edit batch”.' : ''}</p>}
       {b.briefings.map((br) => (
         <div key={br.id} className="brief">
           <div className="row-flex s2"><h4>{br.title}</h4>{br.callDate && <Chip color="plain">Call {fmtDate(br.callDate)}</Chip>}</div>
@@ -494,7 +494,7 @@ function BriefSection({ b }: { b: BatchDetail }) {
           </div>
         </details>
       )}
-      {batchRes.length > 0 && <div className="stack s2"><div className="section-title">This batch</div>{batchRes.map((r) => <ResourceRow key={r.id} r={r} onRemove={me.role === 'manager' || r.createdById === me.id ? () => remove.mutate(r.id) : undefined} />)}</div>}
+      {batchRes.length > 0 && <div className="stack s2"><div className="section-title">This batch</div>{batchRes.map((r) => <ResourceRow key={r.id} r={r} onRemove={isManager(me.role) || r.createdById === me.id ? () => remove.mutate(r.id) : undefined} />)}</div>}
       {clientRes.length > 0 && <div className="stack s2"><div className="section-title">Client folders, examples & assets</div>{clientRes.map((r) => <ResourceRow key={r.id} r={r} />)}</div>}
       {!b.briefings.length && !batchRes.length && !clientRes.length && <Empty boxed title="No briefing materials yet">Attach a briefing call or add links so writers know what applies.</Empty>}
     </div>

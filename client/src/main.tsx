@@ -1,4 +1,5 @@
 import { StrictMode, useEffect } from 'react';
+import { isManager } from '../../shared/workflow';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { QueryClientProvider, useQuery } from '@tanstack/react-query';
@@ -36,7 +37,7 @@ function Gate() {
   if (status.isError) return <main className="login"><ErrorState error={status.error} retry={() => status.refetch()} /></main>;
   if (!status.data!.signedIn) return <Login status={status.data!} onDone={() => { queryClient.clear(); status.refetch(); }} />;
   if (boot.isError || !boot.data) return <main className="login"><ErrorState error={boot.error} retry={() => boot.refetch()} /></main>;
-  const home = boot.data.me.role === 'manager' ? '/overview' : '/my-work';
+  const home = isManager(boot.data.me.role) ? '/overview' : '/my-work';
   return (
     <Routes>
       <Route element={<AppShell boot={boot.data} />}>

@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, Camera, CheckCheck, FileText, Minus, PlayCircle, Plus, RotateCcw, Send } from 'lucide-react';
 import { api, useSave } from '../api';
 import type { MyWork } from '../../../shared/types';
-import { compressRanges, type Progress } from '../../../shared/workflow';
+import { compressRanges, type Progress, isManager } from '../../../shared/workflow';
 import { fmtDate, fmtLong, fmtRange, fmtStamp, plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
 import { BatchProgress, Button, Chip, DueChip, Empty, ErrorState, ExtLink, FormError, Loading, Panel, Ring, ringColor, useToast } from '../components/ui';
@@ -19,7 +19,7 @@ type Entry = MyWork['batches'][number];
 export function MyWorkPage() {
   const { me, users, clock } = useBoot();
   const [params, setParams] = useSearchParams();
-  const viewing = me.role === 'manager' && params.get('userId') ? Number(params.get('userId')) : me.id;
+  const viewing = isManager(me.role) && params.get('userId') ? Number(params.get('userId')) : me.id;
   const q = useQuery({ queryKey: ['my-work', viewing], queryFn: () => api<MyWork>(`/api/my-work${viewing !== me.id ? `?userId=${viewing}` : ''}`) });
   const who = users.find((u) => u.id === viewing);
   const active = q.data?.batches.filter((e) => e.myProgress.delivered < e.myProgress.total) ?? [];
@@ -28,7 +28,7 @@ export function MyWorkPage() {
   return (
     <>
       <PageHeader title={viewing === me.id ? 'My work' : `${who?.name ?? 'Writer'}’s work`} sub={viewing === me.id ? 'Your scripts, what’s due, and everything you need to write them.' : 'Viewing as a manager. Updates are recorded under your name.'}>
-        {me.role === 'manager' && (
+        {isManager(me.role) && (
           <select className="select sm" style={{ width: 'auto' }} aria-label="Show work for" value={viewing} onChange={(e) => setParams(Number(e.target.value) === me.id ? {} : { userId: e.target.value })}>
             {users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.id === me.id ? `Me (${u.name})` : u.name}</option>)}
           </select>

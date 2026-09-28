@@ -8,7 +8,7 @@ import { AlertTriangle, ArrowRight, CalendarClock, Camera, CheckCheck, Clipboard
 import { api } from '../api';
 import type { Dashboard } from '../../../shared/types';
 import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
-import { compressRanges } from '../../../shared/workflow';
+import { compressRanges, isManager } from '../../../shared/workflow';
 import { PageHeader, useBoot, useNewWork } from '../components/Shell';
 import { DueChart } from '../components/DueChart';
 import { AttentionRow, BatchItem } from '../components/BatchBits';
@@ -43,7 +43,7 @@ export function Overview() {
               <span className={`n${d.cards.dueTodayBatches ? '' : ' zero'}`}>{d.cards.dueTodayBatches}</span>
               <span><span className="cap">Batches due today</span><span className="sub" style={{ display: 'block' }}>{d.cards.dueTodayScripts ? `${plural(d.cards.dueTodayScripts, 'script')} left to finish` : 'No deadlines today'}</span></span>
             </button>
-            <button className="stat-card" onClick={() => nav(me.role === 'manager' ? '/review' : '/production?flag=review&view=table')} style={{ ['--c' as string]: 'var(--lavender)' }} aria-label={`${d.cards.awaitingReviewScripts} scripts awaiting review. Open the review queue.`}>
+            <button className="stat-card" onClick={() => nav(isManager(me.role) ? '/review' : '/production?flag=review&view=table')} style={{ ['--c' as string]: 'var(--lavender)' }} aria-label={`${d.cards.awaitingReviewScripts} scripts awaiting review. Open the review queue.`}>
               <span className="corner"><ClipboardCheck /></span>
               <span className={`n${d.cards.awaitingReviewScripts ? '' : ' zero'}`}>{d.cards.awaitingReviewScripts}</span>
               <span><span className="cap">Scripts awaiting review</span><span className="sub" style={{ display: 'block' }}>{d.cards.awaitingReviewBatches ? `across ${plural(d.cards.awaitingReviewBatches, 'batch', 'batches')}` : 'Queue is clear'}</span></span>
@@ -70,7 +70,7 @@ export function Overview() {
 
             <Panel className="a-shoots" title="Upcoming shoots" sub="next 45 days">
               {!d.upcomingShoots.length ? (
-                <Empty boxed icon={<Camera />} title="No shoots scheduled" action={me.role === 'manager' ? <button className="btn sm" onClick={() => openNew('shoot')}>Schedule a shoot</button> : undefined} />
+                <Empty boxed icon={<Camera />} title="No shoots scheduled" action={isManager(me.role) ? <button className="btn sm" onClick={() => openNew('shoot')}>Schedule a shoot</button> : undefined} />
               ) : (
                 <div className="rows fill">
                   {d.upcomingShoots.map((s) => {
@@ -95,7 +95,7 @@ export function Overview() {
             </Panel>
             <Panel className="a-batches" title="Active batches" count={d.activeBatches.length} tools={<Link to="/production" className="btn sm ghost">Production board <ArrowRight size={14} /></Link>}>
               {!d.activeBatches.length ? (
-                <Empty boxed icon={<Sparkles />} title="No active batches" action={me.role === 'manager' ? <button className="btn sm" onClick={() => openNew('shoot')}>Create work</button> : undefined} />
+                <Empty boxed icon={<Sparkles />} title="No active batches" action={isManager(me.role) ? <button className="btn sm" onClick={() => openNew('shoot')}>Create work</button> : undefined} />
               ) : (
                 <div className="rows">{d.activeBatches.slice(0, 10).map((b) => <BatchItem key={b.id} b={b} ring />)}</div>
               )}
@@ -109,7 +109,7 @@ export function Overview() {
                     {d.workload.map((w) => (
                       <Link key={w.userId} to={`/production?writerId=${w.userId}&view=table`} className={`item clickable ${w.overdueScripts ? 'edge-red' : w.overCapacity ? 'edge-yellow' : ''}`}>
                         <div className="body">
-                          <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}><Avatar name={w.name} id={w.userId} small /><span className="title">{w.name}</span>{w.role === 'manager' && <span className="muted" style={{ fontSize: 12 }}>manager</span>}</div>
+                          <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}><Avatar name={w.name} id={w.userId} small /><span className="title">{w.name}</span>{w.role !== 'writer' && <span className="muted" style={{ fontSize: 12 }}>{w.role}</span>}</div>
                           <div className="meta num">
                             <span>{plural(w.activeBatches, 'batch', 'batches')}</span>
                             <span>{w.assigned} assigned</span>

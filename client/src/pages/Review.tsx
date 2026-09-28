@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Check, CheckCheck, ExternalLink, FileText, RotateCcw } from 'lucide-react';
 import { api, useSave } from '../api';
 import type { ReviewQueue } from '../../../shared/types';
-import { compressRanges, STATUS_LABEL } from '../../../shared/workflow';
+import { compressRanges, STATUS_LABEL, isManager } from '../../../shared/workflow';
 import { fmtDate, fmtStamp, plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
 import { Button, Chip, DueChip, Empty, ErrorState, FormError, Loading, Panel, useToast } from '../components/ui';
@@ -16,7 +16,7 @@ import { NoteDialog } from './BatchDetail';
 
 export function ReviewPage() {
   const { me, clock, settings } = useBoot();
-  const manager = me.role === 'manager';
+  const manager = isManager(me.role);
   const toast = useToast();
   const q = useQuery({ queryKey: ['review'], queryFn: () => api<ReviewQueue>('/api/review'), refetchInterval: 60_000 });
   const [sel, setSel] = useState<Set<number>>(new Set());

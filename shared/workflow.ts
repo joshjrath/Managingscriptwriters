@@ -166,7 +166,11 @@ export function nextMilestone(draft: Milestone, final: Milestone): Milestone | n
 
 // ── actions & permissions ────────────────────────────────────────────────
 
-export type Role = 'manager' | 'writer';
+export type Role = 'owner' | 'manager' | 'writer';
+
+/** Owners can do everything managers can. */
+export const isManager = (role: Role) => role === 'manager' || role === 'owner';
+export const ROLE_LABEL: Record<Role, string> = { owner: 'Owner', manager: 'Manager', writer: 'Writer' };
 
 export const SCRIPT_ACTIONS = [
   'start', 'reset', 'submit', 'withdraw', 'approve', 'request_revisions', 'deliver', 'undo_delivery',
@@ -199,8 +203,8 @@ export interface Actor {
 
 export function checkAction(action: ScriptAction, script: Pick<ScriptLite, 'status' | 'assigneeId'>, actor: Actor): string | null {
   const rule = ACTION_RULES[action];
-  if (rule.who === 'manager' && actor.role !== 'manager') return 'Only managers can do this';
-  if (rule.who === 'assignee' && actor.role !== 'manager' && script.assigneeId !== actor.id) {
+  if (rule.who === 'manager' && !isManager(actor.role)) return 'Only managers can do this';
+  if (rule.who === 'assignee' && !isManager(actor.role) && script.assigneeId !== actor.id) {
     return 'You can only update scripts assigned to you';
   }
   if (!rule.from.includes(script.status)) {

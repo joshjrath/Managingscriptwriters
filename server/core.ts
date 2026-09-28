@@ -50,15 +50,16 @@ export async function clockFor(ctx: Ctx, settings?: Settings): Promise<Clock> {
 
 // ── users ────────────────────────────────────────────────────────────────
 
-interface UserRow { id: number; name: string; email: string; role: 'manager' | 'writer'; active: boolean; capacity_per_day: number | null }
+interface UserRow { id: number; name: string; email: string; role: 'owner' | 'manager' | 'writer'; active: boolean; capacity_per_day: number | null; removed_at: string | null; temp_password: string | null }
 
 export async function loadUsers(db: Db): Promise<UserSummary[]> {
-  const rows = await db.query<UserRow>(`select id, name, email, role, active, capacity_per_day from users order by active desc, name`);
-  return rows.map((r) => ({ id: r.id, name: r.name, email: r.email, role: r.role, active: r.active, capacityPerDay: r.capacity_per_day }));
+  const rows = await db.query<UserRow>(`select id, name, email, role, active, capacity_per_day, removed_at, temp_password from users order by active desc, name`);
+  // temp passwords are stripped here; only the team endpoint adds them back for owners and managers
+  return rows.map((r) => ({ id: r.id, name: r.name, email: r.email, role: r.role, active: r.active && !r.removed_at, removed: !!r.removed_at, capacityPerDay: r.capacity_per_day, tempPassword: null }));
 }
 
 export async function managerIds(db: Db): Promise<number[]> {
-  return (await db.query<{ id: number }>(`select id from users where role = 'manager' and active`)).map((r) => r.id);
+  return (await db.query<{ id: number }>(`select id from users where role in ('owner', 'manager') and active and removed_at is null`)).map((r) => r.id);
 }
 
 // ── activity ─────────────────────────────────────────────────────────────

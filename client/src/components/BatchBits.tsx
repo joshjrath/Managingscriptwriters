@@ -1,6 +1,7 @@
 // Compact nested rows for batches, and the quick-inspect drawer.
 
 import type { ReactNode } from 'react';
+import { isManager } from '../../../shared/workflow';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight, Ban, CalendarClock, Camera, ClipboardCheck, OctagonAlert, RotateCcw, UserPlus } from 'lucide-react';
@@ -63,9 +64,9 @@ export function AttentionRow({ a }: { a: AttentionItem }) {
   const nav = useNavigate();
   const b = a.batch;
   const edge = a.kind === 'overdue' || a.kind === 'blocked' ? 'edge-red' : a.kind === 'due_today' || a.kind === 'date_review' ? 'edge-yellow' : 'edge-pink';
-  const action = b.progress.inReview > 0 && me.role === 'manager'
+  const action = b.progress.inReview > 0 && isManager(me.role)
     ? <Link to="/review" className="btn sm review"><ClipboardCheck aria-hidden />Review</Link>
-    : a.kind === 'unassigned' && me.role === 'manager'
+    : a.kind === 'unassigned' && isManager(me.role)
       ? <Link to={`/batches/${b.id}#scripts`} className="btn sm">Assign</Link>
       : <Link to={`/batches/${b.id}`} className="btn sm">Open batch</Link>;
   return (

@@ -2,6 +2,7 @@
 // review, delivery confirmation, blockers and target changes.
 
 import type { FastifyInstance } from 'fastify';
+import { isManager } from '../../shared/workflow';
 import { z } from 'zod';
 import type { Db } from '../db';
 import {
@@ -204,7 +205,7 @@ export async function loadBatchDetail(ctx: Ctx, id: number, me: Me): Promise<Bat
     scripts, briefings, resources: [...batchResources, ...clientResources], revisions, deliveries, activity,
     draftRule: hasShoot && row.draft_due_mode === 'auto' ? ruleText(settings.draftOffsetDays, settings.dayMode) : null,
     finalRule: hasShoot && row.final_due_mode === 'auto' ? ruleText(settings.finalOffsetDays, settings.dayMode) : null,
-    canEdit: me.role === 'manager',
+    canEdit: isManager(me.role),
     isAssigned: scripts.some((s) => s.assigneeId === me.id),
   };
 }
@@ -409,7 +410,7 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const input = parse(z.object({ blocked: z.boolean(), note: zs.text(1000) }), req.body);
     if (input.blocked && !input.note) throw new HttpError(400, 'Say what is blocking the work', { note: 'Say what is blocking the work' });
-    if (me.role !== 'manager' && !(await isAssignedTo(db, id, me.id))) throw forbidden('Only writers on this batch can flag blockers');
+    if (!isManager(me.role) && !(await isAssignedTo(db, id, me.id))) throw forbidden('Only writers on this batch can flag blockers');
     const b = input.blocked
       ? await db.one<{ client_id: number; title: string }>(
         `update batches set blocked = true, blocker_note = $2, blocked_at = now(), blocked_by = $3, updated_at = now() where id = $1 returning client_id, title`,
@@ -572,7 +573,7 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
         `select s.batch_id, s.number, s.assignee_id, s.version, b.client_id from scripts s join batches b on b.id = s.batch_id where s.id = $1 and s.removed_at is null for update of s`, [id],
       );
       if (!s) throw notFound('Script');
-      if (me.role !== 'manager' && s.assignee_id !== me.id) throw forbidden('You can only edit scripts assigned to you');
+      if (!isManager(me.role) && s.assignee_id !== me.id) throw forbidden('You can only edit scripts assigned to you');
       if (s.version !== input.version) throw conflict('This script was changed by someone else. Your view has been refreshed — check it and try again.', 'stale');
       const set: Record<string, unknown> = {};
       if (input.title !== undefined) set.title = input.title;
@@ -600,7 +601,7 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       writerId: zs.id.optional(),
     }), req.body);
     const writerId = input.writerId ?? me.id;
-    if (writerId !== me.id && me.role !== 'manager') throw forbidden('You can only update your own progress');
+    if (writerId !== me.id && !isManager(me.role)) throw forbidden('You can only update your own progress');
     const mine = await db.query<{ id: number; number: number; status: ScriptStatus }>(
       `select id, number, status from scripts where batch_id = $1 and assignee_id = $2 and removed_at is null order by number`, [id, writerId],
     );

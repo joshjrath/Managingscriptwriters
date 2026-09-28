@@ -19,6 +19,9 @@ export interface Me {
 
 export interface UserSummary extends Me {
   active: boolean;
+  removed: boolean;
+  /** the temporary password, readable until the person sets their own (owners and managers only) */
+  tempPassword: string | null;
 }
 
 export interface Settings {

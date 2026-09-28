@@ -10,7 +10,7 @@ import { api, ApiError, queryClient, useSave } from '../api';
 import { useBoot } from './Shell';
 import { Button, Dialog, Field, FormError, inputProps, useFieldId, useToast } from './ui';
 import { addDays, computeDeadlines, dueState, suggestStart, type ISODate } from '../../../shared/dates';
-import { evenSplit } from '../../../shared/workflow';
+import { evenSplit, isManager } from '../../../shared/workflow';
 import { fmtDate, fmtLong, fmtRange, plural } from '../../../shared/format';
 import { parseEntry, type ParsedEntry } from '../../../shared/parse';
 import type { BatchSummary, ClientDetail, Priority, ResourceCategory } from '../../../shared/types';
@@ -117,7 +117,7 @@ export function SplitEditor({ total, parts, onChange, error }: { total: number; 
               <select className="select" aria-label={`Writer ${i + 1}`} value={p.writerId} onChange={(e) => set(i, { writerId: e.target.value ? Number(e.target.value) : '' })}>
                 <option value="">Choose a writer…</option>
                 {team.map((u) => (
-                  <option key={u.id} value={u.id} disabled={parts.some((q, j) => j !== i && q.writerId === u.id)}>{u.name}{u.role === 'manager' ? ' (manager)' : ''}</option>
+                  <option key={u.id} value={u.id} disabled={parts.some((q, j) => j !== i && q.writerId === u.id)}>{u.name}{u.role !== 'writer' ? ` (${u.role})` : ''}</option>
                 ))}
               </select>
               <input className="input num" type="number" min={0} max={500} inputMode="numeric" aria-label={`Scripts for writer ${i + 1}`} value={p.count} onChange={(e) => set(i, { count: e.target.value === '' ? '' : Math.max(0, Number(e.target.value)) })} />
@@ -419,7 +419,7 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
 function ClientForm({ onCreated }: { onCreated: (c: Created) => void }) {
   const { me, users } = useBoot();
   const toast = useToast();
-  const managers = users.filter((u) => u.active && u.role === 'manager');
+  const managers = users.filter((u) => u.active && isManager(u.role));
   const [name, setName] = useState('');
   const [ownerId, setOwnerId] = useState<number>(me.id);
   const [description, setDescription] = useState('');

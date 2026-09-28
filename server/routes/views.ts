@@ -2,6 +2,7 @@
 // calendar, review queue, My work, and the bootstrap payload.
 
 import type { FastifyInstance } from 'fastify';
+import { isManager } from '../../shared/workflow';
 import { z } from 'zod';
 import { clockFor, lastDeliveredAt, loadBatches, loadSettings, loadUsers, type Ctx, type ScriptLiteRow } from '../core';
 import { requireUser } from '../auth';
@@ -109,7 +110,7 @@ export function workloadFor(batches: BatchSummary[], scripts: Map<number, Script
         : b.finalDue ? { date: b.finalDue, kind: 'final' as const } : null;
       if (cand && (!next || cand.date < next.date)) next = { ...cand, batchId: b.id, batchTitle: b.title, clientName: b.clientName };
     }
-    if (!assigned && u.role === 'manager') continue;
+    if (!assigned && isManager(u.role)) continue;
     const capacityNext7 = u.capacityPerDay ? Math.floor(u.capacityPerDay * workingDaysBetween(clock.today, horizon, workingDays)) : null;
     loads.push({
       userId: u.id, name: u.name, role: u.role, activeBatches: batchIds.size, assigned, remaining, toDeliver, overdueScripts,
@@ -131,7 +132,7 @@ export async function computeCounts(ctx: Ctx, me: Me, batches?: BatchSummary[], 
   const unread = await ctx.db.one<{ n: number }>(`select count(*) as n from notifications where user_id = $1 and read_at is null`, [me.id]);
   return {
     myOpenScripts: myOpen,
-    reviewQueue: me.role === 'manager' ? data.summaries.reduce((n, b) => n + b.progress.inReview, 0) : 0,
+    reviewQueue: isManager(me.role) ? data.summaries.reduce((n, b) => n + b.progress.inReview, 0) : 0,
     unreadNotifications: unread?.n ?? 0,
     attention: attentionFor(data.summaries).length,
   };
@@ -254,7 +255,7 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/api/my-work', async (req): Promise<MyWork> => {
     const me = requireUser(req);
     const q = parse(z.object({ userId: zs.id.optional() }), req.query);
-    const uid = me.role === 'manager' && q.userId ? q.userId : me.id;
+    const uid = isManager(me.role) && q.userId ? q.userId : me.id;
     const clock = await clockFor(ctx);
     const { summaries, scripts } = await loadBatches(ctx, {}, clock);
     const recentCut = new Date(ctx.now().getTime() - 7 * 86400_000).toISOString();

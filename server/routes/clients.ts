@@ -2,6 +2,7 @@
 
 import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
+import { isManager } from '../../shared/workflow';
 import { z } from 'zod';
 import { clockFor, isAssignedTo, loadBatches, loadSettings, logActivity, type Ctx } from '../core';
 import { requireManager, requireUser } from '../auth';
@@ -119,7 +120,7 @@ async function checkResourceAccess(db: Db, me: Me, clientId: number, batchId: nu
     const b = await db.one(`select 1 from briefings where id = $1 and client_id = $2`, [briefingId, clientId]);
     if (!b) throw new HttpError(400, 'That briefing belongs to another client');
   }
-  if (me.role === 'manager') return;
+  if (isManager(me.role)) return;
   if (!batchId || briefingId) throw forbidden('Writers can add resources to batches they’re working on');
   if (!(await isAssignedTo(db, batchId, me.id))) throw forbidden('You can only add resources to batches you’re working on');
 }
@@ -328,7 +329,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const r = await db.one<{ created_by: number; client_id: number; batch_id: number | null; title: string }>(`select created_by, client_id, batch_id, title from resources where id = $1 and removed_at is null`, [id]);
     if (!r) throw notFound('Resource');
-    if (me.role !== 'manager' && r.created_by !== me.id) throw forbidden('You can only remove resources you added');
+    if (!isManager(me.role) && r.created_by !== me.id) throw forbidden('You can only remove resources you added');
     await db.query(`update resources set removed_at = now() where id = $1`, [id]);
     await logActivity(db, { actor: me, action: 'resource.removed', entityType: 'resource', entityId: id, clientId: r.client_id, batchId: r.batch_id, summary: `Removed “${r.title}”` });
     return { ok: true };

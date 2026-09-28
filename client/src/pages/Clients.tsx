@@ -2,6 +2,7 @@
 // batches and history in one place.
 
 import { useEffect, useState } from 'react';
+import { isManager } from '../../../shared/workflow';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, Archive, ArchiveRestore, Building2, Camera, FileText, Link2, Pencil, PlayCircle, Plus } from 'lucide-react';
@@ -23,7 +24,7 @@ export function ClientsPage() {
   return (
     <>
       <PageHeader title="Clients" hideNewWork>
-        {me.role === 'manager' && <Button variant="primary pill lg" icon={<Plus aria-hidden />} onClick={() => openNew('client')}>New client</Button>}
+        {isManager(me.role) && <Button variant="primary pill lg" icon={<Plus aria-hidden />} onClick={() => openNew('client')}>New client</Button>}
       </PageHeader>
       <div className="filters">
         <input className="input search" type="search" placeholder="Search clients" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search clients" />
@@ -34,7 +35,7 @@ export function ClientsPage() {
       </div>
       {q.isLoading && <Loading />}
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
-      {q.data && !list.length && <div className="panel"><Empty icon={<Building2 />} title={search ? 'No clients match' : status === 'active' ? 'No active clients yet' : 'No archived clients'} action={me.role === 'manager' && status === 'active' && !search ? <Button onClick={() => openNew('client')}>Add a client</Button> : undefined} /></div>}
+      {q.data && !list.length && <div className="panel"><Empty icon={<Building2 />} title={search ? 'No clients match' : status === 'active' ? 'No active clients yet' : 'No archived clients'} action={isManager(me.role) && status === 'active' && !search ? <Button onClick={() => openNew('client')}>Add a client</Button> : undefined} /></div>}
       <div className="client-grid">
         {list.map((c) => (
           <Link key={c.id} to={`/clients/${c.id}`} className="client-card">
@@ -59,7 +60,7 @@ export function ClientsPage() {
 export function ClientPage() {
   const { id } = useParams();
   const { me, settings, users, clock } = useBoot();
-  const manager = me.role === 'manager';
+  const manager = isManager(me.role);
   const openNew = useNewWork();
   const toast = useToast();
   const q = useQuery({ queryKey: ['client', Number(id)], queryFn: () => api<ClientDetail>(`/api/clients/${id}`) });
@@ -162,7 +163,7 @@ export function ClientPage() {
           )}
         </div>
       </div>
-      {manager && <EditClientDialog c={c} open={edit} onClose={() => setEdit(false)} managers={users.filter((u) => u.role === 'manager' && u.active)} />}
+      {manager && <EditClientDialog c={c} open={edit} onClose={() => setEdit(false)} managers={users.filter((u) => isManager(u.role) && u.active)} />}
       {manager && brief && <BriefingDialog clientId={c.id} briefing={brief === 'new' ? null : brief} batches={c.batches.filter((b) => !b.archivedAt)} onClose={() => setBrief(null)} />}
       <ResourceDialog open={!!res} onClose={() => setRes(null)} clientId={c.id} briefingId={res?.briefingId} />
       {resched && <RescheduleDialog shootId={resched.id} start={resched.start} end={resched.end} onClose={() => setResched(null)} />}

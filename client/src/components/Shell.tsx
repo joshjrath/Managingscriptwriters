@@ -2,6 +2,7 @@
 // mobile drawer, and the context that holds the signed-in bootstrap payload.
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { isManager, ROLE_LABEL } from '../../../shared/workflow';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -23,7 +24,7 @@ export function useBoot(): Bootstrap {
   if (!b) throw new Error('useBoot outside provider');
   return b;
 }
-export const useIsManager = () => useBoot().me.role === 'manager';
+export const useIsManager = () => isManager(useBoot().me.role);
 
 const NewWorkCtx = createContext<(tab?: NewWorkTab, preset?: NewWorkPreset) => void>(() => {});
 export const useNewWork = () => useContext(NewWorkCtx);
@@ -70,7 +71,7 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
             <button className="icon-btn" onClick={() => setDrawer(true)} aria-label="Open navigation"><Menu /></button>
             <span className="wordmark"><span className="full">Scale</span>&nbsp;<span>Media</span></span>
             <div className="end">
-              {boot.me.role === 'manager' && <button className="icon-btn" onClick={() => setNewWork({ tab: 'shoot' })} aria-label="New work"><Plus /></button>}
+              {isManager(boot.me.role) && <button className="icon-btn" onClick={() => setNewWork({ tab: 'shoot' })} aria-label="New work"><Plus /></button>}
               <NotificationsButton />
             </div>
           </div>
@@ -98,7 +99,7 @@ function MobileNav({ onClose }: { onClose: () => void }) {
 function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapsed?: boolean; mobile?: boolean }) {
   const boot = useBoot();
   const { me, counts, settings } = boot;
-  const manager = me.role === 'manager';
+  const manager = isManager(me.role);
   const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; show?: boolean }[] = [
     ...(manager
       ? [{ to: '/overview', label: 'Overview', icon: <LayoutDashboard />, count: counts.attention || undefined, hot: counts.attention > 0 }, { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined }]
@@ -166,7 +167,7 @@ function UserMenu() {
         <Avatar name={me.name} id={me.id} />
         <span className="who">
           <b className="ellipsis">{me.name}</b>
-          <span>{me.role === 'manager' ? 'Manager' : 'Writer'}</span>
+          <span>{ROLE_LABEL[me.role]}</span>
         </span>
       </button>
       {open && (
@@ -315,7 +316,7 @@ export function PageHeader({ title, sub, crumbs, children, hideNewWork }: { titl
       <div className="head-tools">
         {children}
         <OrgDate tz={settings.timezone} />
-        {me.role === 'manager' && !hideNewWork && <Button variant="primary pill lg" icon={<Plus aria-hidden />} onClick={() => openNew('shoot')}>New work</Button>}
+        {isManager(me.role) && !hideNewWork && <Button variant="primary pill lg" icon={<Plus aria-hidden />} onClick={() => openNew('shoot')}>New work</Button>}
         <NotificationsButton />
       </div>
     </header>

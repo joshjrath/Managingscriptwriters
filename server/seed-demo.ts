@@ -23,7 +23,7 @@ export async function seedDemo(db: Db, now = new Date()): Promise<boolean> {
   const ctx: Ctx = { db, now: () => now, secureCookies: false, allowSetup: false, uploadLimitBytes: 0 };
   const hash = await hashPassword(DEMO_PASSWORD);
   const people = [
-    ['josh@scalemedia.demo', 'Josh Rath', 'manager', null],
+    ['josh@scalemedia.demo', 'Josh Rath', 'owner', null],
     ['sarah@scalemedia.demo', 'Sarah Chen', 'writer', 4],
     ['marcus@scalemedia.demo', 'Marcus Webb', 'writer', 3],
     ['priya@scalemedia.demo', 'Priya Nair', 'writer', null],

@@ -82,11 +82,11 @@ async function bootstrapManager(db: Awaited<ReturnType<typeof openDb>>): Promise
   const hash = await hashPassword(password);
   const existing = await db.one<{ id: number }>(`select id from users where lower(email) = $1`, [email]);
   if (existing) {
-    await db.query(`update users set password_hash = $2, role = 'manager', active = true, updated_at = now() where id = $1`, [existing.id, hash]);
+    await db.query(`update users set password_hash = $2, role = 'owner', active = true, removed_at = null, temp_password = null, updated_at = now() where id = $1`, [existing.id, hash]);
     await db.query(`delete from sessions where user_id = $1`, [existing.id]);
     console.log(`reset password for manager ${email} — remove MANAGER_RESET_PASSWORD now so later restarts don't reset it again`);
   } else {
-    await db.query(`insert into users (email, name, role, password_hash) values ($1, $2, 'manager', $3)`, [email, name, hash]);
+    await db.query(`insert into users (email, name, role, password_hash) values ($1, $2, 'owner', $3)`, [email, name, hash]);
     console.log(`created manager account ${email}`);
   }
   return undefined;

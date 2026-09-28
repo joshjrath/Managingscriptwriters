@@ -229,4 +229,12 @@ create table notifications (
 create unique index notifications_dedupe_key on notifications (user_id, dedupe_key);
 create index notifications_user_idx on notifications (user_id, created_at desc);
 `,
+
+  /* 2 · owner role, readable temporary passwords, removing people from the team */ `
+alter table users drop constraint if exists users_role_check;
+alter table users add constraint users_role_check check (role in ('owner', 'manager', 'writer'));
+alter table users add column temp_password text;
+alter table users add column removed_at timestamptz;
+update users set role = 'owner' where id = (select min(id) from users where role = 'manager');
+`,
 ];

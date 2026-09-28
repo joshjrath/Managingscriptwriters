@@ -405,3 +405,53 @@ describe('persistence', () => {
     }
   });
 });
+
+describe('team: roles, temporary passwords, removal', () => {
+  it('the first account is the owner, and owners and managers have the same permissions', async () => {
+    const team = (await manager.get('/api/users')).body.users;
+    expect(team.find((u: any) => u.id === ids.josh).role).toBe('owner');
+    const add = await manager.post('/api/users', { name: 'Mia Park', email: 'mia@scale.test', role: 'manager', password: 'manager-temp-1' });
+    expect(add.status).toBe(200);
+    const mia = as(await login('mia@scale.test', 'manager-temp-1'));
+    // a manager can do owner things, including managing the team and settings
+    expect((await mia.patch('/api/settings', { reminderLeadDays: 3 })).status).toBe(200);
+    expect((await mia.post('/api/users', { name: 'Owner Two', email: 'o2@scale.test', role: 'owner', password: 'owner-two-temp' })).status).toBe(200);
+  });
+
+  it('keeps the temporary password readable for managers until the person sets their own', async () => {
+    await manager.post('/api/users', { name: 'Tess Lane', email: 'tess@scale.test', role: 'writer', password: 'tess-temp-pass' });
+    const find = async (who = manager) => (await who.get('/api/users')).body.users.find((u: any) => u.email === 'tess@scale.test');
+    expect((await find()).tempPassword).toBe('tess-temp-pass');
+    expect((await find(sarah)).tempPassword).toBeNull(); // writers never see it
+    const tess = as(await login('tess@scale.test', 'tess-temp-pass'));
+    expect((await tess.post('/api/me/password', { current: 'tess-temp-pass', next: 'tess-own-password' })).status).toBe(200);
+    expect((await find()).tempPassword).toBeNull();
+    // a reset makes a new readable temporary password
+    await manager.patch(`/api/users/${(await find()).id}`, { password: 'tess-reset-pass' });
+    expect((await find()).tempPassword).toBe('tess-reset-pass');
+  });
+
+  it('removing someone signs them out and hands their unfinished scripts to someone else', async () => {
+    const leo = await manager.post('/api/users', { name: 'Leo Test', email: 'leo@scale.test', role: 'writer', password: 'leo-temp-pass' });
+    const leoId = leo.body.users.find((u: any) => u.email === 'leo@scale.test').id;
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Leo’s batch', targetCount: 3, split: [{ writerId: leoId, count: 3 }] });
+    const leoSession = as(await login('leo@scale.test', 'leo-temp-pass'));
+    const work = await manager.get(`/api/users/${leoId}/open-work`);
+    expect(work.body.scripts).toBe(3);
+    expect((await sarah.post(`/api/users/${leoId}/remove`, {})).status).toBe(403);
+    const r = await manager.post(`/api/users/${leoId}/remove`, { reassignTo: ids.marcus });
+    expect(r.status).toBe(200);
+    expect(r.body.moved).toBe(3);
+    expect(r.body.users.find((u: any) => u.id === leoId).removed).toBe(true);
+    const detail = (await manager.get(`/api/batches/${b.body.batchId}`)).body as BatchDetail;
+    expect(detail.writers.map((w) => [w.name, w.ranges])).toEqual([['Marcus Webb', '1–3']]);
+    expect(detail.activity[0].summary).toMatch(/Leo Test was removed from the team/);
+    expect((await leoSession.get('/api/bootstrap')).status).toBe(401);
+    expect((await call('POST', '/api/auth/login', { body: { email: 'leo@scale.test', password: 'leo-temp-pass' } })).status).toBe(401);
+    expect((await manager.post(`/api/users/${ids.josh}/remove`, {})).status).toBe(400); // not yourself
+    // adding them back restores the same account and history
+    const back = await manager.post('/api/users', { name: 'Leo Test', email: 'leo@scale.test', role: 'writer', password: 'leo-back-pass' });
+    expect(back.status).toBe(200);
+    expect(back.body.users.find((u: any) => u.email === 'leo@scale.test').id).toBe(leoId);
+  });
+});

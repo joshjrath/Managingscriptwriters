@@ -30,7 +30,7 @@ A batch reads e.g. **"20 / 45 drafts ready · 44%"**, with approved and delivere
 ### Workflow rules (enforced on the server)
 
 - Writers move their own scripts: start, submit for review, withdraw, and confirm delivery.
-- Only managers approve, request revisions (a note is required), assign/reassign, change deadlines or script counts, move shoots, manage clients, briefings, users and settings.
+- **Owners and managers have exactly the same permissions** (Owner is a label; the first account is the owner). Only they approve, request revisions (a note is required), assign/reassign, change deadlines or script counts, move shoots, and manage clients, briefings, the team and settings.
 - **A script must be approved before it can be marked delivered** — no action, bulk selection or quick control can skip review.
 - The quick count control on My work changes real script records: **+** submits your next script for review, **−** withdraws the last one you submitted. It can never approve or deliver.
 - Partial review is normal: approve ten scripts while the rest are still being written.
@@ -81,6 +81,8 @@ Responsive: full sidebar on wide screens, collapsible icon rail on smaller deskt
    - a PostgreSQL 16 database, with `DATABASE_URL` wired in automatically
 2. When Render asks, fill in `MANAGER_EMAIL`, `MANAGER_NAME` and `MANAGER_PASSWORD` (at least 10 characters). That account is created on first start.
 3. Open the `.onrender.com` URL, sign in, and add your second manager and writers in **Settings → Team**. The app doesn't send email: after you add someone (or reset their password) it shows a ready-to-send message with the sign-in link, their email and a generated temporary password, with a **Copy message** button to paste into WhatsApp, Slack or email.
+
+**Team:** roles are Owner, Manager and Writer. A person's temporary password stays readable in Team (with **Copy sign-in details**) until they set their own; passwords people choose themselves are never stored readable — use **Reset password** to issue a new temporary one. **Remove** signs someone out for good, hands their unfinished scripts to a person you pick (or leaves them unassigned), and keeps their name in the history; adding the same email again restores the account.
 
 `MANAGER_*` values are only used the first time the server starts with an empty database; changing them later does nothing. To change your password, use **Change password** in the menu under your name. If you're locked out, set `MANAGER_RESET_PASSWORD=1`, deploy (that account's password becomes `MANAGER_PASSWORD`, and it's created as a manager if missing), then remove the variable again.
 
