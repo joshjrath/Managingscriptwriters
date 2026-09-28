@@ -24,21 +24,7 @@ async function main() {
   const db = await openDb({ databaseUrl: env.DATABASE_URL, dataDir });
   console.log(env.DATABASE_URL ? 'database: PostgreSQL' : `database: embedded PGlite at ${dataDir}`);
 
-  const users = await db.one<{ n: number }>(`select count(*) as n from users`);
-  let setupHint: string | undefined;
-  const pwErr = env.MANAGER_PASSWORD ? validatePassword(env.MANAGER_PASSWORD) : null;
-  if (!users?.n && (!env.MANAGER_EMAIL?.trim() || !env.MANAGER_PASSWORD)) {
-    setupHint = 'Set MANAGER_EMAIL and MANAGER_PASSWORD in the server’s environment, then redeploy.';
-  } else if (!users?.n && pwErr) {
-    // keep running so the sign-in page can explain what to fix
-    setupHint = `MANAGER_PASSWORD is too short (${pwErr.toLowerCase()}). Change it in the server’s environment, then redeploy.`;
-    console.error(`manager account not created: MANAGER_PASSWORD ${pwErr.toLowerCase()}`);
-  } else if (!users?.n && env.MANAGER_EMAIL && env.MANAGER_PASSWORD) {
-    await db.query(`insert into users (email, name, role, password_hash) values (lower($1), $2, 'manager', $3)`, [
-      env.MANAGER_EMAIL.trim(), env.MANAGER_NAME?.trim() || 'Manager', await hashPassword(env.MANAGER_PASSWORD),
-    ]);
-    console.log(`created manager account ${env.MANAGER_EMAIL}`);
-  }
+  const setupHint = await bootstrapManager(db);
   if (env.DEMO === '1') {
     const seeded = await seedDemo(db);
     if (seeded) console.log('demo workspace seeded (sign in as josh@scalemedia.demo / scalemedia-demo)');
@@ -70,6 +56,40 @@ async function main() {
   };
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
+}
+
+// Creates the first manager from MANAGER_EMAIL / MANAGER_PASSWORD, or with
+// MANAGER_RESET_PASSWORD=1 resets that account's password (creating it if
+// missing). Values are trimmed: pasted variables often carry a trailing space
+// or newline. Problems are logged and returned for the sign-in page rather
+// than crashing the server.
+async function bootstrapManager(db: Awaited<ReturnType<typeof openDb>>): Promise<string | undefined> {
+  const email = env.MANAGER_EMAIL?.trim().toLowerCase() ?? '';
+  const password = env.MANAGER_PASSWORD?.trim() ?? '';
+  const name = env.MANAGER_NAME?.trim() || 'Manager';
+  const reset = env.MANAGER_RESET_PASSWORD === '1' || env.MANAGER_RESET_PASSWORD === 'true';
+  const users = await db.one<{ n: number }>(`select count(*) as n from users`);
+  const empty = !users?.n;
+  if (!empty && !reset) return undefined;
+  if (!email || !password) {
+    return empty ? 'Set MANAGER_EMAIL and MANAGER_PASSWORD in the server’s environment, then redeploy.' : undefined;
+  }
+  const pwErr = validatePassword(password);
+  if (pwErr) {
+    console.error(`manager account not ${empty ? 'created' : 'reset'}: MANAGER_PASSWORD ${pwErr.toLowerCase()}`);
+    return empty ? `MANAGER_PASSWORD is too short (${pwErr.toLowerCase()}). Change it in the server’s environment, then redeploy.` : undefined;
+  }
+  const hash = await hashPassword(password);
+  const existing = await db.one<{ id: number }>(`select id from users where lower(email) = $1`, [email]);
+  if (existing) {
+    await db.query(`update users set password_hash = $2, role = 'manager', active = true, updated_at = now() where id = $1`, [existing.id, hash]);
+    await db.query(`delete from sessions where user_id = $1`, [existing.id]);
+    console.log(`reset password for manager ${email} — remove MANAGER_RESET_PASSWORD now so later restarts don't reset it again`);
+  } else {
+    await db.query(`insert into users (email, name, role, password_hash) values ($1, $2, 'manager', $3)`, [email, name, hash]);
+    console.log(`created manager account ${email}`);
+  }
+  return undefined;
 }
 
 main().catch((err) => {
