@@ -48,6 +48,8 @@ const MUTATIONS: Record<string, string> = {
   '/api/clients/:id': 'edit a client',
   '/api/clients/:id/archive': 'archive a client',
   '/api/clients/:id/stage': 'move a potential client',
+  '/api/import/read': 'read pasted notes',
+  '/api/import/apply': 'save pasted notes',
   '/api/clients/:id/briefings': 'add a briefing',
   '/api/resources': 'add a resource',
   '/api/resources/upload': 'upload a file',

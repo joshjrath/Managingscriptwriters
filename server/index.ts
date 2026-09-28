@@ -9,6 +9,7 @@ import { openDb } from './db';
 import { hashPassword, validatePassword } from './auth';
 import { startReminderScheduler } from './reminders';
 import { seedDemo } from './seed-demo';
+import { claudeNotesReader } from './notes-import';
 import type { Ctx } from './core';
 
 const env = process.env;
@@ -37,6 +38,8 @@ async function main() {
     allowSetup: !production || env.ALLOW_SETUP === '1',
     uploadLimitBytes: Number(env.UPLOAD_LIMIT_MB ?? 25) * 1024 * 1024,
     setupHint,
+    // paste-notes import reads notes with Claude when an API key is configured
+    notesReader: env.ANTHROPIC_API_KEY ? claudeNotesReader() : null,
   };
   const staticDir = env.STATIC_DIR ?? path.resolve(here, '../client');
   const app = await buildApp(ctx, { staticDir, logger: production });

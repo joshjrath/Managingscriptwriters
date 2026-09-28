@@ -5,7 +5,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, CalendarDays, Camera, CheckCheck, ChevronDown, FileText, Plus, Sparkles, Trash2, Type, Users } from 'lucide-react';
+import { AlertTriangle, CalendarDays, Camera, CheckCheck, ChevronDown, FileText, Plus, Sparkles, Trash2, Type, Users, Wand2 } from 'lucide-react';
+import { NotesImport } from './NotesImport';
 import { api, ApiError, queryClient, useSave } from '../api';
 import { useBoot } from './Shell';
 import { Button, Dialog, Field, FormError, inputProps, Seg, useFieldId, useToast } from './ui';
@@ -16,7 +17,7 @@ import { parseEntry, type ParsedEntry } from '../../../shared/parse';
 import type { BatchSummary, ClientDetail, Priority, ResourceCategory } from '../../../shared/types';
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
 
-export type NewWorkTab = 'quick' | 'shoot' | 'batch' | 'client';
+export type NewWorkTab = 'notes' | 'quick' | 'shoot' | 'batch' | 'client';
 export interface NewWorkPreset { prospect?: boolean; clientId?: number; shootId?: number; text?: string; start?: ISODate; end?: ISODate | null; count?: number; split?: SplitPart[] }
 
 interface Created {
@@ -33,6 +34,7 @@ const TABS: { id: NewWorkTab; label: string; icon: ReactNode }[] = [
   { id: 'batch', label: 'New batch', icon: <CalendarDays aria-hidden /> },
   { id: 'client', label: 'New client', icon: <Users aria-hidden /> },
   { id: 'quick', label: 'Quick entry', icon: <Type aria-hidden /> },
+  { id: 'notes', label: 'Paste notes', icon: <Wand2 aria-hidden /> },
 ];
 
 export function NewWorkDialog({ state, onClose }: { state: { tab: NewWorkTab; preset?: NewWorkPreset } | null; onClose: () => void }) {
@@ -58,6 +60,10 @@ export function NewWorkDialog({ state, onClose }: { state: { tab: NewWorkTab; pr
           {tab === 'shoot' && <ShootForm key={`s${formKey}`} preset={preset} onCreated={setCreated} />}
           {tab === 'batch' && <BatchForm key={`b${formKey}`} preset={preset} onCreated={setCreated} />}
           {tab === 'client' && <ClientForm key={`c${formKey}`} preset={preset} onCreated={setCreated} />}
+          {tab === 'notes' && <NotesImport key={`n${formKey}`} onDone={(r) => setCreated({
+            kind: 'client', title: `Saved ${plural(r.clients.length, 'client')} from your notes`, warnings: r.warnings,
+            lines: r.clients.map((c) => ({ k: c.name, v: c.lines.length ? c.lines.join(' · ') : 'Nothing new to add', rule: c.created ? 'New' : 'Existing client — notes added' })),
+          })} />}
           {tab === 'quick' && <QuickEntry key={`q${formKey}`} preset={preset} onCreated={setCreated} onOpenForm={(p) => { setPreset(p); setTab('shoot'); setFormKey((k) => k + 1); }} />}
         </>
       )}

@@ -17,6 +17,8 @@ export interface Ctx {
   uploadLimitBytes: number;
   /** Why the first manager couldn't be created from the environment, shown on the sign-in page. */
   setupHint?: string;
+  /** reads pasted notes into an import plan (Claude); absent when no API key is configured */
+  notesReader?: import('./notes-import').NotesReader | null;
 }
 
 // ── settings ─────────────────────────────────────────────────────────────

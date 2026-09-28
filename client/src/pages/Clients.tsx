@@ -6,7 +6,7 @@ import { LayoutGroup, m } from 'framer-motion';
 import { isManager } from '../../../shared/workflow';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Archive, ArchiveRestore, Building2, Camera, FileText, GripVertical, Link2, Pencil, PlayCircle, Plus, Sparkles, UserPlus } from 'lucide-react';
+import { AlertTriangle, Archive, ArchiveRestore, Building2, Camera, FileText, GripVertical, Link2, Pencil, PlayCircle, Plus, Sparkles, UserPlus, Wand2 } from 'lucide-react';
 import { api, useSave, type ApiError } from '../api';
 import { confetti } from '../fx';
 import { SOFT } from '../motion';
@@ -61,6 +61,7 @@ export function ClientsPage() {
   return (
     <>
       <PageHeader title="Clients" hideNewWork>
+        {manager && <Button icon={<Wand2 aria-hidden />} onClick={() => openNew('notes')}>Paste notes</Button>}
         {manager && <Button icon={<UserPlus aria-hidden />} onClick={() => openNew('client', { prospect: true })}>Potential client</Button>}
         {manager && <Button variant="primary pill lg" icon={<Plus aria-hidden />} onClick={() => openNew('client')}>New client</Button>}
       </PageHeader>

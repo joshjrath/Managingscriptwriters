@@ -17,6 +17,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-28-paste-notes',
+    date: '2026-09-28',
+    title: 'Paste notes: type it how you’d text it',
+    summary: 'Paste or upload rough notes about clients and they’re turned into clients, briefs, shoots and batches for you to check.',
+    changes: [
+      { tag: 'new', text: 'New work → Paste notes (also on the Clients page). Paste notes or attach a PDF or text file, and Claude reads them into clients, guidance, briefs, shoots and script batches.' },
+      { tag: 'new', text: 'You see an editable preview first: fix dates or counts, add writers, untick anything, and answer any questions it had (like which Wednesday you meant) to have it read again.' },
+      { tag: 'new', text: 'Existing clients get the new notes added underneath what they already have, and saving the same notes twice doesn’t create duplicates.' },
+    ],
+  },
+  {
     id: '2026-09-28-potential-clients',
     date: '2026-09-28',
     title: 'Potential clients',

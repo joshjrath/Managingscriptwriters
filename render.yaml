@@ -26,6 +26,9 @@ services:
         sync: false
       - key: MANAGER_PASSWORD
         sync: false
+      # Optional: turns on New work → Paste notes (Claude reads pasted notes). From console.anthropic.com → API keys.
+      - key: ANTHROPIC_API_KEY
+        sync: false
 
 databases:
   - name: scale-media-db

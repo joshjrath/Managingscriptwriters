@@ -775,3 +775,102 @@ describe('potential clients', () => {
     expect((await manager.post(`/api/clients/${id}/stage`, { stage: 'prospect' })).status).toBe(409);
   });
 });
+
+describe('paste notes (AI import)', () => {
+  const fakePlan = {
+    summary: 'Five clients: two with scripts to write, one shoot, posting and filming notes.',
+    questions: [{ clientName: 'Elegant Jeweler', question: 'Does “next Wednesday” mean Sep 30 or Oct 7?', assumed: 'Wednesday Oct 7; filming Friday Oct 9' }],
+    clients: [
+      { name: 'Shimonov Law', status: 'active' as const, description: 'Brand-new Instagram account.', brandVoice: null, guidance: 'Start around Oct 5–7. Test formats to see what performs.', briefings: [], shoots: [], batches: [], notes: ['No script count given yet.'] },
+      { name: 'Dentist Mike', status: 'active' as const, description: null, brandVoice: null, guidance: 'Schedule all videos on his main Instagram; collab with his other account daily.', briefings: [], shoots: [], batches: [], notes: [] },
+      { name: 'Elon Layliev', status: 'active' as const, description: null, brandVoice: 'Educational.', guidance: 'Formats: education, myth vs fact, rankings. Suggestions: do this not that; FAQ answers.', briefings: [], shoots: [],
+        batches: [{ title: 'Elon Layliev · 45 scripts', targetCount: 45, shootKey: null, plannedStart: null, draftDue: null, finalDue: null, brief: 'Education, myth vs fact, rankings', writerNames: ['Sarah'], nextAction: null }], notes: [] },
+      { name: 'Daniel Abrams', status: 'active' as const, description: null, brandVoice: null, guidance: 'No scripts — we film his life.', shoots: [], batches: [], notes: [],
+        briefings: [{ title: 'An engagement ring from start to finish', summary: 'Number of videos TBD.', instructions: 'Plan about half of each filming day around the ring; the rest is his day.' }] },
+      { name: 'Elegant Jeweler', status: 'active' as const, description: null, brandVoice: null, guidance: 'Short turnaround.', briefings: [], notes: ['Drafts and final both due Oct 8 because writing starts Oct 7.'],
+        shoots: [{ key: 's1', title: 'Filming session', startDate: '2026-10-09', endDate: null }],
+        batches: [{ title: 'Elegant Jeweler · 8 scripts', targetCount: 8, shootKey: 's1', plannedStart: '2026-10-07', draftDue: '2026-10-08', finalDue: '2026-10-08', brief: null, writerNames: ['Nobody Known'], nextAction: 'Assign a writer' }] },
+      { name: 'acme outdoor co.', status: 'active' as const, description: null, brandVoice: null, guidance: 'Post Reels at 6pm.', briefings: [], shoots: [], batches: [], notes: [] },
+    ],
+  };
+  let lastInput: any = null;
+
+  it('explains how to turn it on when no AI key is set, and only managers can use it', async () => {
+    ctx.notesReader = null;
+    const r = await manager.post('/api/import/read', { text: 'hello' });
+    expect(r.status).toBe(503);
+    expect(r.body.error.message).toMatch(/ANTHROPIC_API_KEY/);
+    expect((await manager.get('/api/bootstrap')).body.notesImport).toBe(false);
+    ctx.notesReader = { read: async (input) => { lastInput = input; return JSON.parse(JSON.stringify(fakePlan)); } };
+    expect((await manager.get('/api/bootstrap')).body.notesImport).toBe(true);
+    expect((await sarah.post('/api/import/read', { text: 'hello' })).status).toBe(403);
+    expect((await manager.post('/api/import/read', { text: '   ' })).status).toBe(400);
+  });
+
+  it('reads notes into a preview without saving anything, matching existing clients', async () => {
+    const before = (await manager.get('/api/clients?status=all')).body.clients.length;
+    const r = await manager.post('/api/import/read', { text: 'Shimonov law … Elegant Jeweler next Wednesday …', answers: null });
+    expect(r.status).toBe(200);
+    expect(lastInput.text).toMatch(/Shimonov/);
+    const plan = r.body.plan;
+    expect(plan.clients.find((c: any) => c.name === 'Acme Outdoor Co.').existingClientId).toBe(acmeId);
+    expect(plan.clients.find((c: any) => c.name === 'Elon Layliev').existingClientId).toBeNull();
+    expect(plan.questions[0].assumed).toMatch(/Oct 7/);
+    expect((await manager.get('/api/clients?status=all')).body.clients.length).toBe(before); // nothing saved
+  });
+
+  it('saves the confirmed plan into the right places, once', async () => {
+    const plan = (await manager.post('/api/import/read', { text: 'notes' })).body.plan;
+    const acmeBefore = (await manager.get(`/api/clients/${acmeId}`)).body;
+    const r = await manager.post('/api/import/apply', { plan });
+    expect(r.status).toBe(200);
+    const byName = Object.fromEntries(r.body.clients.map((c: any) => [c.name, c]));
+    expect(byName['Elon Layliev'].created).toBe(true);
+    expect(byName['Acme Outdoor Co.'].created).toBe(false);
+    expect(r.body.warnings.join(' ')).toMatch(/Nobody Known/);
+
+    const all = (await manager.get('/api/clients?status=all')).body.clients;
+    const id = (n: string) => all.find((c: any) => c.name === n).id;
+    const detail = async (n: string) => (await manager.get(`/api/clients/${id(n)}`)).body;
+    // Elegant Jeweler: shoot Oct 9 with 8 unassigned scripts, writing from Oct 7, drafts & final Oct 8
+    const ej = await detail('Elegant Jeweler');
+    expect(ej.shoots.map((s: any) => s.startDate)).toEqual(['2026-10-09']);
+    expect(ej.batches[0]).toMatchObject({ targetCount: 8, plannedStart: '2026-10-07', draftDue: '2026-10-08', finalDue: '2026-10-08', draftDueMode: 'manual' });
+    expect(ej.batches[0].progress.unassigned).toBe(8);
+    // Elon: 45 scripts, all to Sarah, no shoot
+    const el = await detail('Elon Layliev');
+    expect(el.batches[0]).toMatchObject({ targetCount: 45, shootId: null });
+    expect(el.batches[0].writers[0]).toMatchObject({ name: 'Sarah Chen', count: 45 });
+    expect(el.brandVoice).toBe('Educational.');
+    // Daniel: a briefing, no scripts; Dentist Mike and Shimonov: guidance only
+    const da = await detail('Daniel Abrams');
+    expect(da.briefings[0].title).toBe('An engagement ring from start to finish');
+    expect(da.batches).toHaveLength(0);
+    expect((await detail('Dentist Mike')).guidance).toMatch(/main Instagram/);
+    expect((await detail('Shimonov Law')).batches).toHaveLength(0);
+    // an existing client keeps what it had; the new note is added underneath
+    const acme = (await manager.get(`/api/clients/${acmeId}`)).body;
+    expect(acme.guidance).toContain('Post Reels at 6pm.');
+    if (acmeBefore.guidance) expect(acme.guidance.startsWith(acmeBefore.guidance)).toBe(true);
+
+    // saving the same notes again doesn't duplicate anything
+    const again = await manager.post('/api/import/apply', { plan });
+    expect(again.status).toBe(200);
+    expect((await detail('Elegant Jeweler')).shoots).toHaveLength(1);
+    expect((await detail('Elon Layliev')).batches).toHaveLength(1);
+    expect((await detail('Daniel Abrams')).briefings).toHaveLength(1);
+    expect(((await manager.get(`/api/clients/${acmeId}`)).body.guidance.match(/Post Reels at 6pm/g) ?? []).length).toBe(1);
+  });
+
+  it('saves all or nothing', async () => {
+    const plan = { summary: '', questions: [], clients: [
+      { name: 'Fresh Start Co', existingClientId: null, status: 'active', description: 'x', brandVoice: null, guidance: null, briefings: [], shoots: [], batches: [], notes: [] },
+      { name: 'Not Signed Yet', existingClientId: null, status: 'prospect', description: null, brandVoice: null, guidance: null, briefings: [], notes: [],
+        shoots: [{ key: 's1', title: null, startDate: '2026-11-02', endDate: null }], batches: [] },
+    ] };
+    const r = await manager.post('/api/import/apply', { plan });
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/potential client/);
+    expect((await manager.get('/api/clients?status=all')).body.clients.some((c: any) => c.name === 'Fresh Start Co')).toBe(false);
+  });
+});

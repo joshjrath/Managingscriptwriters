@@ -54,6 +54,12 @@ Writers work in one master document, so each batch on **My work** has a **Writte
 
 **Days** is a timeline you scroll left and right freely (trackpad, swipe, or grab the background and fling it); more days load in both directions as you go. Choose 1, 3 or 5 days, a week or 2 weeks on screen; wider days show each event's details. **Month** slides between months, and **List** is an agenda. Shoots can be dragged between days in Days and Month.
 
+### Paste notes (AI)
+
+**New work → Paste notes** (or **Paste notes** on the Clients page): paste notes the way you'd text them — or attach a PDF / text file — and Claude reads them into clients (with description, brand voice and guidance such as posting instructions), briefings, shoots and script batches. You get an editable preview: fix any date or count, type writer names, untick clients you don't want, and answer its questions ("does next Wednesday mean Sep 30 or Oct 7?") to have it read the notes again. **Nothing is saved until you press Save**, and then everything is saved together or not at all. Existing clients (matched by name) keep what they have and get the new notes added underneath; importing the same notes twice doesn't duplicate shoots, batches or briefings. Unknown script counts don't create batches; writer names are matched to the team.
+
+To turn it on, add `ANTHROPIC_API_KEY` (from console.anthropic.com → API keys) to the server's environment — on Render: web service → Environment. It uses Claude Opus 5.5 with structured output (and the API's automatic fallback if a request is declined); expect roughly 5–10 cents per import. Only the notes you paste are sent.
+
 ### Potential clients
 
 The Clients page has a **Potential clients** section for people you're talking to (add one with **Potential client**, or pick *Potential client* in New work → New client). They can hold a description, briefing calls, links and files, but not shoots or batches. When they sign, **drag the card into Clients** — or press **Mark as client** (on the card or their page) — and it moves across; the history records when they became a client, and new clients get a "New client" tag for a week. A client with no shoots or batches yet can be dragged back.

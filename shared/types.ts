@@ -55,6 +55,8 @@ export interface Counts {
 
 export interface Bootstrap {
   me: Me;
+  /** reading pasted notes with AI is set up on the server (ANTHROPIC_API_KEY) */
+  notesImport: boolean;
   /** the newest What's new entry this person has opened */
   whatsNewSeen: string | null;
   settings: Settings;
@@ -442,6 +444,38 @@ export interface AuditEntry {
   summary: string;
   link: string | null;
   ip: string | null;
+}
+
+/** What the notes reader understood from pasted notes: previewed and edited before anything is saved. */
+export interface ImportPlan {
+  summary: string;
+  clients: ImportClient[];
+  /** things it had to assume; answer them and it reads the notes again */
+  questions: { clientName: string | null; question: string; assumed: string }[];
+}
+
+export interface ImportClient {
+  name: string;
+  /** set by the server when the name matches an existing client */
+  existingClientId: number | null;
+  status: 'active' | 'prospect';
+  description: string | null;
+  brandVoice: string | null;
+  /** posting instructions, formats to use, anything writers should always know */
+  guidance: string | null;
+  briefings: { title: string; summary: string | null; instructions: string | null }[];
+  shoots: { key: string; title: string | null; startDate: ISODate; endDate: ISODate | null }[];
+  batches: {
+    title: string; targetCount: number | null; shootKey: string | null; plannedStart: ISODate | null;
+    draftDue: ISODate | null; finalDue: ISODate | null; brief: string | null; writerNames: string[]; nextAction: string | null;
+  }[];
+  /** assumptions and reminders for this client, shown in the preview */
+  notes: string[];
+}
+
+export interface ImportResult {
+  clients: { clientId: number; name: string; created: boolean; lines: string[] }[];
+  warnings: string[];
 }
 
 export type MomentKind = 'approved' | 'revisions' | 'drafts_done' | 'batch_done' | 'team_drafts_done' | 'team_batch_done';
