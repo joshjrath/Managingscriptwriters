@@ -17,6 +17,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-28-chart-water',
+    date: '2026-09-28',
+    title: 'Water in the “Work due by day” chart',
+    summary: 'The chart’s bars now fill with the same liquid effect as the progress bars.',
+    changes: [
+      { tag: 'improved', text: 'Each bar in “Work due by day” pours in and holds water: a rolling surface, a glint and rising bubbles, which speed up when you hover a day.' },
+    ],
+  },
+  {
     id: '2026-09-28-calendar-drag',
     date: '2026-09-28',
     title: 'Drag shoots on the calendar',

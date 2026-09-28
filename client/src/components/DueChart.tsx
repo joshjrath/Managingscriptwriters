@@ -80,6 +80,11 @@ export function DueChart({ draft, final, today }: { draft: DueDay[]; final: DueD
                         {cats.filter((c) => d.byCategory[c]).map((c) => (
                           <span key={c} className="seg-fill" style={{ flex: d.byCategory[c], ['--c' as string]: CAT_COLOR[c] }} />
                         ))}
+                        {/* water: a rolling surface in the top layer's colour, a glint, and rising bubbles */}
+                        <svg className="bar-wave" viewBox="0 0 120 10" preserveAspectRatio="none" aria-hidden style={{ ['--c' as string]: CAT_COLOR[cats.filter((c) => d.byCategory[c]).at(-1)!] }}>
+                          <path d="M0 5Q10 1 20 5T40 5T60 5T80 5T100 5T120 5V10H0Z" />
+                        </svg>
+                        <span className="bar-water" aria-hidden><i className="bar-bub" /><i className="bar-bub" /><i className="bar-bub" /></span>
                       </span>
                     )}
                   </span>
