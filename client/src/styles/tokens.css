@@ -1,0 +1,112 @@
+/* ──────────────────────────────────────────────────────────────────────────
+   Scale Media · design tokens
+
+   The visual language of the Specular dashboard and Ash Health: near-black
+   shell, an inset charcoal sidebar with a salmon active item, charcoal panels
+   with a large radius and no borders, one loud salmon card and one yellow
+   card, bold display numerals, and colour that is always paired with a label.
+
+   Colour semantics (used consistently everywhere):
+     salmon   active navigation, featured emphasis, focus
+     yellow   due today, time-sensitive, primary action
+     lavender review
+     mint     approved / delivered
+     cyan     in progress, informational
+     pink     revisions requested
+     red      overdue, errors, blockers
+   ────────────────────────────────────────────────────────────────────────── */
+:root {
+  color-scheme: dark;
+
+  /* surfaces, darkest → lightest */
+  --bg: #0B0B0D;
+  --sidebar: #141416;
+  --panel: #19191D;
+  --panel-2: #222228;
+  --row: #2B2B32;
+  --row-hover: #33333B;
+  --btn: #38383F;
+  --btn-hover: #44444C;
+  --track: #26262C;
+  --line: #36363E;
+  --line-soft: #2A2A31;
+  --scrim: rgba(5, 5, 7, 0.72);
+
+  /* text */
+  --text: #F5F5F7;
+  --text-2: #A2A2AD;   /* secondary: ≥ 4.5:1 on every surface up to --row */
+  --text-3: #8C8C97;   /* tertiary: panels and darker only */
+  --on-accent: #111113;
+  --on-accent-2: rgba(17, 17, 19, 0.72);
+
+  /* accents */
+  --salmon: #F2A599;
+  --yellow: #F4ED70;
+  --cyan: #55C7E8;
+  --lavender: #9D89EF;
+  --mint: #60D1BE;
+  --pink: #E77AB5;
+  --red: #F16C63;
+  --neutral: #B4B4BE;
+
+  /* status mapping */
+  --st-not-started: var(--neutral);
+  --st-in-progress: var(--cyan);
+  --st-review: var(--lavender);
+  --st-revisions: var(--pink);
+  --st-approved: var(--mint);
+  --st-delivered: var(--mint);
+  --focus: var(--salmon);
+
+  /* shape */
+  --r-sidebar: 32px;
+  --r-panel: 28px;
+  --r-card: 24px;
+  --r-row: 16px;
+  --r-input: 14px;
+  --r-sm: 10px;
+  --r-pill: 999px;
+
+  /* spacing scale */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 20px;
+  --s6: 24px;
+  --s7: 28px;
+  --s8: 32px;
+  --s10: 40px;
+  --gap: 20px;
+  --pad: 26px;
+
+  /* type */
+  --font-ui: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-display: "Bricolage Grotesque Variable", "Inter Variable", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --fs-h1: 44px;
+  --fs-num: 60px;
+  --fs-h2: 21px;
+  --fs-body: 14.5px;
+  --fs-small: 13px;
+  --fs-label: 12px;
+
+  /* depth */
+  --shadow-panel: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  --shadow-pop: 0 28px 70px -18px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --glow: 0 0 10px;
+
+  /* motion */
+  --t: 150ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@media (max-width: 1280px) {
+  :root { --gap: 16px; --pad: 22px; --fs-h1: 40px; --fs-num: 52px; }
+}
+@media (max-width: 760px) {
+  :root { --gap: 14px; --pad: 18px; --fs-h1: 32px; --fs-num: 44px; --r-panel: 24px; --r-card: 22px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --t: 0ms; }
+  *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; scroll-behavior: auto !important; }
+}

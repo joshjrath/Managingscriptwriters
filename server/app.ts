@@ -1,0 +1,103 @@
+// Builds the Fastify app: session loading, CSRF guard, security headers,
+// error handling, API routes and (in production) the built client.
+
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import Fastify, { type FastifyInstance } from 'fastify';
+import cookie from '@fastify/cookie';
+import multipart from '@fastify/multipart';
+import fastifyStatic from '@fastify/static';
+import { SESSION_COOKIE, userForToken } from './auth';
+import { HttpError } from './http';
+import type { Ctx } from './core';
+import { registerAccountRoutes } from './routes/account';
+import { registerBatchRoutes } from './routes/batches';
+import { registerClientRoutes } from './routes/clients';
+import { registerShootRoutes } from './routes/shoots';
+import { registerViewRoutes } from './routes/views';
+
+export const CSRF_HEADER = 'x-scale-media';
+
+export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: boolean } = {}): Promise<FastifyInstance> {
+  const app = Fastify({ logger: opts.logger ?? false, trustProxy: true, bodyLimit: 1024 * 1024 });
+  await app.register(cookie);
+  await app.register(multipart, { limits: { fileSize: ctx.uploadLimitBytes, files: 1, fields: 20 } });
+
+  app.decorateRequest('user', null);
+
+  app.addHook('onRequest', async (req) => {
+    if (!req.url.startsWith('/api/')) return;
+    // Mutations must come from our own page: a custom header can't be sent
+    // cross-site without a CORS preflight, which this server never grants.
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+      if (req.headers[CSRF_HEADER] !== '1') throw new HttpError(403, 'Request blocked. Reload the page and try again.');
+      const origin = req.headers.origin;
+      if (origin && req.headers.host && new URL(origin).host !== req.headers.host) throw new HttpError(403, 'Cross-site request blocked');
+    }
+    req.user = await userForToken(ctx.db, req.cookies[SESSION_COOKIE]);
+  });
+
+  app.addHook('onSend', async (req, reply, payload) => {
+    reply.header('X-Content-Type-Options', 'nosniff');
+    reply.header('Referrer-Policy', 'same-origin');
+    reply.header('X-Frame-Options', 'DENY');
+    if (req.url.startsWith('/api/')) {
+      if (!reply.hasHeader('Cache-Control')) reply.header('Cache-Control', 'no-store');
+    } else if (!reply.hasHeader('Content-Security-Policy')) {
+      reply.header('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+    }
+    return payload;
+  });
+
+  app.setErrorHandler((err: Error & { statusCode?: number; code?: string }, req, reply) => {
+    if (err instanceof HttpError) {
+      return reply.status(err.status).send({ error: { message: err.message, fields: err.fields, code: err.code } });
+    }
+    if (err.code === 'FST_REQ_FILE_TOO_LARGE' || err.statusCode === 413) {
+      return reply.status(413).send({ error: { message: `Files can be up to ${Math.round(ctx.uploadLimitBytes / 1024 / 1024)} MB` } });
+    }
+    if (err.statusCode && err.statusCode >= 400 && err.statusCode < 500) {
+      return reply.status(err.statusCode).send({ error: { message: err.message } });
+    }
+    // unique violations that slipped past explicit checks
+    if ((err as { code?: string }).code === '23505') {
+      return reply.status(409).send({ error: { message: 'That already exists.', code: 'duplicate' } });
+    }
+    req.log.error(err);
+    if (!opts.logger) console.error(err);
+    return reply.status(500).send({ error: { message: 'Something went wrong on the server, so nothing was saved. Try again.' } });
+  });
+
+  app.get('/healthz', async (_req, reply) => {
+    await ctx.db.query('select 1');
+    return reply.type('text/plain').send('ok');
+  });
+
+  registerAccountRoutes(app, ctx);
+  registerViewRoutes(app, ctx);
+  registerClientRoutes(app, ctx);
+  registerShootRoutes(app, ctx);
+  registerBatchRoutes(app, ctx);
+
+  app.all('/api/*', async () => { throw new HttpError(404, 'Not found'); });
+
+  if (opts.staticDir && existsSync(opts.staticDir)) {
+    const indexHtml = await readFile(path.join(opts.staticDir, 'index.html'), 'utf8');
+    await app.register(fastifyStatic, {
+      root: opts.staticDir,
+      wildcard: false,
+      index: false,
+      setHeaders(res, file) {
+        if (file.includes(`${path.sep}assets${path.sep}`)) res.header('Cache-Control', 'public, max-age=31536000, immutable');
+      },
+    });
+    // the client is a single-page app: unknown paths get index.html
+    app.setNotFoundHandler((req, reply) => {
+      if (req.method !== 'GET' || req.url.startsWith('/api/')) return reply.status(404).send({ error: { message: 'Not found' } });
+      return reply.type('text/html').header('Cache-Control', 'no-cache').send(indexHtml);
+    });
+  }
+
+  return app;
+}

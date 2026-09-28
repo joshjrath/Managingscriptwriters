@@ -1,0 +1,70 @@
+import { StrictMode, useEffect } from 'react';
+import { createRoot } from 'react-dom/client';
+import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { QueryClientProvider, useQuery } from '@tanstack/react-query';
+import '@fontsource-variable/inter';
+import '@fontsource-variable/bricolage-grotesque';
+import './styles/tokens.css';
+import './styles/app.css';
+import { api, queryClient } from './api';
+import type { Bootstrap } from '../../shared/types';
+import { AppShell } from './components/Shell';
+import { ErrorState, ToastProvider } from './components/ui';
+import { Login, type AuthStatus } from './pages/Login';
+import { Overview } from './pages/Overview';
+import { MyWorkPage } from './pages/MyWork';
+import { Production } from './pages/Production';
+import { CalendarPage } from './pages/Calendar';
+import { ClientPage, ClientsPage } from './pages/Clients';
+import { BatchPage } from './pages/BatchDetail';
+import { ReviewPage } from './pages/Review';
+import { ResourcesPage } from './pages/Resources';
+import { SettingsPage } from './pages/Settings';
+
+function Gate() {
+  const status = useQuery({ queryKey: ['auth-status'], queryFn: () => api<AuthStatus>('/api/auth/status'), staleTime: Infinity });
+  const boot = useQuery({ queryKey: ['bootstrap'], queryFn: () => api<Bootstrap>('/api/bootstrap'), enabled: !!status.data?.signedIn, refetchInterval: 60_000 });
+  useEffect(() => {
+    const lost = () => { queryClient.clear(); status.refetch(); };
+    window.addEventListener('auth:lost', lost);
+    return () => window.removeEventListener('auth:lost', lost);
+  }, [status]);
+
+  if (status.isLoading || (status.data?.signedIn && boot.isLoading)) {
+    return <div className="loading-center" role="status"><span className="wordmark" style={{ fontSize: 28 }}>Scale&nbsp;<span>Media</span></span><span>Loading…</span></div>;
+  }
+  if (status.isError) return <main className="login"><ErrorState error={status.error} retry={() => status.refetch()} /></main>;
+  if (!status.data!.signedIn) return <Login status={status.data!} onDone={() => { queryClient.clear(); status.refetch(); }} />;
+  if (boot.isError || !boot.data) return <main className="login"><ErrorState error={boot.error} retry={() => boot.refetch()} /></main>;
+  const home = boot.data.me.role === 'manager' ? '/overview' : '/my-work';
+  return (
+    <Routes>
+      <Route element={<AppShell boot={boot.data} />}>
+        <Route index element={<Navigate to={home} replace />} />
+        <Route path="/overview" element={<Overview />} />
+        <Route path="/my-work" element={<MyWorkPage />} />
+        <Route path="/production" element={<Production />} />
+        <Route path="/calendar" element={<CalendarPage />} />
+        <Route path="/clients" element={<ClientsPage />} />
+        <Route path="/clients/:id" element={<ClientPage />} />
+        <Route path="/batches/:id" element={<BatchPage />} />
+        <Route path="/review" element={<ReviewPage />} />
+        <Route path="/resources" element={<ResourcesPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="*" element={<div className="panel"><h2>Page not found</h2><p className="muted" style={{ marginTop: 8 }}>That page doesn’t exist.</p></div>} />
+      </Route>
+    </Routes>
+  );
+}
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <QueryClientProvider client={queryClient}>
+      <ToastProvider>
+        <BrowserRouter>
+          <Gate />
+        </BrowserRouter>
+      </ToastProvider>
+    </QueryClientProvider>
+  </StrictMode>,
+);
