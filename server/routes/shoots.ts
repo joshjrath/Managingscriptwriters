@@ -34,7 +34,7 @@ const shootCreate = z.object({
     nextAction: batchFields.nextAction,
     briefingIds: batchFields.briefingIds,
     split: batchFields.split,
-  }),
+  }).optional(), // leave out to schedule the shoot now and plan its scripts later
 });
 
 const datesSchema = z.object({ startDate: zs.date, endDate: optionalDate, shiftManual: z.boolean().optional() });
@@ -56,6 +56,13 @@ export async function insertShoot(t: Db, me: Me, input: z.infer<typeof shootCrea
     actor: me, action: 'shoot.created', entityType: 'shoot', entityId: shootId, clientId: input.clientId,
     summary: `Scheduled shoot ${fmtRange(input.startDate, endDate)}${input.title ? ` (“${input.title}”)` : ''}`,
   });
+  if (!input.batch) {
+    const planBy = addDays(input.startDate, -settings.planReminderDays);
+    return {
+      shootId, batchId: null,
+      warnings: [`No scripts planned yet. Add them from the shoot when you know the count and writers — you’ll get a reminder ${planBy > clock.today ? `on ${fmtDate(planBy)}` : 'soon'} if they’re still not planned.`],
+    };
+  }
   const title = input.batch.title || `${input.title || 'Shoot'} · ${fmtRange(input.startDate, endDate)}`;
   const created = await insertBatch(t, me, { ...input.batch, title, clientId: input.clientId, shootId }, settings, clock);
   return { shootId, ...created };
@@ -117,7 +124,7 @@ export function registerShootRoutes(app: FastifyInstance, ctx: Ctx) {
     const clock = await clockFor(ctx, settings);
     const created = await db.tx((t) => insertShoot(t, me, input, settings, clock));
     const deadlines = computeDeadlines(input.startDate, rulesOf(settings));
-    return { ...created, deadlines, batch: await loadBatch(ctx, created.batchId, clock) };
+    return { ...created, deadlines, batch: created.batchId ? await loadBatch(ctx, created.batchId, clock) : null };
   });
 
   app.patch('/api/shoots/:id', async (req) => {

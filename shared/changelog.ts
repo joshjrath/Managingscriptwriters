@@ -17,6 +17,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-28-plan-later',
+    date: '2026-09-28',
+    title: 'Book shoots now, plan scripts later',
+    summary: 'Schedule a shoot as soon as it’s booked, even before you know the script count or writers.',
+    changes: [
+      { tag: 'new', text: 'New shoot → “Plan scripts later” books just the shoot. Writers are optional too when you do add scripts.' },
+      { tag: 'new', text: '“Add scripts” on the shoot (calendar, client page and Overview) when you’re ready. Unplanned shoots have a dashed outline on the calendar.' },
+      { tag: 'new', text: 'Managers get a reminder 14 days before the shoot if its scripts aren’t planned or some are unassigned, then again at 7, 3 and 1 days. Change the 14 in Settings.' },
+    ],
+  },
+  {
     id: '2026-09-28-admin-name',
     date: '2026-09-28',
     title: '“Owner” is now called “Admin”',

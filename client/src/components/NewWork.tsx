@@ -241,7 +241,7 @@ function attachErrors(a: Attach): Record<string, string> {
 }
 
 /** Saves the links and files onto the new batch. Returns warnings for anything that failed. */
-async function saveAttachments(clientId: number, batchId: number, a: Attach): Promise<{ saved: string[]; warnings: string[] }> {
+async function saveAttachments(clientId: number, batchId: number | null, a: Attach): Promise<{ saved: string[]; warnings: string[] }> {
   const saved: string[] = [];
   const warnings: string[] = [];
   const links = [
@@ -255,7 +255,7 @@ async function saveAttachments(clientId: number, batchId: number, a: Attach): Pr
   for (const file of a.files) {
     const form = new FormData();
     form.set('clientId', String(clientId));
-    form.set('batchId', String(batchId));
+    if (batchId) form.set('batchId', String(batchId));
     form.set('category', /pdf|word|document|text/i.test(file.type) || /\.(pdf|docx?|txt)$/i.test(file.name) ? 'document' : 'asset');
     form.set('title', file.name);
     form.set('file', file);
@@ -309,6 +309,8 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   const [start, setStart] = useState<string>(p?.start ?? '');
   const [end, setEnd] = useState<string>(p?.end ?? '');
   const [count, setCount] = useState<number | ''>(p?.count ?? '');
+  // scripts can be planned later, when the count and writers are known
+  const [later, setLater] = useState(false);
   const [parts, setParts] = useState<SplitPart[]>(p?.split ?? [{ writerId: me.role === 'writer' ? me.id : '', count: '' }]);
   const [title, setTitle] = useState('');
   const [batchTitle, setBatchTitle] = useState('');
@@ -330,22 +332,36 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
     if (parts.length === 1 && parts[0].writerId !== '' && (parts[0].count === '' || parts[0].count === 0) && count) setParts([{ ...parts[0], count }]);
   }, [count, parts]);
 
-  const save = useSave((body: Record<string, unknown>) => api<{ shootId: number; batchId: number; warnings: string[]; batch: BatchSummary }>('/api/shoots', { body }), {
+  const save = useSave((body: Record<string, unknown>) => api<{ shootId: number; batchId: number | null; warnings: string[]; batch: BatchSummary | null }>('/api/shoots', { body }), {
     onSuccess: async (out) => {
       const d = computeDeadlines(start, settings);
       const split = cleanSplit(parts);
       setUploading(true);
-      const att = await saveAttachments(out.batch.clientId, out.batchId, attach).finally(() => setUploading(false));
+      const att = await saveAttachments(Number(clientId), out.batchId, attach).finally(() => setUploading(false));
       await queryClient.invalidateQueries();
+      if (!out.batch) {
+        onCreated({
+          kind: 'shoot', title: 'Shoot scheduled', clientId: Number(clientId), batchId: null, warnings: [...out.warnings, ...att.warnings],
+          lines: [
+            { k: 'Shoot', v: fmtRange(start, end || null) },
+            { k: 'Scripts', v: 'Not planned yet — add them from the shoot on the calendar, the client page or Overview' },
+            { k: 'Drafts would be due', v: d.draftDue ? fmtLong(d.draftDue) : '—', rule: d.draftRule },
+            { k: 'Reminder', v: `${settings.planReminderDays} days before the shoot if scripts still aren’t planned` },
+            ...attachedLine(att.saved),
+          ],
+        });
+        return;
+      }
+      const batch = out.batch;
       onCreated({
-        kind: 'shoot', title: `Shoot scheduled for ${out.batch.clientName}`, batchId: out.batchId, clientId: undefined,
+        kind: 'shoot', title: `Shoot scheduled for ${batch.clientName}`, batchId: out.batchId, clientId: undefined,
         warnings: [...out.warnings, ...att.warnings],
         lines: [
           { k: 'Shoot', v: fmtRange(start, end || null) },
-          { k: 'Batch', v: `${out.batch.title} · ${plural(Number(count), 'script')}` },
-          { k: 'Writers', v: split.length ? splitLines(split, Number(count), names) : 'None yet — all scripts unassigned' },
-          { k: 'Drafts due', v: fmtLong(out.batch.draftDue!), rule: out.batch.draftDueMode === 'auto' ? d.draftRule : 'Manual override' },
-          { k: 'Final delivery', v: fmtLong(out.batch.finalDue!), rule: out.batch.finalDueMode === 'auto' ? d.finalRule : 'Manual override' },
+          { k: 'Batch', v: `${batch.title} · ${plural(Number(count), 'script')}` },
+          { k: 'Writers', v: split.length ? splitLines(split, Number(count), names) : `None yet — all scripts unassigned. You’ll be reminded ${settings.planReminderDays} days before the shoot.` },
+          { k: 'Drafts due', v: fmtLong(batch.draftDue!), rule: batch.draftDueMode === 'auto' ? d.draftRule : 'Manual override' },
+          { k: 'Final delivery', v: fmtLong(batch.finalDue!), rule: batch.finalDueMode === 'auto' ? d.finalRule : 'Manual override' },
           ...(planned ? [{ k: 'Writing starts', v: fmtLong(planned) }] : []),
           ...attachedLine(att.saved),
         ],
@@ -358,13 +374,13 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
     if (!clientId) errs.clientId = 'Choose a client';
     if (!start) errs.startDate = 'Enter the first shoot day';
     if (end && start && end < start) errs.endDate = 'The shoot can’t end before it starts';
-    if (!count || Number(count) < 1) errs['batch.targetCount'] = 'How many scripts are needed?';
+    if (!later && (!count || Number(count) < 1)) errs['batch.targetCount'] = 'How many scripts are needed? Or choose “Plan scripts later”.';
     Object.assign(errs, attachErrors(attach));
     setLocal(errs);
     if (Object.keys(errs).length) return;
     save.mutate({
       clientId, title: title || null, startDate: start, endDate: end || null, location: location || null, notes: null,
-      batch: {
+      batch: later ? undefined : {
         title: batchTitle || null, targetCount: Number(count), priority, plannedStart: planned || null,
         draftDue: draftOverride || null, finalDue: finalOverride || null, brief: brief || null, nextAction: null,
         briefingIds, split: cleanSplit(parts),
@@ -378,9 +394,17 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
         <Field label="Client" htmlFor={ids.client} error={f.clientId} className="full"><ClientSelect id={ids.client} value={clientId} onChange={setClientId} error={f.clientId} /></Field>
         <Field label="Shoot starts" htmlFor={ids.start} error={f.startDate}><input className="input" type="date" value={start} onChange={(e) => setStart(e.target.value)} {...inputProps(ids.start, f.startDate)} /></Field>
         <Field label="Shoot ends" optional htmlFor={ids.end} error={f.endDate} help="Leave empty for a one-day shoot. Deadlines count back from the first day."><input className="input" type="date" value={end} min={start || undefined} onChange={(e) => setEnd(e.target.value)} {...inputProps(ids.end, f.endDate)} /></Field>
-        <Field label="Scripts needed" htmlFor={ids.count} error={f['batch.targetCount']}><input className="input num" type="number" min={1} max={500} inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value === '' ? '' : Number(e.target.value))} {...inputProps(ids.count, f['batch.targetCount'])} /></Field>
-        <div className="field full"><span className="lbl">Deadlines</span><DeadlinePreview start={start as ISODate} draftOverride={draftOverride as ISODate} finalOverride={finalOverride as ISODate} /></div>
-        <div className="field full"><span className="lbl">Writers</span><SplitEditor total={Number(count) || 0} parts={parts} onChange={setParts} error={f['batch.split']} /></div>
+        <div className="field full">
+          <span className="lbl">Scripts</span>
+          <Seg role="group" aria-label="When to plan the scripts" style={{ alignSelf: 'flex-start' }}>
+            <button type="button" aria-pressed={!later} onClick={() => setLater(false)}>Plan them now</button>
+            <button type="button" aria-pressed={later} onClick={() => { setLater(true); setLocal((l) => { const { ['batch.targetCount']: _x, ...rest } = l; return rest; }); }}>Plan scripts later</button>
+          </Seg>
+          {later && <span className="help">Just book the shoot. Add the script count and writers when you know them — you’ll get a reminder {settings.planReminderDays} days before the shoot if they’re still not planned (change this in Settings).</span>}
+        </div>
+        {!later && <Field label="Scripts needed" htmlFor={ids.count} error={f['batch.targetCount']} help="Writers can be assigned now or later."><input className="input num" type="number" min={1} max={500} inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value === '' ? '' : Number(e.target.value))} {...inputProps(ids.count, f['batch.targetCount'])} /></Field>}
+        <div className="field full"><span className="lbl">{later ? 'Deadlines, once scripts are added' : 'Deadlines'}</span><DeadlinePreview start={start as ISODate} draftOverride={draftOverride as ISODate} finalOverride={finalOverride as ISODate} /></div>
+        {!later && <div className="field full"><span className="lbl">Writers <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional — assign later if you’re not sure</span></span><SplitEditor total={Number(count) || 0} parts={parts} onChange={setParts} error={f['batch.split']} /></div>}
       </div>
       <div className="field"><span className="lbl">Recording & files <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional</span></span><AttachmentsSection value={attach} onChange={setAttach} errors={f} /></div>
       <Advanced>
@@ -397,7 +421,7 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
         </div>
       </Advanced>
       <div className="form-actions">
-        <Button type="submit" variant="primary pill lg" busy={save.isPending || uploading} onClick={submit}>{uploading ? 'Uploading files…' : 'Create shoot & batch'}</Button>
+        <Button type="submit" variant="primary pill lg" busy={save.isPending || uploading} onClick={submit}>{uploading ? 'Uploading files…' : later ? 'Schedule shoot' : 'Create shoot & batch'}</Button>
       </div>
     </form>
   );
@@ -427,6 +451,9 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   const shoots = (client.data?.shoots ?? []).filter((s) => !s.cancelledAt && (s.endDate ?? s.startDate) >= addDays(clock.today, -1));
   const shoot = shoots.find((s) => s.id === shootId);
   const auto = shoot ? computeDeadlines(shoot.startDate, settings) : null;
+  // adding scripts to a shoot: name the batch after it unless a name has been typed
+  const [named, setNamed] = useState(false);
+  useEffect(() => { if (shoot && !named) setTitle(`${shoot.title || 'Shoot'} · ${fmtRange(shoot.startDate, shoot.endDate)}`); }, [shoot, named]);
   const ids = { client: useFieldId('bc'), title: useFieldId('btl'), count: useFieldId('bn'), shoot: useFieldId('bs'), draft: useFieldId('bd'), final: useFieldId('bf'), pr: useFieldId('bp'), ps: useFieldId('bps'), brief: useFieldId('bb'), na: useFieldId('bna') };
   useEffect(() => {
     if (parts.length === 1 && parts[0].writerId !== '' && (parts[0].count === '' || parts[0].count === 0) && count) setParts([{ ...parts[0], count }]);
@@ -471,7 +498,7 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
       <FormError error={save.error && !Object.keys(save.error.fields).length ? save.error : null} />
       <div className="form-grid">
         <Field label="Client" htmlFor={ids.client} error={f.clientId}><ClientSelect id={ids.client} value={clientId} onChange={(v) => { setClientId(v); setShootId(''); }} error={f.clientId} /></Field>
-        <Field label="Batch name" htmlFor={ids.title} error={f.title}><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Initial 5 scripts" {...inputProps(ids.title, f.title)} /></Field>
+        <Field label="Batch name" htmlFor={ids.title} error={f.title}><input className="input" value={title} onChange={(e) => { setNamed(true); setTitle(e.target.value); }} placeholder="e.g. Initial 5 scripts" {...inputProps(ids.title, f.title)} /></Field>
         <Field label="Scripts needed" htmlFor={ids.count} error={f.targetCount}><input className="input num" type="number" min={1} max={500} inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value === '' ? '' : Number(e.target.value))} {...inputProps(ids.count, f.targetCount)} /></Field>
         <Field label="Linked shoot" optional htmlFor={ids.shoot} help={shoot ? 'Deadlines are calculated from the shoot. Enter a date below only to override.' : 'Leave empty for work without a shoot.'}>
           <select className="select" id={ids.shoot} value={shootId} onChange={(e) => setShootId(e.target.value ? Number(e.target.value) : '')} disabled={!clientId}>

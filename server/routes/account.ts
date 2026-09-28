@@ -257,6 +257,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       dayMode: z.enum(['calendar', 'business']).optional(),
       workingDays: z.array(z.number().int().min(0).max(6)).min(1, 'Pick at least one working day').max(7).optional(),
       reminderLeadDays: z.coerce.number().int().min(0).max(14).optional(),
+      planReminderDays: z.coerce.number().int().min(3).max(60).optional(),
       recalculate: z.boolean().default(false),
     }), req.body);
     const before = await loadSettings(db);
@@ -265,7 +266,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     if (final > draft) throw new HttpError(400, 'Final delivery should come after drafts, so its offset must be smaller', { finalOffsetDays: 'Must be ≤ the draft offset' });
     const map: Record<string, string> = {
       orgName: 'org_name', timezone: 'timezone', cutoff: 'cutoff', draftOffsetDays: 'draft_offset_days', finalOffsetDays: 'final_offset_days',
-      dayMode: 'day_mode', workingDays: 'working_days', reminderLeadDays: 'reminder_lead_days',
+      dayMode: 'day_mode', workingDays: 'working_days', reminderLeadDays: 'reminder_lead_days', planReminderDays: 'plan_reminder_days',
     };
     const keys = Object.keys(map).filter((k) => (input as Record<string, unknown>)[k] !== undefined);
     let recalculated = 0;

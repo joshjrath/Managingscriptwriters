@@ -14,7 +14,7 @@ import type { CalendarEvent } from '../../../shared/types';
 import { addDays, addMonths, diffDays, eachDay, startOfMonth, startOfWeek, type ISODate } from '../../../shared/dates';
 import { isManager } from '../../../shared/workflow';
 import { fmtMonth, fmtWeekday, fmtDate, fmtRange } from '../../../shared/format';
-import { PageHeader, useBoot } from '../components/Shell';
+import { PageHeader, useBoot, useNewWork } from '../components/Shell';
 import { Button, Dialog, Empty, ErrorState, Loading, Seg } from '../components/ui';
 import { SOFT } from '../motion';
 import { RescheduleDialog } from './BatchDetail';
@@ -49,6 +49,7 @@ export function CalendarPage() {
   const [drag, setDrag] = useState<{ e: CalendarEvent; offset: number; over: ISODate | null } | null>(null);
   const [move, setMove] = useState<Move | null>(null);
   const [picked, setPicked] = useState<CalendarEvent | null>(null);
+  const openNew = useNewWork();
   const gridStart = startOfWeek(month);
   const gridEnd = addDays(startOfWeek(addDays(addMonths(month, 1), -1)), 6);
   const q = useQuery({
@@ -110,9 +111,9 @@ export function CalendarPage() {
       // each day of a shoot keeps its identity, so a moved shoot glides to its new days
       <m.div key={`${e.id}:${k}`} className="ev-wrap" layout="position" layoutId={e.type === 'shoot' ? `ev-${e.id}-${k}` : undefined} transition={SOFT}>
         <button
-          className={`ev ${e.type}${showLabel ? '' : ' cont'}${e.overdue ? ' overdue' : ''}${e.complete ? ' done' : ''}${movable ? ' movable' : ''}${drag?.e.id === e.id ? ' dragging' : ''}`}
+          className={`ev ${e.type}${showLabel ? '' : ' cont'}${e.overdue ? ' overdue' : ''}${e.complete ? ' done' : ''}${movable ? ' movable' : ''}${drag?.e.id === e.id ? ' dragging' : ''}${e.type === 'shoot' && !e.batchId ? ' unplanned' : ''}`}
           onClick={() => open(e)}
-          title={`${T.label}: ${e.clientName} · ${e.title}${status}${movable ? ' — drag to another day to move it' : ''}`}
+          title={`${T.label}: ${e.clientName} · ${e.title}${status}${e.type === 'shoot' && !e.batchId ? ' — no scripts planned yet' : ''}${movable ? ' — drag to another day to move it' : ''}`}
           draggable={movable || undefined}
           onDragStart={movable ? (x) => { x.dataTransfer.effectAllowed = 'move'; x.dataTransfer.setData('text/plain', `shoot:${e.shootId}`); setDrag({ e, offset: k, over: null }); } : undefined}
           onDragEnd={movable ? () => setDrag(null) : undefined}
@@ -222,9 +223,11 @@ export function CalendarPage() {
       {picked && (
         <Dialog open onClose={() => setPicked(null)} size="narrow" title={`${picked.clientName} · ${picked.title}`} sub={fmtRange(picked.start, picked.end !== picked.start ? picked.end : null)}
           footer={<div className="form-actions">
+            {!picked.batchId && <Button variant="salmon pill" onClick={() => { const e = picked; setPicked(null); openNew('batch', { clientId: clients.find((c) => c.name === e.clientName)?.id, shootId: e.shootId ?? undefined }); }}>Add scripts</Button>}
             {picked.batchId && <Button variant="ghost" icon={<ArrowRight aria-hidden />} onClick={() => { const id = picked.batchId; setPicked(null); nav(`/batches/${id}`); }}>Open batch</Button>}
             <Button variant="primary pill" icon={<CalendarClock aria-hidden />} onClick={() => { setMove(moveOf(picked)); setPicked(null); }}>Change dates</Button>
           </div>}>
+          {!picked.batchId && <p style={{ fontSize: 13.5, marginBottom: 8 }}><b>No scripts planned yet.</b> Add the script count and writers when you know them.</p>}
           <p className="muted" style={{ fontSize: 13.5 }}>Changing the dates moves the draft and final delivery deadlines and the planned writing start with it. You’ll see every change before it’s applied. You can also drag the shoot to another day on the calendar.</p>
         </Dialog>
       )}

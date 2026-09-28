@@ -38,10 +38,10 @@ function RulesPanel() {
   useEffect(() => setV(settings), [settings]);
   const save = useSave(() => api<{ settings: Settings; recalculated: number }>('/api/settings', {
     method: 'PATCH',
-    body: { orgName: v.orgName, timezone: v.timezone, cutoff: v.cutoff, draftOffsetDays: v.draftOffsetDays, finalOffsetDays: v.finalOffsetDays, dayMode: v.dayMode, workingDays: v.workingDays, reminderLeadDays: v.reminderLeadDays, recalculate: recalc },
+    body: { orgName: v.orgName, timezone: v.timezone, cutoff: v.cutoff, draftOffsetDays: v.draftOffsetDays, finalOffsetDays: v.finalOffsetDays, dayMode: v.dayMode, workingDays: v.workingDays, reminderLeadDays: v.reminderLeadDays, planReminderDays: v.planReminderDays, recalculate: recalc },
   }), { onSuccess: (out) => { toast(`Settings saved${recalc ? ` · ${plural(out.recalculated, 'batch', 'batches')} recalculated` : ''}`); setRecalc(false); } });
   const f = save.error?.fields ?? {};
-  const ids = { tz: useFieldId('tz'), cut: useFieldId('cut'), d: useFieldId('d'), fo: useFieldId('fo'), lead: useFieldId('lead'), org: useFieldId('org') };
+  const ids = { tz: useFieldId('tz'), cut: useFieldId('cut'), d: useFieldId('d'), fo: useFieldId('fo'), lead: useFieldId('lead'), plan: useFieldId('plan'), org: useFieldId('org') };
   const example = computeDeadlines('2026-10-12', { ...DEFAULT_RULES, draftOffsetDays: v.draftOffsetDays, finalOffsetDays: v.finalOffsetDays, dayMode: v.dayMode, workingDays: v.workingDays.length ? v.workingDays : [1] });
   const changedRules = v.draftOffsetDays !== settings.draftOffsetDays || v.finalOffsetDays !== settings.finalOffsetDays || v.dayMode !== settings.dayMode || v.workingDays.join() !== settings.workingDays.join();
   return (
@@ -77,6 +77,7 @@ function RulesPanel() {
           </Field>
           <Field label="Daily cutoff" htmlFor={ids.cut} error={f.cutoff} help={`Work is due by ${fmtCutoff(v.cutoff)} on the deadline day.`}><input className="input" type="time" value={v.cutoff} onChange={(e) => setV({ ...v, cutoff: e.target.value })} {...inputProps(ids.cut, f.cutoff)} /></Field>
           <Field label="Remind writers" htmlFor={ids.lead} error={f.reminderLeadDays} help="days before a deadline (plus on the day, and when overdue)"><input className="input num" type="number" min={0} max={14} value={v.reminderLeadDays} onChange={(e) => setV({ ...v, reminderLeadDays: Number(e.target.value) })} {...inputProps(ids.lead, f.reminderLeadDays)} /></Field>
+          <Field label="Remind managers to plan scripts" htmlFor={ids.plan} error={f.planReminderDays} help="days before a shoot that has no scripts planned or has unassigned scripts (again at 7, 3 and 1 days)"><input className="input num" type="number" min={3} max={60} value={v.planReminderDays} onChange={(e) => setV({ ...v, planReminderDays: Number(e.target.value) })} {...inputProps(ids.plan, f.planReminderDays)} /></Field>
           <Field label="Organisation name" htmlFor={ids.org} error={f.orgName}><input className="input" value={v.orgName} onChange={(e) => setV({ ...v, orgName: e.target.value })} {...inputProps(ids.org, f.orgName)} /></Field>
         </div>
         <p className="muted" style={{ fontSize: 12.5 }}>Reminders run on the server every 10 minutes while it’s running{settings.remindersLastRunAt ? ` · last run ${fmtStamp(settings.remindersLastRunAt, settings.timezone)}` : ' · not run yet'}.</p>

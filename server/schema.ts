@@ -308,4 +308,8 @@ create table writer_progress (
   primary key (batch_id, user_id)
 );
 `,
+  // 5 · shoots can be scheduled before their scripts are planned; remind managers ahead of time
+  `
+alter table settings add column plan_reminder_days int not null default 14 check (plan_reminder_days between 3 and 60);
+`,
 ];

@@ -686,3 +686,58 @@ describe('writer progress counter', () => {
     expect(((await manager.get(`/api/batches/${id}`)).body as BatchDetail).activity.find((a) => a.action === 'progress.written' && a.summary.includes('for Sarah Chen'))).toBeTruthy();
   });
 });
+
+describe('scheduling a shoot before its scripts are planned', () => {
+  it('books the shoot with no scripts, then reminds managers ahead of time until scripts are planned and assigned', async () => {
+    const r = await manager.post('/api/shoots', { clientId: acmeId, title: 'Winter lookbook', startDate: '2026-11-30' });
+    expect(r.status).toBe(200);
+    expect(r.body).toMatchObject({ batchId: null, batch: null });
+    expect(r.body.warnings.join(' ')).toMatch(/No scripts planned yet.*reminder on Nov 16/);
+    const shootId = r.body.shootId as number;
+    const cal = (await manager.get('/api/calendar?from=2026-11-01&to=2026-12-31')).body.events;
+    expect(cal.some((e: any) => e.shootId === shootId && e.type === 'shoot')).toBe(true);
+
+    const planning = async (who = manager) => ((await who.get('/api/notifications')).body.notifications as any[]).filter((n) => n.type === 'planning' && /Winter lookbook|Acme/.test(n.body + n.title));
+    const before = (await planning()).length;
+    try {
+      NOW = new Date('2026-11-10T16:00:00Z'); // 20 days out: too early
+      await runReminders(ctx);
+      expect((await planning()).length).toBe(before);
+      NOW = new Date('2026-11-18T16:00:00Z'); // 12 days out: first nudge, once
+      await runReminders(ctx);
+      await runReminders(ctx);
+      const first = await planning();
+      expect(first.length).toBe(before + 1);
+      expect(first[0].title).toMatch(/Shoot in 12 days · Acme Outdoor Co.: no scripts planned/);
+      expect(first[0].body).toMatch(/drafts \(due Nov 25\)/);
+      expect((await planning(sarah)).length).toBe(0); // writers aren't nagged about planning
+      NOW = new Date('2026-11-24T16:00:00Z'); // 6 days out: second nudge
+      await runReminders(ctx);
+      expect((await planning()).length).toBe(before + 2);
+
+      // scripts planned but not assigned: still reminded
+      const b = await manager.post('/api/batches', { clientId: acmeId, shootId, title: 'Winter lookbook scripts', targetCount: 6, split: [] });
+      expect(b.status).toBe(200);
+      NOW = new Date('2026-11-27T16:00:00Z');
+      await runReminders(ctx);
+      const unassigned = ((await manager.get('/api/notifications')).body.notifications as any[]).filter((n) => n.type === 'planning' && /Winter lookbook scripts/.test(n.body));
+      expect(unassigned[0]?.title).toMatch(/6 scripts unassigned/);
+      // once assigned, no more planning reminders
+      const detail = (await manager.get(`/api/batches/${b.body.batchId}`)).body as BatchDetail;
+      await manager.post(`/api/batches/${b.body.batchId}/scripts/assign`, { scriptIds: detail.scripts.map((s) => s.id), assigneeId: ids.sarah });
+      NOW = new Date('2026-11-29T16:00:00Z');
+      const count = (await manager.get('/api/notifications')).body.notifications.filter((n: any) => n.type === 'planning').length;
+      await runReminders(ctx);
+      expect((await manager.get('/api/notifications')).body.notifications.filter((n: any) => n.type === 'planning').length).toBe(count);
+    } finally {
+      NOW = new Date('2026-09-28T16:00:00Z');
+    }
+  });
+
+  it('lets managers choose how far ahead the planning reminder comes', async () => {
+    expect((await manager.patch('/api/settings', { planReminderDays: 21 })).status).toBe(200);
+    expect((await manager.get('/api/settings')).body.settings?.planReminderDays ?? (await manager.get('/api/bootstrap')).body.settings.planReminderDays).toBe(21);
+    expect((await manager.patch('/api/settings', { planReminderDays: 1 })).status).toBe(400);
+    await manager.patch('/api/settings', { planReminderDays: 14 });
+  });
+});

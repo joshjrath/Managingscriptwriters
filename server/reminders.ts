@@ -1,4 +1,7 @@
-// Deadline reminders: approaching, due today, and overdue.
+// Deadline reminders: approaching, due today, and overdue. Planning
+// reminders for managers: a shoot coming up with no scripts planned yet, or
+// a batch with scripts nobody is assigned to, starting planReminderDays
+// before the shoot (or drafts, with no shoot) and again at 7, 3 and 1 days.
 //
 // Runs inside the web process every REMINDER_INTERVAL_MINUTES (default 10),
 // and can also be run once from a cron job with `npm run reminders`.
@@ -6,9 +9,10 @@
 // repeated runs (or several instances) never send the same reminder twice.
 // A moved deadline gets a new key, so it is reminded about again.
 
-import { batchLink, clockFor, loadBatches, loadSettings, managerIds, notify, type Ctx, type ScriptLiteRow } from './core';
+import { batchLink, clockFor, loadBatches, loadSettings, managerIds, notify, rulesOf, type Ctx, type ScriptLiteRow } from './core';
+import { addDays, computeDeadlines, diffDays, type ISODate } from '../shared/dates';
 import { isDraftReady } from '../shared/workflow';
-import { fmtDate, plural } from '../shared/format';
+import { fmtDate, fmtRange, plural } from '../shared/format';
 
 export async function runReminders(ctx: Ctx): Promise<{ created: number; skipped?: boolean }> {
   return ctx.db.tx(async (t) => {
@@ -52,6 +56,43 @@ export async function runReminders(ctx: Ctx): Promise<{ created: number; skipped
         }
       }
     }
+    // planning: nudge managers while there's still time to brief writers
+    const lead = settings.planReminderDays;
+    const stages = [...new Set([lead, 7, 3, 1].filter((x) => x <= lead))].sort((a, b) => a - b);
+    const stageFor = (days: number) => (days < 0 ? undefined : stages.find((x) => days <= x));
+    const inDays = (days: number) => (days === 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`);
+    const unplanned = await t.query<{ id: number; client_id: number; client_name: string; title: string | null; start_date: ISODate; end_date: ISODate | null }>(
+      `select s.id, s.client_id, c.name as client_name, s.title, s.start_date, s.end_date
+         from shoots s join clients c on c.id = s.client_id
+        where s.cancelled_at is null and c.status = 'active' and s.start_date between $1 and $2
+          and not exists (select 1 from batches b where b.shoot_id = s.id and b.archived_at is null)`,
+      [clock.today, addDays(clock.today, lead)],
+    );
+    for (const sh of unplanned) {
+      const days = diffDays(sh.start_date, clock.today);
+      const stage = stageFor(days);
+      if (stage == null) continue;
+      const draftDue = computeDeadlines(sh.start_date, rulesOf(settings)).draftDue;
+      created += await notify(t, managers, {
+        type: 'planning', title: `Shoot ${inDays(days)} · ${sh.client_name}: no scripts planned`,
+        body: `${sh.title || 'The shoot'} (${fmtRange(sh.start_date, sh.end_date)}) has no scripts yet. Add the script count and writers so drafts${draftDue ? ` (due ${fmtDate(draftDue)})` : ''} can start.`,
+        link: `/clients/${sh.client_id}`, dedupeKey: `plan:shoot:${sh.id}:${sh.start_date}:${stage}`,
+      });
+    }
+    for (const b of summaries) {
+      if (b.stage === 'delivered' || !b.progress.unassigned) continue;
+      const ref = b.shootStart ?? b.draftDue;
+      if (!ref) continue;
+      const days = diffDays(ref, clock.today);
+      const stage = stageFor(days);
+      if (stage == null) continue;
+      created += await notify(t, managers, {
+        type: 'planning', title: `${plural(b.progress.unassigned, 'script')} unassigned · ${b.clientName}`,
+        body: `${b.title}: ${b.shootStart ? `shoot ${inDays(days)}` : `drafts due ${inDays(days)}`}${b.draftDue && b.shootStart ? `, drafts due ${fmtDate(b.draftDue)}` : ''}. Assign ${b.progress.unassigned === 1 ? 'it' : 'them'} to a writer.`,
+        link: `${batchLink(b.id)}#scripts`, dedupeKey: `plan:batch:${b.id}:${ref}:${stage}`,
+      });
+    }
+
     await t.query(`update settings set reminders_last_run_at = now() where id = 1`);
     // keep a year of page views in the master log; changes and sign-ins are kept
     await t.query(`delete from audit_log where kind = 'view' and created_at < now() - interval '400 days'`);

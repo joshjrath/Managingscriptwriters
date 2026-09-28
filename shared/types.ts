@@ -33,6 +33,8 @@ export interface Settings {
   dayMode: DayMode;
   workingDays: number[];
   reminderLeadDays: number;
+  /** remind managers this many days before a shoot whose scripts aren't planned or assigned */
+  planReminderDays: number;
   isDemo: boolean;
   remindersLastRunAt: string | null;
 }

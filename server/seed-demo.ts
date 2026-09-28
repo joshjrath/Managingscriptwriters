@@ -80,8 +80,10 @@ export async function seedDemo(db: Db, now = new Date()): Promise<boolean> {
   await link(acme, 'Best-performing spring scripts', 'https://docs.google.com/document/d/acme-spring-examples', 'example');
   await link(acme, 'Product photography (autumn)', 'https://drive.google.com/drive/folders/acme-autumn-assets', 'asset');
 
-  const shoot = async (clientId: number, title: string, start: number, end: number | null, batch: Parameters<typeof insertShoot>[2]['batch']) =>
-    insertShoot(db, josh, { clientId, title, startDate: d(start), endDate: end == null ? null : d(end), location: null, notes: null, batch }, settings, clock);
+  const shoot = async (clientId: number, title: string, start: number, end: number | null, batch: NonNullable<Parameters<typeof insertShoot>[2]['batch']>) => {
+    const r = await insertShoot(db, josh, { clientId, title, startDate: d(start), endDate: end == null ? null : d(end), location: null, notes: null, batch }, settings, clock);
+    return { ...r, batchId: r.batchId! };
+  };
 
   // 1 · Acme · 45 scripts split 1–20 / 21–45, shoot in 14–15 days
   const a = await shoot(acme, 'Autumn range shoot', 14, 15, {
@@ -192,6 +194,9 @@ export async function seedDemo(db: Db, now = new Date()): Promise<boolean> {
     `update batches set needs_date_review = true, date_review_note = $2 where id = $1`,
     [n2.batchId, 'Shoot moved by the client. The manual final delivery date was kept — confirm it still works.'],
   );
+
+  // 10 · Harbor & Pine · a shoot booked before anyone knows the script count
+  await insertShoot(db, josh, { clientId: harbor, title: 'Neighbourhood tours', startDate: d(12), endDate: null, location: 'Riverside', notes: null }, settings, clock);
 
   // leave a few celebrations to greet people on their first visit; the rest are history
   await db.query(

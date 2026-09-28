@@ -84,9 +84,12 @@ export function Overview() {
                         <div className="body">
                           <div className="title">{s.clientName}</div>
                           <div className="meta"><span>{fmtRange(s.startDate, s.endDate)}</span></div>
-                          <div className="meta num">{total ? `${ready} / ${total} drafts · ${delivered} delivered` : 'No scripts yet'}</div>
+                          <div className="meta num">{total ? `${ready} / ${total} drafts · ${delivered} delivered` : 'No scripts planned yet'}{s.batches.some((b) => b.progress.unassigned) ? ` · ${s.batches.reduce((n, b) => n + b.progress.unassigned, 0)} unassigned` : ''}</div>
                         </div>
-                        <div className="side"><Chip color={s.daysUntil <= 3 ? 'yellow' : 'plain'}>{s.daysUntil === 0 ? 'Today' : s.daysUntil === 1 ? 'Tomorrow' : `In ${s.daysUntil} days`}</Chip></div>
+                        <div className="side">
+                          <Chip color={s.daysUntil <= 3 ? 'yellow' : 'plain'}>{s.daysUntil === 0 ? 'Today' : s.daysUntil === 1 ? 'Tomorrow' : `In ${s.daysUntil} days`}</Chip>
+                          {!s.batches.length && isManager(me.role) && <button type="button" className="btn sm salmon" onClick={(e) => { e.stopPropagation(); openNew('batch', { clientId: s.clientId, shootId: s.id }); }}>Add scripts</button>}
+                        </div>
                       </div>
                     );
                   })}

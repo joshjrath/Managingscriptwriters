@@ -102,8 +102,11 @@ export function ClientPage() {
                 {[...upcoming, ...past.slice(-3).reverse()].map((s) => (
                   <div key={s.id} className="item with-tile">
                     <DateTile date={s.startDate} color={(s.endDate ?? s.startDate) < today ? 'var(--text-3)' : undefined} />
-                    <div className="body"><div className="title">{s.title ?? 'Shoot'}</div><div className="meta"><span>{fmtRange(s.startDate, s.endDate)}</span>{s.location && <span>{s.location}</span>}<span>{plural(s.batchIds.length, 'batch', 'batches')}</span></div></div>
-                    <div className="side">{(s.endDate ?? s.startDate) < today ? <Chip>Past</Chip> : manager ? <Button variant="sm" onClick={() => setResched({ id: s.id, start: s.startDate, end: s.endDate })}>Change dates</Button> : null}</div>
+                    <div className="body"><div className="title">{s.title ?? 'Shoot'}</div><div className="meta"><span>{fmtRange(s.startDate, s.endDate)}</span>{s.location && <span>{s.location}</span>}<span>{s.batchIds.length ? plural(s.batchIds.length, 'batch', 'batches') : 'No scripts planned yet'}</span></div></div>
+                    <div className="side">{(s.endDate ?? s.startDate) < today ? <Chip>Past</Chip> : manager ? <div className="row-flex s2">
+                      {!s.batchIds.length && <Button variant="sm salmon" onClick={() => openNew('batch', { clientId: c.id, shootId: s.id })}>Add scripts</Button>}
+                      <Button variant="sm" onClick={() => setResched({ id: s.id, start: s.startDate, end: s.endDate })}>Change dates</Button>
+                    </div> : null}</div>
                   </div>
                 ))}
               </div>

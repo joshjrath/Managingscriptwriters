@@ -23,7 +23,7 @@ export interface Ctx {
 
 interface SettingsRow {
   org_name: string; timezone: string; cutoff: string; draft_offset_days: number; final_offset_days: number;
-  day_mode: 'calendar' | 'business'; working_days: number[] | string; reminder_lead_days: number;
+  day_mode: 'calendar' | 'business'; working_days: number[] | string; reminder_lead_days: number; plan_reminder_days: number;
   is_demo: boolean; reminders_last_run_at: string | null;
 }
 
@@ -34,7 +34,7 @@ export async function loadSettings(db: Db): Promise<Settings> {
   return {
     orgName: r.org_name, timezone: r.timezone, cutoff: r.cutoff,
     draftOffsetDays: r.draft_offset_days, finalOffsetDays: r.final_offset_days,
-    dayMode: r.day_mode, workingDays: wd, reminderLeadDays: r.reminder_lead_days,
+    dayMode: r.day_mode, workingDays: wd, reminderLeadDays: r.reminder_lead_days, planReminderDays: r.plan_reminder_days ?? 14,
     isDemo: r.is_demo, remindersLastRunAt: r.reminders_last_run_at,
   };
 }
