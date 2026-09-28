@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { api, type ApiError } from '../api';
 import { Button, Field, FormError, inputProps, useFieldId } from '../components/ui';
 
-export interface AuthStatus { signedIn: boolean; needsSetup: boolean; setupAllowed: boolean; demo: boolean; orgName: string }
+export interface AuthStatus { signedIn: boolean; needsSetup: boolean; setupAllowed: boolean; setupHint: string | null; demo: boolean; orgName: string }
 
 export function Login({ status, onDone }: { status: AuthStatus; onDone: () => void }) {
   const setup = status.needsSetup;
@@ -33,7 +33,7 @@ export function Login({ status, onDone }: { status: AuthStatus; onDone: () => vo
         <h1>{setup ? 'Set up your workspace' : 'Sign in'}</h1>
         <p className="sub">{setup ? 'Create the first manager account. You can add writers afterwards.' : 'Script production for the Scale Media team.'}</p>
         {setup && !status.setupAllowed ? (
-          <div className="form-error" role="alert"><span>Setup from the browser is turned off on this server. Set <b>MANAGER_EMAIL</b> and <b>MANAGER_PASSWORD</b> in the server’s environment and restart it.</span></div>
+          <div className="form-error" role="alert"><span>{status.setupHint ?? 'Set MANAGER_EMAIL and MANAGER_PASSWORD in the server’s environment, then redeploy.'}</span></div>
         ) : (
           <form className="form" onSubmit={(e) => { e.preventDefault(); submit(); }}>
             <FormError error={error && !Object.keys(f).length ? error : null} />

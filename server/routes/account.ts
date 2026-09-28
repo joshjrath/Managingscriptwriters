@@ -25,6 +25,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       signedIn: !!req.user,
       needsSetup: (users?.n ?? 0) === 0,
       setupAllowed: ctx.allowSetup,
+      setupHint: ctx.setupHint ?? null,
       demo: settings.isDemo,
       orgName: settings.orgName,
     };

@@ -25,9 +25,15 @@ async function main() {
   console.log(env.DATABASE_URL ? 'database: PostgreSQL' : `database: embedded PGlite at ${dataDir}`);
 
   const users = await db.one<{ n: number }>(`select count(*) as n from users`);
-  if (!users?.n && env.MANAGER_EMAIL && env.MANAGER_PASSWORD) {
-    const err = validatePassword(env.MANAGER_PASSWORD);
-    if (err) throw new Error(`MANAGER_PASSWORD: ${err}`);
+  let setupHint: string | undefined;
+  const pwErr = env.MANAGER_PASSWORD ? validatePassword(env.MANAGER_PASSWORD) : null;
+  if (!users?.n && (!env.MANAGER_EMAIL?.trim() || !env.MANAGER_PASSWORD)) {
+    setupHint = 'Set MANAGER_EMAIL and MANAGER_PASSWORD in the server’s environment, then redeploy.';
+  } else if (!users?.n && pwErr) {
+    // keep running so the sign-in page can explain what to fix
+    setupHint = `MANAGER_PASSWORD is too short (${pwErr.toLowerCase()}). Change it in the server’s environment, then redeploy.`;
+    console.error(`manager account not created: MANAGER_PASSWORD ${pwErr.toLowerCase()}`);
+  } else if (!users?.n && env.MANAGER_EMAIL && env.MANAGER_PASSWORD) {
     await db.query(`insert into users (email, name, role, password_hash) values (lower($1), $2, 'manager', $3)`, [
       env.MANAGER_EMAIL.trim(), env.MANAGER_NAME?.trim() || 'Manager', await hashPassword(env.MANAGER_PASSWORD),
     ]);
@@ -44,6 +50,7 @@ async function main() {
     secureCookies: production,
     allowSetup: !production || env.ALLOW_SETUP === '1',
     uploadLimitBytes: Number(env.UPLOAD_LIMIT_MB ?? 25) * 1024 * 1024,
+    setupHint,
   };
   const staticDir = env.STATIC_DIR ?? path.resolve(here, '../client');
   const app = await buildApp(ctx, { staticDir, logger: production });

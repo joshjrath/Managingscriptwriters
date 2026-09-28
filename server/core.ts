@@ -15,6 +15,8 @@ export interface Ctx {
   secureCookies: boolean;
   allowSetup: boolean;
   uploadLimitBytes: number;
+  /** Why the first manager couldn't be created from the environment, shown on the sign-in page. */
+  setupHint?: string;
 }
 
 // ── settings ─────────────────────────────────────────────────────────────
