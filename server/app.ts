@@ -16,6 +16,8 @@ import { registerBatchRoutes } from './routes/batches';
 import { registerClientRoutes } from './routes/clients';
 import { registerShootRoutes } from './routes/shoots';
 import { registerViewRoutes } from './routes/views';
+import { registerAudit } from './audit';
+import { registerSubmissionRoutes } from './submissions';
 
 export const CSRF_HEADER = 'x-scale-media';
 
@@ -74,11 +76,13 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
     return reply.type('text/plain').send('ok');
   });
 
+  registerAudit(app, ctx);
   registerAccountRoutes(app, ctx);
   registerViewRoutes(app, ctx);
   registerClientRoutes(app, ctx);
   registerShootRoutes(app, ctx);
   registerBatchRoutes(app, ctx);
+  registerSubmissionRoutes(app, ctx);
 
   app.all('/api/*', async () => { throw new HttpError(404, 'Not found'); });
 

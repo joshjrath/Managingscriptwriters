@@ -5,7 +5,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  AlertTriangle, Archive, ArchiveRestore, Ban, CalendarClock, Camera, Check, CheckCheck, ExternalLink, FileText,
+  AlertTriangle, Archive, ArchiveRestore, Ban, CalendarClock, Camera, Check, CheckCheck, ChevronDown, ExternalLink, FileText,
   Flag, Link2, OctagonAlert, Pencil, PlayCircle, RotateCcw, Send, SlidersHorizontal, Trash2, Upload, UserPlus,
 } from 'lucide-react';
 import { api, useSave, type ApiError } from '../api';
@@ -19,6 +19,7 @@ import {
   Avatar, BatchProgress, Button, Chip, Dialog, DueChip, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel,
   Ring, ringColor, StageChip, StatusChip, useFieldId, useToast,
 } from '../components/ui';
+import { DecisionDialog, DocumentHistory, SendDialog, SentBackCard, TitlesDialog, WaitingCard } from '../components/Review';
 
 export function BatchPage() {
   const { id } = useParams();
@@ -133,6 +134,8 @@ function BatchView({ b }: { b: BatchDetail }) {
           </Panel>
         </div>
 
+        <DocumentsPanel b={b} />
+
         <ScriptChecklist b={b} />
 
         <div className="grid g-2">
@@ -168,12 +171,57 @@ function BatchView({ b }: { b: BatchDetail }) {
   );
 }
 
+// ── drafts & documents ───────────────────────────────────────────────────
+
+/** Scripts go back and forth as documents: one PDF or link per writer, reviewed in one go. */
+function DocumentsPanel({ b }: { b: BatchDetail }) {
+  const { me } = useBoot();
+  const manager = isManager(me.role);
+  const [dialog, setDialog] = useState<null | { kind: 'send'; preselect: number[]; resend?: boolean } | { kind: 'titles' }>(null);
+  useEffect(() => { if (window.location.hash === '#documents') document.getElementById('documents')?.scrollIntoView(); }, []);
+  const mine = b.scripts.filter((s) => s.assigneeId === me.id);
+  // writers send their own scripts; managers can send any on a writer's behalf
+  const sendable = (manager ? b.scripts : mine).filter((s) => s.status !== 'approved' && s.status !== 'delivered');
+  const notSent = (manager && !mine.length ? b.scripts : mine).filter((s) => s.status === 'not_started' || s.status === 'in_progress');
+  const waiting = b.groups.filter((g) => g.kind === 'waiting');
+  const sentBack = b.groups.filter((g) => g.kind === 'sent_back');
+  const titleable = manager ? b.scripts : mine;
+  // replacing or resending a document is the writer's job; managers can do it from the writer's My work
+  const canResend = (writerId: number | null) => writerId === me.id;
+  return (
+    <Panel title="Drafts & documents" id="documents" count={waiting.length + sentBack.length || undefined}
+      sub={waiting.length || sentBack.length ? `${waiting.length} waiting for review · ${sentBack.length} sent back` : 'one PDF or link per writer, reviewed together'}
+      tools={<>
+        {titleable.length > 0 && <Button variant="sm ghost" icon={<Pencil aria-hidden />} onClick={() => setDialog({ kind: 'titles' })}>Titles</Button>}
+        {sendable.length > 0 && <Button variant="sm primary" icon={<Upload aria-hidden />} onClick={() => setDialog({ kind: 'send', preselect: (notSent.length ? notSent : sendable).map((s) => s.id) })}>Send scripts for review</Button>}
+      </>}>
+      <div className="stack s4">
+        {!waiting.length && !sentBack.length && (
+          <Empty boxed icon={<FileText />} title="Nothing in review right now">
+            {b.isAssigned ? 'When your scripts are written, send them as one PDF or Google Doc link — the reviewer sees one card, not one per script.' : 'Writers send their scripts here as one PDF or Google Doc link.'}
+          </Empty>
+        )}
+        {waiting.map((g) => <WaitingCard key={g.key} group={g} showBatch={false} onReplace={canResend(g.writerId) ? () => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id) }) : undefined} />)}
+        {sentBack.map((g) => <SentBackCard key={g.key} group={g} showBatch={false} onResend={canResend(g.writerId) ? () => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id), resend: true }) : undefined} />)}
+        {b.submissions.length > 0 && (
+          <details className="details">
+            <summary><ChevronDown aria-hidden />Every version and decision ({b.submissions.length} {b.submissions.length === 1 ? 'document' : 'documents'})</summary>
+            <div className="inner"><DocumentHistory submissions={b.submissions} /></div>
+          </details>
+        )}
+      </div>
+      {dialog?.kind === 'send' && <SendDialog batchId={b.id} batchTitle={b.title} candidates={sendable} preselect={dialog.preselect} resend={dialog.resend} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'titles' && <TitlesDialog batchId={b.id} scripts={titleable} onClose={() => setDialog(null)} />}
+    </Panel>
+  );
+}
+
 // ── script checklist ─────────────────────────────────────────────────────
 
 const WRITER_ACTIONS: ScriptAction[] = ['start', 'submit', 'withdraw', 'deliver', 'reset'];
 const MANAGER_ACTIONS: ScriptAction[] = ['start', 'submit', 'approve', 'request_revisions', 'deliver', 'withdraw', 'reset', 'undo_delivery'];
 const ACTION_STYLE: Partial<Record<ScriptAction, string>> = { submit: 'review', approve: 'mint', request_revisions: 'danger', deliver: 'primary', undo_delivery: 'ghost', reset: 'ghost', withdraw: 'ghost' };
-const ACTION_SHORT: Record<ScriptAction, string> = { start: 'Mark in progress', reset: 'Mark not started', submit: 'Submit for review', withdraw: 'Withdraw', approve: 'Approve', request_revisions: 'Request revisions', deliver: 'Mark delivered to Timeliner', undo_delivery: 'Undo delivery' };
+const ACTION_SHORT: Record<ScriptAction, string> = { start: 'Mark in progress', reset: 'Mark not started', submit: 'Send for review…', withdraw: 'Withdraw', approve: 'Approve', request_revisions: 'Send back…', deliver: 'Mark delivered to Timeliner', undo_delivery: 'Undo delivery' };
 
 function ScriptChecklist({ b }: { b: BatchDetail }) {
   const { me, users } = useBoot();
@@ -185,8 +233,11 @@ function ScriptChecklist({ b }: { b: BatchDetail }) {
   const [rangeErr, setRangeErr] = useState('');
   const [filter, setFilter] = useState<'all' | 'mine' | ScriptStatus | 'unassigned'>(manager ? 'all' : b.isAssigned ? 'mine' : 'all');
   const [dialog, setDialog] = useState<null | { action: ScriptAction | 'assign'; ids: number[] }>(null);
+  const sendable = b.scripts.filter((s) => (manager || s.assigneeId === me.id) && s.status !== 'approved' && s.status !== 'delivered');
   const [open, setOpen] = useState<Script | null>(null);
   const actions = manager ? MANAGER_ACTIONS : WRITER_ACTIONS;
+  // long checklists start folded; documents are the main way work moves now
+  const [expanded, setExpanded] = useState(() => b.scripts.length <= 12 || window.location.hash === '#scripts' || (manager && b.progress.unassigned > 0));
 
   useEffect(() => { if (window.location.hash === '#scripts') document.getElementById('scripts')?.scrollIntoView(); }, []);
   // drop selections that no longer exist
@@ -235,14 +286,29 @@ function ScriptChecklist({ b }: { b: BatchDetail }) {
   const startAction = (a: ScriptAction) => {
     const ids = eligible(a).map((s) => s.id);
     if (!ids.length) return;
-    if (a === 'request_revisions' || a === 'deliver' || a === 'undo_delivery') setDialog({ action: a, ids });
+    if (a === 'submit' || a === 'request_revisions' || a === 'deliver' || a === 'undo_delivery') setDialog({ action: a, ids });
     else run.mutate({ action: a, ids });
   };
   const allVisibleSelected = visible.length > 0 && visible.every((s) => sel.has(s.id));
+  const counts = (Object.keys(STATUS_LABEL) as ScriptStatus[]).map((st) => [st, b.scripts.filter((s) => s.status === st).length] as const).filter(([, n]) => n);
+
+  if (!expanded) {
+    return (
+      <Panel title="Script checklist" count={b.scripts.length} id="scripts" sub="every script, one row each"
+        tools={<Button variant="sm" onClick={() => setExpanded(true)}>Show all {plural(b.scripts.length, 'script')}</Button>}>
+        <div className="row-flex s2">
+          {counts.map(([st, n]) => <span key={st} className="row-flex" style={{ gap: 6 }}><StatusChip status={st} /><b className="num">{n}</b></span>)}
+          {b.progress.unassigned > 0 && <Chip color="pink" icon={<UserPlus aria-hidden />}>{b.progress.unassigned} unassigned</Chip>}
+        </div>
+        <p className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>Open the checklist to assign scripts, edit one script’s title or links, or update a few at a time.</p>
+      </Panel>
+    );
+  }
 
   return (
     <Panel title="Script checklist" count={b.scripts.length} id="scripts"
-      sub={`${b.progress.draftReady} / ${b.progress.total} drafts ready · ${b.progress.pctDraft}%`}>
+      sub={`${b.progress.draftReady} / ${b.progress.total} drafts ready · ${b.progress.pctDraft}%`}
+      tools={b.scripts.length > 12 ? <Button variant="sm ghost" onClick={() => { setExpanded(false); setSel(new Set()); }}>Hide</Button> : undefined}>
       <div className="script-toolbar">
         <select className="select sm" style={{ width: 'auto' }} aria-label="Show scripts" value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
           <option value="all">All scripts</option>
@@ -321,9 +387,8 @@ function ScriptChecklist({ b }: { b: BatchDetail }) {
         </>
       )}
 
-      {dialog?.action === 'request_revisions' && <NoteDialog title={`Request revisions on ${plural(dialog.ids.length, 'script')}`} label="What needs to change?" required busy={run.isPending} error={run.error} confirm="Send back for revisions" variant="danger"
-        onClose={() => setDialog(null)} onSubmit={(note) => run.mutate({ action: 'request_revisions', ids: dialog.ids, note })}
-        scripts={compressRanges(b.scripts.filter((s) => dialog.ids.includes(s.id)).map((s) => s.number))} />}
+      {dialog?.action === 'submit' && <SendDialog batchId={b.id} batchTitle={b.title} candidates={sendable} preselect={dialog.ids} onClose={() => { setDialog(null); setSel(new Set()); }} />}
+      {dialog?.action === 'request_revisions' && <DecisionDialog batchId={b.id} scripts={b.scripts.filter((s) => dialog.ids.includes(s.id))} submissionId={null} mode="revisions" onClose={() => { setDialog(null); setSel(new Set()); }} />}
       {dialog?.action === 'deliver' && <DeliverDialog count={dialog.ids.length} nums={compressRanges(b.scripts.filter((s) => dialog.ids.includes(s.id)).map((s) => s.number))} busy={run.isPending} error={run.error}
         onClose={() => setDialog(null)} onSubmit={(url, note) => run.mutate({ action: 'deliver', ids: dialog.ids, timelinerUrl: url, note })} />}
       {dialog?.action === 'undo_delivery' && <NoteDialog title="Undo delivery?" label="Reason" busy={run.isPending} error={run.error} confirm="Move back to approved" variant="danger"
@@ -506,22 +571,30 @@ function BriefSection({ b }: { b: BatchDetail }) {
 
 function ReviewNotes({ b }: { b: BatchDetail }) {
   const { settings } = useBoot();
-  const open = b.revisions.filter((r) => !r.resolvedAt);
-  const done = b.revisions.filter((r) => r.resolvedAt);
+  // one entry per decision: sending ten scripts back with one note is one note
+  const groups = new Map<string, { key: string; note: string; by: string; at: string; open: number[]; done: number[]; resolution: string | null }>();
+  for (const r of b.revisions) {
+    const key = r.reviewId ? `r${r.reviewId}` : `${r.requestedAt}|${r.note}`;
+    const g = groups.get(key) ?? { key, note: r.note, by: r.requestedByName, at: r.requestedAt, open: [], done: [], resolution: r.resolution };
+    (r.resolvedAt ? g.done : g.open).push(r.scriptNumber);
+    groups.set(key, g);
+  }
+  const list = [...groups.values()].sort((x, y) => Number(y.open.length > 0) - Number(x.open.length > 0) || y.at.localeCompare(x.at));
+  const openCount = list.filter((g) => g.open.length).length;
   return (
-    <Panel title="Review notes" count={open.length || undefined} sub={open.length ? 'unresolved' : undefined}>
-      {!b.revisions.length ? <Empty boxed icon={<Check />} title="No revision requests" /> : (
+    <Panel title="Review notes" count={openCount || undefined} sub={openCount ? 'waiting on the writer' : undefined}>
+      {!list.length ? <Empty boxed icon={<Check />} title="No revision requests" /> : (
         <div className="rows">
-          {open.map((r) => (
-            <div key={r.id} className="item edge-pink">
-              <div className="body"><div className="top">Script {r.scriptNumber} · requested by {r.requestedByName}</div><div className="prose">{r.note}</div></div>
-              <div className="side"><Chip color="pink" icon={<RotateCcw aria-hidden />}>Open</Chip><span className="muted nowrap" style={{ fontSize: 12 }}>{fmtStamp(r.requestedAt, settings.timezone)}</span></div>
-            </div>
-          ))}
-          {done.slice(0, 8).map((r) => (
-            <div key={r.id} className="item">
-              <div className="body"><div className="top">Script {r.scriptNumber} · {r.requestedByName}</div><div className="muted" style={{ fontSize: 13 }}>{r.note}</div></div>
-              <div className="side"><Chip color="mint" icon={<Check aria-hidden />}>{r.resolution === 'approved' ? 'Approved' : 'Resubmitted'}</Chip></div>
+          {list.slice(0, 12).map((g) => (
+            <div key={g.key} className={`item${g.open.length ? ' edge-pink' : ''}`}>
+              <div className="body">
+                <div className="top">Script{g.open.length + g.done.length > 1 ? 's' : ''} {compressRanges([...g.open, ...g.done])} · {g.by}</div>
+                <div className={g.open.length ? 'prose' : 'muted'} style={{ fontSize: 13.5 }}>{g.note}</div>
+              </div>
+              <div className="side">
+                {g.open.length ? <Chip color="pink" icon={<RotateCcw aria-hidden />}>{g.done.length ? `${g.open.length} still open` : 'Open'}</Chip> : <Chip color="mint" icon={<Check aria-hidden />}>{g.resolution === 'approved' ? 'Approved' : 'Resubmitted'}</Chip>}
+                <span className="muted nowrap" style={{ fontSize: 12 }}>{fmtStamp(g.at, settings.timezone)}</span>
+              </div>
             </div>
           ))}
         </div>

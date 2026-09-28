@@ -9,6 +9,7 @@ import type { Db } from './db';
 import { hashPassword } from './auth';
 import { clockFor, loadSettings, type Ctx } from './core';
 import { applyScriptAction, insertBatch } from './routes/batches';
+import { sendDocument } from './submissions';
 import { insertShoot } from './routes/shoots';
 import { insertBriefing } from './routes/clients';
 import { addDays } from '../shared/dates';
@@ -93,11 +94,21 @@ export async function seedDemo(db: Db, now = new Date()): Promise<boolean> {
   const act = (who: Me, batchId: number, action: Parameters<typeof applyScriptAction>[3], sids: number[], note: string | null = null, url: string | null = null) =>
     applyScriptAction(ctx, who, batchId, action, sids, { note, timelinerUrl: url });
 
+  // writers send their scripts as one document: a PDF, or a Google Doc link
+  const send = (who: Me, batchId: number, sids: number[], doc: { pdf?: string; url?: string }, note: string | null = null, titles: string[] = []) =>
+    sendDocument(ctx, who, batchId, {
+      scriptIds: sids, url: doc.url ?? null, note,
+      file: doc.pdf ? { filename: `${doc.pdf}.pdf`, mime: 'application/pdf', data: demoPdf(doc.pdf, titles) } : null,
+      titles: titles.map((t, i) => ({ number: i + 1, title: t })),
+    });
+
   let rows = await scriptIds(a.batchId);
-  await act(me('sarah'), a.batchId, 'submit', pick(rows, 1, 12));
+  await send(me('sarah'), a.batchId, pick(rows, 1, 12), { pdf: 'Acme autumn range - scripts 1-12' }, 'All twelve in one PDF. 4 and 9 run a little long.',
+    ['Layer up without the bulk', 'The 3-piece travel kit', 'Rain-proof, not style-proof', 'Autumn in one bag', 'What 400 miles taught us', 'The jacket that folds into itself',
+      'Made for the school run', 'Warm hands, cold mornings', 'The founder’s favourite', 'Recycled, and it feels it', 'Your weekend uniform', 'Built to be handed down']);
   await act(josh, a.batchId, 'approve', pick(rows, 1, 8));
   await act(me('sarah'), a.batchId, 'start', pick(rows, 13, 15));
-  await act(me('marcus'), a.batchId, 'submit', pick(rows, 21, 28));
+  await send(me('marcus'), a.batchId, pick(rows, 21, 28), { url: 'https://docs.google.com/document/d/demo-acme-founder-stories/edit' }, 'First 8 founder stories. Comment straight in the doc.');
   await act(me('marcus'), a.batchId, 'start', pick(rows, 29, 31));
 
   // 2 · Northwind · single-day shoot in 15 days, 12 scripts
@@ -116,7 +127,7 @@ export async function seedDemo(db: Db, now = new Date()): Promise<boolean> {
     brief: null, nextAction: 'Chase Leo for the last 4 drafts', briefingIds: [], split: [{ writerId: ids.leo, count: 10 }],
   });
   rows = await scriptIds(b.batchId);
-  await act(me('leo'), b.batchId, 'submit', pick(rows, 1, 6));
+  await send(me('leo'), b.batchId, pick(rows, 1, 6), { url: 'https://docs.google.com/document/d/demo-brightline-appointments/edit' });
   await act(me('leo'), b.batchId, 'start', pick(rows, 7, 10));
 
   // 4 · Kinetic · final delivery due today, partially delivered
@@ -147,9 +158,12 @@ export async function seedDemo(db: Db, now = new Date()): Promise<boolean> {
     brief: null, nextAction: null, briefingIds: [], split: [{ writerId: ids.marcus, count: 6 }],
   });
   rows = await scriptIds(l.batchId);
-  await act(me('marcus'), l.batchId, 'submit', pick(rows, 1, 6));
+  await send(me('marcus'), l.batchId, pick(rows, 1, 6), { pdf: 'Lumen night serum - all 6' });
   await act(josh, l.batchId, 'approve', pick(rows, 1, 4));
-  await act(josh, l.batchId, 'request_revisions', pick(rows, 5, 6), 'Claim “repairs overnight” isn’t on the approved sheet — rephrase to “supports overnight recovery”.');
+  await applyScriptAction(ctx, josh, l.batchId, 'request_revisions', pick(rows, 5, 6), {
+    note: 'Claim “repairs overnight” isn’t on the approved sheet — rephrase to “supports overnight recovery”. My edits are in the doc.', timelinerUrl: null,
+    review: { url: 'https://docs.google.com/document/d/demo-lumen-edits/edit', fileId: null },
+  });
   await act(me('marcus'), l.batchId, 'deliver', pick(rows, 1, 2), null, 'https://timeliner.io/');
   await db.query(`update batches set blocked = true, blocker_note = 'Waiting on claims approval from Lumen’s legal team', blocked_at = now(), blocked_by = $2 where id = $1`, [l.batchId, ids.marcus]);
 
@@ -182,4 +196,24 @@ export async function seedDemo(db: Db, now = new Date()): Promise<boolean> {
   // make the first few days of history look like history
   await db.query(`update activity set created_at = created_at - interval '2 days' where action in ('client.created','briefing.created','shoot.created','batch.created')`);
   return true;
+}
+
+/** A small, valid one-page PDF listing the script titles, for demo documents. */
+function demoPdf(title: string, lines: string[]): Buffer {
+  const esc = (t: string) => t.replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/[^\x20-\x7e]/g, '').replace(/([\\()])/g, '\\$1');
+  const body = [`BT /F1 18 Tf 60 780 Td (${esc(title)}) Tj ET`, ...lines.map((l, i) => `BT /F1 12 Tf 60 ${740 - i * 22} Td (${i + 1}. ${esc(l)}) Tj ET`)].join('\n');
+  const objs = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${Buffer.byteLength(body)} >>\nstream\n${body}\nendstream`,
+  ];
+  let out = '%PDF-1.4\n';
+  const offsets: number[] = [];
+  objs.forEach((o, i) => { offsets.push(Buffer.byteLength(out)); out += `${i + 1} 0 obj\n${o}\nendobj\n`; });
+  const xref = Buffer.byteLength(out);
+  out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((n) => `${String(n).padStart(10, '0')} 00000 n \n`).join('')}`;
+  out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
+  return Buffer.from(out, 'latin1');
 }

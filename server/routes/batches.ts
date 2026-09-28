@@ -10,6 +10,7 @@ import {
   loadSettings, loadUsers, logActivity, managerIds, notify, rulesOf, type BatchRow, type Ctx, BATCH_SELECT, loadScriptsFor,
 } from '../core';
 import { requireManager, requireUser } from '../auth';
+import { buildGroups, publicSubmission } from '../submissions';
 import { conflict, forbidden, HttpError, notFound, optionalDate, parse, zs } from '../http';
 import {
   loadActivity, loadBriefings, loadDeliveries, loadResources, loadRevisions, loadScripts,
@@ -197,6 +198,7 @@ export async function loadBatchDetail(ctx: Ctx, id: number, me: Me): Promise<Bat
     loadActivity(ctx.db, { batchId: id, limit: 150 }),
   ]);
   const hasShoot = !!row.shoot_id;
+  const { groups, data } = await buildGroups(ctx.db, [summary]);
   return {
     ...summary,
     brief: row.brief,
@@ -207,6 +209,8 @@ export async function loadBatchDetail(ctx: Ctx, id: number, me: Me): Promise<Bat
     finalRule: hasShoot && row.final_due_mode === 'auto' ? ruleText(settings.finalOffsetDays, settings.dayMode) : null,
     canEdit: isManager(me.role),
     isAssigned: scripts.some((s) => s.assigneeId === me.id),
+    submissions: data.submissions.map(publicSubmission),
+    groups,
   };
 }
 
@@ -634,8 +638,14 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
 
 export async function applyScriptAction(
   ctx: Ctx, me: Me, batchId: number, action: ScriptAction, scriptIds: number[],
-  opts: { note: string | null; timelinerUrl: string | null; versions?: Record<string, number>; actingFor?: number },
-): Promise<{ changed: number[]; deliveryId?: number }> {
+  opts: {
+    note: string | null; timelinerUrl: string | null; versions?: Record<string, number>; actingFor?: number;
+    /** a reviewer's attachment (marked-up PDF or edited doc) and the document being reviewed */
+    review?: { url: string | null; fileId: number | null; submissionId?: number | null };
+    /** set when scripts are sent as one document */
+    submission?: { id: number; label: string; version: number };
+  },
+): Promise<{ changed: number[]; deliveryId?: number; reviewId?: number }> {
   const rule = ACTION_RULES[action];
   if (action === 'request_revisions' && !opts.note) throw new HttpError(400, 'Add a note so the writer knows what to change', { note: 'Add a note so the writer knows what to change' });
   const ids = [...new Set(scriptIds)];
@@ -673,6 +683,25 @@ export async function applyScriptAction(
     const idList = rows.map((r) => r.id);
     const inIds = idList.map((_, i) => `$${i + 1}`).join(',');
     let deliveryId: number | undefined;
+    let reviewId: number | undefined;
+    const attached = !!(opts.review?.url || opts.review?.fileId);
+
+    if (action === 'approve' || action === 'request_revisions') {
+      // one review record per decision, tied to the document when there is one
+      let submissionId = opts.review?.submissionId ?? null;
+      if (!submissionId) {
+        const cur = await t.query<{ script_id: number; submission_id: number }>(
+          `select script_id, max(submission_id) as submission_id from submission_scripts where script_id in (${inIds}) group by script_id`, idList,
+        );
+        const distinct = [...new Set(cur.map((c) => c.submission_id))];
+        if (cur.length === idList.length && distinct.length === 1) submissionId = distinct[0];
+      }
+      const r = await t.one<{ id: number }>(
+        `insert into reviews (batch_id, submission_id, action, script_ids, note, url, file_id, reviewed_by) values ($1,$2,$3,$4::jsonb,$5,$6,$7,$8) returning id`,
+        [batchId, submissionId, action === 'approve' ? 'approved' : 'revisions', JSON.stringify(idList), opts.note, opts.review?.url ?? null, opts.review?.fileId ?? null, me.id],
+      );
+      reviewId = r!.id;
+    }
 
     switch (action) {
       case 'submit':
@@ -686,7 +715,7 @@ export async function applyScriptAction(
       case 'request_revisions':
         await t.query(`update scripts set status = 'revisions_needed', approved_at = null, approved_by = null, version = version + 1, updated_at = now() where id in (${inIds})`, idList);
         for (const sid of idList) {
-          await t.query(`insert into revision_requests (script_id, batch_id, note, requested_by) values ($1, $2, $3, $4)`, [sid, batchId, opts.note, me.id]);
+          await t.query(`insert into revision_requests (script_id, batch_id, note, requested_by, review_id) values ($1, $2, $3, $4, $5)`, [sid, batchId, opts.note, me.id, reviewId]);
         }
         break;
       case 'deliver': {
@@ -712,9 +741,13 @@ export async function applyScriptAction(
       start: 'Started', reset: 'Marked not started', submit: 'Submitted for review', withdraw: 'Withdrew from review',
       approve: 'Approved', request_revisions: 'Requested revisions on', deliver: 'Confirmed delivery to Timeliner for', undo_delivery: 'Undid delivery of',
     };
+    const scriptsWord = `script${rows.length > 1 ? 's' : ''} ${nums}`;
+    const summary = action === 'submit' && opts.submission
+      ? `Sent ${scriptsWord} for review as one document: “${opts.submission.label}”${opts.submission.version > 1 ? ` (version ${opts.submission.version})` : ''}${onBehalf}`
+      : `${verb[action]} ${scriptsWord}${onBehalf}${opts.note && action !== 'deliver' ? ` — “${opts.note}”` : ''}${attached ? (action === 'approve' ? ' (edited version attached)' : ' (changes attached)') : ''}`;
     await logActivity(t, {
       actor: me, action: `scripts.${action}`, entityType: 'batch', entityId: batchId, batchId, clientId: b.client_id,
-      summary: `${verb[action]} script${rows.length > 1 ? 's' : ''} ${nums}${onBehalf}${opts.note && action !== 'deliver' ? ` — “${opts.note}”` : ''}`,
+      summary,
       detail: { action, scripts: rows.map((r) => r.number), note: opts.note, timelinerUrl: opts.timelinerUrl, deliveryId: deliveryId ?? null },
     });
 
@@ -724,15 +757,23 @@ export async function applyScriptAction(
     if (action === 'submit') {
       const today = (await clockFor({ ...ctx, db: t })).today;
       const waiting = await t.query<{ number: number }>(`select number from scripts where batch_id = $1 and status = 'ready_for_review' and removed_at is null order by number`, [batchId]);
-      await notify(t, await managerIds(t), {
-        type: 'review_request', title: `Ready for review · ${b.client_name}`,
-        body: `${b.title}: ${plural(waiting.length, 'script')} waiting (${compressRanges(waiting.map((w) => w.number))}). Latest from ${me.name}.`,
-        link: `/review`, dedupeKey: `review:${batchId}:${today}`, refresh: true,
-      }, me.id);
+      if (opts.submission) {
+        await notify(t, await managerIds(t), {
+          type: 'review_request', title: `Ready for review · ${b.client_name}`,
+          body: `${me.name} sent ${scriptsWord} of ${b.title} as one document (“${opts.submission.label}”${opts.submission.version > 1 ? `, version ${opts.submission.version}` : ''}).`,
+          link: `/review`,
+        }, me.id);
+      } else {
+        await notify(t, await managerIds(t), {
+          type: 'review_request', title: `Ready for review · ${b.client_name}`,
+          body: `${b.title}: ${plural(waiting.length, 'script')} waiting (${compressRanges(waiting.map((w) => w.number))}). Latest from ${me.name}.`,
+          link: `/review`, dedupeKey: `review:${batchId}:${today}`, refresh: true,
+        }, me.id);
+      }
     } else if (action === 'approve') {
-      await notify(t, writers, { type: 'approval', title: `Approved · ${b.title}`, body: `${me.name} approved script${rows.length > 1 ? 's' : ''} ${nums}. Add ${rows.length > 1 ? 'them' : 'it'} to Timeliner and confirm delivery.`, link }, me.id);
+      await notify(t, writers, { type: 'approval', title: `Approved · ${b.title}`, body: `${me.name} approved ${scriptsWord}.${attached ? ' They attached their edited version — use that one.' : ''} Add ${rows.length > 1 ? 'them' : 'it'} to Timeliner and confirm delivery.`, link: '/my-work' }, me.id);
     } else if (action === 'request_revisions') {
-      await notify(t, writers, { type: 'revision_request', title: `Revisions requested · ${b.title}`, body: `Script${rows.length > 1 ? 's' : ''} ${nums}: ${opts.note}`, link }, me.id);
+      await notify(t, writers, { type: 'revision_request', title: `Revisions requested · ${b.title}`, body: `${scriptsWord}: ${opts.note}${attached ? ' (their changes are attached)' : ''}`, link: '/my-work' }, me.id);
     } else if (action === 'deliver') {
       await notify(t, await managerIds(t), {
         type: 'delivery', title: `Delivered to Timeliner · ${b.client_name}`,
@@ -742,7 +783,7 @@ export async function applyScriptAction(
       await notify(t, writers, { type: 'delivery', title: `Delivery undone · ${b.title}`, body: `${me.name} moved script${rows.length > 1 ? 's' : ''} ${nums} back to approved.`, link }, me.id);
     }
     await t.query(`update batches set updated_at = now() where id = $1`, [batchId]);
-    return { changed: idList, deliveryId };
+    return { changed: idList, deliveryId, reviewId };
   });
 }
 

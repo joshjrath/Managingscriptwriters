@@ -237,4 +237,52 @@ alter table users add column temp_password text;
 alter table users add column removed_at timestamptz;
 update users set role = 'owner' where id = (select min(id) from users where role = 'manager');
 `,
+
+  /* 3 · scripts sent as one document, reviews with attachments, master log */ `
+create table submissions (
+  id bigint generated always as identity primary key,
+  batch_id bigint not null references batches(id),
+  writer_id bigint references users(id),
+  submitted_by bigint not null references users(id),
+  version int not null default 1,
+  previous_id bigint references submissions(id),
+  url text,
+  file_id bigint references files(id),
+  note text,
+  created_at timestamptz not null default now(),
+  check (url is not null or file_id is not null)
+);
+create index submissions_batch_idx on submissions (batch_id);
+create table submission_scripts (
+  submission_id bigint not null references submissions(id) on delete cascade,
+  script_id bigint not null references scripts(id),
+  primary key (submission_id, script_id)
+);
+create index submission_scripts_script_idx on submission_scripts (script_id);
+create table reviews (
+  id bigint generated always as identity primary key,
+  batch_id bigint not null references batches(id),
+  submission_id bigint references submissions(id),
+  action text not null check (action in ('approved', 'revisions')),
+  script_ids jsonb not null,
+  note text,
+  url text,
+  file_id bigint references files(id),
+  reviewed_by bigint not null references users(id),
+  created_at timestamptz not null default now()
+);
+create index reviews_batch_idx on reviews (batch_id);
+alter table revision_requests add column review_id bigint references reviews(id);
+create table audit_log (
+  id bigint generated always as identity primary key,
+  user_id bigint references users(id),
+  kind text not null check (kind in ('view', 'auth', 'denied')),
+  summary text not null,
+  link text,
+  ip text,
+  created_at timestamptz not null default now()
+);
+create index audit_log_created_idx on audit_log (created_at desc);
+create index audit_log_user_idx on audit_log (user_id, created_at desc);
+`,
 ];

@@ -1,17 +1,19 @@
-// My work: what to write next, my scripts and deadlines, briefs and
-// recordings, quick progress, revision requests and delivery confirmation.
-// Managers who also write use the same view.
+// My work: what to do next, where each of my scripts is (not sent yet, in
+// review, sent back, approved, delivered), sending scripts as one document,
+// briefs and recordings, and delivery confirmation. Managers who also write
+// use the same view.
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, Camera, CheckCheck, FileText, Minus, PlayCircle, Plus, RotateCcw, Send } from 'lucide-react';
+import { ArrowRight, Camera, CheckCheck, FileText, PenLine, PlayCircle, Plus, Send, Type } from 'lucide-react';
 import { api, useSave } from '../api';
-import type { MyWork } from '../../../shared/types';
-import { compressRanges, type Progress, isManager } from '../../../shared/workflow';
-import { fmtDate, fmtLong, fmtRange, fmtStamp, plural } from '../../../shared/format';
+import type { MyWork, Script } from '../../../shared/types';
+import { compressRanges, isApproved, isManager, type Milestone } from '../../../shared/workflow';
+import { fmtDate, fmtLong, fmtRange, fmtStamp, fmtWeekday, plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
-import { BatchProgress, Button, Chip, DueChip, Empty, ErrorState, ExtLink, FormError, Loading, Panel, Ring, ringColor, useToast } from '../components/ui';
+import { BatchProgress, Button, Chip, DueChip, Empty, ErrorState, ExtLink, Loading, Panel, Ring, ringColor, useToast } from '../components/ui';
+import { SendDialog, SentBackCard, TitlesDialog, WaitingCard } from '../components/Review';
 import { DeliverDialog } from './BatchDetail';
 
 type Entry = MyWork['batches'][number];
@@ -40,19 +42,7 @@ export function MyWorkPage() {
         <div className="stack" style={{ gap: 'var(--gap)' }}>
           {!q.data.batches.length && <Panel><Empty icon={<CheckCheck />} title="Nothing assigned right now">New assignments show up here and in your notifications.</Empty></Panel>}
           {next && <NextUp e={next} today={clock.today} />}
-          {q.data.revisions.length > 0 && (
-            <Panel title="Revision requests" count={q.data.revisions.length}>
-              <div className="rows">
-                {q.data.revisions.map((r) => (
-                  <Link key={r.id} to={`/batches/${r.batchId}#scripts`} className="item clickable edge-pink">
-                    <div className="body"><div className="top">{r.clientName} · {r.batchTitle}</div><div className="title">Script {r.scriptNumber}</div><div className="prose" style={{ fontSize: 13.5 }}>{r.note}</div><div className="meta">From {r.requestedByName} · {fmtStamp(r.requestedAt, clock.timezone)}</div></div>
-                    <div className="side"><Chip color="pink" icon={<RotateCcw aria-hidden />}>Needs changes</Chip><span className="btn sm">Open script</span></div>
-                  </Link>
-                ))}
-              </div>
-            </Panel>
-          )}
-          {active.map((e) => <MyBatch key={e.batch.id} e={e} writerId={viewing} />)}
+          {active.map((e) => <MyBatch key={e.batch.id} e={e} />)}
           {done.length > 0 && (
             <Panel title="Recently finished" sub="all your scripts delivered">
               <div className="rows">{done.map((e) => (
@@ -79,13 +69,42 @@ export function MyWorkPage() {
   );
 }
 
+const nums = (list: Script[]) => compressRanges(list.map((s) => s.number));
+const scriptsLabel = (list: Script[]) => (list.length === 1 ? `script ${nums(list)}` : `scripts ${nums(list)}`);
+
+function dueText(m: Milestone, what: string, today: string) {
+  if (!m.date) return `${what}: no date set`;
+  if (m.complete) return `${what}: done`;
+  if (m.overdue) return `${what} ${m.label.toLowerCase()} (${fmtDate(m.date, today)})`;
+  if (m.dueToday) return `${what} due today`;
+  return `${what} due ${fmtWeekday(m.date)}`;
+}
+
+/** Where my scripts in a batch are, in the order a writer works through them. */
+function split(mine: Script[]) {
+  return {
+    notStarted: mine.filter((s) => s.status === 'not_started'),
+    writing: mine.filter((s) => s.status === 'in_progress'),
+    inReview: mine.filter((s) => s.status === 'ready_for_review'),
+    sentBack: mine.filter((s) => s.status === 'revisions_needed'),
+    approved: mine.filter((s) => s.status === 'approved'),
+    delivered: mine.filter((s) => s.status === 'delivered'),
+  };
+}
+
 function NextUp({ e, today }: { e: Entry; today: string }) {
   const b = e.batch;
   const recUrl = e.briefings.find((x) => x.recordingUrl)?.recordingUrl ?? e.resources.find((r) => r.category === 'recording' && r.url)?.url;
   const p = e.myProgress;
-  const nextScript = e.mine.find((s) => s.status === 'revisions_needed') ?? e.mine.find((s) => s.status === 'in_progress') ?? e.mine.find((s) => s.status === 'not_started');
-  const toDeliver = e.mine.filter((s) => s.status === 'approved').length;
-  const doing = toDeliver && !nextScript ? `Add ${plural(toDeliver, 'approved script')} to Timeliner and confirm delivery` : nextScript ? `${nextScript.status === 'revisions_needed' ? 'Revise' : 'Write'} script ${nextScript.number}${nextScript.title ? ` · ${nextScript.title}` : ''}` : 'Waiting for review';
+  const st = split(e.mine);
+  const notSent = [...st.notStarted, ...st.writing];
+  const doing = st.sentBack.length
+    ? `Revise ${scriptsLabel(st.sentBack)} and send the new version`
+    : notSent.length
+      ? `Write ${scriptsLabel(notSent)} and send ${notSent.length === 1 ? 'it' : 'them'} for review`
+      : st.approved.length
+        ? `Add ${plural(st.approved.length, 'approved script')} to Timeliner and confirm delivery`
+        : st.inReview.length ? 'Waiting for review' : 'All done';
   return (
     <section className="stat-card salmon" style={{ cursor: 'default', minHeight: 0, transform: 'none' }} aria-label="Next up">
       <span className="cap">Next up</span>
@@ -93,31 +112,40 @@ function NextUp({ e, today }: { e: Entry; today: string }) {
         <div style={{ minWidth: 0, flex: '1 1 320px' }}>
           <div style={{ font: '800 30px/1.1 var(--font-display)', letterSpacing: '-0.04em', overflowWrap: 'anywhere' }}>{doing}</div>
           <div className="sub" style={{ fontSize: 14, marginTop: 8 }}>{b.clientName} · {b.title}</div>
-          <div className="sub" style={{ fontSize: 14, marginTop: 4 }}>
-            {b.next ? `${b.next.kind === 'draft' ? 'Drafts' : 'Final delivery'} ${b.next.overdue ? `${b.next.label.toLowerCase()} (${fmtDate(b.next.date!, today)})` : b.next.dueToday ? 'due today' : `due ${fmtLong(b.next.date!)}`}` : ''}
-            {' · '}{p.draftReady} / {p.total} of yours draft-ready
-          </div>
+          <div className="sub" style={{ fontSize: 14, marginTop: 4 }}>{dueText(b.draft, 'Drafts', today)} · {dueText(b.final, 'Final delivery', today)}</div>
+          <div className="sub num" style={{ fontSize: 14, marginTop: 4 }}>{p.draftReady} / {p.total} of yours sent for review or approved</div>
         </div>
         <div className="row-flex s2">
-          {recUrl && <ExtLink href={recUrl} className="btn" ><PlayCircle aria-hidden />Recording</ExtLink>}
-          <Link to={`/batches/${b.id}#scripts`} className="btn" style={{ background: 'var(--on-accent)', color: 'var(--text)' }}>Open batch <ArrowRight aria-hidden /></Link>
+          {recUrl && <ExtLink href={recUrl} className="btn"><PlayCircle aria-hidden />Recording</ExtLink>}
+          <Link to={`/batches/${b.id}`} className="btn" style={{ background: 'var(--on-accent)', color: 'var(--text)' }}>Open batch <ArrowRight aria-hidden /></Link>
         </div>
       </div>
     </section>
   );
 }
 
-function MyBatch({ e, writerId }: { e: Entry; writerId: number }) {
-  const { clock, me } = useBoot();
+function MyBatch({ e }: { e: Entry }) {
+  const { clock } = useBoot();
   const toast = useToast();
   const b = e.batch;
   const p = e.myProgress;
-  const [delivering, setDelivering] = useState(false);
-  const approved = e.mine.filter((s) => s.status === 'approved');
+  const st = split(e.mine);
+  const notSent = [...st.notStarted, ...st.writing];
+  const sendable = e.mine.filter((s) => !isApproved(s.status));
+  const [dialog, setDialog] = useState<null | { kind: 'send'; preselect: number[]; resend?: boolean } | { kind: 'titles' } | { kind: 'deliver' }>(null);
   const deliver = useSave((v: { url: string | null; note: string | null }) => api(`/api/batches/${b.id}/scripts/action`, {
-    body: { action: 'deliver', scriptIds: approved.map((s) => s.id), timelinerUrl: v.url, note: v.note, versions: Object.fromEntries(approved.map((s) => [s.id, s.version])) },
-  }), { onSuccess: () => { toast(`Delivery confirmed for scripts ${compressRanges(approved.map((s) => s.number))}`); setDelivering(false); } });
+    body: { action: 'deliver', scriptIds: st.approved.map((s) => s.id), timelinerUrl: v.url, note: v.note, versions: Object.fromEntries(st.approved.map((s) => [s.id, s.version])) },
+  }), { onSuccess: () => { toast(`Delivery confirmed for scripts ${nums(st.approved)}`); setDialog(null); } });
   const edge = b.next?.overdue || b.blocked ? 'edge-red' : b.next?.dueToday ? 'edge-yellow' : '';
+  const waiting = e.groups.filter((g) => g.kind === 'waiting');
+  const sentBack = e.groups.filter((g) => g.kind === 'sent_back');
+  const tiles: { k: string; n: number; c: string; detail?: string }[] = [
+    { k: 'Not sent', n: notSent.length, c: 'var(--neutral)', detail: notSent.length ? `${st.notStarted.length} not started · ${st.writing.length} writing` : undefined },
+    { k: 'In review', n: st.inReview.length, c: 'var(--lavender)' },
+    { k: 'Sent back', n: st.sentBack.length, c: 'var(--pink)' },
+    { k: 'Approved', n: st.approved.length, c: 'color-mix(in srgb, var(--mint) 60%, var(--track))', detail: st.approved.length ? 'to deliver' : undefined },
+    { k: 'Delivered', n: st.delivered.length, c: 'var(--mint)' },
+  ];
   return (
     <Panel className={edge} title={b.title} sub={b.clientName} tools={<><DueChip m={b.next} today={clock.today} />{b.blocked && <Chip color="red">Blocked</Chip>}</>}>
       <div className="grid g-main-side" style={{ gap: 18 }}>
@@ -125,25 +153,55 @@ function MyBatch({ e, writerId }: { e: Entry; writerId: number }) {
           <div className="row-flex" style={{ gap: 18, flexWrap: 'nowrap', alignItems: 'center' }}>
             <Ring pct={p.pctDraft} color={ringColor(p)} size={64} stroke={7} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="muted" style={{ fontSize: 12.5, marginBottom: 6 }}>Your scripts: {compressRanges(e.mine.map((s) => s.number))}</div>
+              <div className="muted" style={{ fontSize: 12.5, marginBottom: 6 }}>Your scripts: {nums(e.mine)}</div>
               <BatchProgress p={p} />
             </div>
           </div>
-          <QuickProgress batchId={b.id} p={p} writerId={writerId} actingForOther={writerId !== me.id} />
-          {p.revisions > 0 && <div className="banner pink"><RotateCcw aria-hidden /><div className="txt"><b>{plural(p.revisions, 'script')} need revisions</b><span>Resubmit them from the batch page once they’re fixed.</span></div></div>}
+          <div className="state-tiles" role="list" aria-label="Where your scripts are">
+            {tiles.map((t) => (
+              <div key={t.k} role="listitem" className={t.n ? '' : 'zero'} style={{ ['--c' as string]: t.c }}>
+                <span className="k"><i />{t.k}</span>
+                <span className="v num">{t.n}</span>
+                {t.detail && <span className="p">{t.detail}</span>}
+              </div>
+            ))}
+          </div>
           {b.blocked && <div className="banner red"><div className="txt"><b>Blocked: {b.blockerNote}</b></div></div>}
+
+          {sentBack.map((g) => <SentBackCard key={g.key} group={g} showBatch={false} onResend={() => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id), resend: true })} />)}
+
+          {notSent.length > 0 && (
+            <div className="todo-block">
+              <div style={{ minWidth: 0 }}>
+                <div className="t">{notSent.length === e.mine.length ? `All ${plural(notSent.length, 'script')}` : plural(notSent.length, 'script')} not sent yet <span className="muted num">({nums(notSent)})</span></div>
+                <div className="s">When they’re written, send them as one PDF or Google Doc link. You can send some now and the rest later.</div>
+              </div>
+              <Button variant="primary pill" icon={<Send aria-hidden />} onClick={() => setDialog({ kind: 'send', preselect: notSent.map((s) => s.id) })}>Send for review</Button>
+            </div>
+          )}
+
+          {waiting.map((g) => <WaitingCard key={g.key} group={g} showBatch={false} onReplace={() => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id) })} />)}
+
+          {st.approved.length > 0 && (
+            <div className="todo-block mint">
+              <div style={{ minWidth: 0 }}>
+                <div className="t">{plural(st.approved.length, 'script')} approved <span className="muted num">({nums(st.approved)})</span></div>
+                <div className="s">Add them to Timeliner, then confirm here.</div>
+              </div>
+              <Button variant="primary pill" icon={<Send aria-hidden />} onClick={() => setDialog({ kind: 'deliver' })}>Mark {plural(st.approved.length, 'script')} delivered</Button>
+            </div>
+          )}
+
           <div className="row-flex s2">
-            <Button variant="primary pill" icon={<Send aria-hidden />} disabled={!approved.length} onClick={() => setDelivering(true)} title={approved.length ? undefined : 'Scripts can be delivered once they’re approved'}>
-              {approved.length ? `Mark ${plural(approved.length, 'approved script')} delivered` : 'Nothing approved to deliver yet'}
-            </Button>
-            <Link to={`/batches/${b.id}#scripts`} className="btn">Open checklist</Link>
+            <Button variant="sm" icon={<Type aria-hidden />} onClick={() => setDialog({ kind: 'titles' })}>{e.mine.some((s) => s.title) ? 'Edit titles' : 'Add titles'}</Button>
+            <Link to={`/batches/${b.id}`} className="btn sm">Open batch</Link>
           </div>
         </div>
         <div className="stack s2">
           <div className="deadline-list">
             {b.shootStart && <div className="deadline" style={{ ['--c' as string]: 'var(--salmon)' }}><span className="ic"><Camera /></span><div><div className="k">Shoot</div><div className="v">{fmtRange(b.shootStart, b.shootEnd)}</div></div></div>}
             {b.plannedStart && <div className="deadline" style={{ ['--c' as string]: 'var(--cyan)' }}><span className="ic"><Plus /></span><div><div className="k">Start writing</div><div className="v">{fmtLong(b.plannedStart)}</div></div></div>}
-            <div className="deadline" style={{ ['--c' as string]: 'var(--lavender)' }}><span className="ic"><FileText /></span><div><div className="k">Drafts due</div><div className="v">{b.draftDue ? fmtLong(b.draftDue) : 'Not set'}</div></div><div className="right"><DueChip m={b.draft} today={clock.today} prefix={false} /></div></div>
+            <div className="deadline" style={{ ['--c' as string]: 'var(--lavender)' }}><span className="ic"><PenLine /></span><div><div className="k">Drafts due</div><div className="v">{b.draftDue ? fmtLong(b.draftDue) : 'Not set'}</div></div><div className="right"><DueChip m={b.draft} today={clock.today} prefix={false} /></div></div>
             <div className="deadline" style={{ ['--c' as string]: 'var(--yellow)' }}><span className="ic"><Send /></span><div><div className="k">Final delivery</div><div className="v">{b.finalDue ? fmtLong(b.finalDue) : 'Not set'}</div></div><div className="right"><DueChip m={b.final} today={clock.today} prefix={false} /></div></div>
           </div>
           {e.resources.length > 0 && (
@@ -176,42 +234,9 @@ function MyBatch({ e, writerId }: { e: Entry; writerId: number }) {
           )}
         </div>
       </div>
-      {delivering && <DeliverDialog count={approved.length} nums={compressRanges(approved.map((s) => s.number))} busy={deliver.isPending} error={deliver.error} onClose={() => setDelivering(false)} onSubmit={(url, note) => deliver.mutate({ url, note })} />}
+      {dialog?.kind === 'send' && <SendDialog batchId={b.id} batchTitle={b.title} candidates={sendable} preselect={dialog.preselect} resend={dialog.resend} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'titles' && <TitlesDialog batchId={b.id} scripts={e.mine} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'deliver' && <DeliverDialog count={st.approved.length} nums={nums(st.approved)} busy={deliver.isPending} error={deliver.error} onClose={() => setDialog(null)} onSubmit={(url, note) => deliver.mutate({ url, note })} />}
     </Panel>
-  );
-}
-
-/**
- * The quick count control. Each step changes real script records:
- * + submits your next script for review, − withdraws your last submitted one.
- * It can never approve or deliver anything.
- */
-function QuickProgress({ batchId, p, writerId, actingForOther }: { batchId: number; p: Progress; writerId: number; actingForOther: boolean }) {
-  const toast = useToast();
-  const [value, setValue] = useState(String(p.draftReady));
-  useEffect(() => { setValue(String(p.draftReady)); }, [p.draftReady]);
-  const min = p.approved;
-  const max = p.total - p.revisions;
-  const save = useSave((target: number) => api<{ changed: number[] }>(`/api/batches/${batchId}/quick-progress`, { body: { draftReady: target, expected: p.draftReady, writerId } }), {
-    onSuccess: (out, target) => { if (out.changed.length) toast(`${target > p.draftReady ? 'Submitted' : 'Withdrew'} ${plural(out.changed.length, 'script')} — now ${target} / ${p.total} draft-ready`); },
-  });
-  const commit = (n: number) => {
-    if (Number.isNaN(n)) { setValue(String(p.draftReady)); return; }
-    const clamped = Math.min(max, Math.max(min, n));
-    setValue(String(clamped));
-    if (clamped !== p.draftReady) save.mutate(clamped);
-  };
-  return (
-    <div className="stack s2">
-      <div className="row-flex" style={{ gap: 10, flexWrap: 'nowrap' }}>
-        <button className="icon-btn" style={{ background: 'var(--row)', width: 48, height: 48 }} aria-label="One fewer draft ready" disabled={save.isPending || p.draftReady <= min} onClick={() => commit(p.draftReady - 1)}><Minus /></button>
-        <input className="input num" inputMode="numeric" aria-label="Drafts ready" style={{ width: 84, textAlign: 'center', fontSize: 22, fontWeight: 800, fontFamily: 'var(--font-display)', minHeight: 48 }}
-          value={value} onChange={(ev) => setValue(ev.target.value.replace(/\D/g, ''))} onBlur={() => commit(Number(value))} onKeyDown={(ev) => { if (ev.key === 'Enter') commit(Number(value)); }} />
-        <button className="icon-btn" style={{ background: 'var(--row)', width: 48, height: 48 }} aria-label="One more draft ready" disabled={save.isPending || p.draftReady >= max} onClick={() => commit(p.draftReady + 1)}><Plus /></button>
-        <span className="muted" style={{ fontSize: 13 }}>of {p.total} draft-ready{actingForOther ? ' (on the writer’s behalf)' : ''}</span>
-      </div>
-      <span className="muted" style={{ fontSize: 12 }}>+ submits your next script for review; − withdraws the last one you submitted. Approval and delivery are separate steps.</span>
-      <FormError error={save.error} />
-    </div>
   );
 }

@@ -218,7 +218,7 @@ describe('progress, review and Timeliner delivery', () => {
     const noNote = await manager.post(`/api/batches/${batchId}/scripts/action`, { action: 'request_revisions', scriptIds: [s[30].id] });
     expect(noNote.status).toBe(400);
     const queue = (await manager.get('/api/review')).body;
-    expect(queue.revisions.map((r: any) => r.note)).toContain('Tighten the hook');
+    expect(queue.sentBack.map((g: any) => g.review?.note)).toContain('Tighten the hook');
   });
 
   it('records writer-confirmed deliveries with who and when, and keeps partial delivery visible', async () => {
@@ -453,5 +453,118 @@ describe('team: roles, temporary passwords, removal', () => {
     const back = await manager.post('/api/users', { name: 'Leo Test', email: 'leo@scale.test', role: 'writer', password: 'leo-back-pass' });
     expect(back.status).toBe(200);
     expect(back.body.users.find((u: any) => u.email === 'leo@scale.test').id).toBe(leoId);
+  });
+});
+
+
+describe('scripts sent as one document', () => {
+  let docBatch: number;
+  const multipart = (fields: Record<string, string>, file?: { name: string; body: string }) => {
+    const boundary = '----smdoc' + Math.random().toString(16).slice(2);
+    const parts = Object.entries(fields).map(([k, v]) => `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}`);
+    if (file) parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${file.name}"\r\nContent-Type: application/pdf\r\n\r\n${file.body}`);
+    return { payload: parts.join('\r\n') + `\r\n--${boundary}--\r\n`, type: `multipart/form-data; boundary=${boundary}` };
+  };
+  const send = async (cookie: string, url: string, fields: Record<string, string>, file?: { name: string; body: string }) => {
+    const m = multipart(fields, file);
+    const r = await app.inject({ method: 'POST', url, headers: { 'x-scale-media': '1', cookie, 'content-type': m.type }, payload: m.payload });
+    return { status: r.statusCode, body: JSON.parse(r.body) };
+  };
+
+  it('a writer sends all ten scripts as one PDF, and the queue shows one item, not ten', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Ten in one', targetCount: 10, finalDue: '2026-10-20', split: [{ writerId: ids.marcus, count: 10 }] });
+    docBatch = b.body.batchId;
+    const scripts = b.body.batch ? (await marcus.get(`/api/batches/${docBatch}`)).body.scripts : [];
+    const r = await send(marcus.cookie, `/api/batches/${docBatch}/submissions`, {
+      scriptIds: JSON.stringify(scripts.map((s: any) => s.id)),
+      titles: JSON.stringify([{ number: 1, title: 'Rain shell hook' }, { number: 2, title: 'Trail pack' }]),
+      note: 'All ten in one PDF',
+    }, { name: 'ten-scripts.pdf', body: '%PDF-1.4 ten' });
+    expect(r.status).toBe(200);
+    const detail = r.body.batch as BatchDetail;
+    expect(detail.progress.inReview).toBe(10);
+    expect(detail.scripts.find((s) => s.number === 1)!.title).toBe('Rain shell hook');
+    expect(detail.submissions).toHaveLength(1);
+    expect(detail.submissions[0]).toMatchObject({ version: 1, state: 'in_review', fileName: 'ten-scripts.pdf', writerName: 'Marcus Webb', currentNumbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] });
+    const queue = (await manager.get('/api/review')).body;
+    const mine = queue.waiting.filter((g: any) => g.batch.id === docBatch);
+    expect(mine).toHaveLength(1);
+    expect(mine[0].scripts).toHaveLength(10);
+    expect(mine[0].submission.fileName).toBe('ten-scripts.pdf');
+    // the document opens for signed-in people
+    const f = await app.inject({ method: 'GET', url: `/api/files/${detail.submissions[0].fileId}`, headers: { cookie: manager.cookie } });
+    expect(f.statusCode).toBe(200);
+  });
+
+  it('sending back with marked-up changes is one request, and the writer sees it once', async () => {
+    const detail = (await manager.get(`/api/batches/${docBatch}`)).body as BatchDetail;
+    const sub = detail.submissions[0];
+    const r = await send(manager.cookie, `/api/batches/${docBatch}/review`, {
+      action: 'revisions', scriptIds: JSON.stringify(detail.scripts.map((s) => s.id)), submissionId: String(sub.id),
+      note: 'Tighten every opening line — see my notes', url: 'https://docs.google.com/document/d/marked-up',
+    });
+    expect(r.status).toBe(200);
+    expect(r.body.batch.progress.revisions).toBe(10);
+    const work = (await marcus.get('/api/my-work')).body;
+    const back = work.sentBack.filter((g: any) => g.batch.id === docBatch);
+    expect(back).toHaveLength(1);
+    expect(back[0].review).toMatchObject({ note: 'Tighten every opening line — see my notes', url: 'https://docs.google.com/document/d/marked-up', reviewedByName: 'Josh Rath' });
+    expect(back[0].scripts).toHaveLength(10);
+    const sentBack = (await manager.get('/api/review')).body.sentBack.filter((g: any) => g.batch.id === docBatch);
+    expect(sentBack).toHaveLength(1);
+  });
+
+  it('a revised version becomes version 2, and approving it approves all ten at once', async () => {
+    const detail = (await marcus.get(`/api/batches/${docBatch}`)).body as BatchDetail;
+    const v2 = await marcus.post(`/api/batches/${docBatch}/submissions`, { scriptIds: detail.scripts.map((s) => s.id), url: 'https://drive.google.com/file/d/v2' });
+    expect(v2.status).toBe(200);
+    const subs = (v2.body.batch as BatchDetail).submissions;
+    expect(subs.map((s) => [s.version, s.state])).toEqual([[1, 'superseded'], [2, 'in_review']]);
+    expect(subs[1].previousId).toBe(subs[0].id);
+    const ok = await manager.post(`/api/batches/${docBatch}/review`, { action: 'approve', scriptIds: detail.scripts.map((s) => s.id), submissionId: subs[1].id });
+    expect(ok.status).toBe(200);
+    const after = ok.body.batch as BatchDetail;
+    expect(after.progress.approved).toBe(10);
+    expect(after.submissions[1].state).toBe('approved');
+    expect(after.submissions[1].reviews.map((r) => r.action)).toEqual(['approved']);
+    expect(after.revisions.filter((r) => !r.resolvedAt)).toHaveLength(0);
+  });
+
+  it('only the writer (or a manager) can send scripts, and only managers can review', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Permission doc', targetCount: 2, split: [{ writerId: ids.marcus, count: 2 }] });
+    const sids = (await manager.get(`/api/batches/${b.body.batchId}`)).body.scripts.map((s: any) => s.id);
+    expect((await sarah.post(`/api/batches/${b.body.batchId}/submissions`, { scriptIds: sids, url: 'https://example.com/x' })).status).toBe(403);
+    expect((await marcus.post(`/api/batches/${b.body.batchId}/submissions`, { scriptIds: sids })).status).toBe(400); // needs a document
+    expect((await marcus.post(`/api/batches/${b.body.batchId}/submissions`, { scriptIds: sids, url: 'https://example.com/x' })).status).toBe(200);
+    expect((await marcus.post(`/api/batches/${b.body.batchId}/review`, { action: 'approve', scriptIds: sids })).status).toBe(403);
+    expect((await sarah.post(`/api/batches/${b.body.batchId}/titles`, { titles: [{ number: 1, title: 'Hijack' }] })).status).toBe(403);
+    const t = await marcus.post(`/api/batches/${b.body.batchId}/titles`, { titles: [{ number: 1, title: 'Opening' }, { number: 2, title: null }] });
+    expect(t.status).toBe(200);
+    expect(t.body.batch.scripts[0].title).toBe('Opening');
+  });
+});
+
+describe('master log', () => {
+  it('records views once per 10 minutes, changes, sign-ins and blocked attempts; only owners can read it', async () => {
+    const tessish = await login('sarah@scale.test', 'writer-password-1');
+    await as(tessish).get(`/api/batches/${batchId}`);
+    await as(tessish).get(`/api/batches/${batchId}`);
+    await as(tessish).post(`/api/batches/${batchId}/scripts/assign`, { scriptIds: [1], assigneeId: ids.sarah }); // blocked
+    await call('POST', '/api/auth/login', { body: { email: 'sarah@scale.test', password: 'nope-nope-nope' } });
+    const log = await manager.get('/api/audit');
+    expect(log.status).toBe(200);
+    const entries = log.body.entries as { kind: string; summary: string; userName: string | null }[];
+    const views = entries.filter((e) => e.kind === 'view' && e.userName === 'Sarah Chen' && /Viewed batch/.test(e.summary));
+    expect(views).toHaveLength(1);
+    expect(entries.some((e) => e.kind === 'denied' && e.userName === 'Sarah Chen' && /assign scripts/.test(e.summary))).toBe(true);
+    expect(entries.some((e) => e.kind === 'auth' && /Failed sign-in/.test(e.summary))).toBe(true);
+    expect(entries.some((e) => e.kind === 'auth' && e.summary === 'Signed in')).toBe(true);
+    expect(entries.some((e) => e.kind === 'change')).toBe(true);
+    const onlyViews = (await manager.get('/api/audit?kind=view')).body.entries;
+    expect(onlyViews.every((e: any) => e.kind === 'view')).toBe(true);
+    // managers and writers can't read it
+    const mia = as(await login('mia@scale.test', 'manager-temp-1'));
+    expect((await mia.get('/api/audit')).status).toBe(403);
+    expect((await sarah.get('/api/audit')).status).toBe(403);
   });
 });

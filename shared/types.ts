@@ -135,6 +135,7 @@ export interface RevisionRequest {
   resolvedAt: string | null;
   resolvedByName: string | null;
   resolution: string | null;
+  reviewId: number | null;
 }
 
 export interface Resource {
@@ -230,6 +231,8 @@ export interface BatchDetail extends BatchSummary {
   finalRule: string | null;
   canEdit: boolean;
   isAssigned: boolean;
+  submissions: Submission[];
+  groups: ReviewGroup[];
 }
 
 export interface ClientSummary {
@@ -352,15 +355,80 @@ export interface CalendarEvent {
   complete: boolean;
 }
 
+/** A document (PDF upload or link) a writer sent for a set of their scripts. */
+export interface Attachment {
+  url: string | null;
+  fileId: number | null;
+  fileName: string | null;
+  fileSize: number | null;
+}
+
+export interface ReviewRecord extends Attachment {
+  id: number;
+  batchId: number;
+  submissionId: number | null;
+  action: 'approved' | 'revisions';
+  scriptNumbers: number[];
+  note: string | null;
+  reviewedByName: string;
+  createdAt: string;
+}
+
+export type SubmissionState = 'in_review' | 'revisions_requested' | 'approved' | 'delivered' | 'superseded' | 'withdrawn';
+
+export interface Submission extends Attachment {
+  id: number;
+  batchId: number;
+  writerId: number | null;
+  writerName: string | null;
+  submittedByName: string;
+  version: number;
+  previousId: number | null;
+  note: string | null;
+  createdAt: string;
+  /** every script this document was sent for */
+  scriptNumbers: number[];
+  /** scripts for which this is still the latest document */
+  currentNumbers: number[];
+  counts: { inReview: number; approved: number; delivered: number; revisions: number; notSubmitted: number };
+  state: SubmissionState;
+  reviews: ReviewRecord[];
+}
+
+/** Scripts reviewed together: everything one writer sent as one document, or sent back in one go. */
+export interface ReviewGroup {
+  key: string;
+  kind: 'waiting' | 'sent_back';
+  batch: BatchSummary;
+  writerId: number | null;
+  writerName: string;
+  submission: Submission | null;
+  /** for sent_back: the decision that sent them back (note and any attached changes) */
+  review: ReviewRecord | null;
+  scripts: Script[];
+  since: string | null;
+}
+
 export interface ReviewQueue {
-  batches: { batch: BatchSummary; scripts: Script[] }[];
-  revisions: (RevisionRequest & { batchTitle: string; clientName: string; assigneeName: string | null; scriptStatus: ScriptStatus })[];
+  waiting: ReviewGroup[];
+  sentBack: ReviewGroup[];
 }
 
 export interface MyWork {
-  batches: { batch: BatchSummary; mine: Script[]; myProgress: Progress; briefings: Briefing[]; resources: Resource[] }[];
-  revisions: ReviewQueue['revisions'];
+  batches: { batch: BatchSummary; mine: Script[]; myProgress: Progress; briefings: Briefing[]; resources: Resource[]; groups: ReviewGroup[]; submissions: Submission[] }[];
+  sentBack: ReviewGroup[];
   recentDeliveries: (Delivery & { batchTitle: string; clientName: string })[];
+}
+
+export interface AuditEntry {
+  id: string;
+  at: string;
+  userId: number | null;
+  userName: string | null;
+  kind: 'view' | 'change' | 'auth' | 'denied';
+  summary: string;
+  link: string | null;
+  ip: string | null;
 }
 
 export interface ReschedulePreview {

@@ -51,7 +51,7 @@ export async function loadScripts(db: Db, where: { batchId?: number; ids?: numbe
 
 interface RevisionRow {
   id: number; script_id: number; script_number: number; batch_id: number; note: string; requested_by_name: string;
-  requested_at: string; resolved_at: string | null; resolved_by_name: string | null; resolution: string | null;
+  requested_at: string; resolved_at: string | null; resolved_by_name: string | null; resolution: string | null; review_id: number | null;
 }
 
 export async function loadRevisions(db: Db, where: { batchId?: number; scriptIds?: number[]; openOnly?: boolean; batchIds?: number[] }): Promise<RevisionRequest[]> {
@@ -63,7 +63,7 @@ export async function loadRevisions(db: Db, where: { batchId?: number; scriptIds
   if (where.openOnly) cond.push(`r.resolved_at is null`);
   const rows = await db.query<RevisionRow>(
     `select r.id, r.script_id, s.number as script_number, r.batch_id, r.note, rq.name as requested_by_name, r.requested_at,
-            r.resolved_at, rs.name as resolved_by_name, r.resolution
+            r.resolved_at, rs.name as resolved_by_name, r.resolution, r.review_id
        from revision_requests r
        join scripts s on s.id = r.script_id
        join users rq on rq.id = r.requested_by
@@ -75,7 +75,7 @@ export async function loadRevisions(db: Db, where: { batchId?: number; scriptIds
   return rows.map((r) => ({
     id: r.id, scriptId: r.script_id, scriptNumber: r.script_number, batchId: r.batch_id, note: r.note,
     requestedByName: r.requested_by_name, requestedAt: r.requested_at, resolvedAt: r.resolved_at,
-    resolvedByName: r.resolved_by_name, resolution: r.resolution,
+    resolvedByName: r.resolved_by_name, resolution: r.resolution, reviewId: r.review_id,
   }));
 }
 

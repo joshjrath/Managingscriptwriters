@@ -7,7 +7,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bell, Building2, CalendarDays, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
-  PanelLeftClose, PanelLeftOpen, PenLine, Plus, Search, Settings,
+  PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings,
 } from 'lucide-react';
 import { api, queryClient, useSave } from '../api';
 import type { Bootstrap, Notification, SearchResults } from '../../../shared/types';
@@ -138,6 +138,13 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
       </nav>
       <div className="side-foot">
         {settings.isDemo && <div className="demo-flag"><b>Demo workspace.</b> Sample data only — separate from your real workspace.</div>}
+        {me.role === 'owner' && (
+          <nav className="nav" aria-label="Owner">
+            <NavLink to="/log" className={({ isActive }) => (isActive ? 'active' : '')} title={collapsed ? 'Master log' : undefined}>
+              <ScrollText /><span className="label">Master log</span>
+            </NavLink>
+          </nav>
+        )}
         <UserMenu />
         {onToggle && !mobile && (
           <button className="collapse-btn" onClick={onToggle} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>

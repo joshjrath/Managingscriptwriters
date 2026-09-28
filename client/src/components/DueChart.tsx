@@ -89,6 +89,7 @@ export function DueChart({ draft, final, today }: { draft: DueDay[]; final: DueD
                 {d.total > 0 && (
                   <span className="tip" role="presentation">
                     <b>{label} · {plural(d.total, 'script')}</b>
+                    <em>{isLate ? `past their ${noun} deadline` : mode === 'final' ? 'due for final delivery to Timeliner' : 'with drafts due'}</em>
                     {cats.filter((c) => d.byCategory[c]).map((c) => (
                       <div key={c} style={{ ['--c' as string]: CAT_COLOR[c] }}><i />{DUE_CATEGORY_LABEL[c]}<span>{d.byCategory[c]}</span></div>
                     ))}
@@ -101,7 +102,7 @@ export function DueChart({ draft, final, today }: { draft: DueDay[]; final: DueD
       </div>
       {selected && (
         <div className="due-detail">
-          <h3>{selected.date === 'overdue' ? 'Overdue' : fmtWeekday(selected.date)} <span className="chip plain">{plural(selected.total, 'script')}</span></h3>
+          <h3>{selected.date === 'overdue' ? 'Overdue' : fmtWeekday(selected.date)} <span className="chip plain">{plural(selected.total, 'script')} · {mode === 'final' ? 'final delivery' : 'drafts'}</span></h3>
           {!selected.items.length && <p className="muted">Nothing due {selected.date === 'overdue' ? 'late' : 'this day'}.</p>}
           <div className="rows">
             {selected.items.map((it) => (

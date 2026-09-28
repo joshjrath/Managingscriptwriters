@@ -8,6 +8,7 @@ import {
 } from '../auth';
 import { assigneesOf, batchLink, loadSettings, loadUsers, logActivity, notify, rulesOf, type Ctx } from '../core';
 import { compressRanges, isManager } from '../../shared/workflow';
+import { auditEvent } from '../audit';
 import type { Me, UserSummary } from '../../shared/types';
 import { conflict, HttpError, notFound, parse, zs } from '../http';
 import { computeDeadlines, isValidTimeZone } from '../../shared/dates';
@@ -41,15 +42,18 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const ok = u ? await verifyPassword(input.password, u.password_hash) : await verifyPassword(input.password, 'scrypt$AAAA$AAAA');
     if (!u || !ok || !u.active) {
       recordFailure(key);
+      await auditEvent(db, { userId: u?.id ?? null, kind: 'auth', summary: u ? (ok ? 'Tried to sign in to a deactivated account' : 'Failed sign-in (wrong password)') : `Failed sign-in for unknown email ${input.email}`, ip: req.ip });
       throw new HttpError(401, u && ok && !u.active ? 'This account has been deactivated' : 'Email or password is incorrect');
     }
     clearFailures(key);
+    await auditEvent(db, { userId: u.id, kind: 'auth', summary: 'Signed in', ip: req.ip });
     const token = await createSession(db, u.id);
     setSessionCookie(reply, token, ctx.secureCookies);
     return { ok: true };
   });
 
   app.post('/api/auth/logout', async (req, reply) => {
+    if (req.user) await auditEvent(db, { userId: req.user.id, kind: 'auth', summary: 'Signed out', ip: req.ip });
     await destroySession(db, req.cookies[SESSION_COOKIE]);
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
     return { ok: true };
@@ -82,6 +86,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const err = validatePassword(input.next);
     if (err) throw new HttpError(400, err, { next: err });
     await db.query(`update users set password_hash = $2, temp_password = null, updated_at = now() where id = $1`, [me.id, await hashPassword(input.next)]);
+    await logActivity(db, { actor: me, action: 'user.password', entityType: 'user', entityId: me.id, summary: 'Changed their own password' });
     const token = req.cookies[SESSION_COOKIE];
     await db.query(`delete from sessions where user_id = $1 and token_hash <> $2`, [me.id, sha(token ?? '')]);
     return { ok: true };

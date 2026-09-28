@@ -6,8 +6,9 @@ import { isManager } from '../../shared/workflow';
 import { z } from 'zod';
 import { clockFor, lastDeliveredAt, loadBatches, loadSettings, loadUsers, type Ctx, type ScriptLiteRow } from '../core';
 import { requireUser } from '../auth';
+import { buildGroups, loadReviewQueue, publicSubmission } from '../submissions';
 import { parse, zs } from '../http';
-import { loadBriefings, loadDeliveries, loadResources, loadRevisions, loadScripts, loadShoots } from '../records';
+import { loadBriefings, loadDeliveries, loadResources, loadScripts, loadShoots } from '../records';
 import { addDays, diffDays, nowInZone, startOfWeek, workingDaysBetween, type Clock, type ISODate } from '../../shared/dates';
 import { isDraftReady, summarize, type ScriptStatus } from '../../shared/workflow';
 import { plural } from '../../shared/format';
@@ -240,16 +241,7 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.get('/api/review', async (req): Promise<ReviewQueue> => {
     requireUser(req);
-    const clock = await clockFor(ctx);
-    const { summaries } = await loadBatches(ctx, {}, clock);
-    const byId = new Map(summaries.map((b) => [b.id, b]));
-    const waiting = (await loadScripts(db, { status: 'ready_for_review' })).filter((s) => byId.has(s.batchId));
-    const grouped = new Map<number, typeof waiting>();
-    for (const s of waiting) grouped.set(s.batchId, [...(grouped.get(s.batchId) ?? []), s]);
-    const batches = [...grouped.entries()]
-      .map(([bid, list]) => ({ batch: byId.get(bid)!, scripts: list }))
-      .sort((a, b) => (a.batch.finalDue ?? '9999').localeCompare(b.batch.finalDue ?? '9999'));
-    return { batches, revisions: await openRevisions(ctx, summaries) };
+    return loadReviewQueue(ctx);
   });
 
   app.get('/api/my-work', async (req): Promise<MyWork> => {
@@ -280,27 +272,20 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
       const doneB = b.myProgress.delivered === b.myProgress.total ? 1 : 0;
       return doneA - doneB || rank(a.batch) - rank(b.batch) || (a.batch.next?.date ?? '9999').localeCompare(b.batch.next?.date ?? '9999');
     });
-    const revisions = (await openRevisions(ctx, summaries)).filter((r) => allScripts.some((s) => s.id === r.scriptId));
+    const { groups, data } = await buildGroups(db, mineBatches, { assigneeId: uid });
+    const withDocs = list.map((e) => {
+      const myIds = new Set(e.mine.map((s) => s.id));
+      return {
+        ...e,
+        groups: groups.filter((g) => g.batch.id === e.batch.id),
+        submissions: data.submissions.filter((s) => s.batchId === e.batch.id && s.currentIds.some((id) => myIds.has(id))).map(publicSubmission),
+      };
+    });
     const deliveries = await loadDeliveries(db, { confirmedBy: uid, limit: 5 });
     const byId = new Map(summaries.map((b) => [b.id, b]));
     return {
-      batches: list, revisions,
+      batches: withDocs, sentBack: groups.filter((g) => g.kind === 'sent_back'),
       recentDeliveries: deliveries.map((d) => ({ ...d, batchTitle: byId.get(d.batchId)?.title ?? '', clientName: byId.get(d.batchId)?.clientName ?? '' })),
     };
   });
-}
-
-async function openRevisions(ctx: Ctx, summaries: BatchSummary[]): Promise<ReviewQueue['revisions']> {
-  const byId = new Map(summaries.map((b) => [b.id, b]));
-  const open = await loadRevisions(ctx.db, { openOnly: true, batchIds: summaries.map((b) => b.id) });
-  if (!open.length) return [];
-  const scripts = await loadScripts(ctx.db, { ids: [...new Set(open.map((r) => r.scriptId))] });
-  const sById = new Map(scripts.map((s) => [s.id, s]));
-  return open.map((r) => ({
-    ...r,
-    batchTitle: byId.get(r.batchId)?.title ?? '',
-    clientName: byId.get(r.batchId)?.clientName ?? '',
-    assigneeName: sById.get(r.scriptId)?.assigneeName ?? null,
-    scriptStatus: sById.get(r.scriptId)?.status ?? 'revisions_needed',
-  }));
 }

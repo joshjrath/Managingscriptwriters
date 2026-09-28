@@ -21,6 +21,7 @@ import { BatchPage } from './pages/BatchDetail';
 import { ReviewPage } from './pages/Review';
 import { ResourcesPage } from './pages/Resources';
 import { SettingsPage } from './pages/Settings';
+import { MasterLogPage } from './pages/MasterLog';
 
 function Gate() {
   const status = useQuery({ queryKey: ['auth-status'], queryFn: () => api<AuthStatus>('/api/auth/status'), staleTime: Infinity });
@@ -52,6 +53,7 @@ function Gate() {
         <Route path="/review" element={<ReviewPage />} />
         <Route path="/resources" element={<ResourcesPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        <Route path="/log" element={<MasterLogPage />} />
         <Route path="*" element={<div className="panel"><h2>Page not found</h2><p className="muted" style={{ marginTop: 8 }}>That page doesn’t exist.</p></div>} />
       </Route>
     </Routes>

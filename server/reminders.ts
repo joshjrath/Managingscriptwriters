@@ -53,6 +53,8 @@ export async function runReminders(ctx: Ctx): Promise<{ created: number; skipped
       }
     }
     await t.query(`update settings set reminders_last_run_at = now() where id = 1`);
+    // keep a year of page views in the master log; changes and sign-ins are kept
+    await t.query(`delete from audit_log where kind = 'view' and created_at < now() - interval '400 days'`);
     return { created };
   });
 }

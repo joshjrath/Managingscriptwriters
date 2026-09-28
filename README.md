@@ -32,10 +32,23 @@ A batch reads e.g. **"20 / 45 drafts ready · 44%"**, with approved and delivere
 - Writers move their own scripts: start, submit for review, withdraw, and confirm delivery.
 - **Owners and managers have exactly the same permissions** (Owner is a label; the first account is the owner). Only they approve, request revisions (a note is required), assign/reassign, change deadlines or script counts, move shoots, and manage clients, briefings, the team and settings.
 - **A script must be approved before it can be marked delivered** — no action, bulk selection or quick control can skip review.
-- The quick count control on My work changes real script records: **+** submits your next script for review, **−** withdraws the last one you submitted. It can never approve or deliver.
 - Partial review is normal: approve ten scripts while the rest are still being written.
 - Lowering a batch's script count needs an explicit choice of which not-started / in-progress scripts to remove. Submitted, approved and delivered work is never removed; removed scripts stay in history and come back first if the count goes up again.
 - Stale edits are rejected (409) instead of overwriting someone else's change.
+
+### Sending and reviewing scripts as one document
+
+Writers don't send scripts one at a time. On **My work** (or the batch page) they press **Send for review**, upload one PDF or paste one Google Doc / Drive link, and pick which of their scripts it covers — all of them by default, or a range like 1–10. They can add titles for all of them at once (one per line) and a note.
+
+- The **Review queue** shows **one card per document**: "Sarah Chen sent 12 scripts (1–12) as one document", with the file or link, the note and the titles. Managers choose **Approve all**, **Send back for revisions** (a note, plus an optional marked-up PDF or edited Google Doc), or **Approve with my edits** (attach the final version). "Review scripts one by one" is there for the rare partial decision.
+- Sending back is one request with one note, so the writer sees one card — "12 scripts sent back to you" — with the reviewer's changes and a **Send revised version** button. The new document becomes version 2; every version and decision stays on the batch page under **Drafts & documents**.
+- My work shows exactly where each script is: not sent (split into not started / writing), in review, sent back, approved and delivered. The old +/− counter is gone.
+- Script titles can also be set from **Titles** on the batch page or My work: paste a list and it's applied in order, or keep the "3. Title" numbers.
+- Everything is still recorded per script, so progress, deadlines and delivery rules work exactly as before.
+
+### Master log (owners only)
+
+**Master log**, next to your name in the sidebar, lists every change (from the activity history), every page or file someone opened, sign-ins and failed sign-ins, and anything someone tried that they weren't allowed to do. Filter by person or kind, or search. Repeat views of the same page by the same person within 10 minutes count once. Page views are kept for 400 days; changes and sign-ins are kept indefinitely. Managers and writers can't open it.
 
 ### Deadlines
 
@@ -70,7 +83,7 @@ Every meaningful change (creation, assignments, status changes, reviews, deliver
 
 ## Screens
 
-Overview · My work · Production (board + table, filters, search) · Calendar (month + list; writing periods, drafts due, final delivery, shoots) · Clients and client detail · Batch detail (script checklist with range selection and bulk actions, brief, deadlines, review notes, delivery records, history) · Review queue · Resources · Settings (deadline rules, timezone & cutoff, reminders, team). Dashboard cards link to the matching filtered records; chart bars reveal the underlying batches.
+Overview · My work · Production (board + table, filters, search) · Calendar (month + list; writing periods, drafts due, final delivery, shoots) · Clients and client detail · Batch detail (drafts & documents, script checklist with range selection and bulk actions, brief, deadlines, review notes, delivery records, history) · Review queue (one card per document) · Resources · Settings (deadline rules, timezone & cutoff, reminders, team) · Master log (owners). Dashboard cards link to the matching filtered records; chart bars reveal the underlying batches.
 
 Responsive: full sidebar on wide screens, collapsible icon rail on smaller desktops/tablets, navigation drawer and card layouts on phones (My work, deadlines, briefs and delivery confirmation are prioritised).
 
@@ -110,7 +123,7 @@ TEST_DATABASE_URL=postgres://user@host/db npm test    # a real PostgreSQL (the s
 npm run typecheck
 ```
 
-They cover: deadline maths across month and year boundaries, leap days, DST, multi-day shoots, business-day mode, timezones and the daily cutoff; progress (20 / 45 · 44%), stages and partial delivery; workflow permissions; the quick-entry parser; and through the real API — creating a client with a recording, document and uploaded file (and denying anonymous file access), both example shoots, the 20 / 25 split without double counting, draft completion not delivering, partial review and delivery, delivery records, moving a shoot with a manual override, batches without shoots, the dashboard's overdue / blocked / unassigned lists, writers being refused on every manager action sent directly to the API, CSRF, stale-edit rejection, target changes that protect work, reminder deduplication, and data persisting across restarts.
+They cover: deadline maths across month and year boundaries, leap days, DST, multi-day shoots, business-day mode, timezones and the daily cutoff; progress (20 / 45 · 44%), stages and partial delivery; workflow permissions; the quick-entry parser; and through the real API — creating a client with a recording, document and uploaded file (and denying anonymous file access), both example shoots, the 20 / 25 split without double counting, draft completion not delivering, partial review and delivery, delivery records, moving a shoot with a manual override, batches without shoots, the dashboard's overdue / blocked / unassigned lists, writers being refused on every manager action sent directly to the API, CSRF, stale-edit rejection, target changes that protect work, reminder deduplication, sending ten scripts as one PDF and getting one review card and one revision request back, versioned resubmissions, script titles, the owner-only master log (views, sign-ins, blocked attempts), and data persisting across restarts.
 
 ## Layout
 
@@ -125,7 +138,7 @@ test/           vitest suites
 
 - Timeliner delivery is **manually confirmed by the writer**, not verified. An official Timeliner API integration could be added later without changing this flow.
 - Quick entry is pattern-based; unusual phrasing falls back to the structured form.
-- Scripts aren't written in the app — each script links to its external writing document.
+- Scripts aren't written in the app — writers send a PDF or a Google Doc link, and edits happen in that document.
 - Notifications are in-app only (no email or Slack yet).
 - Board columns follow the workflow stage computed from scripts; cards open a details drawer rather than supporting drag-and-drop, so nothing can bypass review or delivery confirmation.
 - Uploaded files live in the database, which is simple and private but best kept to documents and images rather than video.
