@@ -50,6 +50,10 @@ Writers don't send scripts one at a time. On **My work** (or the batch page) the
 
 Writers work in one master document, so each batch on **My work** has a **Written so far** counter (+ / −) they tap to keep their manager posted. It is only an update: it never sends, withdraws or changes any script. It can't go below the scripts they've already sent or above how many they have. Managers see it as a lighter "written" layer in every progress bar, as "12 / 25 written · 8 sent" next to each writer on the batch page, and as one line in the history per writing session (repeated taps within 15 minutes update the same line).
 
+### Calendar views
+
+**Days** is a timeline you scroll left and right freely (trackpad, swipe, or grab the background and fling it); more days load in both directions as you go. Choose 1, 3 or 5 days, a week or 2 weeks on screen; wider days show each event's details. **Month** slides between months, and **List** is an agenda. Shoots can be dragged between days in Days and Month.
+
 ### Moving a shoot
 
 Change a shoot's dates from **Change dates** on the batch or client page, by clicking the shoot on the calendar, or by **dragging it to another day on the calendar** (multi-day shoots keep their length). A preview lists everything that moves before anything changes: automatic draft and final deadlines are recalculated, the planned writing start moves by the same number of days, and batches named after the shoot's dates ("Shoot · Oct 7, 2026") get the new dates. Manually set deadlines are kept and flagged for a check, or moved by the same number of days if you tick that option. Writers are notified and each batch's history records the change.

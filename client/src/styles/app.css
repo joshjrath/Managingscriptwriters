@@ -980,6 +980,38 @@ dialog.moment::backdrop { background: rgba(8, 8, 10, 0.72); backdrop-filter: blu
 .landing-tag svg { width: 11px; height: 11px; }
 @media (max-width: 760px) { .landing-tag { display: none; } .ev .grip { display: none; } }
 
+/* calendar: sliding months, and the free-scrolling Days timeline */
+.cal.month-cal { overflow: hidden; }
+.cal.days-cal { padding: 0; overflow: hidden; }
+.days-scroll { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; cursor: grab; outline: none; scrollbar-width: thin; scrollbar-color: #3A3A42 transparent; }
+.days-scroll:focus-visible { box-shadow: inset 0 0 0 2px var(--salmon); border-radius: var(--r-panel); }
+.days-scroll.panning { cursor: grabbing; user-select: none; }
+.days-strip { display: flex; min-height: 520px; padding: 12px 0; }
+.days-strip.reflow { animation: reflow 380ms var(--ease-out-quint); }
+@keyframes reflow { from { opacity: 0.2; transform: scale(0.985); } }
+.dcol { flex: none; width: var(--col); padding: 0 4px; display: flex; flex-direction: column; gap: 6px; border-left: 1px solid transparent; }
+.dcol.first { border-left-color: var(--line-soft); }
+.dhead { position: relative; display: flex; align-items: baseline; gap: 6px; padding: 8px 10px 10px; border-radius: 14px; }
+.dhead .dow { font: 700 10.5px/1 var(--font-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); }
+.dhead .dnum { font: 800 22px/1 var(--font-display); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
+.dhead .dmon { margin-left: auto; font: 700 11px/1 var(--font-ui); letter-spacing: .1em; text-transform: uppercase; color: var(--salmon); }
+.dcol.weekend .dhead .dnum, .dcol.weekend .dhead .dow { color: var(--text-3); }
+.dcol.today .dhead { background: color-mix(in srgb, var(--yellow) 16%, transparent); }
+.dcol.today .dhead .dow, .dcol.today .dhead .dnum { color: var(--yellow); }
+.dbody { flex: 1; display: flex; flex-direction: column; gap: 5px; padding: 8px 6px; border-radius: 16px; background: var(--row); min-height: 440px; transition: background 150ms ease, box-shadow 150ms ease; }
+.dcol.weekend .dbody { background: color-mix(in srgb, var(--row) 70%, var(--panel)); }
+.dcol.today .dbody { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--yellow) 60%, transparent); }
+.dcol.landing .dbody { background: color-mix(in srgb, var(--salmon) 16%, var(--row)); box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--salmon) 70%, transparent); }
+.dbody .ev { min-height: 30px; }
+.dbody .ev span { display: flex; flex-direction: column; gap: 1px; white-space: normal; }
+.dbody .ev .ev-sub { font-size: 11px; font-weight: 500; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 760px) {
+  .days-strip { min-height: 420px; }
+  .dbody { min-height: 360px; }
+  .dbody .ev span { display: flex; }
+  .dbody .ev { justify-content: flex-start; padding: 5px 6px; }
+}
+
 /* a small on/off switch in menus */
 .switch { margin-left: auto; width: 34px; height: 20px; border-radius: 999px; background: var(--track); position: relative; transition: background 200ms ease; flex: none; }
 .switch i { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-2); transition: transform 240ms var(--ease-out-back), background 200ms ease; }

@@ -17,6 +17,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-28-calendar-days',
+    date: '2026-09-28',
+    title: 'A free-scrolling Days view on the calendar',
+    summary: 'Scroll left and right through time, and choose how many days fit on screen.',
+    changes: [
+      { tag: 'new', text: 'Calendar → Days: a timeline you scroll sideways as far as you like. Use a trackpad, swipe, or grab the background and fling it. More days load as you go.' },
+      { tag: 'new', text: 'Choose 1 day, 3 days, 5 days, a week or 2 weeks on screen. Wider days show each shoot’s and deadline’s details.' },
+      { tag: 'improved', text: 'Months slide in from the side you’re heading to, views fade in, and you can drag shoots between days in the Days view too.' },
+    ],
+  },
+  {
     id: '2026-09-28-chart-water',
     date: '2026-09-28',
     title: 'Water in the “Work due by day” chart',
