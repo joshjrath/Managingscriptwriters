@@ -1123,3 +1123,19 @@ html[data-motion='on'] .rec-dot { animation: rec-pulse 1.8s var(--ease-out-quint
   .mode-bar { border-radius: 20px; bottom: 12px; padding: 10px 12px; gap: 8px; }
   .mode-dot { right: 12px; bottom: 12px; }
 }
+
+/* ── Script bank ─────────────────────────────────────────────────────── */
+.bank-row { display: grid; grid-template-columns: 52px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px 14px; border-radius: 16px; background: var(--row); transition: background var(--t); }
+.bank-row:hover { background: color-mix(in srgb, var(--text) 4%, var(--row)); }
+.bank-num { display: grid; place-items: center; height: 40px; border-radius: 12px; background: var(--bg); font: 700 14px/1 var(--font-display); color: var(--salmon); letter-spacing: -0.02em; }
+.bank-row .t { font-weight: 600; font-size: 14px; overflow-wrap: anywhere; }
+.bank-row .s { font-size: 12px; color: var(--text-2); margin-top: 2px; overflow-wrap: anywhere; }
+.bank-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.bank-none { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3); padding: 0 6px; }
+.bank-none svg { width: 14px; height: 14px; }
+.panel.is-refreshing .rows { opacity: .6; transition: opacity var(--t); }
+@media (max-width: 760px) {
+  .bank-row { grid-template-columns: 44px minmax(0, 1fr); }
+  .bank-tools { grid-column: 1 / -1; justify-content: flex-start; }
+}
+@media (max-width: 640px) { .bank-filters .search { flex-basis: 100%; max-width: none; } .bank-filters .select { flex: 1 1 140px; max-width: none; } }

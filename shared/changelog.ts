@@ -17,6 +17,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-29-script-bank',
+    date: '2026-09-29',
+    title: 'Script bank',
+    summary: 'Every script for every client in one place, so you can pull any of them up at once.',
+    changes: [
+      { tag: 'new', text: 'A Script bank tab in the sidebar lists every script across all clients and batches, including archived ones.' },
+      { tag: 'new', text: 'Search by title, number (like #12), client, batch or writer, and filter by client, writer and status (Finished pulls up everything approved or delivered).' },
+      { tag: 'new', text: 'Open script opens the newest document the script is in: the writer’s latest version, or the one approved with a manager’s edits. Timeliner links are there too.' },
+    ],
+  },
+  {
     id: '2026-09-29-view-as-recording',
     date: '2026-09-29',
     title: 'View as anyone, and Recording mode for tutorials',

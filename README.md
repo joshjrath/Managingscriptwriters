@@ -50,6 +50,10 @@ Writers don't send scripts one at a time. On **My work** (or the batch page) the
 
 Writers work in one master document, so each batch on **My work** has a **Written so far** counter (+ / −) they tap to keep their manager posted. It is only an update: it never sends, withdraws or changes any script. It can't go below the scripts they've already sent or above how many they have. Managers see it as a lighter "written" layer in every progress bar, as "12 / 25 written · 8 sent" next to each writer on the batch page, and as one line in the history per writing session (repeated taps within 15 minutes update the same line).
 
+### Script bank
+
+**Script bank** in the sidebar lists every script ever planned, across all clients and batches (archived ones included), for everyone on the team. Search by title, number (`#12`), client, batch or writer; filter by client, writer and status. **Open script** opens the newest document the script is in (the writer's latest send, or the version a manager approved with edits), and the Timeliner link once delivered. Scripts with documents come first; press `/` to jump to the search box.
+
 ### Calendar views
 
 **Days** is a timeline you scroll left and right freely (trackpad, swipe, or grab the background and fling it); more days load in both directions as you go. Choose 1, 3 or 5 days, a week or 2 weeks on screen; wider days show each event's details. **Month** slides between months, and **List** is an agenda. Shoots can be dragged between days in Days and Month.

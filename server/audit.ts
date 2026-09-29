@@ -22,6 +22,7 @@ const STATIC_VIEWS: Record<string, string> = {
   '/api/calendar': 'Viewed Calendar',
   '/api/review': 'Viewed the Review queue',
   '/api/resources': 'Viewed Resources',
+  '/api/script-bank': 'Viewed the Script bank',
   '/api/clients': 'Viewed Clients',
   '/api/users': 'Viewed the Team',
   '/api/settings': 'Viewed Settings',

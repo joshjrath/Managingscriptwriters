@@ -53,6 +53,31 @@ export interface Counts {
   attention: number;
 }
 
+export interface ScriptBankItem {
+  id: number;
+  number: number;
+  title: string | null;
+  status: ScriptStatus;
+  writerId: number | null;
+  writerName: string | null;
+  batchId: number;
+  batchTitle: string;
+  batchArchived: boolean;
+  clientId: number;
+  clientName: string;
+  shootDate: string | null;
+  timelinerUrl: string | null;
+  /** the newest document with this script in it: the writer's latest send, or a manager's approved edit */
+  document: { kind: 'file' | 'link'; href: string; name: string | null; version: number | null; edited: boolean; at: string } | null;
+  updatedAt: string;
+}
+
+export interface ScriptBankPage {
+  scripts: ScriptBankItem[];
+  total: number;
+  nextOffset: number | null;
+}
+
 /** An admin's View as / Recording mode state (null for everyone else). */
 export interface SessionMode {
   realId: number;

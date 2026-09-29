@@ -7,7 +7,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bell, Building2, CalendarDays, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
-  Circle, Eye, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Wand2,
+  Circle, Eye, Library, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Wand2,
 } from 'lucide-react';
 import { LayoutGroup, m } from 'framer-motion';
 import { api, queryClient, useSave } from '../api';
@@ -115,6 +115,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
     { to: '/review', label: 'Review queue', icon: <ClipboardCheck />, count: manager ? counts.reviewQueue || undefined : undefined },
+    { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
   ];
   return (
