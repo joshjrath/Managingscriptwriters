@@ -9,6 +9,7 @@ import { api } from '../api';
 import type { Dashboard } from '../../../shared/types';
 import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
 import { compressRanges, isManager } from '../../../shared/workflow';
+import { TodayPill } from '../components/TodayPill';
 import { PageHeader, useBoot, useNewWork } from '../components/Shell';
 import { DueChart } from '../components/DueChart';
 import { AttentionRow, BatchItem } from '../components/BatchBits';
@@ -32,6 +33,7 @@ export function Overview() {
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
       {d && (
         <>
+          <div style={{ marginBottom: 'var(--gap)' }}><TodayPill /></div>
           <div className="cards4">
             <button className="stat-card salmon" onClick={() => nav('/production?flag=overdue&view=table')} aria-label={`${d.cards.overdueBatches} overdue batches, ${d.cards.overdueScripts} scripts behind. Show them.`}>
               <span className="corner"><AlertTriangle /></span>

@@ -1040,3 +1040,35 @@ describe('overview for each viewer', () => {
     expect(dueTotal(hers)).toBeLessThanOrEqual(dueTotal(team));
   });
 });
+
+describe('today pill', () => {
+  it('counts what’s due today, marks drafts done once sent, and scopes to the viewer', async () => {
+    const before = (await sarah.get('/api/today')).body;
+    expect(before.scope).toBe('me');
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Due today batch', targetCount: 3, draftDue: '2026-09-28', finalDue: '2026-10-09', split: [{ writerId: ids.sarah, count: 3 }] });
+    expect(b.status).toBe(200);
+    const batchId = b.body.batchId ?? b.body.batch?.id;
+    const t1 = (await sarah.get('/api/today')).body;
+    const item = t1.items.find((i: any) => i.batchId === batchId);
+    expect(item).toMatchObject({ kind: 'draft', total: 3, done: 0, overdue: false });
+    expect(t1.total).toBe(before.total + 3);
+
+    // not in anyone else's day
+    expect((await marcus.get('/api/today')).body.items.some((i: any) => i.batchId === batchId)).toBe(false);
+    // managers see the team, or one person
+    expect((await manager.get('/api/today')).body.scope).toBe('team');
+    expect((await manager.get('/api/today')).body.items.some((i: any) => i.batchId === batchId)).toBe(true);
+    const one = (await manager.get(`/api/today?userId=${ids.sarah}`)).body;
+    expect(one.scope).toBe('person');
+    expect(one.total).toBe(t1.total);
+    // writers can't peek at someone else's day
+    expect((await sarah.get(`/api/today?userId=${ids.marcus}`)).body.scope).toBe('me');
+
+    const detail = (await sarah.get(`/api/batches/${batchId}`)).body;
+    const sent = await sarah.post(`/api/batches/${batchId}/submissions`, { scriptIds: detail.scripts.map((s: any) => s.id), url: 'https://docs.example/today' });
+    expect(sent.status).toBe(200);
+    const t2 = (await sarah.get('/api/today')).body;
+    expect(t2.items.find((i: any) => i.batchId === batchId)).toMatchObject({ total: 3, done: 3 });
+    expect(t2.done).toBe(t1.done + 3);
+  });
+});

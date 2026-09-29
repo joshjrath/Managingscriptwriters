@@ -91,6 +91,16 @@ export interface ScriptBankPage {
   nextOffset: number | null;
 }
 
+/** What's due today (and anything overdue still open, or finished today), counted in scripts. */
+export interface TodayTasks {
+  date: string;
+  /** me = the viewer's own scripts; person = one writer (managers); team = everyone */
+  scope: 'me' | 'person' | 'team';
+  total: number;
+  done: number;
+  items: { batchId: number; batchTitle: string; clientName: string; kind: 'draft' | 'final'; total: number; done: number; overdue: boolean }[];
+}
+
 /** An admin's View as / Recording mode state (null for everyone else). */
 export interface SessionMode {
   realId: number;

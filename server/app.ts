@@ -22,6 +22,7 @@ import { registerMomentRoutes } from './moments';
 import { registerNotesImportRoutes } from './notes-import';
 import { registerRecording, routedDb } from './recording';
 import { registerScriptBankRoutes } from './script-bank';
+import { registerTodayRoutes } from './today';
 import type { Db } from './db';
 
 export const CSRF_HEADER = 'x-scale-media';
@@ -97,6 +98,7 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
   registerMomentRoutes(app, ctx);
   registerNotesImportRoutes(app, ctx);
   registerScriptBankRoutes(app, ctx);
+  registerTodayRoutes(app, ctx);
 
   app.all('/api/*', async () => { throw new HttpError(404, 'Not found'); });
 

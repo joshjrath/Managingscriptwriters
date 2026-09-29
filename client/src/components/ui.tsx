@@ -68,7 +68,7 @@ export const edgeFor = (m: Milestone | null, blocked?: boolean) =>
 // ── progress ─────────────────────────────────────────────────────────────
 
 /** Starts at 0 and follows `target`, so CSS transitions animate the first fill as well as later changes. */
-function useRise(target: number, ready = true) {
+export function useRise(target: number, ready = true) {
   const allowed = useMotionAllowed();
   const [shown, setShown] = useState(allowed ? 0 : target);
   const prev = useRef<number | null>(null);
@@ -85,7 +85,7 @@ function useRise(target: number, ready = true) {
 }
 
 /** True while the element is on (or near) the screen; continuous animations pause otherwise. */
-function useOnScreen<T extends Element>() {
+export function useOnScreen<T extends Element>() {
   const ref = useRef<T>(null);
   const [on, setOn] = useState(false);
   useEffect(() => {

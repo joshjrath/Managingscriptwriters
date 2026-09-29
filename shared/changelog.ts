@@ -17,6 +17,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-29-today-pill',
+    date: '2026-09-29',
+    title: 'The Today pill, and green waves when you’re done',
+    summary: 'See how much of today’s work is done at a glance, and get rolling green waves once it all is.',
+    changes: [
+      { tag: 'new', text: 'A Today pill at the top of My work and the Overview. It counts the scripts due today, plus anything overdue that’s still open, and fills as drafts are sent for review and deliveries are confirmed.' },
+      { tag: 'new', text: 'Finish everything due today and it turns into rolling green waves with rising sparkles for the rest of the day, with a burst of confetti the moment you finish.' },
+      { tag: 'new', text: 'Writers see their own day. Admins and managers see the whole team on the Overview, or one writer’s day on their My work page.' },
+    ],
+  },
+  {
     id: '2026-09-29-bank-deliverables',
     date: '2026-09-29',
     title: 'Script bank lists documents, not script numbers',

@@ -76,6 +76,10 @@ A shoot can be booked on its own: New shoot → **Plan scripts later**. Writers 
 
 Change a shoot's dates from **Change dates** on the batch or client page, by clicking the shoot on the calendar, or by **dragging it to another day on the calendar** (multi-day shoots keep their length). A preview lists everything that moves before anything changes: automatic draft and final deadlines are recalculated, the planned writing start moves by the same number of days, and batches named after the shoot's dates ("Shoot · Oct 7, 2026") get the new dates. Manually set deadlines are kept and flagged for a check, or moved by the same number of days if you tick that option. Writers are notified and each batch's history records the change.
 
+### Today pill
+
+At the top of My work and the Overview. **Today's tasks** are the scripts due today (drafts or final delivery), plus anything overdue that's still open or was finished today. Drafts count as done once sent for review, final delivery once delivered. Writers see their own day; on the Overview admins and managers see the whole team, and a writer's My work page shows that writer's day. When everything is done the pill turns into rolling green waves for the rest of the day, with confetti the first time (once per day). Animations follow the account menu's Animations switch and the system's reduce-motion setting.
+
 ### Celebrations and animation
 
 - Progress bars fill like liquid, with a moving edge and rising bubbles; they spark when a batch moves forward, and the big ring on a batch page fills with water.
