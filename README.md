@@ -52,7 +52,7 @@ Writers work in one master document, so each batch on **My work** has a **Writte
 
 ### Script bank
 
-**Script bank** in the sidebar lists every script ever planned, across all clients and batches (archived ones included), for everyone on the team. Search by title, number (`#12`), client, batch or writer; filter by client, writer and status. **Open script** opens the newest document the script is in (the writer's latest send, or the version a manager approved with edits), and the Timeliner link once delivered. Scripts with documents come first; press `/` to jump to the search box.
+**Script bank** in the sidebar lists every deliverable ever sent, across all clients and batches (archived ones included), for everyone on the team. A deliverable is one document, the PDF or link a writer sent covering their scripts for a batch ("scripts 1–45"), so it's one entry however many scripts are in it; only its newest version is listed (older ones are on the batch page). **Open** opens the document, **Approved edit** the version a manager approved with edits, and Timeliner once delivered. Search by client, batch, writer, file name, note or a script's title, or type `#12` to find the document script 12 is in; filter by client, writer and status. Press `/` to jump to the search box.
 
 ### Calendar views
 

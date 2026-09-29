@@ -53,11 +53,19 @@ export interface Counts {
   attention: number;
 }
 
-export interface ScriptBankItem {
-  id: number;
-  number: number;
-  title: string | null;
-  status: ScriptStatus;
+/** approved = every script in it approved or delivered; delivered = all delivered to Timeliner */
+export type DeliverableState = 'in_progress' | 'in_review' | 'revisions' | 'approved' | 'delivered';
+
+/** One document (a PDF or a link) covering a writer's scripts for a batch: one entry in the Script bank. */
+export interface Deliverable {
+  key: string;
+  kind: 'file' | 'link';
+  href: string;
+  name: string | null;
+  note: string | null;
+  /** the newest version is listed; older ones are on the batch page */
+  version: number;
+  sentAt: string;
   writerId: number | null;
   writerName: string | null;
   batchId: number;
@@ -66,15 +74,20 @@ export interface ScriptBankItem {
   clientId: number;
   clientName: string;
   shootDate: string | null;
+  scripts: { id: number; number: number; title: string | null; status: ScriptStatus }[];
+  /** "1–45" */
+  ranges: string;
+  state: DeliverableState;
+  /** the version a manager approved with their own edits */
+  edited: { kind: 'file' | 'link'; href: string; name: string | null; at: string } | null;
   timelinerUrl: string | null;
-  /** the newest document with this script in it: the writer's latest send, or a manager's approved edit */
-  document: { kind: 'file' | 'link'; href: string; name: string | null; version: number | null; edited: boolean; at: string } | null;
-  updatedAt: string;
 }
 
 export interface ScriptBankPage {
-  scripts: ScriptBankItem[];
+  deliverables: Deliverable[];
   total: number;
+  /** scripts across all matching deliverables */
+  scriptCount: number;
   nextOffset: number | null;
 }
 

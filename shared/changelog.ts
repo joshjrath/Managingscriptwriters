@@ -17,6 +17,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-29-bank-deliverables',
+    date: '2026-09-29',
+    title: 'Script bank lists documents, not script numbers',
+    summary: 'One entry per PDF or link a writer sent, however many scripts are in it.',
+    changes: [
+      { tag: 'improved', text: 'Each entry in the Script bank is one deliverable, like “Acme · scripts 1–45 · Sarah”, instead of one row per script. Only the newest version is listed.' },
+      { tag: 'improved', text: 'Open goes to the document; Approved edit opens the version approved with a manager’s edits. You can still search a script title or type #12 to find the document script 12 is in.' },
+    ],
+  },
+  {
     id: '2026-09-29-overview-per-person',
     date: '2026-09-29',
     title: 'An Overview of your own work',

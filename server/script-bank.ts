@@ -1,26 +1,38 @@
-// Script bank: every script ever planned, across every client and batch, with
-// its latest document one click away. Search by title, number, client, batch
-// or writer, and filter by client, writer and status.
+// Script bank: every deliverable ever sent, across every client and batch.
+// A deliverable is one document (a PDF or a link) covering a writer's
+// scripts for a batch, like "#1–45" — so it's one row, not 45. Only the
+// newest version of each is listed, with the version a manager approved
+// with edits beside it. Search matches the client, batch, writer, file name
+// and note, plus the titles and numbers of the scripts inside, so "#12"
+// finds the document script 12 is in.
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Ctx } from './core';
 import { requireUser } from './auth';
 import { parse, zs } from './http';
-import { SCRIPT_STATUSES, type ScriptStatus } from '../shared/workflow';
-import type { ScriptBankItem, ScriptBankPage } from '../shared/types';
+import { compressRanges, type ScriptStatus } from '../shared/workflow';
+import type { Deliverable, DeliverableState, ScriptBankPage } from '../shared/types';
 
-const STATUS_GROUPS: Record<string, ScriptStatus[]> = {
-  finished: ['approved', 'delivered'],
-  open: ['not_started', 'in_progress', 'ready_for_review', 'revisions_needed'],
-};
-
-interface Row {
-  id: number; number: number; title: string | null; status: ScriptStatus; version: number;
-  assignee_id: number | null; writer: string | null; doc_url: string | null; timeliner_url: string | null;
-  updated_at: string; approved_at: string | null; delivered_at: string | null;
+interface SubRow {
+  id: number; previous_id: number | null; version: number; url: string | null; file_id: number | null; file_name: string | null; note: string | null;
+  created_at: string; writer_id: number | null; writer_name: string | null;
   batch_id: number; batch_title: string; batch_archived: boolean; client_id: number; client_name: string; shoot_date: string | null;
-  d_src: 'submission' | 'edited' | null; d_at: string | null; d_url: string | null; d_file: number | null; d_version: number | null; d_name: string | null;
+}
+interface ScriptRow { submission_id: number; id: number; number: number; title: string | null; status: ScriptStatus; timeliner_url: string | null }
+interface EditRow { submission_id: number; url: string | null; file_id: number | null; file_name: string | null; created_at: string }
+interface LooseRow {
+  id: number; number: number; title: string | null; status: ScriptStatus; doc_url: string; timeliner_url: string | null; updated_at: string;
+  writer_id: number | null; writer_name: string | null;
+  batch_id: number; batch_title: string; batch_archived: boolean; client_id: number; client_name: string; shoot_date: string | null;
+}
+
+export function stateOf(statuses: ScriptStatus[]): DeliverableState {
+  if (statuses.length && statuses.every((s) => s === 'delivered')) return 'delivered';
+  if (statuses.length && statuses.every((s) => s === 'approved' || s === 'delivered')) return 'approved';
+  if (statuses.some((s) => s === 'revisions_needed')) return 'revisions';
+  if (statuses.some((s) => s === 'ready_for_review')) return 'in_review';
+  return 'in_progress';
 }
 
 export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
@@ -31,76 +43,119 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
     const q = parse(z.object({
       q: z.string().trim().max(120).optional(),
       clientId: zs.id.optional(),
-      writerId: z.union([zs.id, z.literal('none')]).optional(),
-      status: z.enum(['finished', 'open', ...SCRIPT_STATUSES]).optional(),
+      writerId: zs.id.optional(),
+      status: z.enum(['finished', 'in_review', 'revisions', 'open']).optional(),
       sort: z.enum(['recent', 'client']).default('recent'),
       offset: z.coerce.number().int().min(0).max(100_000).default(0),
-      limit: z.coerce.number().int().min(10).max(200).default(60),
+      limit: z.coerce.number().int().min(10).max(200).default(40),
     }), req.query);
 
-    const p: unknown[] = [];
-    const where: string[] = ['s.removed_at is null'];
-    const add = (sql: (n: string) => string, v: unknown) => { p.push(v); where.push(sql(`$${p.length}`)); };
-    if (q.clientId) add((n) => `c.id = ${n}`, q.clientId);
-    if (q.writerId === 'none') where.push('s.assignee_id is null');
-    else if (q.writerId) add((n) => `s.assignee_id = ${n}`, q.writerId);
-    if (q.status) add((n) => `s.status = any(${n}::text[])`, STATUS_GROUPS[q.status] ?? [q.status]);
-    if (q.q) {
-      const num = /^#?(\d{1,4})$/.exec(q.q);
-      p.push(`%${q.q.toLowerCase()}%`);
-      const like = `$${p.length}`;
-      let cond = `lower(coalesce(s.title, '')) like ${like} or lower(c.name) like ${like} or lower(b.title) like ${like} or lower(coalesce(u.name, '')) like ${like}`;
-      if (num) { p.push(Number(num[1])); cond += ` or s.number = $${p.length}`; }
-      where.push(`(${cond})`);
-    }
-    const joins = `
-      from scripts s
-      join batches b on b.id = s.batch_id
-      join clients c on c.id = b.client_id
-      left join users u on u.id = s.assignee_id
-      left join shoots sh on sh.id = b.shoot_id`;
-    const filter = `where ${where.join(' and ')}`;
-
-    const total = (await db.one<{ n: number }>(`select count(*)::int as n ${joins} ${filter}`, p))?.n ?? 0;
-    const order = q.sort === 'client'
-      ? `lower(c.name), b.created_at desc, b.id desc, s.number`
-      : `(d.created_at is null and s.doc_url is null), coalesce(d.created_at, s.updated_at) desc, s.id desc`;
-    // The newest document covering each script: the writer's latest send, or
-    // the version a manager approved with their own edits, whichever is newer.
-    const rows = await db.query<Row>(
-      `select s.id, s.number, s.title, s.status, s.version, s.assignee_id, u.name as writer, s.doc_url, s.timeliner_url,
-              s.updated_at, s.approved_at, s.delivered_at,
+    const subs = await db.query<SubRow>(
+      `select s.id, s.previous_id, s.version, s.url, s.file_id, f.filename as file_name, s.note, s.created_at,
+              coalesce(s.writer_id, s.submitted_by) as writer_id, w.name as writer_name,
               b.id as batch_id, b.title as batch_title, b.archived_at is not null as batch_archived, c.id as client_id, c.name as client_name,
-              sh.start_date as shoot_date,
-              d.src as d_src, d.created_at as d_at, d.url as d_url, d.file_id as d_file, d.version as d_version, f.filename as d_name
-         ${joins}
-         left join lateral (
-           select * from (
-             select sub.created_at, sub.url, sub.file_id, sub.version, 'submission' as src
-               from submission_scripts ss join submissions sub on sub.id = ss.submission_id where ss.script_id = s.id
-             union all
-             select r.created_at, r.url, r.file_id, null::int as version, 'edited' as src
-               from reviews r where r.batch_id = s.batch_id and r.action = 'approved' and (r.url is not null or r.file_id is not null) and r.script_ids @> jsonb_build_array(s.id)
-           ) x order by created_at desc limit 1
-         ) d on true
-         left join files f on f.id = d.file_id
-         ${filter}
-        order by ${order}
-        limit ${q.limit} offset ${q.offset}`,
-      p,
+              sh.start_date as shoot_date
+         from submissions s
+         join batches b on b.id = s.batch_id join clients c on c.id = b.client_id
+         left join users w on w.id = coalesce(s.writer_id, s.submitted_by)
+         left join shoots sh on sh.id = b.shoot_id
+         left join files f on f.id = s.file_id
+        order by s.created_at, s.id`,
     );
+    // a newer version replaces the one it revises; follow each chain to its newest
+    const replacedBy = new Map<number, number>();
+    for (const s of subs) if (s.previous_id) replacedBy.set(s.previous_id, s.id);
+    const newestOf = (id: number) => { let cur = id; for (let i = 0; i < 100 && replacedBy.has(cur); i++) cur = replacedBy.get(cur)!; return cur; };
+    const latest = subs.filter((s) => !replacedBy.has(s.id));
 
-    const scripts: ScriptBankItem[] = rows.map((r) => ({
-      id: r.id, number: r.number, title: r.title, status: r.status,
-      writerId: r.assignee_id, writerName: r.writer,
-      batchId: r.batch_id, batchTitle: r.batch_title, batchArchived: r.batch_archived,
-      clientId: r.client_id, clientName: r.client_name, shootDate: r.shoot_date,
-      timelinerUrl: r.timeliner_url,
-      document: r.d_src
-        ? { kind: r.d_file ? 'file' : 'link', href: r.d_file ? `/api/files/${r.d_file}` : r.d_url!, name: r.d_name, version: r.d_version, edited: r.d_src === 'edited', at: r.d_at! }
-        : r.doc_url ? { kind: 'link', href: r.doc_url, name: null, version: null, edited: false, at: r.updated_at } : null,
-      updatedAt: r.delivered_at ?? r.approved_at ?? r.d_at ?? r.updated_at,
-    }));
-    return { scripts, total, nextOffset: q.offset + rows.length < total ? q.offset + rows.length : null };
+    const scripts = await db.query<ScriptRow>(
+      `select ss.submission_id, sc.id, sc.number, sc.title, sc.status, sc.timeliner_url
+         from submission_scripts ss join scripts sc on sc.id = ss.script_id where sc.removed_at is null order by sc.number`,
+    );
+    const scriptsBySub = new Map<number, ScriptRow[]>();
+    for (const r of scripts) { const l = scriptsBySub.get(r.submission_id) ?? []; l.push(r); scriptsBySub.set(r.submission_id, l); }
+
+    const edits = await db.query<EditRow>(
+      `select r.submission_id, r.url, r.file_id, f.filename as file_name, r.created_at from reviews r left join files f on f.id = r.file_id
+        where r.action = 'approved' and r.submission_id is not null and (r.url is not null or r.file_id is not null) order by r.created_at`,
+    );
+    const editOf = new Map<number, EditRow>();
+    for (const e of edits) editOf.set(newestOf(e.submission_id), e);
+
+    const out: Deliverable[] = [];
+    for (const s of latest) {
+      const list = scriptsBySub.get(s.id) ?? [];
+      if (!list.length) continue;
+      const e = editOf.get(s.id);
+      out.push({
+        key: `s${s.id}`,
+        kind: s.file_id ? 'file' : 'link',
+        href: s.file_id ? `/api/files/${s.file_id}` : s.url!,
+        name: s.file_name, note: s.note, version: s.version, sentAt: s.created_at,
+        writerId: s.writer_id, writerName: s.writer_name,
+        batchId: s.batch_id, batchTitle: s.batch_title, batchArchived: s.batch_archived,
+        clientId: s.client_id, clientName: s.client_name, shootDate: s.shoot_date,
+        scripts: list.map((x) => ({ id: x.id, number: x.number, title: x.title, status: x.status })),
+        ranges: compressRanges(list.map((x) => x.number)),
+        state: stateOf(list.map((x) => x.status)),
+        edited: e ? { kind: e.file_id ? 'file' : 'link', href: e.file_id ? `/api/files/${e.file_id}` : e.url!, name: e.file_name, at: e.created_at } : null,
+        timelinerUrl: list.find((x) => x.timeliner_url)?.timeliner_url ?? null,
+      });
+    }
+
+    // Scripts tracked with their own document link and never sent through the
+    // app: one deliverable per distinct link in a batch.
+    const loose = await db.query<LooseRow>(
+      `select sc.id, sc.number, sc.title, sc.status, sc.doc_url, sc.timeliner_url, sc.updated_at, sc.assignee_id as writer_id, u.name as writer_name,
+              b.id as batch_id, b.title as batch_title, b.archived_at is not null as batch_archived, c.id as client_id, c.name as client_name, sh.start_date as shoot_date
+         from scripts sc join batches b on b.id = sc.batch_id join clients c on c.id = b.client_id
+         left join users u on u.id = sc.assignee_id left join shoots sh on sh.id = b.shoot_id
+        where sc.removed_at is null and sc.doc_url is not null and not exists (select 1 from submission_scripts ss where ss.script_id = sc.id)
+        order by sc.number`,
+    );
+    const groups = new Map<string, LooseRow[]>();
+    for (const r of loose) { const k = `${r.batch_id}|${r.doc_url}`; const l = groups.get(k) ?? []; l.push(r); groups.set(k, l); }
+    for (const list of groups.values()) {
+      const r = list[0];
+      out.push({
+        key: `d${list[0].id}`, kind: 'link', href: r.doc_url, name: null, note: null, version: 1,
+        sentAt: list.reduce((m, x) => (x.updated_at > m ? x.updated_at : m), r.updated_at),
+        writerId: r.writer_id, writerName: list.every((x) => x.writer_id === r.writer_id) ? r.writer_name : 'Several writers',
+        batchId: r.batch_id, batchTitle: r.batch_title, batchArchived: r.batch_archived,
+        clientId: r.client_id, clientName: r.client_name, shootDate: r.shoot_date,
+        scripts: list.map((x) => ({ id: x.id, number: x.number, title: x.title, status: x.status })),
+        ranges: compressRanges(list.map((x) => x.number)),
+        state: stateOf(list.map((x) => x.status)),
+        edited: null,
+        timelinerUrl: list.find((x) => x.timeliner_url)?.timeliner_url ?? null,
+      });
+    }
+
+    // filters
+    const needle = q.q?.toLowerCase().replace(/^#/, '');
+    const num = q.q && /^#?\d{1,4}$/.test(q.q) ? Number(q.q.replace('#', '')) : null;
+    const match = (d: Deliverable) => {
+      if (q.clientId && d.clientId !== q.clientId) return false;
+      if (q.writerId && d.writerId !== q.writerId) return false;
+      if (q.status === 'finished' && d.state !== 'approved' && d.state !== 'delivered') return false;
+      if (q.status === 'in_review' && d.state !== 'in_review') return false;
+      if (q.status === 'revisions' && d.state !== 'revisions') return false;
+      if (q.status === 'open' && (d.state === 'approved' || d.state === 'delivered')) return false;
+      if (!needle) return true;
+      if (num != null) return d.scripts.some((s) => s.number === num);
+      const hay = [d.clientName, d.batchTitle, d.writerName ?? '', d.name ?? '', d.note ?? '', ...d.scripts.map((s) => s.title ?? '')].join('\n').toLowerCase();
+      return hay.includes(needle);
+    };
+    const found = out.filter(match);
+    found.sort(q.sort === 'client'
+      ? (a, b) => a.clientName.localeCompare(b.clientName) || b.sentAt.localeCompare(a.sentAt)
+      : (a, b) => b.sentAt.localeCompare(a.sentAt));
+    const page = found.slice(q.offset, q.offset + q.limit);
+    return {
+      deliverables: page,
+      total: found.length,
+      scriptCount: found.reduce((n, d) => n + d.scripts.length, 0),
+      nextOffset: q.offset + page.length < found.length ? q.offset + page.length : null,
+    };
   });
 }

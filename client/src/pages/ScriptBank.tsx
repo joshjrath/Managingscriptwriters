@@ -1,17 +1,27 @@
-// Script bank: every script across every client and batch, searchable in one
-// place, with its latest document (the writer's newest send, or the version a
-// manager approved with edits) one click away.
+// Script bank: every deliverable ever sent, across every client and batch.
+// One row per document (a writer's PDF or link covering, say, scripts 1–45),
+// newest version only, with the manager's approved edit beside it.
 
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useInfiniteQuery, keepPreviousData } from '@tanstack/react-query';
-import { ExternalLink, FileText, Library, Link2, Send } from 'lucide-react';
+import { ExternalLink, FileText, Library, Link2, PenLine } from 'lucide-react';
 import { api, qs } from '../api';
-import type { ScriptBankItem, ScriptBankPage } from '../../../shared/types';
-import { SCRIPT_STATUSES, STATUS_LABEL } from '../../../shared/workflow';
-import { fmtDate, fmtStamp } from '../../../shared/format';
+import type { Deliverable, DeliverableState, ScriptBankPage } from '../../../shared/types';
+import { fmtDate, fmtStamp, plural } from '../../../shared/format';
+import { STATUS_SHORT, type ScriptStatus } from '../../../shared/workflow';
 import { PageHeader, useBoot } from '../components/Shell';
-import { Button, Empty, ErrorState, Loading, Panel, StatusChip } from '../components/ui';
+import { Button, Chip, Empty, ErrorState, Loading, Panel } from '../components/ui';
+
+const STATE: Record<DeliverableState, { label: string; color: string }> = {
+  in_progress: { label: 'In progress', color: 'cyan' },
+  in_review: { label: 'In review', color: 'lavender' },
+  revisions: { label: 'Revisions', color: 'pink' },
+  approved: { label: 'Approved', color: 'mint' },
+  delivered: { label: 'Delivered', color: 'mint' },
+};
+
+const scriptNumber = (q: string) => (/^#?\d{1,4}$/.test(q) ? Number(q.replace('#', '')) : null);
 
 export function ScriptBankPage() {
   const { clients, users, settings } = useBoot();
@@ -45,17 +55,18 @@ export function ScriptBankPage() {
     getNextPageParam: (last) => last.nextOffset,
     placeholderData: keepPreviousData,
   });
-  const scripts = bank.data?.pages.flatMap((p) => p.scripts) ?? [];
-  const total = bank.data?.pages[0]?.total ?? 0;
+  const items = bank.data?.pages.flatMap((p) => p.deliverables) ?? [];
+  const first = bank.data?.pages[0];
   const filtered = !!(q || clientId || writerId || status);
   const people = users.filter((u) => !u.removed).sort((a, b) => a.name.localeCompare(b.name));
+  const num = scriptNumber(q);
 
   return (
     <>
-      <PageHeader title="Script bank" sub="Every script for every client in one place. Search by title, number, client, batch or writer." />
+      <PageHeader title="Script bank" sub="Every document your writers have sent, for every client. Search a client, batch, writer, title or script number." />
       <div className="filters bank-filters" role="search">
-        <input ref={search} className="input search" type="search" autoFocus placeholder="Search scripts…" title="Press / to jump here" value={text}
-          onChange={(e) => setText(e.target.value)} aria-label="Search scripts by title, number, client, batch or writer" />
+        <input ref={search} className="input search" type="search" autoFocus placeholder="Search, or #12 for script 12…" title="Press / to jump here" value={text}
+          onChange={(e) => setText(e.target.value)} aria-label="Search by client, batch, writer, title or script number" />
         <select className="select" value={clientId} onChange={(e) => set('clientId', e.target.value)} aria-label="Client">
           <option value="">All clients</option>
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}{c.status === 'archived' ? ' (archived)' : ''}</option>)}
@@ -63,36 +74,36 @@ export function ScriptBankPage() {
         <select className="select" value={writerId} onChange={(e) => set('writerId', e.target.value)} aria-label="Writer">
           <option value="">All writers</option>
           {people.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-          <option value="none">Unassigned</option>
         </select>
         <select className="select" value={status} onChange={(e) => set('status', e.target.value)} aria-label="Status">
           <option value="">Any status</option>
           <option value="finished">Finished (approved or delivered)</option>
-          <option value="open">Still in progress</option>
-          {SCRIPT_STATUSES.map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+          <option value="in_review">In review</option>
+          <option value="revisions">Sent back for revisions</option>
+          <option value="open">Not finished yet</option>
         </select>
         <select className="select" value={sort} onChange={(e) => set('sort', e.target.value === 'recent' ? '' : e.target.value)} aria-label="Order">
-          <option value="recent">Newest documents first</option>
-          <option value="client">By client and batch</option>
+          <option value="recent">Newest first</option>
+          <option value="client">By client</option>
         </select>
         {filtered && <Button variant="ghost sm" onClick={() => { setText(''); setParams(new URLSearchParams(sort !== 'recent' ? { sort } : {}), { replace: true }); }}>Clear</Button>}
       </div>
       {bank.isLoading && <Loading />}
       {bank.isError && <ErrorState error={bank.error} retry={() => bank.refetch()} />}
-      {bank.data && (
-        <Panel title="Scripts" count={total} className={bank.isPlaceholderData ? 'is-refreshing' : ''}>
-          {!scripts.length ? (
-            <Empty boxed icon={<Library />} title={filtered ? 'No scripts match' : 'No scripts yet'}>
-              {filtered ? 'Try fewer words, or clear the filters.' : 'Scripts appear here as soon as a batch is planned.'}
+      {first && (
+        <Panel title="Deliverables" count={first.total} sub={first.scriptCount ? plural(first.scriptCount, 'script') : undefined} className={bank.isPlaceholderData ? 'is-refreshing' : ''}>
+          {!items.length ? (
+            <Empty boxed icon={<Library />} title={filtered ? 'Nothing matches' : 'Nothing sent yet'}>
+              {filtered ? 'Try fewer words, or clear the filters.' : 'Documents appear here as soon as a writer sends their scripts for review.'}
             </Empty>
           ) : (
             <div className="rows bank">
-              {scripts.map((s) => <BankRow key={s.id} s={s} tz={settings.timezone} />)}
+              {items.map((d) => <DeliverableRow key={d.key} d={d} tz={settings.timezone} num={num} />)}
             </div>
           )}
           {bank.hasNextPage && (
             <div style={{ display: 'flex', justifyContent: 'center', marginTop: 14 }}>
-              <Button onClick={() => bank.fetchNextPage()} busy={bank.isFetchingNextPage}>Show more ({total - scripts.length} left)</Button>
+              <Button onClick={() => bank.fetchNextPage()} busy={bank.isFetchingNextPage}>Show more ({first.total - items.length} left)</Button>
             </div>
           )}
         </Panel>
@@ -101,39 +112,51 @@ export function ScriptBankPage() {
   );
 }
 
-function BankRow({ s, tz }: { s: ScriptBankItem; tz: string }) {
-  const doc = s.document;
+/** "4 approved · 2 revisions" when the scripts in a document aren't all at the same step. */
+function breakdown(scripts: Deliverable['scripts']): string {
+  const counts = new Map<ScriptStatus, number>();
+  for (const s of scripts) counts.set(s.status, (counts.get(s.status) ?? 0) + 1);
+  if (counts.size < 2) return '';
+  return [...counts.entries()].map(([s, n]) => `${n} ${STATUS_SHORT[s].toLowerCase()}`).join(' · ');
+}
+
+function DeliverableRow({ d, tz, num }: { d: Deliverable; tz: string; num: number | null }) {
+  const st = STATE[d.state];
+  const hit = num != null ? d.scripts.find((s) => s.number === num) : null;
+  const mix = breakdown(d.scripts);
   return (
     <div className="bank-row">
-      <span className="bank-num" aria-label={`Script ${s.number}`}>#{s.number}</span>
+      <span className="bank-num" aria-label={plural(d.scripts.length, 'script')}>
+        <b>{d.scripts.length}</b><small>{d.scripts.length === 1 ? 'script' : 'scripts'}</small>
+      </span>
       <div style={{ minWidth: 0 }}>
-        <div className="t">{s.title ?? <span className="dim">Untitled script</span>}</div>
-        <div className="s">
-          <Link className="link" to={`/clients/${s.clientId}`}>{s.clientName}</Link>
-          {' › '}<Link className="link" to={`/batches/${s.batchId}`}>{s.batchTitle}</Link>
-          {s.batchArchived && ' (archived)'}
-          {' · '}{s.writerName ?? 'Unassigned'}
-          {s.shootDate && <> · shoot {fmtDate(s.shootDate)}</>}
+        <div className="t">
+          <Link className="link" to={`/clients/${d.clientId}`}>{d.clientName}</Link> <span className="dim">›</span> <Link className="link" to={`/batches/${d.batchId}`}>{d.batchTitle}</Link>
+          {d.batchArchived && <span className="dim"> (archived)</span>}
         </div>
-        {doc && (
+        <div className="s">
+          Scripts {d.ranges} · {d.writerName ?? 'Unassigned'}{d.shootDate && <> · shoot {fmtDate(d.shootDate)}</>}
+          {' · '}{d.version > 1 ? `version ${d.version}, ` : ''}sent {fmtStamp(d.sentAt, tz)}
+          {d.name && <> · {d.name}</>}
+        </div>
+        {(hit || mix) && (
           <div className="s">
-            {doc.edited ? 'Approved with edits' : `Sent${doc.version && doc.version > 1 ? ` · version ${doc.version}` : ''}`} {fmtStamp(doc.at, tz)}
-            {doc.name && <> · {doc.name}</>}
+            {hit && <b className="bank-hit">Script {hit.number}{hit.title ? ` “${hit.title}”` : ''} is in here{mix ? ' · ' : ''}</b>}
+            {mix}
           </div>
         )}
       </div>
       <div className="bank-tools">
-        <StatusChip status={s.status} />
-        {doc ? (
-          <a className="btn sm primary" href={doc.href} target="_blank" rel="noopener noreferrer">
-            {doc.kind === 'file' ? <FileText aria-hidden /> : <Link2 aria-hidden />}Open script
+        <Chip color={st.color} dot>{st.label}</Chip>
+        <a className="btn sm primary" href={d.href} target="_blank" rel="noopener noreferrer">
+          {d.kind === 'file' ? <FileText aria-hidden /> : <Link2 aria-hidden />}Open
+        </a>
+        {d.edited && (
+          <a className="btn sm mint" href={d.edited.href} target="_blank" rel="noopener noreferrer" title={`Approved with edits ${fmtStamp(d.edited.at, tz)}`}>
+            <PenLine aria-hidden />Approved edit
           </a>
-        ) : (
-          s.status === 'not_started' || s.status === 'in_progress'
-            ? <span className="bank-none" title="The writer hasn’t sent this script yet"><Send aria-hidden />Not sent yet</span>
-            : <span className="bank-none" title="This script was tracked without a document attached">No document</span>
         )}
-        {s.timelinerUrl && <a className="btn sm" href={s.timelinerUrl} target="_blank" rel="noopener noreferrer">Timeliner<ExternalLink aria-hidden /></a>}
+        {d.timelinerUrl && <a className="btn sm" href={d.timelinerUrl} target="_blank" rel="noopener noreferrer">Timeliner<ExternalLink aria-hidden /></a>}
       </div>
     </div>
   );

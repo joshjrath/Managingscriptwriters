@@ -976,42 +976,43 @@ describe('view as and recording mode', () => {
 });
 
 describe('script bank', () => {
-  it('lists every script with its latest document, and searches and filters them', async () => {
+  it('lists one entry per document (newest version), not one per script, and searches inside it', async () => {
     const all = (await sarah.get('/api/script-bank?limit=200')).body;
-    const n = await db.one<{ n: number }>(`select count(*)::int as n from scripts where removed_at is null`);
-    expect(all.total).toBe(n!.n);
-    expect(all.scripts.length).toBe(Math.min(200, n!.n));
-
-    // a script that was sent opens the newest document it was in
-    const sent = await db.one<{ id: number; url: string | null; file_id: number | null }>(
-      `select ss.script_id as id, sub.url, sub.file_id from submission_scripts ss join submissions sub on sub.id = ss.submission_id
-        order by sub.created_at desc, sub.id desc limit 1`,
+    // one entry per newest submission that still covers scripts
+    const newest = await db.query<{ id: number; version: number; n: number }>(
+      `select s.id, s.version, count(ss.script_id)::int as n from submissions s join submission_scripts ss on ss.submission_id = s.id
+        join scripts sc on sc.id = ss.script_id and sc.removed_at is null
+        where not exists (select 1 from submissions later where later.previous_id = s.id) group by s.id, s.version`,
     );
-    const row = all.scripts.find((s: any) => s.id === sent!.id);
-    expect(row.document).not.toBeNull();
-    const edited = await db.one(`select 1 from reviews where action = 'approved' and (url is not null or file_id is not null) and script_ids @> jsonb_build_array($1::bigint)`, [sent!.id]);
-    if (!edited) expect(row.document.href).toBe(sent!.file_id ? `/api/files/${sent!.file_id}` : sent!.url);
-
-    // by client, writer, status and number
-    const acme = (await manager.get(`/api/script-bank?clientId=${acmeId}&limit=200`)).body;
-    expect(acme.scripts.length).toBeGreaterThan(0);
-    expect(acme.scripts.every((s: any) => s.clientId === acmeId)).toBe(true);
-    const hers = (await manager.get(`/api/script-bank?writerId=${ids.sarah}&limit=200`)).body;
-    expect(hers.scripts.every((s: any) => s.writerId === ids.sarah)).toBe(true);
-    const done = (await manager.get('/api/script-bank?status=finished&limit=200')).body;
-    expect(done.scripts.every((s: any) => s.status === 'approved' || s.status === 'delivered')).toBe(true);
-    const seven = (await manager.get(`/api/script-bank?q=%237&clientId=${acmeId}`)).body;
-    expect(seven.scripts.some((s: any) => s.number === 7)).toBe(true);
-    const byName = (await manager.get('/api/script-bank?q=acme')).body;
-    expect(byName.scripts.every((s: any) => /acme/i.test(`${s.clientName} ${s.batchTitle} ${s.title ?? ''} ${s.writerName ?? ''}`))).toBe(true);
-
-    // pages
-    const p1 = (await manager.get('/api/script-bank?limit=10')).body;
-    if (p1.total > 10) {
-      expect(p1.nextOffset).toBe(10);
-      const p2 = (await manager.get('/api/script-bank?limit=10&offset=10')).body;
-      expect(p2.scripts.map((s: any) => s.id)).not.toContain(p1.scripts[0].id);
+    const fromSubs = all.deliverables.filter((d: any) => d.key.startsWith('s'));
+    expect(fromSubs.length).toBe(newest.length);
+    expect(newest.length).toBeGreaterThan(0);
+    for (const n of newest) {
+      const d = fromSubs.find((x: any) => x.key === `s${n.id}`);
+      expect(d.scripts.length).toBe(n.n);
+      expect(d.version).toBe(n.version);
     }
+    // an older version of a revised document isn't listed on its own
+    const older = await db.one<{ id: number }>(`select previous_id as id from submissions where previous_id is not null limit 1`);
+    if (older) expect(all.deliverables.some((d: any) => d.key === `s${older.id}`)).toBe(false);
+    expect(all.scriptCount).toBe(all.deliverables.reduce((n: number, d: any) => n + d.scripts.length, 0));
+
+    // "#N" finds the document the script is in
+    const d0 = fromSubs[0];
+    const n0 = d0.scripts[0].number;
+    const hit = (await manager.get(`/api/script-bank?q=%23${n0}&clientId=${d0.clientId}&limit=200`)).body;
+    expect(hit.deliverables.some((d: any) => d.key === d0.key)).toBe(true);
+    expect(hit.deliverables.every((d: any) => d.scripts.some((s: any) => s.number === n0))).toBe(true);
+
+    // filters
+    const acme = (await manager.get(`/api/script-bank?clientId=${acmeId}&limit=200`)).body;
+    expect(acme.deliverables.every((d: any) => d.clientId === acmeId)).toBe(true);
+    const hers = (await manager.get(`/api/script-bank?writerId=${ids.sarah}&limit=200`)).body;
+    expect(hers.deliverables.every((d: any) => d.writerId === ids.sarah)).toBe(true);
+    const done = (await manager.get('/api/script-bank?status=finished&limit=200')).body;
+    expect(done.deliverables.every((d: any) => d.scripts.every((s: any) => s.status === 'approved' || s.status === 'delivered'))).toBe(true);
+    const byName = (await manager.get(`/api/script-bank?q=${encodeURIComponent(d0.clientName.toLowerCase())}`)).body;
+    expect(byName.deliverables.some((d: any) => d.key === d0.key)).toBe(true);
     expect((await call('GET', '/api/script-bank')).status).toBe(401);
   });
 });
