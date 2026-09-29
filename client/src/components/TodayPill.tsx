@@ -67,7 +67,7 @@ export function TodayPill({ userId }: { userId?: number }) {
   return (
     <section
       ref={(el) => { ref.current = el; pill.current = el; }}
-      className={`today-pill${allDone ? ' done' : ''}${total ? '' : ' empty'}`}
+      className={`today-pill${allDone ? ' done' : ''}${total ? '' : ' tp-none'}`}
       data-live={on && allowed ? '' : undefined}
       aria-label={label}
       style={{ ['--p' as string]: shown }}

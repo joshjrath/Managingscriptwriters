@@ -25,6 +25,7 @@ export const CHANGELOG: ChangelogEntry[] = [
       { tag: 'new', text: 'A Today pill at the top of My work and the Overview. It counts the scripts due today, plus anything overdue that’s still open, and fills as drafts are sent for review and deliveries are confirmed.' },
       { tag: 'new', text: 'Finish everything due today and it turns into rolling green waves with rising sparkles for the rest of the day, with a burst of confetti the moment you finish.' },
       { tag: 'new', text: 'Writers see their own day. Admins and managers see the whole team on the Overview, or one writer’s day on their My work page.' },
+      { tag: 'fixed', text: 'The Today pill is slim, and no longer grows huge when nothing is due.' },
     ],
   },
   {

@@ -1144,7 +1144,7 @@ html[data-motion='on'] .rec-dot { animation: rec-pulse 1.8s var(--ease-out-quint
 /* ── Today pill ───────────────────────────────────────────────────────── */
 .today-pill {
   --w1: color-mix(in srgb, var(--cyan) 38%, var(--track)); --w2: color-mix(in srgb, var(--cyan) 62%, var(--track)); --w3: color-mix(in srgb, var(--lavender) 75%, var(--track));
-  position: relative; isolation: isolate; overflow: hidden; min-height: 76px; border-radius: 999px;
+  position: relative; isolation: isolate; overflow: hidden; min-height: 54px; border-radius: 999px;
   background: var(--row); display: flex; align-items: center;
 }
 .today-pill.skeleton { background: var(--row); opacity: .6; }
@@ -1170,17 +1170,17 @@ html[data-motion='on'] .rec-dot { animation: rec-pulse 1.8s var(--ease-out-quint
 .tp-glint { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
 .tp-glint::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 30%; background: linear-gradient(100deg, transparent, rgba(255, 255, 255, .22), transparent); transform: translateX(-120%); }
 .tp-spark { position: absolute; bottom: 10%; width: 5px; height: 5px; border-radius: 50%; background: #E9FFF8; opacity: 0; box-shadow: 0 0 8px rgba(155, 232, 201, .9); }
-.tp-text { position: relative; z-index: 1; display: flex; align-items: center; gap: 14px; padding: 12px 26px 12px 14px; min-width: 0; width: 100%; }
-.tp-ic { flex: none; width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: rgba(0, 0, 0, .28); color: var(--yellow); }
-.tp-ic svg { width: 22px; height: 22px; }
+.tp-text { position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; padding: 8px 22px 8px 10px; min-width: 0; width: 100%; }
+.tp-ic { flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: rgba(0, 0, 0, .28); color: var(--yellow); }
+.tp-ic svg { width: 18px; height: 18px; }
 .today-pill.done .tp-ic { color: #E9FFF8; background: rgba(255, 255, 255, .14); }
-.tp-main { display: flex; flex-direction: column; flex: none; }
-.tp-k { font: 700 10.5px/1 var(--font-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); margin-bottom: 5px; }
+.tp-main { display: flex; flex-direction: column; align-items: flex-start; flex: none; }
+.tp-k { font: 700 9.5px/1 var(--font-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); margin-bottom: 4px; }
 .today-pill.done .tp-k { color: #BDF2E1; }
-.tp-main b { font: 800 22px/1.05 var(--font-display); letter-spacing: -0.03em; color: #fff; text-shadow: 0 1px 10px rgba(0, 0, 0, .35); white-space: nowrap; }
-.tp-sub { margin-left: auto; min-width: 0; text-align: right; font-size: 13px; color: var(--text); text-shadow: 0 1px 8px rgba(0, 0, 0, .45); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-main b { font: 800 17px/1.05 var(--font-display); letter-spacing: -0.03em; color: #fff; text-shadow: 0 1px 10px rgba(0, 0, 0, .35); white-space: nowrap; }
+.tp-sub { margin-left: auto; min-width: 0; text-align: right; font-size: 12.5px; color: var(--text); text-shadow: 0 1px 8px rgba(0, 0, 0, .45); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .today-pill.done .tp-sub { color: #DDFBF1; }
-.today-pill.empty .tp-sub { color: var(--text-2); text-shadow: none; }
+.today-pill.tp-none .tp-sub { color: var(--text-2); text-shadow: none; }
 
 /* motion: only while on screen and animations are allowed */
 .today-pill[data-live] .tp-wave { animation: tp-roll var(--roll, 9s) linear infinite; }
@@ -1201,7 +1201,7 @@ html[data-motion='on'] .rec-dot { animation: rec-pulse 1.8s var(--ease-out-quint
 @media (max-width: 640px) {
   .today-pill { border-radius: 26px; }
   .tp-fill { clip-path: inset(0 calc(100% - var(--p) * 1%) 0 0 round 26px); }
-  .tp-text { flex-wrap: wrap; gap: 6px 12px; padding: 12px 16px; }
-  .tp-ic { width: 40px; height: 40px; }
+  .tp-text { flex-wrap: wrap; gap: 4px 10px; padding: 8px 14px 8px 10px; }
+  .tp-ic { width: 32px; height: 32px; }
   .tp-sub { flex-basis: 100%; margin-left: 0; text-align: left; white-space: normal; }
 }
