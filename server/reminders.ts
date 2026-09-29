@@ -64,7 +64,7 @@ export async function runReminders(ctx: Ctx): Promise<{ created: number; skipped
     const unplanned = await t.query<{ id: number; client_id: number; client_name: string; title: string | null; start_date: ISODate; end_date: ISODate | null }>(
       `select s.id, s.client_id, c.name as client_name, s.title, s.start_date, s.end_date
          from shoots s join clients c on c.id = s.client_id
-        where s.cancelled_at is null and c.status = 'active' and s.start_date between $1 and $2
+        where s.cancelled_at is null and c.status <> 'archived' and s.start_date between $1 and $2
           and not exists (select 1 from batches b where b.shoot_id = s.id and b.archived_at is null)`,
       [clock.today, addDays(clock.today, lead)],
     );

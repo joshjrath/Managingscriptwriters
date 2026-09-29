@@ -134,7 +134,7 @@ export async function loadResources(db: Db, where: { clientId?: number; batchId?
     const p = `$${params.length}`;
     cond.push(`(lower(r.title) like ${p} or lower(coalesce(r.notes,'')) like ${p} or lower(c.name) like ${p} or lower(coalesce(b.title,'')) like ${p} or lower(coalesce(bf.title,'')) like ${p} or lower(coalesce(f.filename,'')) like ${p})`);
   }
-  if (!where.includeArchivedClients && !where.clientId && !where.id) cond.push(`c.status = 'active'`);
+  if (!where.includeArchivedClients && !where.clientId && !where.id) cond.push(`c.status <> 'archived'`);
   const rows = await db.query<ResourceRow>(
     `select r.id, r.client_id, c.name as client_name, r.briefing_id, bf.title as briefing_title, r.batch_id, b.title as batch_title,
             r.kind, r.category, r.title, r.url, r.file_id, f.filename as file_name, f.size as file_size, r.notes,
@@ -210,7 +210,7 @@ export async function loadShoots(db: Db, where: { clientId?: number; id?: number
   if (where.clientId) { params.push(where.clientId); cond.push(`sh.client_id = $${params.length}`); }
   if (where.from) { params.push(where.from); cond.push(`coalesce(sh.end_date, sh.start_date) >= $${params.length}`); }
   if (where.to) { params.push(where.to); cond.push(`sh.start_date <= $${params.length}`); }
-  if (where.activeClientsOnly) cond.push(`c.status = 'active'`);
+  if (where.activeClientsOnly) cond.push(`c.status <> 'archived'`);
   const rows = await db.query<ShootRow>(
     `select sh.id, sh.client_id, c.name as client_name, sh.title, sh.start_date, sh.end_date, sh.location, sh.notes, sh.cancelled_at
        from shoots sh join clients c on c.id = sh.client_id

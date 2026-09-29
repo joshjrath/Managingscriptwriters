@@ -174,7 +174,7 @@ function ClientSelect({ id, value, onChange, error }: { id: string; value: numbe
   return (
     <select className="select" value={value} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : '')} {...inputProps(id, error)}>
       <option value="">Choose a client…</option>
-      {clients.filter((c) => c.status === 'active').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      {clients.filter((c) => c.status !== 'archived').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
     </select>
   );
 }
@@ -589,8 +589,8 @@ function ClientForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: 
   const submit = () => {
     const errs: Record<string, string> = {};
     if (!name.trim()) errs.name = 'Client name is required';
-    if (withBatch && !prospect && (!batch.targetCount || Number(batch.targetCount) < 1)) errs['initialBatch.targetCount'] = 'How many scripts?';
-    if (withBatch && !prospect && !batch.title.trim()) errs['initialBatch.title'] = 'Name the batch';
+    if (withBatch && (!batch.targetCount || Number(batch.targetCount) < 1)) errs['initialBatch.targetCount'] = 'How many scripts?';
+    if (withBatch && !batch.title.trim()) errs['initialBatch.title'] = 'Name the batch';
     for (const [k, v] of [['briefing.recordingUrl', call.recordingUrl], ['briefing.documentUrl', call.documentUrl]] as const) {
       if (withCall && v && !/^https?:\/\/\S+$/i.test(v)) errs[k] = 'Use a full link starting with https://';
     }
@@ -600,7 +600,7 @@ function ClientForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: 
       name, prospect, ownerId, description: description || null, brandVoice: brandVoice || null, guidance: guidance || null,
       briefing: withCall ? { ...call, callDate: call.callDate || null, recordingUrl: call.recordingUrl || null, documentUrl: call.documentUrl || null, summary: call.summary || null, instructions: call.instructions || null } : undefined,
       links: links.filter((l) => l.url.trim()).map((l) => ({ ...l, title: l.title || l.url })),
-      initialBatch: withBatch && !prospect ? { title: batch.title, targetCount: Number(batch.targetCount), draftDue: batch.draftDue || null, finalDue: batch.finalDue || null, split: cleanSplit(parts), priority: 'normal' } : undefined,
+      initialBatch: withBatch ? { title: batch.title, targetCount: Number(batch.targetCount), draftDue: batch.draftDue || null, finalDue: batch.finalDue || null, split: cleanSplit(parts), priority: 'normal' } : undefined,
     });
   };
   return (
@@ -610,7 +610,7 @@ function ClientForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: 
         <button type="button" aria-pressed={!prospect} onClick={() => setProspect(false)}>Client</button>
         <button type="button" aria-pressed={prospect} onClick={() => setProspect(true)}>Potential client</button>
       </Seg>
-      {prospect && <span className="help" style={{ marginTop: -8 }}>Not signed yet. They sit in Potential clients until you drag them into Clients. Shoots and batches can be added once they’re a client.</span>}
+      {prospect && <span className="help" style={{ marginTop: -8 }}>Not signed yet. They sit in Potential clients until you drag them into Clients. It’s only a label: shoots and batches work the same.</span>}
       <div className="form-grid">
         <Field label={prospect ? 'Name' : 'Client name'} htmlFor={ids.name} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.name, f.name)} /></Field>
         <Field label="Internal owner" htmlFor={ids.owner}><select className="select" id={ids.owner} value={ownerId} onChange={(e) => setOwnerId(Number(e.target.value))}>{managers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
@@ -645,8 +645,8 @@ function ClientForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: 
           </div>
         </div>
       </Advanced>
-      {!prospect && <label className="check"><input type="checkbox" checked={withBatch} onChange={(e) => setWithBatch(e.target.checked)} />Create an initial batch (no shoot needed)</label>}
-      {withBatch && !prospect && (
+      <label className="check"><input type="checkbox" checked={withBatch} onChange={(e) => setWithBatch(e.target.checked)} />Create an initial batch (no shoot needed)</label>
+      {withBatch && (
         <div className="form-grid">
           <Field label="Batch name" htmlFor={ids.bt} error={f['initialBatch.title']}><input className="input" value={batch.title} onChange={(e) => setBatch({ ...batch, title: e.target.value })} {...inputProps(ids.bt, f['initialBatch.title'])} /></Field>
           <Field label="Scripts" htmlFor={ids.bn} error={f['initialBatch.targetCount']}><input className="input num" type="number" min={1} value={batch.targetCount} onChange={(e) => setBatch({ ...batch, targetCount: e.target.value === '' ? '' : Number(e.target.value) })} {...inputProps(ids.bn, f['initialBatch.targetCount'])} /></Field>
@@ -765,7 +765,7 @@ function QuickEntry({ preset, onCreated, onOpenForm }: { preset?: NewWorkPreset;
                   <select className="select" aria-label="Choose the client" value={clientChoice} onChange={(e) => setClientChoice(e.target.value === 'new' ? 'new' : e.target.value ? Number(e.target.value) : '')}>
                     <option value="">Choose a client…</option>
                     {newName && <option value="new">Create new client “{newName}”</option>}
-                    {(parsed.client.kind === 'ambiguous' ? parsed.client.options : boot.clients.filter((c) => c.status === 'active')).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                    {(parsed.client.kind === 'ambiguous' ? parsed.client.options : boot.clients.filter((c) => c.status !== 'archived')).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
                   </select>
                   {clientChoice === 'new' && <label className="check"><input type="checkbox" checked={confirmNew} onChange={(e) => setConfirmNew(e.target.checked)} />Yes, create “{newName}” as a new client</label>}
                 </div>

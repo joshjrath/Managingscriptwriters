@@ -17,6 +17,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-29-potential-label',
+    date: '2026-09-29',
+    title: 'Potential client is just a label now',
+    summary: 'Move any client to Potential clients and back without changing their work.',
+    changes: [
+      { tag: 'improved', text: 'Drag any client into Potential clients, even one with shoots and scripts. Nothing else changes: their shoots stay on the calendar, and their batches, deadlines and reminders carry on as before.' },
+      { tag: 'improved', text: 'Potential clients can have shoots and batches too, and show up in every client picker and filter.' },
+    ],
+  },
+  {
     id: '2026-09-29-script-bank',
     date: '2026-09-29',
     title: 'Script bank',

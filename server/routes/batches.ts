@@ -77,7 +77,6 @@ export async function insertBatch(
   const client = await t.one<{ id: number; name: string; status: string }>(`select id, name, status from clients where id = $1`, [input.clientId]);
   if (!client) throw new HttpError(400, 'Choose a client', { clientId: 'Choose a client' });
   if (client.status === 'archived') throw new HttpError(400, 'This client is archived', { clientId: 'This client is archived' });
-  if (client.status === 'prospect') throw new HttpError(400, `${client.name} is still a potential client. Mark them as a client first.`, { clientId: 'Still a potential client — mark them as a client first' });
 
   let shoot: ShootRef | undefined;
   if (input.shootId) {

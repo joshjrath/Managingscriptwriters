@@ -753,11 +753,9 @@ describe('potential clients', () => {
     const current = (await manager.get('/api/clients?status=current')).body.clients.find((c: any) => c.id === id);
     expect(current).toMatchObject({ status: 'prospect', becameClientAt: null });
 
-    // no work until they sign
+    // it's only a label: potential clients can have shoots and batches like anyone
     const shoot = await manager.post('/api/shoots', { clientId: id, startDate: '2026-12-01' });
-    expect(shoot.status).toBe(400);
-    expect(shoot.body.error.message).toMatch(/still a potential client/);
-    expect((await manager.post('/api/batches', { clientId: id, title: 'x', targetCount: 2, split: [] })).status).toBe(400);
+    expect(shoot.status).toBe(200);
     expect((await sarah.post(`/api/clients/${id}/stage`, { stage: 'client' })).status).toBe(403);
 
     const conv = await manager.post(`/api/clients/${id}/stage`, { stage: 'client' });
@@ -767,12 +765,27 @@ describe('potential clients', () => {
     expect((await manager.get('/api/clients?status=current')).body.clients.find((c: any) => c.id === id).becameClientAt).toBeTruthy();
     const log = (await manager.get(`/api/clients/${id}`)).body;
     expect(JSON.stringify(log)).toMatch(/Sunny Side Bakery became a client/);
+  });
 
-    // can move back while there's no work; not once there is
-    expect((await manager.post(`/api/clients/${id}/stage`, { stage: 'prospect' })).body.changed).toBe(true);
-    await manager.post(`/api/clients/${id}/stage`, { stage: 'client' });
-    expect((await manager.post('/api/shoots', { clientId: id, startDate: '2026-12-01' })).status).toBe(200);
-    expect((await manager.post(`/api/clients/${id}/stage`, { stage: 'prospect' })).status).toBe(409);
+  it('moving a client with work to Potential clients changes nothing but the label', async () => {
+    const shootsBefore = (await manager.get('/api/shoots?from=2026-09-01&to=2026-12-31')).body.shoots.filter((x: any) => x.clientId === acmeId);
+    const batchesBefore = (await manager.get('/api/batches')).body.batches.filter((b: any) => b.clientId === acmeId);
+    expect(shootsBefore.length + batchesBefore.length).toBeGreaterThan(0);
+    const cal = async () => JSON.stringify((await manager.get('/api/calendar?from=2026-09-01&to=2026-12-31')).body);
+    const calBefore = await cal();
+
+    const moved = await manager.post(`/api/clients/${acmeId}/stage`, { stage: 'prospect' });
+    expect(moved.status).toBe(200);
+    expect(moved.body.changed).toBe(true);
+    expect((await manager.get('/api/clients?status=prospect')).body.clients.some((c: any) => c.id === acmeId)).toBe(true);
+    // the calendar, shoots and batches are exactly as they were
+    expect(await cal()).toBe(calBefore);
+    expect((await manager.get('/api/shoots?from=2026-09-01&to=2026-12-31')).body.shoots.filter((x: any) => x.clientId === acmeId)).toEqual(shootsBefore);
+    expect((await manager.get('/api/batches')).body.batches.filter((b: any) => b.clientId === acmeId).map((b: any) => b.id)).toEqual(batchesBefore.map((b: any) => b.id));
+    // and work can still be added
+    expect((await manager.post('/api/shoots', { clientId: acmeId, startDate: '2026-12-10' })).status).toBe(200);
+
+    expect((await manager.post(`/api/clients/${acmeId}/stage`, { stage: 'client' })).body.changed).toBe(true);
   });
 });
 
@@ -863,14 +876,16 @@ describe('paste notes (AI import)', () => {
   });
 
   it('saves all or nothing', async () => {
+    const old = (await manager.post('/api/clients', { name: 'Old Archived Co' })).body.clientId;
+    await manager.post(`/api/clients/${old}/archive`, { archived: true });
     const plan = { summary: '', questions: [], clients: [
       { name: 'Fresh Start Co', existingClientId: null, status: 'active', description: 'x', brandVoice: null, guidance: null, briefings: [], shoots: [], batches: [], notes: [] },
-      { name: 'Not Signed Yet', existingClientId: null, status: 'prospect', description: null, brandVoice: null, guidance: null, briefings: [], notes: [],
+      { name: 'Old Archived Co', existingClientId: old, status: 'active', description: null, brandVoice: null, guidance: null, briefings: [], notes: [],
         shoots: [{ key: 's1', title: null, startDate: '2026-11-02', endDate: null }], batches: [] },
     ] };
     const r = await manager.post('/api/import/apply', { plan });
-    expect(r.status).toBe(400);
-    expect(r.body.error.message).toMatch(/potential client/);
+    expect(r.status).toBe(409);
+    expect(r.body.error.message).toMatch(/archived/);
     expect((await manager.get('/api/clients?status=all')).body.clients.some((c: any) => c.name === 'Fresh Start Co')).toBe(false);
   });
 });

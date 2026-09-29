@@ -66,7 +66,7 @@ To turn it on, add `ANTHROPIC_API_KEY` (from console.anthropic.com → API keys)
 
 ### Potential clients
 
-The Clients page has a **Potential clients** section for people you're talking to (add one with **Potential client**, or pick *Potential client* in New work → New client). They can hold a description, briefing calls, links and files, but not shoots or batches. When they sign, **drag the card into Clients** — or press **Mark as client** (on the card or their page) — and it moves across; the history records when they became a client, and new clients get a "New client" tag for a week. A client with no shoots or batches yet can be dragged back.
+The Clients page has a **Potential clients** section for people you're talking to (add one with **Potential client**, or pick *Potential client* in New work → New client). It's only a label: a potential client can have shoots, batches and deadlines like any client, and they show on the calendar, in Production and in reminders as usual. When they sign, **drag the card into Clients** — or press **Mark as client** (on the card or their page) — and it moves across; the history records when they became a client, and new clients get a "New client" tag for a week. Any client can be dragged into Potential clients too, and nothing about their work changes.
 
 ### Shoots before scripts
 

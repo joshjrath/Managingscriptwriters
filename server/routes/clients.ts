@@ -168,7 +168,6 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     await duplicateName(db, input.name);
     const settings = await loadSettings(db);
     const clock = await clockFor(ctx, settings);
-    if (input.prospect && input.initialBatch) throw new HttpError(400, 'Potential clients can’t have batches yet. Mark them as a client first.', { initialBatch: 'Not for potential clients' });
     const out = await db.tx(async (t) => {
       const row = await t.one<{ id: number }>(
         `insert into clients (name, status, owner_id, description, brand_voice, guidance, created_by) values ($1,$2,$3,$4,$5,$6,$7) returning id`,
@@ -210,8 +209,8 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   /**
-   * Potential client → client (dragged into Clients, or "Mark as client"). Moving
-   * back is allowed only while they have no shoots or batches.
+   * Potential client ⇄ client (dragged between the two, or "Mark as client").
+   * It's only a label: shoots, batches, deadlines and the calendar don't change.
    */
   app.post('/api/clients/:id/stage', async (req) => {
     const me = requireManager(req);
@@ -227,10 +226,8 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
         await logActivity(t, { actor: me, action: 'client.converted', entityType: 'client', entityId: id, clientId: id, summary: `${c.name} became a client (moved from Potential clients)` });
       } else {
         if (c.status === 'prospect') return { ok: true, changed: false };
-        const work = await t.one<{ n: number }>(`select (select count(*) from batches where client_id = $1) + (select count(*) from shoots where client_id = $1) as n`, [id]);
-        if (Number(work?.n)) throw new HttpError(409, `${c.name} already has shoots or batches, so they stay a client.`);
         await t.query(`update clients set status = 'prospect', became_client_at = null, updated_at = now() where id = $1`, [id]);
-        await logActivity(t, { actor: me, action: 'client.to_prospect', entityType: 'client', entityId: id, clientId: id, summary: `Moved ${c.name} back to Potential clients` });
+        await logActivity(t, { actor: me, action: 'client.to_prospect', entityType: 'client', entityId: id, clientId: id, summary: `Moved ${c.name} to Potential clients` });
       }
       return { ok: true, changed: true };
     });
@@ -297,7 +294,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     const clients = new Map((await db.query<{ id: number; name: string; status: string }>(`select id, name, status from clients`)).map((c) => [c.id, c]));
     const needle = q.q?.toLowerCase();
     const briefingLinks = briefings
-      .filter((b) => clients.get(b.clientId)?.status === 'active' || q.clientId)
+      .filter((b) => (clients.get(b.clientId) && clients.get(b.clientId)!.status !== 'archived') || q.clientId)
       .flatMap((b) => [
         b.recordingUrl ? { briefingId: b.id, briefingTitle: b.title, clientId: b.clientId, clientName: clients.get(b.clientId)?.name ?? '', kind: 'recording' as const, url: b.recordingUrl, callDate: b.callDate } : null,
         b.documentUrl ? { briefingId: b.id, briefingTitle: b.title, clientId: b.clientId, clientName: clients.get(b.clientId)?.name ?? '', kind: 'document' as const, url: b.documentUrl, callDate: b.callDate } : null,

@@ -33,7 +33,7 @@ export function ResourcesPage() {
       <PageHeader title="Resources" sub="Folders, examples, assets, recordings and documents — each linked to the client, briefing or batch it belongs to." />
       <div className="filters" role="search">
         <input className="input search" type="search" placeholder="Search titles, clients, batches, file names" value={text} onChange={(e) => setText(e.target.value)} aria-label="Search resources" />
-        <select className="select" value={clientId} onChange={(e) => set('clientId', e.target.value)} aria-label="Client"><option value="">All clients</option>{clients.filter((c) => c.status === 'active').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+        <select className="select" value={clientId} onChange={(e) => set('clientId', e.target.value)} aria-label="Client"><option value="">All clients</option>{clients.filter((c) => c.status !== 'archived').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
         <select className="select" value={category} onChange={(e) => set('category', e.target.value)} aria-label="Type"><option value="">All types</option>{RESOURCE_CATEGORIES.map((c) => <option key={c} value={c}>{RESOURCE_LABEL[c]}</option>)}</select>
       </div>
       {res.isLoading && <Loading />}

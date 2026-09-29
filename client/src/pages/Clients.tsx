@@ -42,7 +42,7 @@ export function ClientsPage() {
     onSuccess: (_o, v) => {
       const name = q.data?.clients.find((c) => c.id === v.id)?.name ?? 'They';
       if (v.to === 'active') { confetti({ x: v.at?.x, y: v.at?.y, count: 90, spread: 100, power: 13 }); toast(`${name} is now a client`); }
-      else toast(`${name} moved back to Potential clients`);
+      else toast(`${name} moved to Potential clients`);
     },
     onError: (err: ApiError) => toast(err.message, 'error'),
     onSettled: () => qc.invalidateQueries(),
@@ -110,7 +110,7 @@ export function ClientsPage() {
                   <h2>Potential clients</h2><span className="count">{prospects.length}</span>
                   {manager && <Button variant="sm ghost" icon={<Plus aria-hidden />} onClick={() => openNew('client', { prospect: true })} aria-label="Add a potential client" />}
                 </div>
-                {manager && <p className="zone-help">{drag?.from === 'active' ? 'Drop to move them back (only if they have no work yet)' : 'Drag a card into Clients when they sign.'}</p>}
+                {manager && <p className="zone-help">{drag?.from === 'active' ? 'Drop to label them a potential client. Their shoots and scripts stay exactly as they are.' : 'Drag a card into Clients when they sign, or a client in here to label them potential.'}</p>}
                 {!prospects.length ? <div className="prospect-empty"><UserPlus aria-hidden /><span>{search ? 'None match' : 'People you’re talking to go here.'}</span></div> : (
                   <div className="prospect-list">
                     {prospects.map((c) => (
@@ -169,13 +169,13 @@ export function ClientPage() {
       <PageHeader title={c.name} crumbs={<Link to="/clients">Clients</Link>}
         sub={<span className="row-flex s2">{c.status === 'archived' ? <Chip icon={<Archive aria-hidden />}>Archived</Chip> : c.status === 'prospect' ? <Chip color="yellow" icon={<UserPlus aria-hidden />}>Potential client</Chip> : <Chip color="mint" dot>Active</Chip>}<span>Owner: {c.ownerName ?? '—'}</span></span>} hideNewWork>
         {manager && c.status === 'prospect' && <Button variant="mint" icon={<Sparkles aria-hidden />} busy={convert.isPending} onClick={(x) => { const r = (x.currentTarget as HTMLElement).getBoundingClientRect(); convertAt.current = { x: r.left + r.width / 2, y: r.top }; convert.mutate(undefined); }}>Mark as client</Button>}
-        {manager && c.status === 'active' && <><Button icon={<Camera aria-hidden />} onClick={() => openNew('shoot', { clientId: c.id })}>New shoot</Button><Button icon={<Plus aria-hidden />} onClick={() => openNew('batch', { clientId: c.id })}>New batch</Button></>}
+        {manager && c.status !== 'archived' && <><Button icon={<Camera aria-hidden />} onClick={() => openNew('shoot', { clientId: c.id })}>New shoot</Button><Button icon={<Plus aria-hidden />} onClick={() => openNew('batch', { clientId: c.id })}>New batch</Button></>}
         {manager && <Button icon={<Pencil aria-hidden />} onClick={() => setEdit(true)}>Edit</Button>}
       </PageHeader>
       {c.status === 'prospect' && (
         <div className="banner yellow" style={{ marginBottom: 'var(--gap)' }}>
           <UserPlus aria-hidden />
-          <div className="txt"><b>{c.name} is a potential client.</b><span>Keep notes, calls and files here. When they sign, mark them as a client (or drag their card into Clients) to schedule shoots and batches.</span></div>
+          <div className="txt"><b>{c.name} is a potential client.</b><span>This is only a label: shoots, batches and deadlines work just like any client’s. When they sign, mark them as a client (or drag their card into Clients).</span></div>
         </div>
       )}
       <div className="grid g-side-main">
@@ -188,7 +188,7 @@ export function ClientPage() {
             </div>
           </Panel>
           <Panel title="Shoots" count={upcoming.length || undefined} sub={upcoming.length ? 'upcoming' : undefined}>
-            {!c.shoots.length ? <Empty boxed icon={<Camera />} title="No shoots" action={manager && c.status === 'active' ? <Button variant="sm" onClick={() => openNew('shoot', { clientId: c.id })}>Schedule a shoot</Button> : undefined} /> : (
+            {!c.shoots.length ? <Empty boxed icon={<Camera />} title="No shoots" action={manager && c.status !== 'archived' ? <Button variant="sm" onClick={() => openNew('shoot', { clientId: c.id })}>Schedule a shoot</Button> : undefined} /> : (
               <div className="rows">
                 {[...upcoming, ...past.slice(-3).reverse()].map((s) => (
                   <div key={s.id} className="item with-tile">
@@ -250,7 +250,7 @@ export function ClientPage() {
           </Panel>
           {manager && (
             <div className="row-flex s2">
-              {c.status === 'active'
+              {c.status !== 'archived'
                 ? <Button variant="ghost" icon={<Archive aria-hidden />} busy={archive.isPending} onClick={() => { if (window.confirm(`Archive ${c.name}? Their batches and history are kept; the client just leaves the active lists.`)) archive.mutate(true); }}>Archive client</Button>
                 : <Button icon={<ArchiveRestore aria-hidden />} busy={archive.isPending} onClick={() => archive.mutate(false)}>Restore client</Button>}
             </div>

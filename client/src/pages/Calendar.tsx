@@ -145,7 +145,7 @@ export function CalendarPage() {
         </>}
         <span className="spacer" />
         <select className="select sm" style={{ width: 'auto' }} value={writerId} onChange={(e) => setP('writerId', e.target.value)} aria-label="Writer"><option value="">All writers</option>{users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
-        <select className="select sm" style={{ width: 'auto', maxWidth: 220 }} value={clientId} onChange={(e) => setP('clientId', e.target.value)} aria-label="Client"><option value="">All clients</option>{clients.filter((c) => c.status === 'active').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
+        <select className="select sm" style={{ width: 'auto', maxWidth: 220 }} value={clientId} onChange={(e) => setP('clientId', e.target.value)} aria-label="Client"><option value="">All clients</option>{clients.filter((c) => c.status !== 'archived').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
       </div>
       <div className="quick" role="group" aria-label="Show event types">
         {(Object.keys(TYPE) as CalendarEvent['type'][]).map((t) => {

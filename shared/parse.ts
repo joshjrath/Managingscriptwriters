@@ -121,7 +121,7 @@ export function matchClient(text: string, clients: ParseContext['clients']): Cli
   const t = norm(text);
   const full = clients.filter((c) => wordIn(t, norm(c.name)));
   const pickBest = (list: typeof clients) => {
-    const active = list.filter((c) => c.status === 'active');
+    const active = list.filter((c) => c.status !== 'archived');
     return active.length ? active : list;
   };
   let hits = pickBest(full);

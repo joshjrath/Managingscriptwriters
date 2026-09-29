@@ -58,7 +58,7 @@ export function ScriptBankPage() {
           onChange={(e) => setText(e.target.value)} aria-label="Search scripts by title, number, client, batch or writer" />
         <select className="select" value={clientId} onChange={(e) => set('clientId', e.target.value)} aria-label="Client">
           <option value="">All clients</option>
-          {clients.filter((c) => c.status !== 'prospect').map((c) => <option key={c.id} value={c.id}>{c.name}{c.status === 'archived' ? ' (archived)' : ''}</option>)}
+          {clients.map((c) => <option key={c.id} value={c.id}>{c.name}{c.status === 'archived' ? ' (archived)' : ''}</option>)}
         </select>
         <select className="select" value={writerId} onChange={(e) => set('writerId', e.target.value)} aria-label="Writer">
           <option value="">All writers</option>

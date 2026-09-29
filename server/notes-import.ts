@@ -218,7 +218,6 @@ export async function applyPlan(ctx: Ctx, me: Me, plan: z.infer<typeof planSchem
     const clock = await clockFor(c, settings);
     for (const p of plan.clients) {
       const hasWork = p.shoots.length > 0 || p.batches.some((b) => b.targetCount);
-      if (p.status === 'prospect' && hasWork) throw new HttpError(400, `${p.name} is set as a potential client but has shoots or scripts. Make them a client, or remove the shoots and scripts.`);
       const lines: string[] = [];
       let row = p.existingClientId
         ? await t.one<{ id: number; name: string; description: string | null; brand_voice: string | null; guidance: string | null; status: string }>(`select id, name, description, brand_voice, guidance, status from clients where id = $1`, [p.existingClientId])

@@ -140,7 +140,6 @@ function ReadingNotes() {
 
 function ClientEditor({ c, include, onInclude, onChange, settings }: { c: ImportClient; include: boolean; onInclude: (v: boolean) => void; onChange: (c: Partial<ImportClient>) => void; settings: Parameters<typeof computeDeadlines>[1] }) {
   const ids = { n: useFieldId('in'), d: useFieldId('id'), v: useFieldId('iv'), g: useFieldId('ig') };
-  const hasWork = c.shoots.length > 0 || c.batches.some((b) => b.targetCount);
   const setBatch = (j: number, next: Partial<Batch>) => onChange({ batches: c.batches.map((b, k) => (k === j ? { ...b, ...next } : b)) });
   return (
     <>
@@ -150,7 +149,7 @@ function ClientEditor({ c, include, onInclude, onChange, settings }: { c: Import
         <Chip color={c.existingClientId ? 'cyan' : 'mint'}>{c.existingClientId ? 'Existing client — notes are added' : 'New client'}</Chip>
         <Seg role="group" aria-label="Client or potential client">
           <button type="button" aria-pressed={c.status === 'active'} onClick={() => onChange({ status: 'active' })}>Client</button>
-          <button type="button" aria-pressed={c.status === 'prospect'} onClick={() => onChange({ status: 'prospect' })} disabled={hasWork} title={hasWork ? 'Has shoots or scripts' : undefined}>Potential</button>
+          <button type="button" aria-pressed={c.status === 'prospect'} onClick={() => onChange({ status: 'prospect' })}>Potential</button>
         </Seg>
       </div>
       {include && (

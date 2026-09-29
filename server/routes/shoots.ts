@@ -46,7 +46,6 @@ export async function insertShoot(t: Db, me: Me, input: z.infer<typeof shootCrea
   const client = await t.one<{ name: string; status: string }>(`select name, status from clients where id = $1`, [input.clientId]);
   if (!client) throw new HttpError(400, 'Choose a client', { clientId: 'Choose a client' });
   if (client.status === 'archived') throw new HttpError(400, 'This client is archived', { clientId: 'This client is archived' });
-  if (client.status === 'prospect') throw new HttpError(400, `${client.name} is still a potential client. Mark them as a client first.`, { clientId: 'Still a potential client — mark them as a client first' });
   const endDate = input.endDate && input.endDate !== input.startDate ? input.endDate : null;
   const shoot = await t.one<{ id: number }>(
     `insert into shoots (client_id, title, start_date, end_date, location, notes, created_by) values ($1,$2,$3,$4,$5,$6,$7) returning id`,

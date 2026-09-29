@@ -75,7 +75,7 @@ export function Production() {
         <input className="input search" type="search" placeholder="Search batches or clients" value={filters.q} onChange={(e) => set('q', e.target.value)} aria-label="Search batches" />
         <select className="select" value={filters.clientId} onChange={(e) => set('clientId', e.target.value)} aria-label="Client">
           <option value="">All clients</option>
-          {clients.filter((c) => c.status === 'active').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          {clients.filter((c) => c.status !== 'archived').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
         <select className="select" value={filters.writerId} onChange={(e) => set('writerId', e.target.value)} aria-label="Writer">
           <option value="">All writers</option>
