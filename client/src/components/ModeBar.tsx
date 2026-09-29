@@ -76,12 +76,12 @@ export function ModeBar() {
             {rec && (
               <span className="mode-part">
                 <i className="rec-dot" aria-hidden />
-                <span><b>Recording mode</b><span className="mode-sub">Practice copy · nothing is saved</span></span>
+                <span className="mode-text"><b>Recording mode</b><span className="mode-sub">Practice copy · nothing is saved</span></span>
               </span>
             )}
             <span className="mode-part">
               {who ? <Avatar name={who.name} id={who.id} small /> : <Eye size={16} aria-hidden />}
-              <span>
+              <span className="mode-text">
                 <b>{who ? `Viewing as ${who.name}` : `You (${mode.realName})`}</b>
                 <span className="mode-sub">{who ? `${who.roleLabel}${rec ? '' : ' · view only'}` : 'Admin'}</span>
               </span>

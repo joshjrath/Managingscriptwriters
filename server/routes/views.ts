@@ -157,11 +157,13 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/api/counts', async (req) => computeCounts(ctx, requireUser(req)));
 
   app.get('/api/dashboard', async (req): Promise<Dashboard> => {
-    requireUser(req);
+    const me = requireUser(req);
+    // Admins and managers see the whole team; a writer sees only their own scripts.
+    const mine = !isManager(me.role);
     const settings = await loadSettings(db);
     const clock = await clockFor(ctx, settings);
-    const { summaries, scripts } = await loadBatches(ctx, {}, clock);
-    const users = await loadUsers(db);
+    const { summaries, scripts } = await loadBatches(ctx, mine ? { assigneeId: me.id } : {}, clock);
+    const users = (await loadUsers(db)).filter((u) => !mine || u.id === me.id);
 
     const overdue = summaries.filter((b) => b.draft.overdue || b.final.overdue);
     const dueToday = summaries.filter((b) => b.draft.dueToday || b.final.dueToday);
@@ -177,16 +179,17 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
       }
     }
     const shoots = (await loadShoots(db, { from: clock.today, to: addDays(clock.today, 45), activeClientsOnly: true }))
-      .filter((s) => !s.cancelledAt)
+      .filter((s) => !s.cancelledAt && (!mine || summaries.some((b) => b.shootId === s.id)))
       .slice(0, 6)
       .map((s) => ({ ...s, batches: summaries.filter((b) => b.shootId === s.id), daysUntil: diffDays(s.startDate, clock.today) }));
-    const deliveries = await loadDeliveries(db, { limit: 8 });
+    const deliveries = await loadDeliveries(db, mine ? { confirmedBy: me.id, limit: 8 } : { limit: 8 });
     const titles = new Map((await db.query<{ id: number; title: string; client_name: string }>(
       `select b.id, b.title, c.name as client_name from batches b join clients c on c.id = b.client_id`,
     )).map((r) => [r.id, r]));
 
     return {
       clock,
+      scope: mine ? 'mine' : 'team',
       cards: {
         overdueBatches: overdue.length,
         overdueScripts: overdue.reduce((n, b) => n + (b.final.overdue ? b.final.remaining : b.draft.remaining), 0),

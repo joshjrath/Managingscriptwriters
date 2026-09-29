@@ -219,6 +219,8 @@ export interface BatchQuery {
   shootId?: number;
   includeArchived?: boolean;
   onlyArchived?: boolean;
+  /** only this person's scripts: progress and deadlines count just their share, and batches without any of theirs are left out */
+  assigneeId?: number;
 }
 
 export async function loadBatches(ctx: Ctx, q: BatchQuery = {}, clock?: Clock): Promise<{ summaries: BatchSummary[]; rows: BatchRow[]; scripts: Map<number, ScriptLiteRow[]> }> {
@@ -232,11 +234,20 @@ export async function loadBatches(ctx: Ctx, q: BatchQuery = {}, clock?: Clock): 
   if (q.shootId) { params.push(q.shootId); where.push(`b.shoot_id = $${params.length}`); }
   if (q.onlyArchived) where.push(`b.archived_at is not null`);
   else if (!q.includeArchived && !q.ids) where.push(`b.archived_at is null`);
-  const rows = await ctx.db.query<BatchRow>(
+  let rows = await ctx.db.query<BatchRow>(
     `${BATCH_SELECT} ${where.length ? 'where ' + where.join(' and ') : ''} order by b.final_due nulls last, b.id`,
     params,
   );
-  const scripts = await loadScriptsFor(ctx.db, rows.map((r) => r.id));
+  let scripts = await loadScriptsFor(ctx.db, rows.map((r) => r.id));
+  if (q.assigneeId) {
+    const mine = new Map<number, ScriptLiteRow[]>();
+    for (const [id, list] of scripts) {
+      const own = list.filter((s) => s.assignee_id === q.assigneeId);
+      if (own.length) mine.set(id, own);
+    }
+    scripts = mine;
+    rows = rows.filter((r) => mine.has(r.id));
+  }
   const users = await loadUsers(ctx.db);
   const names = new Map(users.map((u) => [u.id, u.name]));
   const c = clock ?? (await clockFor(ctx));

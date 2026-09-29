@@ -22,7 +22,7 @@ export function Overview() {
   const d = q.data;
   return (
     <>
-      <PageHeader title="Overview" />
+      <PageHeader title="Overview" sub={d?.scope === 'mine' ? 'Your scripts only: every number here counts just the work assigned to you.' : undefined} />
       {q.isLoading && (
         <div className="stack s6">
           <div className="cards4">{[0, 1, 2, 3].map((i) => <Loading key={i} height={164} />)}</div>
@@ -36,22 +36,22 @@ export function Overview() {
             <button className="stat-card salmon" onClick={() => nav('/production?flag=overdue&view=table')} aria-label={`${d.cards.overdueBatches} overdue batches, ${d.cards.overdueScripts} scripts behind. Show them.`}>
               <span className="corner"><AlertTriangle /></span>
               <span className={`n${d.cards.overdueBatches ? '' : ' zero'}`}><CountUp value={d.cards.overdueBatches} /></span>
-              <span><span className="cap">Overdue batches</span><span className="sub" style={{ display: 'block' }}>{d.cards.overdueScripts ? `${plural(d.cards.overdueScripts, 'script')} behind` : 'Nothing overdue'}</span></span>
+              <span><span className="cap">{d.scope === 'mine' ? 'Your overdue batches' : 'Overdue batches'}</span><span className="sub" style={{ display: 'block' }}>{d.cards.overdueScripts ? `${plural(d.cards.overdueScripts, 'script')} behind` : 'Nothing overdue'}</span></span>
             </button>
             <button className="stat-card yellow" onClick={() => nav('/production?flag=due_today&view=table')} aria-label={`${d.cards.dueTodayBatches} batches due today. Show them.`}>
               <span className="corner"><CalendarClock /></span>
               <span className={`n${d.cards.dueTodayBatches ? '' : ' zero'}`}><CountUp value={d.cards.dueTodayBatches} /></span>
-              <span><span className="cap">Batches due today</span><span className="sub" style={{ display: 'block' }}>{d.cards.dueTodayScripts ? `${plural(d.cards.dueTodayScripts, 'script')} left to finish` : 'No deadlines today'}</span></span>
+              <span><span className="cap">{d.scope === 'mine' ? 'Yours due today' : 'Batches due today'}</span><span className="sub" style={{ display: 'block' }}>{d.cards.dueTodayScripts ? `${plural(d.cards.dueTodayScripts, 'script')} left to finish` : 'No deadlines today'}</span></span>
             </button>
             <button className="stat-card" onClick={() => nav(isManager(me.role) ? '/review' : '/production?flag=review&view=table')} style={{ ['--c' as string]: 'var(--lavender)' }} aria-label={`${d.cards.awaitingReviewScripts} scripts awaiting review. Open the review queue.`}>
               <span className="corner"><ClipboardCheck /></span>
               <span className={`n${d.cards.awaitingReviewScripts ? '' : ' zero'}`}><CountUp value={d.cards.awaitingReviewScripts} /></span>
-              <span><span className="cap">Scripts awaiting review</span><span className="sub" style={{ display: 'block' }}>{d.cards.awaitingReviewBatches ? `across ${plural(d.cards.awaitingReviewBatches, 'batch', 'batches')}` : 'Queue is clear'}</span></span>
+              <span><span className="cap">{d.scope === 'mine' ? 'Your scripts in review' : 'Scripts awaiting review'}</span><span className="sub" style={{ display: 'block' }}>{d.cards.awaitingReviewBatches ? `across ${plural(d.cards.awaitingReviewBatches, 'batch', 'batches')}` : 'Queue is clear'}</span></span>
             </button>
             <button className="stat-card elev" onClick={() => nav('/production?stage=delivered&view=table&completed=1')} style={{ ['--c' as string]: 'var(--mint)' }} aria-label={`${d.cards.deliveredThisWeekScripts} scripts delivered this week.`}>
               <span className="corner"><Send /></span>
               <span className={`n${d.cards.deliveredThisWeekScripts ? '' : ' zero'}`}><CountUp value={d.cards.deliveredThisWeekScripts} /></span>
-              <span><span className="cap">Delivered this week</span><span className="sub" style={{ display: 'block' }}>scripts, writer-confirmed{d.cards.deliveredThisWeekBatches ? ` · ${plural(d.cards.deliveredThisWeekBatches, 'batch', 'batches')}` : ''}</span></span>
+              <span><span className="cap">Delivered this week</span><span className="sub" style={{ display: 'block' }}>{d.scope === 'mine' ? 'your scripts' : 'scripts, writer-confirmed'}{d.cards.deliveredThisWeekBatches ? ` · ${plural(d.cards.deliveredThisWeekBatches, 'batch', 'batches')}` : ''}</span></span>
             </button>
           </div>
 
@@ -96,7 +96,7 @@ export function Overview() {
                 </div>
               )}
             </Panel>
-            <Panel className="a-batches" title="Active batches" count={d.activeBatches.length} tools={<Link to="/production" className="btn sm ghost">Production board <ArrowRight size={14} /></Link>}>
+            <Panel className="a-batches" title={d.scope === 'mine' ? 'Your active batches' : 'Active batches'} count={d.activeBatches.length} tools={<Link to="/production" className="btn sm ghost">Production board <ArrowRight size={14} /></Link>}>
               {!d.activeBatches.length ? (
                 <Empty boxed icon={<Sparkles />} title="No active batches" action={isManager(me.role) ? <button className="btn sm" onClick={() => openNew('shoot')}>Create work</button> : undefined} />
               ) : (
@@ -106,7 +106,7 @@ export function Overview() {
             </Panel>
 
             <div className="a-side">
-              <Panel title="Writer workload">
+              <Panel title={d.scope === 'mine' ? 'Your workload' : 'Writer workload'}>
                 {!d.workload.length ? <Empty boxed title="No writers yet">Add your team in Settings → Team.</Empty> : (
                   <div className="rows">
                     {d.workload.map((w) => (
@@ -134,7 +134,7 @@ export function Overview() {
                   </div>
                 )}
               </Panel>
-              <Panel title="Recent deliveries" sub="writer-confirmed in Timeliner">
+              <Panel title={d.scope === 'mine' ? 'Your recent deliveries' : 'Recent deliveries'} sub="writer-confirmed in Timeliner">
                 {!d.recentDeliveries.length ? <Empty boxed icon={<Send />} title="No deliveries yet" /> : (
                   <div className="rows">
                     {d.recentDeliveries.slice(0, 6).map((x) => (

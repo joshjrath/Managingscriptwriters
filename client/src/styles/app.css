@@ -1100,7 +1100,7 @@ dialog.moment::backdrop { background: rgba(8, 8, 10, 0.72); backdrop-filter: blu
 }
 .mode-bar.rec { background: color-mix(in srgb, var(--red) 16%, var(--panel-2)); }
 .mode-part { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
-.mode-part > span { display: flex; flex-direction: column; min-width: 0; }
+.mode-text { display: flex; flex-direction: column; min-width: 0; }
 .mode-part b { font-weight: 700; white-space: nowrap; }
 .mode-sub { color: var(--text-2); font-size: 11.5px; white-space: nowrap; }
 .mode-actions { display: inline-flex; align-items: center; gap: 4px; }

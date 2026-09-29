@@ -133,7 +133,7 @@ Every meaningful change (creation, assignments, status changes, reviews, deliver
 
 ## Screens
 
-Overview · My work · Production (board + table, filters, search) · Calendar (month + list; writing periods, drafts due, final delivery, shoots) · Clients and client detail · Batch detail (drafts & documents, script checklist with range selection and bulk actions, brief, deadlines, review notes, delivery records, history) · Review queue (one card per document) · Resources · Settings (deadline rules, timezone & cutoff, reminders, team) · Master log (admins) · What's new. Dashboard cards link to the matching filtered records; chart bars reveal the underlying batches.
+Overview · My work · Script bank · Production (board + table, filters, search) · Calendar (month + list; writing periods, drafts due, final delivery, shoots) · Clients and client detail · Batch detail (drafts & documents, script checklist with range selection and bulk actions, brief, deadlines, review notes, delivery records, history) · Review queue (one card per document) · Resources · Settings (deadline rules, timezone & cutoff, reminders, team) · Master log (admins) · What's new. Dashboard cards link to the matching filtered records; chart bars reveal the underlying batches. Admins and managers see the whole team on the Overview; a writer's Overview counts only the scripts assigned to them.
 
 Responsive: full sidebar on wide screens, collapsible icon rail on smaller desktops/tablets, navigation drawer and card layouts on phones (My work, deadlines, briefs and delivery confirmation are prioritised).
 

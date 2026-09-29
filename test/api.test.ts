@@ -1015,3 +1015,27 @@ describe('script bank', () => {
     expect((await call('GET', '/api/script-bank')).status).toBe(401);
   });
 });
+
+describe('overview for each viewer', () => {
+  it('admins see the whole team; writers see only their own scripts', async () => {
+    const team = (await manager.get('/api/dashboard')).body;
+    expect(team.scope).toBe('team');
+    const hers = (await sarah.get('/api/dashboard')).body;
+    expect(hers.scope).toBe('mine');
+    const own = await db.query<{ batch_id: number; status: string; n: number }>(
+      `select s.batch_id, s.status, count(*)::int as n from scripts s join batches b on b.id = s.batch_id
+        where s.assignee_id = $1 and s.removed_at is null and b.archived_at is null group by 1, 2`, [ids.sarah],
+    );
+    const inReview = own.filter((r) => r.status === 'ready_for_review').reduce((n, r) => n + r.n, 0);
+    expect(hers.cards.awaitingReviewScripts).toBe(inReview);
+    const myBatches = new Set(own.map((r) => r.batch_id));
+    expect(hers.activeBatches.every((b: any) => myBatches.has(b.id))).toBe(true);
+    // every batch shows only her share
+    for (const b of hers.activeBatches) expect(b.writers.every((w: any) => w.userId === ids.sarah)).toBe(true);
+    expect(hers.unassignedScripts).toBe(0);
+    expect(hers.workload.every((w: any) => w.userId === ids.sarah)).toBe(true);
+    expect(hers.recentDeliveries.every((d: any) => d.confirmedById === ids.sarah)).toBe(true);
+    const dueTotal = (d: any) => d.due.final.reduce((n: number, x: any) => n + x.total, 0);
+    expect(dueTotal(hers)).toBeLessThanOrEqual(dueTotal(team));
+  });
+});

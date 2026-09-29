@@ -17,6 +17,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-29-overview-per-person',
+    date: '2026-09-29',
+    title: 'An Overview of your own work',
+    summary: 'Writers now see an Overview of just their scripts. Admins and managers still see the whole team.',
+    changes: [
+      { tag: 'improved', text: 'For writers, every number on the Overview counts only the scripts assigned to them: overdue, due today, in review, delivered this week, work due by day, needs attention, active batches, shoots and recent deliveries.' },
+      { tag: 'fixed', text: 'The avatar in the View as bar is a neat circle again.' },
+    ],
+  },
+  {
     id: '2026-09-29-potential-label',
     date: '2026-09-29',
     title: 'Potential client is just a label now',

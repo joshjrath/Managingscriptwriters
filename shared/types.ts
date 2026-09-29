@@ -375,6 +375,8 @@ export interface AttentionItem {
 
 export interface Dashboard {
   clock: Clock;
+  /** team = everyone's work (admins and managers); mine = only the viewer's own scripts (writers) */
+  scope: 'team' | 'mine';
   cards: {
     overdueBatches: number;
     overdueScripts: number;
