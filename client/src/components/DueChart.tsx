@@ -77,8 +77,9 @@ export function DueChart({ draft, final, today }: { draft: DueDay[]; final: DueD
                   <span className="track">
                     {d.total > 0 && (
                       <span className="stackfill" style={{ height: `${pct}%`, ['--i' as string]: i }}>
-                        {cats.filter((c) => d.byCategory[c]).map((c) => (
-                          <span key={c} className="seg-fill" style={{ flex: d.byCategory[c], ['--c' as string]: CAT_COLOR[c] }} />
+                        {cats.filter((c) => d.byCategory[c]).map((c, k, list) => (
+                          // each layer fades into the one above it, like water settling, instead of a hard line
+                          <span key={c} className="seg-fill" style={{ flex: d.byCategory[c], ['--c' as string]: CAT_COLOR[c], ['--next' as string]: CAT_COLOR[list[k + 1] ?? c] }} />
                         ))}
                         {/* water: a rolling surface in the top layer's colour, a glint, and rising bubbles */}
                         <svg className="bar-wave" viewBox="0 0 120 10" preserveAspectRatio="none" aria-hidden style={{ ['--c' as string]: CAT_COLOR[cats.filter((c) => d.byCategory[c]).at(-1)!] }}>

@@ -121,7 +121,11 @@ export function LiquidBar({ total, segs, thin }: { total: number; segs: { n: num
     <div ref={ref} className={`bar-line liquid${thin ? ' thin' : ''}`} data-live={on && allowed ? '' : undefined} aria-hidden>
       <div ref={liq} className={`liq${full ? ' full' : ''}`} style={{ width: `${shown}%`, ['--edge' as string]: edge }} onTransitionEnd={onEnd}>
         <div className="liq-layers">
-          {segs.map((x, i) => <span key={i} style={{ flexGrow: x.n, ['--c' as string]: x.c }} />)}
+          {segs.map((x, i) => {
+            // blend into the next layer that's actually showing
+            const next = segs.slice(i + 1).find((y) => y.n > 0)?.c ?? x.c;
+            return <span key={i} style={{ flexGrow: x.n, ['--c' as string]: x.c, ['--next' as string]: next }} />;
+          })}
         </div>
         <span className="liq-shine" />
         {!thin && shown > 0 && BUBBLES.map(([l, sz, d, t, x], i) => (

@@ -295,8 +295,8 @@ main.page-main { padding: 28px 28px 72px 22px; min-width: 0; }
 }
 .bar.late .track { background: color-mix(in srgb, var(--red) 13%, var(--track)); }
 .bar.today .track { background: color-mix(in srgb, var(--yellow) 14%, var(--track)); }
-.bar .stackfill { position: relative; display: flex; flex-direction: column-reverse; gap: 2px; width: 100%; }
-.bar .seg-fill { width: 100%; background: var(--c); min-height: 6px; }
+.bar .stackfill { position: relative; display: flex; flex-direction: column-reverse; width: 100%; }
+.bar .seg-fill { width: 100%; min-height: 6px; background: linear-gradient(to top, var(--c) 0, var(--c) calc(100% - 14px), var(--next) 100%); }
 .bar:hover .track, .bar:focus-visible .track { box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.22); }
 .bar[aria-pressed="true"] .track { box-shadow: inset 0 0 0 2px var(--text); }
 .bar:focus-visible { outline: none; }
@@ -827,7 +827,7 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0 6px; font-
 .bar-line.liquid .liq { position: relative; height: 100%; width: 0; transition: width 1200ms cubic-bezier(.34, 1.25, .64, 1); will-change: width; }
 .bar-line.liquid .liq-layers { position: absolute; inset: 0; display: flex; border-radius: 999px 0 0 999px; overflow: hidden; }
 .bar-line.liquid .liq.full .liq-layers { border-radius: 999px; }
-.bar-line.liquid .liq-layers > span { flex: 0 1 0; min-width: 0; background: var(--c); transition: flex-grow 900ms var(--ease-out-quint), background-color 500ms ease; }
+.bar-line.liquid .liq-layers > span { flex: 0 1 0; min-width: 0; background: linear-gradient(90deg, var(--c) 0, var(--c) calc(100% - 16px), var(--next) 100%); transition: flex-grow 900ms var(--ease-out-quint); }
 .bar-line.liquid .liq::after { content: ""; position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(180deg, rgba(255, 255, 255, 0.34), rgba(255, 255, 255, 0) 55%, rgba(0, 0, 0, 0.12)); pointer-events: none; }
 .bar-line.liquid .liq-shine { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; }
 .bar-line.liquid .liq-shine::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; width: 40%; background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.35), transparent); transform: translateX(-120%); animation: shine 3.6s ease-in-out infinite; }

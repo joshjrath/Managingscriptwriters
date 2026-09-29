@@ -17,6 +17,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-29-soft-layers',
+    date: '2026-09-29',
+    title: 'Softer colours in the water',
+    summary: 'Colour layers in the chart bars and progress bars now blend into each other.',
+    changes: [
+      { tag: 'improved', text: 'No more hard lines between colours: each layer in the “Work due by day” bars and the progress bars fades smoothly into the next, like liquid.' },
+    ],
+  },
+  {
     id: '2026-09-28-paste-notes',
     date: '2026-09-28',
     title: 'Paste notes: type it how you’d text it',
