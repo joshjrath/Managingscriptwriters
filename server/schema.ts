@@ -318,4 +318,8 @@ alter table clients drop constraint if exists clients_status_check;
 alter table clients add constraint clients_status_check check (status in ('prospect', 'active', 'archived'));
 alter table clients add column became_client_at timestamptz;
 `,
+  // 7 · store file contents uncompressed so downloads can be streamed in pieces cheaply
+  `
+alter table files alter column data set storage external;
+`,
 ];

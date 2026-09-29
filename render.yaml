@@ -8,7 +8,9 @@ services:
     # On the free plan the service sleeps when idle and reminders stop.
     plan: starter
     buildCommand: npm ci && npm run build
-    startCommand: npm start
+    # Node directly (no npm process alongside it), with a capped heap so memory
+    # stays well inside the Starter plan's 512 MB.
+    startCommand: node --max-old-space-size=200 --max-semi-space-size=2 dist/server/index.mjs
     healthCheckPath: /healthz
     envVars:
       - key: NODE_VERSION

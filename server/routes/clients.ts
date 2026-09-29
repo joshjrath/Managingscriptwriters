@@ -1,7 +1,6 @@
 // Clients, briefing/ideation-call records, resources and secure file access.
 
-import { createHash } from 'node:crypto';
-import { realFileData } from '../recording';
+import { fileStream, isBlockedFile, spool, storeFile, type UploadedFile } from '../files';
 import type { FastifyInstance } from 'fastify';
 import { isManager } from '../../shared/workflow';
 import { z } from 'zod';
@@ -131,7 +130,6 @@ async function checkResourceAccess(db: Db, me: Me, clientId: number, batchId: nu
 }
 
 const SAFE_INLINE = new Set(['application/pdf', 'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'text/plain']);
-const BLOCKED_EXT = /\.(exe|bat|cmd|com|msi|scr|js|mjs|vbs|ps1|sh|jar|app|dll)$/i;
 
 export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
   const { db } = ctx;
@@ -321,18 +319,14 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     const me = requireUser(req);
     if (!req.isMultipart()) throw new HttpError(400, 'Send the file as a form upload');
     const fields: Record<string, string> = {};
-    let file: { filename: string; mime: string; data: Buffer } | null = null;
+    let file: UploadedFile | null = null;
+    // the file is streamed to a temporary file as it arrives, never held in memory
     for await (const part of req.parts({ limits: { fileSize: ctx.uploadLimitBytes, files: 1 } })) {
-      if (part.type === 'file') {
-        const data = await part.toBuffer();
-        if (part.file.truncated) throw new HttpError(413, `Files can be up to ${Math.round(ctx.uploadLimitBytes / 1024 / 1024)} MB`);
-        file = { filename: part.filename, mime: part.mimetype || 'application/octet-stream', data };
-      } else {
-        fields[part.fieldname] = String(part.value ?? '');
-      }
+      if (part.type === 'file') file = await spool(req, part, ctx.uploadLimitBytes);
+      else fields[part.fieldname] = String(part.value ?? '');
     }
-    if (!file || !file.data.length) throw new HttpError(400, 'Choose a file to upload', { file: 'Choose a file to upload' });
-    if (BLOCKED_EXT.test(file.filename)) throw new HttpError(400, 'That file type can’t be uploaded', { file: 'That file type can’t be uploaded' });
+    if (!file) throw new HttpError(400, 'Choose a file to upload', { file: 'Choose a file to upload' });
+    if (isBlockedFile(file.filename)) throw new HttpError(400, 'That file type can’t be uploaded', { file: 'That file type can’t be uploaded' });
     const input = parse(resourceCreate.omit({ url: true }).extend({ title: zs.text(200) }), {
       clientId: fields.clientId, briefingId: fields.briefingId || null, batchId: fields.batchId || null,
       category: fields.category || 'document', title: fields.title || file.filename, notes: fields.notes,
@@ -340,13 +334,10 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     await checkResourceAccess(db, me, input.clientId, input.batchId, input.briefingId);
     const safeName = file.filename.replace(/[\r\n"\\/]/g, '_').slice(0, 200) || 'file';
     const id = await db.tx(async (t) => {
-      const f = await t.one<{ id: number }>(
-        `insert into files (filename, mime, size, sha256, data, uploaded_by) values ($1,$2,$3,$4,$5,$6) returning id`,
-        [safeName, file!.mime, file!.data.length, createHash('sha256').update(file!.data).digest('hex'), file!.data, me.id],
-      );
+      const fileId = await storeFile(t, me, file!);
       const r = await t.one<{ id: number }>(
         `insert into resources (client_id, briefing_id, batch_id, kind, category, title, file_id, notes, created_by) values ($1,$2,$3,'file',$4,$5,$6,$7,$8) returning id`,
-        [input.clientId, input.briefingId ?? null, input.batchId ?? null, input.category, input.title || safeName, f!.id, input.notes ?? null, me.id],
+        [input.clientId, input.briefingId ?? null, input.batchId ?? null, input.category, input.title || safeName, fileId, input.notes ?? null, me.id],
       );
       await logActivity(t, { actor: me, action: 'resource.uploaded', entityType: 'resource', entityId: r!.id, clientId: input.clientId, batchId: input.batchId ?? null, summary: `Uploaded “${safeName}”` });
       return r!.id;
@@ -369,8 +360,8 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/api/files/:id', async (req, reply) => {
     requireUser(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
-    const f = await db.one<{ filename: string; mime: string; data: Buffer | Uint8Array; size: number }>(
-      `select f.filename, f.mime, f.data, f.size from files f where f.id = $1 and (exists (select 1 from resources r where r.file_id = f.id and r.removed_at is null) or exists (select 1 from submissions s where s.file_id = f.id) or exists (select 1 from reviews v where v.file_id = f.id))`, [id],
+    const f = await db.one<{ filename: string; mime: string; size: number; stored: number }>(
+      `select f.filename, f.mime, f.size, octet_length(f.data) as stored from files f where f.id = $1 and (exists (select 1 from resources r where r.file_id = f.id and r.removed_at is null) or exists (select 1 from submissions s where s.file_id = f.id) or exists (select 1 from reviews v where v.file_id = f.id))`, [id],
     );
     if (!f) throw notFound('File');
     const inline = SAFE_INLINE.has(f.mime) && (req.query as Record<string, string>).download !== '1';
@@ -381,9 +372,12 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
       .header('X-Content-Type-Options', 'nosniff')
       .header('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox")
       .header('Cache-Control', 'private, max-age=300');
-    // in Recording mode, files copied from the real workspace keep their contents there
-    const data = f.data.length === 0 && f.size > 0 ? await realFileData(ctx, id) ?? f.data : f.data;
-    return reply.send(Buffer.from(data));
+    // Streamed in pieces rather than loaded whole. In Recording mode, files copied
+    // from the real workspace keep their contents there (the copy holds none).
+    const here = ctx.dbNow?.() ?? db;
+    const from = f.stored === 0 && f.size > 0 && ctx.realDb ? ctx.realDb : here;
+    reply.header('Content-Length', String(f.stored === 0 && f.size > 0 ? f.size : f.stored));
+    return reply.send(fileStream(from, id, f.stored || f.size));
   });
 
   app.get('/api/search', async (req) => {

@@ -21,6 +21,8 @@ export interface Ctx {
   notesReader?: import('./notes-import').NotesReader | null;
   /** the real workspace; `db` points at a practice copy for requests made in Recording mode */
   realDb?: Db;
+  /** the database this request is using right now (for work that outlives the handler, like streaming a file) */
+  dbNow?: () => Db;
 }
 
 // ── settings ─────────────────────────────────────────────────────────────

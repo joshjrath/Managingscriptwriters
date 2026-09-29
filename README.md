@@ -100,7 +100,7 @@ At the top of My work and the Overview. **Today's tasks** are the scripts due to
 For recording tutorials. From your account menu:
 
 - **View as…** shows the whole site exactly as that person sees it (their My work, their notifications, their menu). On the real workspace it's **view only**: changes are refused, and the app's own background writes (dismissing their celebrations, marking their notifications read) quietly do nothing.
-- **Recording mode** makes a private practice copy of the whole workspace, held in the server's memory for your sign-in only. Everything works in it, including viewing as someone and acting as them. Turning it off (or signing out, 6 idle hours, or a server restart) throws the copy away; nobody else ever sees it. Uploaded files stay readable in it without being copied. At most 3 copies exist at once.
+- **Recording mode** makes a private practice copy of the whole workspace for your sign-in only: a separate schema in the same database, filled by the database itself, so it costs the server about 1 MB (no second database engine). Everything works in it, including viewing as someone and acting as them. Turning it off (or signing out, 6 idle hours, or a server restart) drops the copy; nobody else ever sees it. Uploaded files stay readable in it without being copied, and only the newest 500 Master log entries are copied. At most 2 copies exist at once.
 
 A small bar at the bottom shows what's on (Switch person, Back to me, Turn off) and can shrink to a dot. The Master log records when each starts and stops, and pages viewed as someone are logged under the admin with "(viewing as …)".
 
@@ -144,7 +144,7 @@ Responsive: full sidebar on wide screens, collapsible icon rail on smaller deskt
 ## Deploy to Render
 
 1. Push this repo to GitHub, then in Render choose **New → Blueprint** and pick the repo. `render.yaml` creates:
-   - the web service (`npm ci && npm run build`, then `npm start`, health check `/healthz`, Node 22)
+   - the web service (`npm ci && npm run build`, then `node --max-old-space-size=200 --max-semi-space-size=2 dist/server/index.mjs`, health check `/healthz`, Node 22)
    - a PostgreSQL 16 database, with `DATABASE_URL` wired in automatically
 2. When Render asks, fill in `MANAGER_EMAIL`, `MANAGER_NAME` and `MANAGER_PASSWORD` (at least 10 characters). That account is created on first start.
 3. Open the `.onrender.com` URL, sign in, and add your second manager and writers in **Settings → Team**. The app doesn't send email: after you add someone (or reset their password) it shows a ready-to-send message with the sign-in link, their email and a generated temporary password, with a **Copy message** button to paste into WhatsApp, Slack or email.
@@ -157,7 +157,14 @@ Responsive: full sidebar on wide screens, collapsible icon rail on smaller deskt
 
 The server creates its tables on first start and refuses to start without `DATABASE_URL`, so nothing is ever written to Render's temporary disk. Uploaded files are stored in Postgres, so no Render disk is needed. Pick a database plan with backups; check Render's current terms, because free databases are time-limited.
 
-To set it up by hand instead of using the blueprint: create a PostgreSQL database, then a Node web service with build command `npm ci && npm run build`, start command `npm start`, health check path `/healthz`, and environment variables `NODE_VERSION=22`, `DATABASE_URL` (the database's internal connection string) and the three `MANAGER_*` values.
+To set it up by hand instead of using the blueprint: create a PostgreSQL database, then a Node web service with build command `npm ci && npm run build`, start command `node --max-old-space-size=200 --max-semi-space-size=2 dist/server/index.mjs`, health check path `/healthz`, and environment variables `NODE_VERSION=22`, `DATABASE_URL` (the database's internal connection string) and the three `MANAGER_*` values.
+
+**Memory.** The server runs in about 90–130 MB on the Starter plan's 512 MB, including during 25 MB uploads and in Recording mode:
+- Start it with `node` directly, as above, not `npm start`: npm stays running next to the server and costs about 60 MB on its own. If your service was set up by hand, change its start command in Render → Settings.
+- Uploads are streamed to a temporary file and written to the database in 4 MB pieces; downloads are streamed back out in 512 KB pieces. A file is never held in memory whole.
+- Recording mode copies the workspace inside the database (see above), and its connections close when idle. The main connection pool is capped at 6, to spare the database plan's memory too.
+- The Claude SDK loads the first time notes are read, and Paste notes accepts at most 20 MB of files per read.
+- The embedded database (PGlite) is only for local use and the demo; it needs about 500 MB by itself, so production always uses PostgreSQL.
 
 Any other Node 22 host with PostgreSQL works the same way (`railway.json` is kept for Railway).
 

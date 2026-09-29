@@ -5,8 +5,9 @@
 // saved in one go (or not at all).
 
 import type { FastifyInstance } from 'fastify';
-import Anthropic from '@anthropic-ai/sdk';
-import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
+// The Claude SDK is loaded the first time notes are read, not at startup, so it
+// takes no memory on a server that never uses Paste notes.
+import type Anthropic from '@anthropic-ai/sdk';
 import * as z4 from 'zod/v4';
 import { z } from 'zod';
 import type { Db } from './db';
@@ -111,9 +112,13 @@ function contextText(c: NotesContext) {
 }
 
 /** The real reader: Claude reads the notes with structured output, so the plan always matches the schema. */
-export function claudeNotesReader(client = new Anthropic()): NotesReader {
+export function claudeNotesReader(given?: Anthropic): NotesReader {
+  let client = given;
   return {
     async read(input, context) {
+      const { default: SDK } = await import('@anthropic-ai/sdk');
+      const { betaZodOutputFormat } = await import('@anthropic-ai/sdk/helpers/beta/zod');
+      client ??= new SDK();
       const content: Anthropic.Beta.BetaContentBlockParam[] = [];
       for (const f of input.files) {
         if (f.mime === 'application/pdf' || /\.pdf$/i.test(f.name)) {
@@ -135,10 +140,10 @@ export function claudeNotesReader(client = new Anthropic()): NotesReader {
           messages: [{ role: 'user', content }],
         });
       } catch (err) {
-        if (err instanceof Anthropic.AuthenticationError) throw new HttpError(503, 'The AI key on the server isn’t valid. Check ANTHROPIC_API_KEY in your hosting settings.');
-        if (err instanceof Anthropic.RateLimitError) throw new HttpError(429, 'Too many notes are being read right now. Try again in a minute.');
-        if (err instanceof Anthropic.BadRequestError) throw new HttpError(400, `Couldn’t read those notes: ${err.message}`);
-        if (err instanceof Anthropic.APIError) throw new HttpError(502, 'The AI service didn’t answer. Try again in a moment — nothing was saved.');
+        if (err instanceof SDK.AuthenticationError) throw new HttpError(503, 'The AI key on the server isn’t valid. Check ANTHROPIC_API_KEY in your hosting settings.');
+        if (err instanceof SDK.RateLimitError) throw new HttpError(429, 'Too many notes are being read right now. Try again in a minute.');
+        if (err instanceof SDK.BadRequestError) throw new HttpError(400, `Couldn’t read those notes: ${err.message}`);
+        if (err instanceof SDK.APIError) throw new HttpError(502, 'The AI service didn’t answer. Try again in a moment — nothing was saved.');
         throw err;
       }
       if (response.stop_reason === 'refusal') throw new HttpError(422, 'Those notes couldn’t be read. Try rewording them or add the information by hand.');
@@ -295,6 +300,8 @@ export async function applyPlan(ctx: Ctx, me: Me, plan: z.infer<typeof planSchem
 // ── routes ───────────────────────────────────────────────────────────────
 
 const FILE_LIMIT = 10 * 1024 * 1024;
+// files are held in memory while Claude reads them, so cap the total too
+const TOTAL_LIMIT = 20 * 1024 * 1024;
 
 export function registerNotesImportRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post('/api/import/read', async (req) => {
@@ -306,6 +313,7 @@ export function registerNotesImportRoutes(app: FastifyInstance, ctx: Ctx) {
         if (part.type === 'file') {
           const data = await part.toBuffer();
           if (part.file.truncated) throw new HttpError(413, `“${part.filename}” is over 10 MB`);
+          if (input.files.reduce((n, f) => n + f.data.length, data.length) > TOTAL_LIMIT) throw new HttpError(413, 'Those files add up to more than 20 MB. Send fewer at a time.');
           if (!/pdf|text|markdown|csv|json/i.test(part.mimetype) && !/\.(pdf|txt|md|csv)$/i.test(part.filename)) throw new HttpError(400, `“${part.filename}” can’t be read. Use a PDF or a text file, or paste the text.`);
           input.files.push({ name: part.filename, mime: part.mimetype, data });
         } else if (part.fieldname === 'text') input.text = String(part.value ?? '');

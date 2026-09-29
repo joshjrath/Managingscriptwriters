@@ -112,6 +112,9 @@ export function checkThrottle(key: string): void {
 }
 
 export function recordFailure(key: string): void {
+  // forget expired entries so failed sign-ins from many addresses can't grow this without limit
+  if (attempts.size > 500) for (const [k, v] of attempts) if (v.until < Date.now()) attempts.delete(k);
+  if (attempts.size > 5_000) attempts.clear();
   const a = attempts.get(key);
   if (!a || a.until < Date.now()) attempts.set(key, { count: 1, until: Date.now() + WINDOW_MS });
   else a.count++;

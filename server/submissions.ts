@@ -7,7 +7,6 @@
 // source of truth for progress; documents and reviews say which scripts they
 // cover. A script's "current" document is the latest one it was sent in.
 
-import { createHash } from 'node:crypto';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Db } from './db';
@@ -15,6 +14,7 @@ import { clockFor, loadBatches, loadUsers, logActivity, managerIds, notify, type
 import { requireManager, requireUser } from './auth';
 import { conflict, forbidden, HttpError, notFound, parse, zs } from './http';
 import { loadRevisions, loadScripts } from './records';
+import { spool, storeFile, type UploadedFile } from './files';
 import { applyScriptAction, loadBatchDetail } from './routes/batches';
 import { compressRanges, isManager, type ScriptStatus } from '../shared/workflow';
 import type { BatchSummary, Me, ReviewGroup, ReviewQueue, ReviewRecord, Submission, SubmissionState } from '../shared/types';
@@ -23,33 +23,14 @@ const inList = (ids: number[], params: unknown[]) => ids.map((id) => { params.pu
 
 // ── files and form parsing ───────────────────────────────────────────────
 
-const BLOCKED_EXT = /\.(exe|bat|cmd|com|msi|scr|js|mjs|vbs|ps1|sh|jar|app|dll)$/i;
-
-export interface UploadedFile { filename: string; mime: string; data: Buffer }
-
-export async function storeFile(t: Db, me: Me, file: UploadedFile): Promise<number> {
-  if (BLOCKED_EXT.test(file.filename)) throw new HttpError(400, 'That file type can’t be uploaded', { file: 'That file type can’t be uploaded' });
-  const safeName = file.filename.replace(/[\r\n"\\/]/g, '_').slice(0, 200) || 'file';
-  const f = await t.one<{ id: number }>(
-    `insert into files (filename, mime, size, sha256, data, uploaded_by) values ($1,$2,$3,$4,$5,$6) returning id`,
-    [safeName, file.mime, file.data.length, createHash('sha256').update(file.data).digest('hex'), file.data, me.id],
-  );
-  return f!.id;
-}
-
-/** Reads either a JSON body or a multipart form with at most one file. */
+/** Reads either a JSON body or a multipart form with at most one file (spooled to disk, not memory). */
 export async function readForm(req: FastifyRequest, limitBytes: number): Promise<{ fields: Record<string, unknown>; file: UploadedFile | null }> {
   if (!req.isMultipart()) return { fields: (req.body as Record<string, unknown>) ?? {}, file: null };
   const fields: Record<string, unknown> = {};
   let file: UploadedFile | null = null;
   for await (const part of req.parts({ limits: { fileSize: limitBytes, files: 1 } })) {
-    if (part.type === 'file') {
-      const data = await part.toBuffer();
-      if (part.file.truncated) throw new HttpError(413, `Files can be up to ${Math.round(limitBytes / 1024 / 1024)} MB`);
-      if (data.length) file = { filename: part.filename, mime: part.mimetype || 'application/octet-stream', data };
-    } else {
-      fields[part.fieldname] = String(part.value ?? '');
-    }
+    if (part.type === 'file') file = await spool(req, part, limitBytes);
+    else fields[part.fieldname] = String(part.value ?? '');
   }
   return { fields, file };
 }

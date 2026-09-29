@@ -17,6 +17,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-29-memory',
+    date: '2026-09-29',
+    title: 'Recording mode fixed, and a much lighter server',
+    summary: 'Recording mode works on the live site again, and the whole platform uses far less memory.',
+    changes: [
+      { tag: 'fixed', text: 'Turning on Recording mode no longer fails with “Request failed (502)”. The practice copy now lives inside the database instead of in the server’s memory, so it costs almost nothing.' },
+      { tag: 'improved', text: 'Big files are streamed in small pieces when you upload or open them, instead of being loaded whole, so large PDFs can’t overload the server.' },
+      { tag: 'improved', text: 'The server starts leaner and stays lean: roughly a quarter of the memory it could reach before under heavy use.' },
+      { tag: 'improved', text: 'If the server is ever restarting, you now see “The server is restarting or busy. Wait a moment and try again.” instead of an error code.' },
+    ],
+  },
+  {
     id: '2026-09-29-today-pill',
     date: '2026-09-29',
     title: 'The Today pill, and green waves when you’re done',

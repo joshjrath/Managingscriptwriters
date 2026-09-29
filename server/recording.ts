@@ -5,17 +5,19 @@
 // (dismissing their celebrations, reading their notifications, opening What's
 // new) quietly do nothing, so nothing happens under their name.
 //
-// Recording mode: a throwaway copy of the whole workspace, held in memory for
-// this one sign-in. Everything works (send scripts, approve, drag shoots, view
+// Recording mode: a throwaway copy of the whole workspace for this one
+// sign-in, kept in a private schema of the same database (so it costs the
+// server almost no memory). Everything works (send scripts, approve, drag shoots, view
 // as anyone and act as them) and it all disappears when recording is turned
 // off, the admin signs out, it's left idle for 6 hours, or the server
 // restarts. Every request from that sign-in is sent to the copy through
 // AsyncLocalStorage, so routes don't need to know it exists.
 
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { randomBytes } from 'node:crypto';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { z } from 'zod';
-import { openPglite, migrate, type Db } from './db';
+import { migrate, type Db } from './db';
 import { requireUser, SESSION_COOKIE, sha, userForToken } from './auth';
 import { auditEvent } from './audit';
 import { HttpError, parse, zs } from './http';
@@ -24,7 +26,7 @@ import type { Me, SessionMode } from '../shared/types';
 import { ROLE_LABEL } from '../shared/workflow';
 
 const IDLE_MS = 6 * 3600_000;
-const MAX_SANDBOXES = 3;
+const MAX_SANDBOXES = 2;
 
 interface Sandbox {
   db: Db;
@@ -53,52 +55,59 @@ declare module 'fastify' {
 // Tables left empty in the copy: sign-ins stay on the real workspace.
 const SKIP = new Set(['schema_migrations', 'sessions']);
 
-/** A full in-memory copy of `src`. File contents stay on the real workspace (see realFileData). */
+/**
+ * A copy of `src` for Recording mode: a private schema in the same database,
+ * filled by the database itself (`insert … select`), so no rows pass through
+ * the server and no second database engine is started (one would cost ~500 MB).
+ * File contents stay on the real workspace (see the /api/files route), and only the
+ * newest Master log entries are copied. Closing the copy drops the schema.
+ */
+export const SANDBOX_PREFIX = 'rec_';
+const AUDIT_ROWS = 500;
+
 export async function cloneDb(src: Db): Promise<Db> {
-  const dst = await openPglite();
+  const schema = `${SANDBOX_PREFIX}${randomBytes(6).toString('hex')}`;
+  const from = (await src.one<{ s: string }>(`select current_schema() as s`))!.s;
+  await src.query(`create schema ${schema}`);
+  const drop = () => src.query(`drop schema if exists ${schema} cascade`).then(() => {}, () => {});
+  let dst: Db | null = null;
   try {
+    dst = await src.withSchema(schema);
     await migrate(dst);
-    const tables = (await dst.query<{ name: string }>(
-      `select c.relname as name from pg_class c join pg_namespace n on n.oid = c.relnamespace
-        where n.nspname = current_schema() and c.relkind = 'r' order by c.oid`,
+    const d = dst;
+    const tables = (await d.query<{ name: string }>(
+      `select c.relname as name from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = $1 and c.relkind = 'r' order by c.oid`, [schema],
     )).map((r) => r.name).filter((t) => !SKIP.has(t));
-    const fks = await dst.query<{ tbl: string; con: string }>(
-      `select c.conrelid::regclass::text as tbl, c.conname as con from pg_constraint c join pg_namespace n on n.oid = c.connamespace
-        where n.nspname = current_schema() and c.contype = 'f'`,
+    const cols = await d.query<{ tbl: string; col: string }>(
+      `select table_name as tbl, column_name as col from information_schema.columns where table_schema = $1 order by table_name, ordinal_position`, [schema],
     );
-    const identity = await dst.query<{ tbl: string; col: string }>(
-      `select table_name as tbl, column_name as col from information_schema.columns where table_schema = current_schema() and is_identity = 'YES'`,
+    const fks = await d.query<{ tbl: string; con: string }>(
+      `select c.conrelid::regclass::text as tbl, c.conname as con from pg_constraint c join pg_namespace n on n.oid = c.connamespace where n.nspname = $1 and c.contype = 'f'`, [schema],
     );
-    // Copy in one transaction with foreign keys checked at the end, so table order doesn't matter.
-    for (const f of fks) await dst.query(`alter table ${f.tbl} alter constraint ${f.con} deferrable initially deferred`);
-    const data = new Map<string, string>();
-    for (const t of tables) {
-      const expr = t === 'files' ? `jsonb_set(to_jsonb(x), '{data}', to_jsonb('\\x'::text))` : 'to_jsonb(x)';
-      const row = await src.one<{ rows: string }>(`select coalesce(jsonb_agg(${expr}), '[]'::jsonb)::text as rows from ${t} x`);
-      data.set(t, row?.rows ?? '[]');
-    }
-    await dst.tx(async (t) => {
-      for (const name of tables) await t.query(`delete from ${name}`);
+    const identity = await d.query<{ tbl: string; col: string }>(
+      `select table_name as tbl, column_name as col from information_schema.columns where table_schema = $1 and is_identity = 'YES'`, [schema],
+    );
+    for (const f of fks) await d.query(`alter table ${f.tbl} alter constraint "${f.con}" deferrable initially deferred`);
+    await d.tx(async (t) => {
+      for (const name of tables) await t.query(`delete from "${name}"`);
       for (const name of tables) {
-        await t.query(`insert into ${name} overriding system value select * from jsonb_populate_recordset(null::${name}, $1::jsonb)`, [data.get(name)]);
+        const list = cols.filter((c) => c.tbl === name).map((c) => c.col);
+        const pick = list.map((c) => (name === 'files' && c === 'data' ? `''::bytea` : `"${c}"`));
+        const only = name === 'audit_log' ? ` where id in (select id from "${from}"."audit_log" order by id desc limit ${AUDIT_ROWS})` : '';
+        await t.query(`insert into "${name}" (${list.map((c) => `"${c}"`).join(', ')}) overriding system value select ${pick.join(', ')} from "${from}"."${name}"${only}`);
       }
     });
     for (const c of identity) {
-      await dst.query(`select setval(pg_get_serial_sequence('${c.tbl}', '${c.col}'), coalesce((select max(${c.col}) from ${c.tbl}), 0) + 1, false)`);
+      await d.query(`select setval(pg_get_serial_sequence('${c.tbl}', '${c.col}'), coalesce((select max("${c.col}") from "${c.tbl}"), 0) + 1, false)`);
     }
-    return dst;
+    return { ...d, close: async () => { await d.close().catch(() => {}); await drop(); } };
   } catch (err) {
-    await dst.close().catch(() => {});
+    await dst?.close().catch(() => {});
+    await drop();
     throw err;
   }
 }
 
-/** A copied file's contents live only on the real workspace; files uploaded while recording live in the copy. */
-export async function realFileData(ctx: Ctx, id: number): Promise<Uint8Array | null> {
-  if (!ctx.realDb || ctx.realDb === ctx.db) return null;
-  const row = await ctx.realDb.one<{ data: Uint8Array }>(`select data from files where id = $1`, [id]);
-  return row?.data ?? null;
-}
 
 // ── routing requests ─────────────────────────────────────────────────────
 
@@ -111,6 +120,7 @@ export function routedDb(real: Db, als: AsyncLocalStorage<Db>): Db {
     one: (sql, params) => cur().one(sql, params),
     tx: (fn) => cur().tx(fn),
     close: () => real.close(),
+    withSchema: (schema) => real.withSchema(schema),
   };
 }
 
@@ -130,6 +140,12 @@ const QUIET: Record<string, unknown> = {
 
 export function registerRecording(app: FastifyInstance, ctx: Ctx, realDb: Db, als: AsyncLocalStorage<Db>) {
   const modes = new Map<string, Mode>();
+  // Practice copies live only as long as this process; drop any left behind by a restart.
+  {
+    void realDb.query<{ s: string }>(`select nspname as s from pg_namespace where nspname like '${SANDBOX_PREFIX}%'`)
+      .then((rows) => Promise.all(rows.map((r) => realDb.query(`drop schema if exists ${r.s} cascade`))))
+      .catch((err) => app.log.warn({ err }, 'could not clean up old practice copies'));
+  }
 
   const closeSandbox = async (m: Mode) => {
     const sb = m.sandbox;

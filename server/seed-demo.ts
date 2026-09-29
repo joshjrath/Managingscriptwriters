@@ -10,6 +10,7 @@ import { hashPassword } from './auth';
 import { clockFor, loadSettings, type Ctx } from './core';
 import { applyScriptAction, insertBatch } from './routes/batches';
 import { sendDocument } from './submissions';
+import { bufferFile } from './files';
 import { insertShoot } from './routes/shoots';
 import { insertBriefing } from './routes/clients';
 import { addDays } from '../shared/dates';
@@ -100,7 +101,7 @@ export async function seedDemo(db: Db, now = new Date()): Promise<boolean> {
   const send = (who: Me, batchId: number, sids: number[], doc: { pdf?: string; url?: string }, note: string | null = null, titles: string[] = []) =>
     sendDocument(ctx, who, batchId, {
       scriptIds: sids, url: doc.url ?? null, note,
-      file: doc.pdf ? { filename: `${doc.pdf}.pdf`, mime: 'application/pdf', data: demoPdf(doc.pdf, titles) } : null,
+      file: doc.pdf ? bufferFile(`${doc.pdf}.pdf`, 'application/pdf', demoPdf(doc.pdf, titles)) : null,
       titles: titles.map((t, i) => ({ number: i + 1, title: t })),
     });
 

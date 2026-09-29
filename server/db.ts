@@ -12,12 +12,21 @@ export interface Db {
   one<T = Record<string, unknown>>(sql: string, params?: unknown[]): Promise<T | undefined>;
   tx<T>(fn: (db: Db) => Promise<T>): Promise<T>;
   close(): Promise<void>;
+  /**
+   * The same database, but queries run in `schema` (Recording mode's practice
+   * copy). Costs no extra engine: on PostgreSQL it's a tiny pool that closes
+   * idle connections; on PGlite each query runs in a transaction that points at
+   * the schema, on the one existing engine.
+   */
+  withSchema(schema: string): Promise<Db>;
 }
 
 const OID = { int8: 20, numeric: 1700, date: 1082, timestamptz: 1184, timestamp: 1114 };
 const iso = (v: string) => new Date(v).toISOString();
 
-export async function openPostgres(url: string): Promise<Db> {
+const SCHEMA_NAME = /^[a-z_][a-z0-9_]*$/;
+
+export async function openPostgres(url: string, opts: { schema?: string } = {}): Promise<Db> {
   const types = {
     getTypeParser(oid: number, format?: string) {
       if (oid === OID.int8) return (v: string) => Number(v);
@@ -28,7 +37,15 @@ export async function openPostgres(url: string): Promise<Db> {
     },
   };
   const ssl = /sslmode=require/.test(url) || process.env.PGSSL === '1' ? { rejectUnauthorized: false } : undefined;
-  const pool = new pg.Pool({ connectionString: url, types: types as pg.CustomTypesConfig, max: 10, ssl });
+  if (opts.schema && !SCHEMA_NAME.test(opts.schema)) throw new Error('bad schema name');
+  // Each open connection costs memory on the database server (a 256 MB plan on
+  // Render), so keep pools small and let idle connections go.
+  const pool = new pg.Pool({
+    connectionString: url, types: types as pg.CustomTypesConfig, ssl,
+    ...(opts.schema
+      ? { max: 2, idleTimeoutMillis: 5_000, options: `-c search_path=${opts.schema}` }
+      : { max: 6, idleTimeoutMillis: 30_000 }),
+  });
 
   const make = (runner: { query: pg.Pool['query'] }, inTx: boolean): Db => {
     const db: Db = {
@@ -59,6 +76,7 @@ export async function openPostgres(url: string): Promise<Db> {
       async close() {
         if (!inTx) await pool.end();
       },
+      withSchema: (schema) => openPostgres(url, { schema }),
     };
     return db;
   };
@@ -95,8 +113,23 @@ export async function openPglite(dataDir?: string): Promise<Db> {
       async close() {
         if (!inTx) await lite.close();
       },
+      withSchema: async (schema) => scoped(schema),
     };
     return db;
+  };
+  // Every query runs in a transaction that points at `schema`; `set local` ends with it.
+  const scoped = (schema: string): Db => {
+    if (!SCHEMA_NAME.test(schema)) throw new Error('bad schema name');
+    const enter = `set local search_path = ${schema}`;
+    const run = <T>(fn: (t: Runner) => Promise<T>) => lite.transaction(async (t) => { await t.query(enter); return fn(t as unknown as Runner); });
+    return {
+      kind: 'pglite',
+      query: async <T>(sql: string, params: unknown[] = []) => run(async (t) => (await t.query(sql, params)).rows as T[]),
+      one: async <T>(sql: string, params: unknown[] = []) => run(async (t) => (await t.query(sql, params)).rows[0] as T | undefined),
+      tx: (fn) => run((t) => fn(make(t, true))),
+      close: async () => {},
+      withSchema: async (other) => scoped(other),
+    };
   };
   return make(lite as unknown as Runner, false);
 }

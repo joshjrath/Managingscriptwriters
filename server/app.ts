@@ -23,6 +23,7 @@ import { registerNotesImportRoutes } from './notes-import';
 import { registerRecording, routedDb } from './recording';
 import { registerScriptBankRoutes } from './script-bank';
 import { registerTodayRoutes } from './today';
+import { registerUploadCleanup } from './files';
 import type { Db } from './db';
 
 export const CSRF_HEADER = 'x-scale-media';
@@ -50,7 +51,9 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
   const als = new AsyncLocalStorage<Db>();
   ctx.realDb = realDb;
   ctx.db = routedDb(realDb, als);
+  ctx.dbNow = () => als.getStore() ?? realDb;
   registerRecording(app, ctx, realDb, als);
+  registerUploadCleanup(app);
 
   app.addHook('onSend', async (req, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff');

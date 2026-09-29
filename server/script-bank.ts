@@ -60,24 +60,31 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
          left join users w on w.id = coalesce(s.writer_id, s.submitted_by)
          left join shoots sh on sh.id = b.shoot_id
          left join files f on f.id = s.file_id
-        order by s.created_at, s.id`,
+        where ($1::bigint is null or b.client_id = $1)
+        order by s.created_at, s.id`, [q.clientId ?? null],
     );
     // a newer version replaces the one it revises; follow each chain to its newest
     const replacedBy = new Map<number, number>();
     for (const s of subs) if (s.previous_id) replacedBy.set(s.previous_id, s.id);
     const newestOf = (id: number) => { let cur = id; for (let i = 0; i < 100 && replacedBy.has(cur); i++) cur = replacedBy.get(cur)!; return cur; };
-    const latest = subs.filter((s) => !replacedBy.has(s.id));
+    // the writer filter applies to the newest version (an older one may have been sent by someone else)
+    const latest = subs.filter((s) => !replacedBy.has(s.id) && (!q.writerId || s.writer_id === q.writerId));
+    const latestIds = latest.map((s) => s.id);
 
     const scripts = await db.query<ScriptRow>(
       `select ss.submission_id, sc.id, sc.number, sc.title, sc.status, sc.timeliner_url
-         from submission_scripts ss join scripts sc on sc.id = ss.script_id where sc.removed_at is null order by sc.number`,
+         from submission_scripts ss join scripts sc on sc.id = ss.script_id
+        where sc.removed_at is null and ss.submission_id = any($1::bigint[]) order by sc.number`, [latestIds],
     );
     const scriptsBySub = new Map<number, ScriptRow[]>();
     for (const r of scripts) { const l = scriptsBySub.get(r.submission_id) ?? []; l.push(r); scriptsBySub.set(r.submission_id, l); }
 
     const edits = await db.query<EditRow>(
       `select r.submission_id, r.url, r.file_id, f.filename as file_name, r.created_at from reviews r left join files f on f.id = r.file_id
-        where r.action = 'approved' and r.submission_id is not null and (r.url is not null or r.file_id is not null) order by r.created_at`,
+         join batches b on b.id = r.batch_id
+        where r.action = 'approved' and r.submission_id is not null and (r.url is not null or r.file_id is not null)
+          and ($1::bigint is null or b.client_id = $1)
+        order by r.created_at`, [q.clientId ?? null],
     );
     const editOf = new Map<number, EditRow>();
     for (const e of edits) editOf.set(newestOf(e.submission_id), e);
@@ -111,7 +118,8 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
          from scripts sc join batches b on b.id = sc.batch_id join clients c on c.id = b.client_id
          left join users u on u.id = sc.assignee_id left join shoots sh on sh.id = b.shoot_id
         where sc.removed_at is null and sc.doc_url is not null and not exists (select 1 from submission_scripts ss where ss.script_id = sc.id)
-        order by sc.number`,
+          and ($1::bigint is null or b.client_id = $1) and ($2::bigint is null or sc.assignee_id = $2)
+        order by sc.number`, [q.clientId ?? null, q.writerId ?? null],
     );
     const groups = new Map<string, LooseRow[]>();
     for (const r of loose) { const k = `${r.batch_id}|${r.doc_url}`; const l = groups.get(k) ?? []; l.push(r); groups.set(k, l); }

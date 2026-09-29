@@ -37,7 +37,10 @@ export async function api<T>(path: string, opts: { method?: string; body?: Body;
   if (!res.ok) {
     const e = (data as { error?: { message?: string; fields?: Record<string, string>; code?: string } } | null)?.error;
     if (res.status === 401 && !path.startsWith('/api/auth/')) window.dispatchEvent(new Event('auth:lost'));
-    throw new ApiError(res.status, e?.message ?? `Request failed (${res.status})`, e?.fields ?? {}, e?.code);
+    const fallback = res.status >= 502 && res.status <= 504
+      ? 'The server is restarting or busy. Wait a moment and try again.'
+      : `Request failed (${res.status})`;
+    throw new ApiError(res.status, e?.message ?? fallback, e?.fields ?? {}, e?.code);
   }
   return data as T;
 }
