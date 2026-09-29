@@ -361,7 +361,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     requireUser(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const f = await db.one<{ filename: string; mime: string; size: number; stored: number }>(
-      `select f.filename, f.mime, f.size, octet_length(f.data) as stored from files f where f.id = $1 and (exists (select 1 from resources r where r.file_id = f.id and r.removed_at is null) or exists (select 1 from submissions s where s.file_id = f.id) or exists (select 1 from reviews v where v.file_id = f.id))`, [id],
+      `select f.filename, f.mime, f.size, octet_length(f.data) as stored from files f where f.id = $1 and (exists (select 1 from resources r where r.file_id = f.id and r.removed_at is null) or exists (select 1 from submissions s where s.file_id = f.id) or exists (select 1 from reviews v where v.file_id = f.id) or exists (select 1 from past_documents p where p.file_id = f.id and p.removed_at is null))`, [id],
     );
     if (!f) throw notFound('File');
     const inline = SAFE_INLINE.has(f.mime) && (req.query as Record<string, string>).download !== '1';

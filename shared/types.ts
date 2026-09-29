@@ -68,13 +68,17 @@ export interface Deliverable {
   sentAt: string;
   writerId: number | null;
   writerName: string | null;
-  batchId: number;
+  /** null for past scripts added by hand, which aren't part of a batch */
+  batchId: number | null;
+  /** the batch, or the past document's title */
   batchTitle: string;
   batchArchived: boolean;
   clientId: number;
   clientName: string;
   shootDate: string | null;
   scripts: { id: number; number: number; title: string | null; status: ScriptStatus }[];
+  /** set for scripts from before the platform, uploaded straight to the Script bank */
+  past: { id: number; scriptCount: number | null; writtenOn: string | null } | null;
   /** "1–45" */
   ranges: string;
   state: DeliverableState;

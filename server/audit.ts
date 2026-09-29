@@ -59,6 +59,8 @@ const MUTATIONS: Record<string, string> = {
   '/api/users': 'add a team member',
   '/api/users/:id': 'edit a team member',
   '/api/users/:id/remove': 'remove a team member',
+  '/api/script-bank/past': 'add past scripts',
+  '/api/script-bank/past/:id': 'remove past scripts',
   '/api/moments/seen': 'dismiss a celebration',
   '/api/me/whats-new': 'open What’s new',
 };

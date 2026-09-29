@@ -322,4 +322,24 @@ alter table clients add column became_client_at timestamptz;
   `
 alter table files alter column data set storage external;
 `,
+  // 8 · past scripts: documents from before the platform, added to the Script bank by hand
+  `
+create table past_documents (
+  id bigint generated always as identity primary key,
+  client_id bigint not null references clients(id),
+  title text not null,
+  file_id bigint references files(id),
+  url text,
+  writer_id bigint references users(id),
+  writer_name text,
+  script_count int check (script_count between 1 and 1000),
+  written_on date,
+  note text,
+  created_by bigint not null references users(id),
+  created_at timestamptz not null default now(),
+  removed_at timestamptz,
+  check (file_id is not null or url is not null)
+);
+create index past_documents_client_idx on past_documents (client_id) where removed_at is null;
+`,
 ];

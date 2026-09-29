@@ -19,6 +19,7 @@ import {
   Avatar, BatchProgress, Button, Chip, CountUp, Dialog, DueChip, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel,
   Ring, ringColor, StageChip, StatusChip, useFieldId, useToast, Seg,
 } from '../components/ui';
+import { WrittenCounter } from '../components/WrittenCounter';
 import { CardList, DecisionDialog, DocumentHistory, SendDialog, SentBackCard, TitlesDialog, WaitingCard } from '../components/Review';
 
 export function BatchPage() {
@@ -42,6 +43,8 @@ function BatchView({ b }: { b: BatchDetail }) {
   const reviewed = useSave(() => api(`/api/batches/${b.id}/dates-reviewed`, { body: {} }), { onSuccess: () => toast('Deadlines confirmed') });
   const unblock = useSave(() => api(`/api/batches/${b.id}/blocker`, { body: { blocked: false, note: null } }), { onSuccess: () => toast('Blocker cleared') });
   const canBlock = manager || b.isAssigned;
+  // your own share of this batch, if you're writing some of it
+  const mine = b.writers.find((w) => w.userId === me.id);
   const tz = fmtTimeZoneAbbr(settings.timezone);
 
   return (
@@ -87,6 +90,11 @@ function BatchView({ b }: { b: BatchDetail }) {
               <div style={{ ['--c' as string]: 'var(--mint)' }}><span className="k"><i />Delivered</span><span className="v"><CountUp value={b.progress.delivered} /><small>/ {b.progress.total}</small></span><span className="p">{b.progress.pctDelivered}% · writer-confirmed</span></div>
             </div>
             {b.progress.revisions > 0 && <div className="banner pink" style={{ marginTop: 12 }}><RotateCcw aria-hidden /><div className="txt"><b>{plural(b.progress.revisions, 'script')} returned for revisions</b><span>These don’t count as draft-ready until they’re resubmitted.</span></div></div>}
+            {mine && (
+              <div style={{ marginTop: 18 }}>
+                <WrittenCounter batchId={b.id} writerId={me.id} forOther={false} total={mine.count} sent={mine.draftReady} written={Math.max(mine.written, mine.draftReady)} />
+              </div>
+            )}
             <div className="section-title" style={{ marginTop: 22 }}>Assignments</div>
             <div className="rows">
               {b.writers.map((w) => (
@@ -98,6 +106,9 @@ function BatchView({ b }: { b: BatchDetail }) {
                   <div className="side">
                     <span className="when num">{w.userId != null && w.written > w.draftReady ? `${w.written} / ${w.count} written` : `${w.draftReady} / ${w.count} drafts ready`}</span>
                     <span className="muted num" style={{ fontSize: 12 }}>{w.written > w.draftReady ? `${w.draftReady} sent · ` : ''}{w.delivered} delivered{w.writtenAt ? ` · updated ${fmtStamp(w.writtenAt, settings.timezone)}` : ''}</span>
+                    {manager && w.userId != null && w.userId !== me.id && w.draftReady < w.count && (
+                      <WrittenCounter compact batchId={b.id} writerId={w.userId} forOther total={w.count} sent={w.draftReady} written={Math.max(w.written, w.draftReady)} />
+                    )}
                   </div>
                 </div>
               ))}

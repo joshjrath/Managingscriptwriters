@@ -17,6 +17,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-29-past-scripts',
+    date: '2026-09-29',
+    title: 'Past scripts in the Script bank, and the counter on batch pages',
+    summary: 'Add old scripts from before the platform, and tap + or − on a batch page too.',
+    changes: [
+      { tag: 'new', text: 'Script bank → Add past scripts: upload one or many PDFs (or paste a link), pick the client, and optionally who wrote them, when, and how many scripts are in each. They’re searchable with everything else and marked “Past script”.' },
+      { tag: 'new', text: 'The “Written so far” + / − counter is now on the batch page as well as My work. Admins and managers get a small + / − on each writer’s row.' },
+    ],
+  },
+  {
     id: '2026-09-29-memory',
     date: '2026-09-29',
     title: 'Recording mode fixed, and a much lighter server',

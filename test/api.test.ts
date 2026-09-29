@@ -1072,3 +1072,46 @@ describe('today pill', () => {
     expect(t2.done).toBe(t1.done + 3);
   });
 });
+
+describe('past scripts in the script bank', () => {
+  it('lets managers file old PDFs and links under a client, shown and searchable in the bank', async () => {
+    const boundary = '----smpast';
+    const payload = [
+      `--${boundary}\r\nContent-Disposition: form-data; name="clientId"\r\n\r\n${acmeId}`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="writerName"\r\n\r\nsarah chen`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="scriptCount"\r\n\r\n12`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="writtenOn"\r\n\r\n2025-03-14`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="Spring 2025 hooks.pdf"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4 old scripts`,
+      `--${boundary}--\r\n`,
+    ].join('\r\n');
+    const up = await app.inject({ method: 'POST', url: '/api/script-bank/past', headers: { 'x-scale-media': '1', cookie: manager.cookie, 'content-type': `multipart/form-data; boundary=${boundary}` }, payload });
+    expect(up.statusCode).toBe(200);
+    const link = await manager.post('/api/script-bank/past', { clientId: acmeId, url: 'https://docs.google.com/document/d/old-batch', title: 'Launch scripts 2024', writerName: 'A freelancer' });
+    expect(link.status).toBe(200);
+    // writers can't add them
+    expect((await sarah.post('/api/script-bank/past', { clientId: acmeId, url: 'https://example.com/x' })).status).toBe(403);
+    // needs a file or a link, and a client
+    expect((await manager.post('/api/script-bank/past', { clientId: acmeId })).status).toBe(400);
+    expect((await manager.post('/api/script-bank/past', { url: 'https://example.com/x' })).status).toBe(400);
+
+    const bank = (await sarah.get(`/api/script-bank?clientId=${acmeId}&limit=200`)).body;
+    const pdf = bank.deliverables.find((d: any) => d.batchTitle === 'Spring 2025 hooks');
+    expect(pdf).toMatchObject({ kind: 'file', batchId: null, writerId: ids.sarah, writerName: 'Sarah Chen', state: 'delivered' });
+    expect(pdf.past).toMatchObject({ scriptCount: 12, writtenOn: '2025-03-14' });
+    const got = await app.inject({ method: 'GET', url: pdf.href, headers: { cookie: sarah.cookie } });
+    expect(got.statusCode).toBe(200);
+    expect(got.body).toContain('%PDF-1.4 old scripts');
+    const other = bank.deliverables.find((d: any) => d.batchTitle === 'Launch scripts 2024');
+    expect(other).toMatchObject({ kind: 'link', href: 'https://docs.google.com/document/d/old-batch', writerId: null, writerName: 'A freelancer' });
+    // found by title, counted with the rest, and filtered by writer
+    expect((await manager.get('/api/script-bank?q=spring%202025')).body.deliverables.some((d: any) => d.key === pdf.key)).toBe(true);
+    expect((await manager.get(`/api/script-bank?writerId=${ids.sarah}&limit=200`)).body.deliverables.some((d: any) => d.key === pdf.key)).toBe(true);
+    expect((await manager.get('/api/script-bank?status=finished&limit=200')).body.deliverables.some((d: any) => d.key === pdf.key)).toBe(true);
+
+    // removing takes it out of the bank and its file stops being served
+    expect((await sarah.del(`/api/script-bank/past/${pdf.past.id}`)).status).toBe(403);
+    expect((await manager.del(`/api/script-bank/past/${pdf.past.id}`)).status).toBe(200);
+    expect((await manager.get(`/api/script-bank?clientId=${acmeId}&limit=200`)).body.deliverables.some((d: any) => d.key === pdf.key)).toBe(false);
+    expect((await app.inject({ method: 'GET', url: pdf.href, headers: { cookie: sarah.cookie } })).statusCode).toBe(404);
+  });
+});

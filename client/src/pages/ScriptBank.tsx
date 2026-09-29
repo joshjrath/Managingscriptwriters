@@ -4,14 +4,14 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useInfiniteQuery, keepPreviousData } from '@tanstack/react-query';
-import { ExternalLink, FileText, Library, Link2, PenLine } from 'lucide-react';
-import { api, qs } from '../api';
+import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query';
+import { Archive, ExternalLink, FileText, Library, Link2, PenLine, Trash2, Upload, X } from 'lucide-react';
+import { api, qs, useSave, type ApiError } from '../api';
 import type { Deliverable, DeliverableState, ScriptBankPage } from '../../../shared/types';
 import { fmtDate, fmtStamp, plural } from '../../../shared/format';
-import { STATUS_SHORT, type ScriptStatus } from '../../../shared/workflow';
+import { STATUS_SHORT, isManager, type ScriptStatus } from '../../../shared/workflow';
 import { PageHeader, useBoot } from '../components/Shell';
-import { Button, Chip, Empty, ErrorState, Loading, Panel } from '../components/ui';
+import { Button, Chip, Dialog, Empty, ErrorState, Field, FormError, Loading, Panel, Seg, inputProps, useFieldId, useToast } from '../components/ui';
 
 const STATE: Record<DeliverableState, { label: string; color: string }> = {
   in_progress: { label: 'In progress', color: 'cyan' },
@@ -24,7 +24,9 @@ const STATE: Record<DeliverableState, { label: string; color: string }> = {
 const scriptNumber = (q: string) => (/^#?\d{1,4}$/.test(q) ? Number(q.replace('#', '')) : null);
 
 export function ScriptBankPage() {
-  const { clients, users, settings } = useBoot();
+  const { clients, users, settings, me } = useBoot();
+  const manager = isManager(me.role);
+  const [adding, setAdding] = useState(false);
   const [params, setParams] = useSearchParams();
   const [text, setText] = useState(params.get('q') ?? '');
   const search = useRef<HTMLInputElement>(null);
@@ -63,7 +65,10 @@ export function ScriptBankPage() {
 
   return (
     <>
-      <PageHeader title="Script bank" sub="Every document your writers have sent, for every client. Search a client, batch, writer, title or script number." />
+      <PageHeader title="Script bank" sub="Every document your writers have sent, for every client, plus past scripts from before. Search a client, batch, writer, title or script number.">
+        {manager && <Button icon={<Upload aria-hidden />} onClick={() => setAdding(true)}>Add past scripts</Button>}
+      </PageHeader>
+      {manager && <PastDialog open={adding} onClose={() => setAdding(false)} />}
       <div className="filters bank-filters" role="search">
         <input ref={search} className="input search" type="search" autoFocus placeholder="Search, or #12 for script 12…" title="Press / to jump here" value={text}
           onChange={(e) => setText(e.target.value)} aria-label="Search by client, batch, writer, title or script number" />
@@ -98,7 +103,7 @@ export function ScriptBankPage() {
             </Empty>
           ) : (
             <div className="rows bank">
-              {items.map((d) => <DeliverableRow key={d.key} d={d} tz={settings.timezone} num={num} />)}
+              {items.map((d) => (d.past ? <PastRow key={d.key} d={d} manager={manager} /> : <DeliverableRow key={d.key} d={d} tz={settings.timezone} num={num} />))}
             </div>
           )}
           {bank.hasNextPage && (
@@ -159,5 +164,157 @@ function DeliverableRow({ d, tz, num }: { d: Deliverable; tz: string; num: numbe
         {d.timelinerUrl && <a className="btn sm" href={d.timelinerUrl} target="_blank" rel="noopener noreferrer">Timeliner<ExternalLink aria-hidden /></a>}
       </div>
     </div>
+  );
+}
+
+/** A past document: scripts written before the platform, uploaded straight to the bank. */
+function PastRow({ d, manager }: { d: Deliverable; manager: boolean }) {
+  const toast = useToast();
+  const remove = useSave(() => api(`/api/script-bank/past/${d.past!.id}`, { method: 'DELETE' }), { onSuccess: () => toast(`Removed “${d.batchTitle}”`) });
+  const count = d.past!.scriptCount;
+  return (
+    <div className="bank-row past">
+      <span className="bank-num" aria-label={count ? plural(count, 'script') : 'Past document'}>
+        {count ? <><b>{count}</b><small>{count === 1 ? 'script' : 'scripts'}</small></> : <><Archive aria-hidden /><small>past</small></>}
+      </span>
+      <div style={{ minWidth: 0 }}>
+        <div className="t">
+          <Link className="link" to={`/clients/${d.clientId}`}>{d.clientName}</Link> <span className="dim">›</span> {d.batchTitle}
+        </div>
+        <div className="s">
+          Past scripts{d.writerName ? ` · ${d.writerName}` : ''}{d.past!.writtenOn ? ` · written ${fmtDate(d.past!.writtenOn)}` : ''}{d.name ? ` · ${d.name}` : ''}
+        </div>
+        {d.note && <div className="s">{d.note}</div>}
+      </div>
+      <div className="bank-tools">
+        <Chip color="neutral" icon={<Archive aria-hidden />}>Past script</Chip>
+        <a className="btn sm primary" href={d.href} target="_blank" rel="noopener noreferrer">
+          {d.kind === 'file' ? <FileText aria-hidden /> : <Link2 aria-hidden />}Open
+        </a>
+        {manager && (
+          <Button variant="sm ghost" icon={<Trash2 aria-hidden />} busy={remove.isPending} aria-label={`Remove ${d.batchTitle}`}
+            onClick={() => { if (window.confirm(`Remove “${d.batchTitle}” from the Script bank?`)) remove.mutate(undefined); }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+const baseName = (name: string) => name.replace(/\.[a-z0-9]{2,5}$/i, '');
+
+/** Upload scripts from before the platform (one or many PDFs, or a link) and file them under a client. */
+function PastDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { clients, users } = useBoot();
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [mode, setMode] = useState<'file' | 'link'>('file');
+  const [files, setFiles] = useState<{ file: File; title: string }[]>([]);
+  const [url, setUrl] = useState('');
+  const [linkTitle, setLinkTitle] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [writerName, setWriterName] = useState('');
+  const [writtenOn, setWrittenOn] = useState('');
+  const [scriptCount, setScriptCount] = useState('');
+  const [note, setNote] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<ApiError | null>(null);
+  const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
+  const ids = { c: useFieldId('pc'), f: useFieldId('pf'), u: useFieldId('pu'), lt: useFieldId('plt'), w: useFieldId('pw'), d: useFieldId('pd'), n: useFieldId('pn'), no: useFieldId('pno') };
+  const people = users.filter((u) => !u.removed).map((u) => u.name).sort();
+  const sorted = [...clients].sort((a, b) => a.name.localeCompare(b.name));
+
+  const reset = () => { setFiles([]); setUrl(''); setLinkTitle(''); setWriterName(''); setWrittenOn(''); setScriptCount(''); setNote(''); setError(null); setFieldErr({}); };
+  const close = () => { if (!busy) { reset(); onClose(); } };
+  const common = { clientId, writerName: writerName.trim(), writtenOn, scriptCount, note: note.trim() };
+
+  const submit = async () => {
+    const errs: Record<string, string> = {};
+    if (!clientId) errs.clientId = 'Choose a client';
+    if (mode === 'file' && !files.length) errs.file = 'Choose at least one file';
+    if (mode === 'link' && !url.trim()) errs.url = 'Paste a link';
+    setFieldErr(errs);
+    if (Object.keys(errs).length) return;
+    setError(null);
+    let done = 0;
+    try {
+      if (mode === 'link') {
+        setBusy('Saving…');
+        await api('/api/script-bank/past', { body: { ...common, url: url.trim(), title: linkTitle.trim() } });
+        done = 1;
+      } else {
+        for (const [i, f] of files.entries()) {
+          setBusy(files.length > 1 ? `Uploading ${i + 1} of ${files.length}…` : 'Uploading…');
+          const form = new FormData();
+          for (const [k, v] of Object.entries({ ...common, title: f.title.trim() })) if (v) form.append(k, v);
+          form.append('file', f.file);
+          await api('/api/script-bank/past', { form });
+          done++;
+        }
+      }
+      await qc.invalidateQueries();
+      toast(done === 1 ? 'Added to the Script bank' : `${done} documents added to the Script bank`);
+      reset();
+      onClose();
+    } catch (err) {
+      setError(err as ApiError);
+      if (done) { setFiles((fs) => fs.slice(done)); await qc.invalidateQueries(); }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const count = mode === 'file' ? files.length : 1;
+  return (
+    <Dialog open={open} onClose={close} title="Add past scripts"
+      sub="Scripts written before the platform. They’re filed in the Script bank under the client you pick."
+      footer={<div className="form-actions"><Button variant="ghost" onClick={close} disabled={!!busy}>Cancel</Button><Button variant="primary" busy={!!busy} onClick={submit}>{busy ?? (count > 1 ? `Add ${count} documents` : 'Add to Script bank')}</Button></div>}>
+      <form className="form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
+        <FormError error={error} />
+        <Field label="Client" htmlFor={ids.c} error={fieldErr.clientId}>
+          <select className="select" value={clientId} onChange={(e) => setClientId(e.target.value)} {...inputProps(ids.c, fieldErr.clientId)}>
+            <option value="">Choose a client…</option>
+            {sorted.map((c) => <option key={c.id} value={c.id}>{c.name}{c.status === 'prospect' ? ' (potential)' : c.status === 'archived' ? ' (archived)' : ''}</option>)}
+          </select>
+        </Field>
+        <Seg role="group" aria-label="File or link">
+          <button type="button" aria-pressed={mode === 'file'} onClick={() => setMode('file')}><Upload aria-hidden />Upload files</button>
+          <button type="button" aria-pressed={mode === 'link'} onClick={() => setMode('link')}><Link2 aria-hidden />Paste link</button>
+        </Seg>
+        {mode === 'file' ? (
+          <Field label="Files" htmlFor={ids.f} error={fieldErr.file} help="PDFs are best. Pick several at once, and each one is added separately.">
+            <input id={ids.f} className="input" type="file" multiple accept=".pdf,.doc,.docx,.txt,.rtf,.pages,application/pdf"
+              onChange={(e) => { const picked = [...(e.target.files ?? [])].map((file) => ({ file, title: baseName(file.name) })); setFiles((fs) => [...fs, ...picked]); e.target.value = ''; }} />
+          </Field>
+        ) : (
+          <>
+            <Field label="Link" htmlFor={ids.u} error={fieldErr.url}><input className="input" type="url" placeholder="https://docs.google.com/…" value={url} onChange={(e) => setUrl(e.target.value)} {...inputProps(ids.u, fieldErr.url)} /></Field>
+            <Field label="Name" optional htmlFor={ids.lt}><input className="input" placeholder="e.g. Spring 2025 scripts" value={linkTitle} onChange={(e) => setLinkTitle(e.target.value)} {...inputProps(ids.lt)} /></Field>
+          </>
+        )}
+        {mode === 'file' && files.length > 0 && (
+          <div className="past-files">
+            {files.map((f, i) => (
+              <div key={`${f.file.name}-${i}`} className="past-file">
+                <FileText aria-hidden />
+                <input className="input" aria-label={`Name for ${f.file.name}`} value={f.title} onChange={(e) => setFiles((fs) => fs.map((x, j) => (j === i ? { ...x, title: e.target.value } : x)))} />
+                <button type="button" className="icon-btn sm" aria-label={`Remove ${f.file.name}`} onClick={() => setFiles((fs) => fs.filter((_, j) => j !== i))}><X /></button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="past-pair">
+          <Field label="Written by" optional htmlFor={ids.w} help="Someone on the team, or any name.">
+            <input className="input" list={`${ids.w}-list`} value={writerName} onChange={(e) => setWriterName(e.target.value)} {...inputProps(ids.w)} />
+            <datalist id={`${ids.w}-list`}>{people.map((n) => <option key={n} value={n} />)}</datalist>
+          </Field>
+          <Field label="When it was written" optional htmlFor={ids.d}><input className="input" type="date" value={writtenOn} onChange={(e) => setWrittenOn(e.target.value)} {...inputProps(ids.d)} /></Field>
+        </div>
+        <Field label={count > 1 ? 'Scripts in each document' : 'How many scripts are in it'} optional htmlFor={ids.n}>
+          <input className="input" type="number" min={1} max={1000} inputMode="numeric" value={scriptCount} onChange={(e) => setScriptCount(e.target.value)} style={{ maxWidth: 160 }} {...inputProps(ids.n)} />
+        </Field>
+        <Field label="Note" optional htmlFor={ids.no}><textarea className="input" rows={2} placeholder="Anything worth knowing, e.g. what performed well" value={note} onChange={(e) => setNote(e.target.value)} {...inputProps(ids.no)} /></Field>
+        <button type="submit" hidden />
+      </form>
+    </Dialog>
   );
 }

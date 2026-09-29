@@ -1205,3 +1205,25 @@ html[data-motion='on'] .rec-dot { animation: rec-pulse 1.8s var(--ease-out-quint
   .tp-ic { width: 32px; height: 32px; }
   .tp-sub { flex-basis: 100%; margin-left: 0; text-align: left; white-space: normal; }
 }
+
+/* compact "Written so far" stepper on a batch's assignment rows (managers) */
+.counter-compact { display: flex; align-items: center; gap: 8px; margin-top: 6px; justify-content: flex-end; }
+.counter-compact .stepper { display: flex; align-items: center; gap: 6px; }
+.counter-compact .stepper .icon-btn { width: 30px; height: 30px; background: var(--bg); }
+.counter-compact .stepper .icon-btn svg { width: 15px; height: 15px; }
+.counter-compact .stepper .icon-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--cyan) 22%, var(--bg)); }
+.counter-compact .val { min-width: 54px; text-align: center; font: 800 16px/1 var(--font-display); letter-spacing: -0.03em; }
+.counter-compact .val small { font: 700 11px/1 var(--font-display); color: var(--text-2); margin-left: 2px; }
+.counter-compact .val .pop { display: inline-block; animation: numpop 320ms var(--ease-out-back); }
+.counter-compact .save-state { font-size: 11.5px; color: var(--text-2); display: inline-flex; align-items: center; gap: 4px; }
+.counter-compact .save-state svg { width: 12px; height: 12px; color: var(--mint); }
+.counter-compact .save-state:empty { display: none; }
+
+/* past scripts in the Script bank */
+.bank-row.past .bank-num svg { width: 18px; height: 18px; color: var(--text-2); }
+.past-files { display: flex; flex-direction: column; gap: 8px; margin-top: -4px; }
+.past-file { display: flex; align-items: center; gap: 10px; padding: 6px 6px 6px 12px; border-radius: 12px; background: var(--row); }
+.past-file > svg { width: 17px; height: 17px; color: var(--text-2); flex: none; }
+.past-file .input { flex: 1; min-width: 0; height: 38px; }
+.past-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
+@media (max-width: 640px) { .past-pair { grid-template-columns: minmax(0, 1fr); } }

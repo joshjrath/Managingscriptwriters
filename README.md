@@ -48,11 +48,13 @@ Writers don't send scripts one at a time. On **My work** (or the batch page) the
 
 ### "Written so far" counter
 
-Writers work in one master document, so each batch on **My work** has a **Written so far** counter (+ / −) they tap to keep their manager posted. It is only an update: it never sends, withdraws or changes any script. It can't go below the scripts they've already sent or above how many they have. Managers see it as a lighter "written" layer in every progress bar, as "12 / 25 written · 8 sent" next to each writer on the batch page, and as one line in the history per writing session (repeated taps within 15 minutes update the same line).
+Writers work in one master document, so each batch on **My work**, and their share on the batch page, has a **Written so far** counter (+ / −) they tap to keep their manager posted. Admins and managers also get a small + / − on each writer's row on the batch page. It is only an update: it never sends, withdraws or changes any script. It can't go below the scripts they've already sent or above how many they have. Managers see it as a lighter "written" layer in every progress bar, as "12 / 25 written · 8 sent" next to each writer on the batch page, and as one line in the history per writing session (repeated taps within 15 minutes update the same line).
 
 ### Script bank
 
 **Script bank** in the sidebar lists every deliverable ever sent, across all clients and batches (archived ones included), for everyone on the team. A deliverable is one document, the PDF or link a writer sent covering their scripts for a batch ("scripts 1–45"), so it's one entry however many scripts are in it; only its newest version is listed (older ones are on the batch page). **Open** opens the document, **Approved edit** the version a manager approved with edits, and Timeliner once delivered. Search by client, batch, writer, file name, note or a script's title, or type `#12` to find the document script 12 is in; filter by client, writer and status. Press `/` to jump to the search box.
+
+**Past scripts:** admins and managers can add documents from before the platform with **Add past scripts**: upload one or more PDFs (or paste a link), choose the client, and optionally who wrote them (a team member's name links it to them), when, and how many scripts each holds. They show as "Past script" entries, are searched with everything else, and can be removed.
 
 ### Calendar views
 

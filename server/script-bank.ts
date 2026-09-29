@@ -8,9 +8,11 @@
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
-import type { Ctx } from './core';
-import { requireUser } from './auth';
-import { parse, zs } from './http';
+import { logActivity, type Ctx } from './core';
+import { requireManager, requireUser } from './auth';
+import { HttpError, notFound, parse, zs } from './http';
+import { readForm } from './submissions';
+import { storeFile } from './files';
 import { compressRanges, type ScriptStatus } from '../shared/workflow';
 import type { Deliverable, DeliverableState, ScriptBankPage } from '../shared/types';
 
@@ -21,6 +23,10 @@ interface SubRow {
 }
 interface ScriptRow { submission_id: number; id: number; number: number; title: string | null; status: ScriptStatus; timeliner_url: string | null }
 interface EditRow { submission_id: number; url: string | null; file_id: number | null; file_name: string | null; created_at: string }
+interface PastRow {
+  id: number; title: string; file_id: number | null; file_name: string | null; url: string | null; writer_id: number | null; writer_name: string | null;
+  script_count: number | null; written_on: string | null; note: string | null; created_at: string; client_id: number; client_name: string;
+}
 interface LooseRow {
   id: number; number: number; title: string | null; status: ScriptStatus; doc_url: string; timeliner_url: string | null; updated_at: string;
   writer_id: number | null; writer_name: string | null;
@@ -107,6 +113,7 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
         state: stateOf(list.map((x) => x.status)),
         edited: e ? { kind: e.file_id ? 'file' : 'link', href: e.file_id ? `/api/files/${e.file_id}` : e.url!, name: e.file_name, at: e.created_at } : null,
         timelinerUrl: list.find((x) => x.timeliner_url)?.timeliner_url ?? null,
+        past: null,
       });
     }
 
@@ -136,6 +143,28 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
         state: stateOf(list.map((x) => x.status)),
         edited: null,
         timelinerUrl: list.find((x) => x.timeliner_url)?.timeliner_url ?? null,
+        past: null,
+      });
+    }
+
+    // Past scripts from before the platform, added straight to the bank.
+    const past = await db.query<PastRow>(
+      `select p.id, p.title, p.file_id, f.filename as file_name, p.url, p.writer_id, coalesce(u.name, p.writer_name) as writer_name,
+              p.script_count, p.written_on, p.note, p.created_at, c.id as client_id, c.name as client_name
+         from past_documents p join clients c on c.id = p.client_id
+         left join users u on u.id = p.writer_id left join files f on f.id = p.file_id
+        where p.removed_at is null and ($1::bigint is null or p.client_id = $1) and ($2::bigint is null or p.writer_id = $2)`,
+      [q.clientId ?? null, q.writerId ?? null],
+    );
+    for (const r of past) {
+      out.push({
+        key: `p${r.id}`, kind: r.file_id ? 'file' : 'link', href: r.file_id ? `/api/files/${r.file_id}` : r.url!,
+        name: r.file_name, note: r.note, version: 1, sentAt: r.written_on ? `${r.written_on}T12:00:00.000Z` : r.created_at,
+        writerId: r.writer_id, writerName: r.writer_name,
+        batchId: null, batchTitle: r.title, batchArchived: false,
+        clientId: r.client_id, clientName: r.client_name, shootDate: null,
+        scripts: [], ranges: '', state: 'delivered', edited: null, timelinerUrl: null,
+        past: { id: r.id, scriptCount: r.script_count, writtenOn: r.written_on },
       });
     }
 
@@ -151,6 +180,7 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
       if (q.status === 'open' && (d.state === 'approved' || d.state === 'delivered')) return false;
       if (!needle) return true;
       if (num != null) return d.scripts.some((s) => s.number === num);
+      // past documents: their title, file name and note are searched below
       const hay = [d.clientName, d.batchTitle, d.writerName ?? '', d.name ?? '', d.note ?? '', ...d.scripts.map((s) => s.title ?? '')].join('\n').toLowerCase();
       return hay.includes(needle);
     };
@@ -162,8 +192,52 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
     return {
       deliverables: page,
       total: found.length,
-      scriptCount: found.reduce((n, d) => n + d.scripts.length, 0),
+      scriptCount: found.reduce((n, d) => n + (d.past ? d.past.scriptCount ?? 0 : d.scripts.length), 0),
       nextOffset: q.offset + page.length < found.length ? q.offset + page.length : null,
     };
+  });
+
+  // Past scripts: a PDF (or a link) from before the platform, filed under a client.
+  app.post('/api/script-bank/past', async (req) => {
+    const me = requireManager(req);
+    const { fields, file } = await readForm(req, ctx.uploadLimitBytes);
+    const input = parse(z.object({
+      clientId: z.coerce.number().int().positive({ message: 'Choose a client' }),
+      title: z.string().trim().max(200).optional(),
+      url: z.string().trim().url('Enter a full link, starting with https://').max(2000).optional().or(z.literal('')),
+      writerName: z.string().trim().max(120).optional(),
+      scriptCount: z.coerce.number().int().min(1).max(1000).optional().or(z.literal('').transform(() => undefined)),
+      writtenOn: zs.date.optional().or(z.literal('').transform(() => undefined)),
+      note: z.string().trim().max(2000).optional(),
+    }), fields);
+    if (!file && !input.url) throw new HttpError(400, 'Choose a file or paste a link', { file: 'Choose a file or paste a link' });
+    const client = await db.one<{ id: number; name: string }>(`select id, name from clients where id = $1`, [input.clientId]);
+    if (!client) throw new HttpError(400, 'Choose a client', { clientId: 'Choose a client' });
+    const title = input.title || (file ? file.filename.replace(/\.[a-z0-9]{2,5}$/i, '') : 'Past scripts');
+    // a writer's name that matches someone on the team links it to them
+    const writer = input.writerName
+      ? await db.one<{ id: number; name: string }>(`select id, name from users where lower(name) = lower($1) and removed_at is null order by id limit 1`, [input.writerName])
+      : undefined;
+    const id = await db.tx(async (t) => {
+      const fileId = file ? await storeFile(t, me, file) : null;
+      const row = await t.one<{ id: number }>(
+        `insert into past_documents (client_id, title, file_id, url, writer_id, writer_name, script_count, written_on, note, created_by)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`,
+        [client.id, title, fileId, file ? null : input.url || null, writer?.id ?? null, writer ? null : input.writerName || null,
+          input.scriptCount ?? null, input.writtenOn ?? null, input.note || null, me.id],
+      );
+      await logActivity(t, { actor: me, action: 'past.added', entityType: 'past_document', entityId: row!.id, clientId: client.id, summary: `Added past scripts “${title}” to the Script bank` });
+      return row!.id;
+    });
+    return { id };
+  });
+
+  app.delete('/api/script-bank/past/:id', async (req) => {
+    const me = requireManager(req);
+    const { id } = parse(z.object({ id: zs.id }), req.params);
+    const r = await db.one<{ client_id: number; title: string }>(`update past_documents set removed_at = now() where id = $1 and removed_at is null returning client_id, title`, [id]);
+    if (!r) throw notFound('Past document');
+    await logActivity(db, { actor: me, action: 'past.removed', entityType: 'past_document', entityId: id, clientId: r.client_id, summary: `Removed past scripts “${r.title}” from the Script bank` });
+    return { ok: true };
   });
 }
