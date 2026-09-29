@@ -7,7 +7,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bell, Building2, CalendarDays, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
-  PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Wand2,
+  Circle, Eye, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Wand2,
 } from 'lucide-react';
 import { LayoutGroup, m } from 'framer-motion';
 import { api, queryClient, useSave } from '../api';
@@ -17,6 +17,7 @@ import { nowInZone } from '../../../shared/dates';
 import { Avatar, Button, Dialog, Field, FormError, inputProps, useFieldId, useToast } from './ui';
 import { NewWorkDialog, type NewWorkTab, type NewWorkPreset } from './NewWork';
 import { MomentsHost } from './Moments';
+import { ModeBar, RecordingDialog, ViewAsDialog, useModeActions } from './ModeBar';
 import { SPRING, setMotionEnabled, useMotionSetting } from '../motion';
 import { LATEST_CHANGE } from '../../../shared/changelog';
 
@@ -67,7 +68,7 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
   return (
     <BootCtx.Provider value={boot}>
       <NewWorkCtx.Provider value={(tab = 'shoot', preset) => setNewWork({ tab, preset })}>
-        <div className={`app${collapsed ? ' collapsed' : ''}${expanded ? ' expanded' : ''}`}>
+        <div className={`app${collapsed ? ' collapsed' : ''}${expanded ? ' expanded' : ''}${boot.mode?.recording ? ' recording' : ''}`}>
           <aside className="sidebar" aria-label="Main navigation">
             <Rail onToggle={toggle} collapsed={railCollapsed} />
           </aside>
@@ -86,6 +87,7 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
         </div>
         <NewWorkDialog state={newWork} onClose={() => setNewWork(null)} />
         <MomentsHost />
+        <ModeBar />
       </NewWorkCtx.Provider>
     </BootCtx.Provider>
   );
@@ -180,10 +182,13 @@ function NavItem({ to, icon, label, collapsed, children }: { to: string; icon: R
 }
 
 function UserMenu() {
-  const { me } = useBoot();
+  const { me, mode } = useBoot();
   const motionOn = useMotionSetting();
   const [open, setOpen] = useState(false);
   const [pw, setPw] = useState(false);
+  const [viewAs, setViewAs] = useState(false);
+  const [recording, setRecording] = useState(false);
+  const modeAct = useModeActions();
   const ref = useRef<HTMLDivElement>(null);
   useOutside(ref, () => setOpen(false), open);
   const logout = async () => {
@@ -202,12 +207,22 @@ function UserMenu() {
       </button>
       {open && (
         <div className="menu" role="menu">
-          <button role="menuitem" onClick={() => { setPw(true); setOpen(false); }}><KeyRound />Change password</button>
+          {mode && (
+            <>
+              <button role="menuitem" onClick={() => { setViewAs(true); setOpen(false); }}><Eye />View as…</button>
+              <button role="menuitemcheckbox" aria-checked={!!mode.recording} onClick={() => { setOpen(false); if (mode.recording) modeAct.stopRecording(); else setRecording(true); }}>
+                <Circle />Recording mode<span className={`switch${mode.recording ? ' on' : ''}`} aria-hidden><i /></span>
+              </button>
+            </>
+          )}
+          {!mode?.viewingAs && <button role="menuitem" onClick={() => { setPw(true); setOpen(false); }}><KeyRound />Change password</button>}
           <button role="menuitemcheckbox" aria-checked={motionOn} onClick={() => setMotionEnabled(!motionOn)}><Wand2 />Animations<span className={`switch${motionOn ? ' on' : ''}`} aria-hidden><i /></span></button>
           <button role="menuitem" onClick={logout}><LogOut />Sign out</button>
         </div>
       )}
       <PasswordDialog open={pw} onClose={() => setPw(false)} />
+      {mode && <ViewAsDialog open={viewAs} onClose={() => setViewAs(false)} />}
+      {mode && <RecordingDialog open={recording} onClose={() => setRecording(false)} />}
     </div>
   );
 }

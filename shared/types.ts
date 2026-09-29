@@ -53,8 +53,20 @@ export interface Counts {
   attention: number;
 }
 
+/** An admin's View as / Recording mode state (null for everyone else). */
+export interface SessionMode {
+  realId: number;
+  realName: string;
+  /** whose eyes the site is showing, when it isn't the admin's own */
+  viewingAs: { id: number; name: string; role: Role; roleLabel: string } | null;
+  /** a practice copy of the workspace: anything goes, and it's all thrown away when turned off */
+  recording: { startedAt: string } | null;
+}
+
 export interface Bootstrap {
+  /** who the site is showing (the viewed person while viewing as someone) */
   me: Me;
+  mode: SessionMode | null;
   /** reading pasted notes with AI is set up on the server (ANTHROPIC_API_KEY) */
   notesImport: boolean;
   /** the newest What's new entry this person has opened */

@@ -1,6 +1,7 @@
 // Clients, briefing/ideation-call records, resources and secure file access.
 
 import { createHash } from 'node:crypto';
+import { realFileData } from '../recording';
 import type { FastifyInstance } from 'fastify';
 import { isManager } from '../../shared/workflow';
 import { z } from 'zod';
@@ -383,7 +384,9 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
       .header('X-Content-Type-Options', 'nosniff')
       .header('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox")
       .header('Cache-Control', 'private, max-age=300');
-    return reply.send(Buffer.from(f.data));
+    // in Recording mode, files copied from the real workspace keep their contents there
+    const data = f.data.length === 0 && f.size > 0 ? await realFileData(ctx, id) ?? f.data : f.data;
+    return reply.send(Buffer.from(data));
   });
 
   app.get('/api/search', async (req) => {

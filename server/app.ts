@@ -8,7 +8,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
-import { SESSION_COOKIE, userForToken } from './auth';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { HttpError } from './http';
 import type { Ctx } from './core';
 import { registerAccountRoutes } from './routes/account';
@@ -20,6 +20,8 @@ import { registerAudit } from './audit';
 import { registerSubmissionRoutes } from './submissions';
 import { registerMomentRoutes } from './moments';
 import { registerNotesImportRoutes } from './notes-import';
+import { registerRecording, routedDb } from './recording';
+import type { Db } from './db';
 
 export const CSRF_HEADER = 'x-scale-media';
 
@@ -39,8 +41,14 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
       const origin = req.headers.origin;
       if (origin && req.headers.host && new URL(origin).host !== req.headers.host) throw new HttpError(403, 'Cross-site request blocked');
     }
-    req.user = await userForToken(ctx.db, req.cookies[SESSION_COOKIE]);
   });
+
+  // Sessions, View as and Recording mode (which sends a sign-in's requests to a practice copy).
+  const realDb = ctx.realDb ?? ctx.db;
+  const als = new AsyncLocalStorage<Db>();
+  ctx.realDb = realDb;
+  ctx.db = routedDb(realDb, als);
+  registerRecording(app, ctx, realDb, als);
 
   app.addHook('onSend', async (req, reply, payload) => {
     reply.header('X-Content-Type-Options', 'nosniff');

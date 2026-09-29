@@ -87,6 +87,15 @@ Change a shoot's dates from **Change dates** on the batch or client page, by cli
 
 **Master log**, next to your name in the sidebar, lists every change (from the activity history), every page or file someone opened, sign-ins and failed sign-ins, and anything someone tried that they weren't allowed to do. Filter by person or kind, or search. Repeat views of the same page by the same person within 10 minutes count once. Page views are kept for 400 days; changes and sign-ins are kept indefinitely. Managers and writers can't open it.
 
+### View as and Recording mode (admins only)
+
+For recording tutorials. From your account menu:
+
+- **View as…** shows the whole site exactly as that person sees it (their My work, their notifications, their menu). On the real workspace it's **view only**: changes are refused, and the app's own background writes (dismissing their celebrations, marking their notifications read) quietly do nothing.
+- **Recording mode** makes a private practice copy of the whole workspace, held in the server's memory for your sign-in only. Everything works in it, including viewing as someone and acting as them. Turning it off (or signing out, 6 idle hours, or a server restart) throws the copy away; nobody else ever sees it. Uploaded files stay readable in it without being copied. At most 3 copies exist at once.
+
+A small bar at the bottom shows what's on (Switch person, Back to me, Turn off) and can shrink to a dot. The Master log records when each starts and stops, and pages viewed as someone are logged under the admin with "(viewing as …)".
+
 ### Deadlines
 
 Creating a shoot creates its batch and calculates, from the **first shoot day**:

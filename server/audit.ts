@@ -109,20 +109,26 @@ export function registerAudit(app: FastifyInstance, ctx: Ctx) {
       const route = req.routeOptions?.url;
       const me = req.user;
       if (!me || !route || !route.startsWith('/api/')) return;
+      // Recording mode is practice: only turning it on and off is logged (by recording.ts).
+      if (req.recording) return;
+      // While viewing as someone, it's the admin looking.
+      const actor = req.realUser ?? me;
+      const as = req.viewingAs ? ` (viewing as ${req.viewingAs.name})` : '';
       const status = reply.statusCode;
       if (req.method === 'GET') {
         if (status >= 400) return;
         const v = await describeView(ctx.db, route, (req.params ?? {}) as Record<string, string>, (req.query ?? {}) as Record<string, string>, me);
         if (!v) return;
-        const key = `${me.id}|${v.key}`;
+        const key = `${actor.id}|${me.id}|${v.key}`;
         const now = Date.now();
         if ((recentViews.get(key) ?? 0) > now - VIEW_WINDOW_MS) return;
         recentViews.set(key, now);
         if (recentViews.size > 10_000) for (const [k, t] of recentViews) if (t < now - VIEW_WINDOW_MS) recentViews.delete(k);
-        await auditEvent(ctx.db, { userId: me.id, kind: 'view', summary: v.summary, link: v.link });
+        await auditEvent(ctx.db, { userId: actor.id, kind: 'view', summary: v.summary + as, link: v.link });
       } else if (status === 403) {
         const what = MUTATIONS[route] ?? `${req.method} ${route}`;
-        await auditEvent(ctx.db, { userId: me.id, kind: 'denied', summary: `Tried to ${what} — not allowed`, ip: req.ip });
+        if (req.viewingAs) return; // refused only because it's view-only
+        await auditEvent(ctx.db, { userId: actor.id, kind: 'denied', summary: `Tried to ${what} — not allowed`, ip: req.ip });
       }
     } catch (err) {
       req.log.warn({ err }, 'master log write failed');

@@ -1089,3 +1089,37 @@ dialog.moment::backdrop { background: rgba(8, 8, 10, 0.72); backdrop-filter: blu
 .switch i { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--text-2); transition: transform 240ms var(--ease-out-back), background 200ms ease; }
 .switch.on { background: color-mix(in srgb, var(--mint) 55%, var(--track)); }
 .switch.on i { transform: translateX(14px); background: #fff; }
+
+/* ── View as / Recording mode ─────────────────────────────────────────── */
+.mode-bar {
+  position: fixed; left: 50%; bottom: 18px; translate: -50% 0; z-index: 90;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center;
+  max-width: calc(100vw - 32px); padding: 8px 8px 8px 16px; border-radius: 999px;
+  background: color-mix(in srgb, var(--cyan) 14%, var(--panel-2)); box-shadow: var(--shadow-pop);
+  font-size: 13px; line-height: 1.25;
+}
+.mode-bar.rec { background: color-mix(in srgb, var(--red) 16%, var(--panel-2)); }
+.mode-part { display: inline-flex; align-items: center; gap: 9px; min-width: 0; }
+.mode-part > span { display: flex; flex-direction: column; min-width: 0; }
+.mode-part b { font-weight: 700; white-space: nowrap; }
+.mode-sub { color: var(--text-2); font-size: 11.5px; white-space: nowrap; }
+.mode-actions { display: inline-flex; align-items: center; gap: 4px; }
+.rec-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--red); flex: none; box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 60%, transparent); }
+html[data-motion='on'] .rec-dot { animation: rec-pulse 1.8s var(--ease-out-quint) infinite; }
+@keyframes rec-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 9px transparent; } }
+.mode-dot {
+  position: fixed; right: 18px; bottom: 18px; z-index: 90; width: 34px; height: 34px; border-radius: 50%; border: 0; cursor: pointer;
+  display: grid; place-items: center; color: var(--cyan); background: var(--panel-2); box-shadow: var(--shadow-pop);
+}
+.mode-dot:hover { background: var(--row); }
+.viewas-list { display: flex; flex-direction: column; gap: 6px; max-height: 60vh; overflow-y: auto; }
+.viewas-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 0; border-radius: var(--r-row); background: var(--row); color: var(--text); cursor: pointer; text-align: left; font: inherit; }
+.viewas-row:hover:not(:disabled) { background: var(--btn-hover); }
+.viewas-row:disabled { opacity: .6; cursor: progress; }
+.viewas-row.on { box-shadow: inset 0 0 0 1.5px var(--cyan); }
+.viewas-row .who { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.viewas-row .who span { color: var(--text-2); font-size: 12px; }
+@media (max-width: 640px) {
+  .mode-bar { border-radius: 20px; bottom: 12px; padding: 10px 12px; gap: 8px; }
+  .mode-dot { right: 12px; bottom: 12px; }
+}

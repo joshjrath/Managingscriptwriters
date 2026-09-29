@@ -17,6 +17,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-29-view-as-recording',
+    date: '2026-09-29',
+    title: 'View as anyone, and Recording mode for tutorials',
+    summary: 'Admins can see the site through anyone’s eyes, and practise on a throwaway copy where nothing is saved.',
+    changes: [
+      { tag: 'new', text: 'View as (account menu, Admins only): pick anyone on the team and the whole site shows exactly what they see. On the real workspace it’s view only, so nothing happens under their name.' },
+      { tag: 'new', text: 'Recording mode (account menu): a private practice copy of the whole workspace. Send scripts, approve, drag shoots, add clients, and view as anyone to click through what they’d do. Turn it off and everything you did is thrown away.' },
+      { tag: 'new', text: 'A small bar shows what’s on, with Switch person, Back to me and Turn off. Shrink it to a dot so it stays out of your recordings.' },
+      { tag: 'new', text: 'The Master log notes when View as and Recording mode start and stop.' },
+    ],
+  },
+  {
     id: '2026-09-29-soft-layers',
     date: '2026-09-29',
     title: 'Softer colours in the water',

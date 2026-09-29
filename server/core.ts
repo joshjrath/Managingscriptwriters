@@ -19,6 +19,8 @@ export interface Ctx {
   setupHint?: string;
   /** reads pasted notes into an import plan (Claude); absent when no API key is configured */
   notesReader?: import('./notes-import').NotesReader | null;
+  /** the real workspace; `db` points at a practice copy for requests made in Recording mode */
+  realDb?: Db;
 }
 
 // ── settings ─────────────────────────────────────────────────────────────

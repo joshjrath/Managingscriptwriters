@@ -874,3 +874,88 @@ describe('paste notes (AI import)', () => {
     expect((await manager.get('/api/clients?status=all')).body.clients.some((c: any) => c.name === 'Fresh Start Co')).toBe(false);
   });
 });
+
+describe('view as and recording mode', () => {
+  it('lets the admin see the site as someone else, view only', async () => {
+    expect((await sarah.post('/api/admin/view-as', { userId: ids.marcus })).status).toBe(403);
+    expect((await sarah.get('/api/bootstrap')).body.mode).toBeNull();
+
+    const start = await manager.post('/api/admin/view-as', { userId: ids.sarah });
+    expect(start.status).toBe(200);
+    expect(start.body.viewingAs).toMatchObject({ id: ids.sarah, name: 'Sarah Chen', roleLabel: 'Writer' });
+    const boot = (await manager.get('/api/bootstrap')).body;
+    expect(boot.me).toMatchObject({ id: ids.sarah, role: 'writer' });
+    expect(boot.mode).toMatchObject({ realId: ids.josh, realName: 'Josh Rath', recording: null });
+    expect(boot.whatsNewSeen).toBe('2026-09-28-animations');
+    // what she sees, including what writers can't open
+    expect((await manager.get('/api/audit')).status).toBe(403);
+    // changes are off; background writes quietly do nothing
+    const blocked = await manager.post('/api/clients', { name: 'Should Not Exist' });
+    expect(blocked.status).toBe(403);
+    expect(blocked.body.error.code).toBe('viewing_as');
+    expect((await manager.post('/api/me/whats-new', { seen: 'something-else' })).status).toBe(200);
+    expect((await sarah.get('/api/bootstrap')).body.whatsNewSeen).toBe('2026-09-28-animations');
+    expect((await manager.get('/api/moments')).body).toEqual([]);
+    // her own sign-in is untouched
+    expect((await sarah.get('/api/bootstrap')).body.mode).toBeNull();
+
+    const stop = await manager.post('/api/admin/view-as/stop');
+    expect(stop.body.viewingAs).toBeNull();
+    expect((await manager.get('/api/bootstrap')).body.me.id).toBe(ids.josh);
+    const log = (await manager.get('/api/audit?kind=auth')).body.entries.map((e: any) => e.summary);
+    expect(log).toContain('Started viewing as Sarah Chen');
+    expect(log).toContain('Stopped viewing as Sarah Chen');
+  });
+
+  it('recording mode works on a practice copy that’s thrown away when it’s turned off', async () => {
+    const clientsBefore = (await manager.get('/api/clients?status=all')).body.clients.length;
+    const on = await manager.post('/api/admin/recording/start');
+    expect(on.status).toBe(200);
+    expect(on.body.recording).not.toBeNull();
+    expect((await manager.get('/api/bootstrap')).body.mode.recording).not.toBeNull();
+
+    // everything is there and anything goes
+    expect((await manager.get('/api/clients?status=all')).body.clients.length).toBe(clientsBefore);
+    const made = await manager.post('/api/clients', { name: 'Practice Client' });
+    expect(made.status).toBe(200);
+    expect((await manager.get('/api/clients?status=all')).body.clients.some((c: any) => c.name === 'Practice Client')).toBe(true);
+    // new rows don't collide with copied ones
+    expect(made.body.clientId).toBeGreaterThan(acmeId);
+    // copied files still open
+    const file = await db.one<{ id: number }>(`select f.id from files f join resources r on r.file_id = f.id where r.removed_at is null order by f.id limit 1`);
+    const got = await app.inject({ method: 'GET', url: `/api/files/${file!.id}`, headers: { cookie: manager.cookie } });
+    expect(got.statusCode).toBe(200);
+    expect(got.body).toContain('%PDF-1.4 hello');
+
+    // act as a writer too
+    await manager.post('/api/admin/view-as', { userId: ids.sarah });
+    expect((await manager.get('/api/bootstrap')).body.me.id).toBe(ids.sarah);
+    expect((await manager.post('/api/me/whats-new', { seen: 'practice-only' })).status).toBe(200);
+    expect((await manager.get('/api/bootstrap')).body.whatsNewSeen).toBe('practice-only');
+
+    // nobody else sees any of it
+    expect((await sarah.get('/api/bootstrap')).body.whatsNewSeen).toBe('2026-09-28-animations');
+    expect((await sarah.get('/api/clients?status=all')).body.clients.some((c: any) => c.name === 'Practice Client')).toBe(false);
+    expect(await db.one(`select id from clients where name = 'Practice Client'`)).toBeUndefined();
+
+    const off = await manager.post('/api/admin/recording/stop');
+    expect(off.body.recording).toBeNull();
+    // still viewing as Sarah (she's real), on the real workspace, view only
+    expect(off.body.viewingAs?.id).toBe(ids.sarah);
+    expect((await manager.get('/api/bootstrap')).body.whatsNewSeen).toBe('2026-09-28-animations');
+    await manager.post('/api/admin/view-as/stop');
+    expect((await manager.get('/api/clients?status=all')).body.clients.some((c: any) => c.name === 'Practice Client')).toBe(false);
+    const log = (await manager.get('/api/audit?kind=auth')).body.entries.map((e: any) => e.summary);
+    expect(log.some((s: string) => s.startsWith('Turned on Recording mode'))).toBe(true);
+    expect(log.some((s: string) => s.startsWith('Turned off Recording mode'))).toBe(true);
+  });
+
+  it('signing out ends recording mode', async () => {
+    const cookie = await login('josh@scale.test', 'correct-horse-battery');
+    const josh = as(cookie);
+    await josh.post('/api/admin/recording/start');
+    expect((await josh.get('/api/bootstrap')).body.mode.recording).not.toBeNull();
+    expect((await josh.post('/api/auth/logout')).status).toBe(200);
+    expect((await josh.get('/api/bootstrap')).status).toBe(401);
+  });
+});
