@@ -153,10 +153,14 @@ export interface WriterShare {
   count: number;
   ranges: string;
   draftReady: number;
+  /** approved, including delivered */
+  approved: number;
   delivered: number;
   /** the writer's own "written so far" count (never less than what they've sent) */
   written: number;
   writtenAt: string | null;
+  /** how far their counter went up today (workspace time) */
+  writtenToday: number;
 }
 
 export interface BatchSummary {
@@ -186,6 +190,8 @@ export interface BatchSummary {
   progress: Progress;
   /** scripts written so far, from writers' progress counters plus everything already sent */
   written: number;
+  /** how far writers' counters went up today, across the batch */
+  writtenToday: number;
   stage: Stage;
   writers: WriterShare[];
   draft: Milestone;

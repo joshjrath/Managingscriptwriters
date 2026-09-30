@@ -11,6 +11,7 @@ import { PRIORITY_LABEL } from '../../../shared/types';
 import { fmtDate, fmtLong, fmtRange, fmtStamp } from '../../../shared/format';
 import { BatchProgress, Button, Chip, Dialog, DueChip, ErrorState, Loading, Ring, ringColor, StageChip, edgeFor } from './ui';
 import { useBoot } from './Shell';
+import { TodayBump } from './WritingPulse';
 
 export function writersText(b: BatchSummary): string {
   return b.writers.map((w) => `${w.name} ${w.ranges}`).join(' · ') || 'No scripts';
@@ -32,6 +33,7 @@ export function BatchItem({ b, action, extra, onOpen, ring }: { b: BatchSummary;
         <div className="title">{b.title}</div>
         <div className="meta">
           <span className="ellipsis" title={writersText(b)}>{writersText(b)}</span>
+          <TodayBump n={b.writtenToday} />
           {b.blocked && <Chip color="red" icon={<Ban aria-hidden />}>Blocked</Chip>}
           {b.progress.unassigned > 0 && <Chip color="pink" icon={<UserPlus aria-hidden />}>{b.progress.unassigned} unassigned</Chip>}
           {b.progress.inReview > 0 && <Chip color="lavender" dot>{b.progress.inReview} in review</Chip>}

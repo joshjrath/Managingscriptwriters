@@ -686,6 +686,32 @@ describe('writer progress counter', () => {
     expect(onBehalf.body.written).toBe(8);
     expect(((await manager.get(`/api/batches/${id}`)).body as BatchDetail).activity.find((a) => a.action === 'progress.written' && a.summary.includes('for Sarah Chen'))).toBeTruthy();
   });
+
+  it('shows how far each writer went today', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Today counter', targetCount: 10, finalDue: '2026-10-22', split: [{ writerId: ids.sarah, count: 6 }, { writerId: ids.marcus, count: 4 }] });
+    const id = b.body.batchId as number;
+    await sarah.post(`/api/batches/${id}/written`, { written: 2 });
+    await sarah.post(`/api/batches/${id}/written`, { written: 3 });
+    let d = (await manager.get(`/api/batches/${id}`)).body as BatchDetail;
+    const her = () => d.writers.find((w) => w.userId === ids.sarah)!;
+    expect(her()).toMatchObject({ written: 3, writtenToday: 3, approved: 0 });
+    expect(d.writers.find((w) => w.userId === ids.marcus)!.writtenToday).toBe(0);
+    expect(d.writtenToday).toBe(3);
+    // going back down counts down too, never below zero
+    await sarah.post(`/api/batches/${id}/written`, { written: 1 });
+    d = (await manager.get(`/api/batches/${id}`)).body as BatchDetail;
+    expect(her().writtenToday).toBe(1);
+    // a new day starts from where the counter stood
+    await db.query(`update writer_progress set day = day - 1 where batch_id = $1`, [id]);
+    d = (await manager.get(`/api/batches/${id}`)).body as BatchDetail;
+    expect(her()).toMatchObject({ written: 1, writtenToday: 0 });
+    await sarah.post(`/api/batches/${id}/written`, { written: 4 });
+    d = (await manager.get(`/api/batches/${id}`)).body as BatchDetail;
+    expect(her()).toMatchObject({ written: 4, writtenToday: 3 });
+    // it shows on the Overview's batches too
+    const dash = (await manager.get('/api/dashboard')).body;
+    expect(dash.activeBatches.find((x: any) => x.id === id).writers.find((w: any) => w.userId === ids.sarah)).toMatchObject({ writtenToday: 3 });
+  });
 });
 
 describe('scheduling a shoot before its scripts are planned', () => {

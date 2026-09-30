@@ -615,9 +615,13 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       if (!mine.length) throw new HttpError(400, 'No scripts in this batch are assigned to them');
       const sent = mine.filter((s) => isDraftReady(s.status)).length;
       const written = Math.min(mine.length, Math.max(sent, input.written));
+      // remember where the counter stood when the day started, for "+3 today"
+      const today = (await clockFor({ ...ctx, db: t })).today;
       await t.query(
-        `insert into writer_progress (batch_id, user_id, written) values ($1, $2, $3)
-         on conflict (batch_id, user_id) do update set written = excluded.written, updated_at = now()`, [id, uid, written],
+        `insert into writer_progress (batch_id, user_id, written, day, day_start) values ($1, $2, $3, $4, $5)
+         on conflict (batch_id, user_id) do update set written = excluded.written, updated_at = now(),
+           day_start = case when writer_progress.day = excluded.day then writer_progress.day_start else greatest(writer_progress.written, $5) end,
+           day = excluded.day`, [id, uid, written, today, sent],
       );
       const who = uid === me.id ? '' : ` for ${(await t.one<{ name: string }>(`select name from users where id = $1`, [uid]))?.name ?? 'the writer'}`;
       const summary = `Progress update: ${written} of ${mine.length} scripts written${who}`;

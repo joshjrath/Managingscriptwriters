@@ -396,4 +396,9 @@ create table editors (
   removed_at timestamptz
 );
 `,
+  // 12 · where each writer's counter stood at the start of the day, so managers can see "+3 today"
+  `
+alter table writer_progress add column day date;
+alter table writer_progress add column day_start int;
+`,
 ];
