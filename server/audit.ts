@@ -27,6 +27,7 @@ const STATIC_VIEWS: Record<string, string> = {
   '/api/users': 'Viewed the Team',
   '/api/settings': 'Viewed Settings',
   '/api/audit': 'Viewed the Master log',
+  '/api/control/world': 'Viewed the Control Center',
 };
 
 const MUTATIONS: Record<string, string> = {
@@ -63,6 +64,9 @@ const MUTATIONS: Record<string, string> = {
   '/api/script-bank/past/:id': 'remove past scripts',
   '/api/moments/seen': 'dismiss a celebration',
   '/api/me/whats-new': 'open What’s new',
+  '/api/control/authorize': 'open the Control Center',
+  '/api/editors': 'add an editor',
+  '/api/editors/:id': 'change an editor',
 };
 
 async function describeView(db: Db, route: string, params: Record<string, string>, query: Record<string, string>, me: Me): Promise<{ key: string; summary: string; link: string | null } | null> {

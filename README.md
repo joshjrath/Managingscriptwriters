@@ -140,9 +140,31 @@ In-app notifications cover assignments, deadline changes, approaching / due-toda
 
 Every meaningful change (creation, assignments, status changes, reviews, deliveries, deadline moves, blockers, target changes, archiving) is written to the activity history with actor and timestamp, shown on batch and client pages.
 
+### Control Center (admin only)
+
+A separate, private view of the whole operation, built as its own visual world rather than another page of the app. A tiny **CONTROL CENTER** link sits under the wordmark in the admin's sidebar; anyone else only reaches it by going to `/control-center` directly. Clicking it drains the page into darkness (colour, depth and the wordmark go, a scan passes) while the Control Center loads, then a minimal portal asks for authorization.
+
+**Clearance** uses the platform's own accounts: a signed-in admin re-enters their password; someone signed out gives their email and password (which also signs them in). The server then marks that session *cleared* for 12 hours (`sessions.control_until`). Every Control Center request checks it, managers and writers are always refused ("clearance insufficient"; `isAdmin` in `server/control/access.ts`), failed attempts are throttled like sign-in, and clearances, failures and refusals go to the Master log. **Lock clearance** (System view or the command palette) ends it; signing out ends it too. Hiding the link is only an aesthetic choice: the world data is never served to a session that isn't cleared, and nothing secret is in the page. `verifyOperator` in `server/control/routes.ts` is the one place to swap in another identity check.
+
+After a short initialization (each line is a real step: identity, the snapshot, nodes, timezones, operations, the renderer) a point becomes a cloud of particles, the outline of Earth settles first, then the planet. On a repeat visit within the clearance the sequence is shorter.
+
+**The world.** A particle globe (Natural Earth land, lit by the real sun, with a warm band on the terminator) carries every placed team member as a node on their city, plus the editors the admin adds under **Settings → Editors** (city and working hours only: they can't sign in, have no scripts and are never offered as writers). Nodes follow local time: a pulse when active, a slow heartbeat in deep work, a bead in orbit while reviewing, dim when off shift, a breath in the hour before a shift, a different ring for late-night work, a warm ring at local dawn and dusk, and a faster rhythm when a deadline is under 12 hours away. Their scripts orbit them (wider while in review, higher with the client). Arcs join writers and reviewers; handoffs travel them as packets of light and land with a *TRANSFER RECEIVED* label. Pressure appears in place as a broken amber ring and converging arcs: deadline collisions, overload, revision pile-ups, reviews waiting over 48 hours, too much converging on one reviewer, blocked batches, client approvals holding things up, hours nobody covers, and work landing after hours. Clicking a person turns the planet to their city and sets their name, local time, status, current signal, progress, next deadline and orbiting scripts beside it.
+
+**Views** (keys 1–9, or the left edge): World · Missions (projects on an orbit; opening one draws its phase arc, RESEARCH → DELIVERY, with its scripts sitting in their phase) · Deadlines (24H / 48H / 7D / 30D orbits: the closer the deadline, the tighter and faster the orbit) · Timezones (a 24-hour dial of shifts and coverage, with a scrubber and *Follow the sun*, which turns the planet and the terminator through the day) · Signals (handoffs and the full feed) · Constellation (people, projects and clients as a network) · Galaxy (every script as a star round its writer) · Archive (delivered work as constellations deeper in space) · System (diagnostics, data source, renderer).
+
+**Controls:** drag to turn (with inertia), scroll or pinch to zoom (scrolling past the limit enters or leaves a layer), ⌘K / Ctrl+K or `/` for the command palette (people, cities, clients, projects, script codes and commands such as *deadlines*, *writers online*, *reviews*, *follow the sun*, *lock*), arrows to turn or step through operations and hours, Esc to step back out. Sound is off by default (a very quiet synthesized hum and ticks when on).
+
+**Data.** The server builds one snapshot (`shared/control.ts` describes it; `server/control/`) from a source:
+- **Live workspace**: team members with a city (Settings → Team → *City* and *Working hours*), batches as projects, every script, recent submissions and reviews as handoffs between the people who sent and reviewed them, and the activity history as the feed.
+- **Simulated network**: a centralized, clearly labelled sample operation (`server/control/simulated.ts`) used until at least two people have a city. Its handoffs are replayed, not observed.
+
+`CONTROL_CENTER_DATA=simulated` or `=workspace` forces one; the default (`auto`) goes live once two people are placed. Clocks, the sun, shifts, coverage and anomalies are computed from real time on each device (`shared/control.ts`), never stored. The snapshot refreshes every 20 seconds.
+
+**Rendering.** three.js, loaded only with the Control Center (its own chunk, so the rest of the app is unaffected). Quality tiers pick particle counts and pixel ratio from the device and step down if frames drop; the loop pauses when the tab is hidden. Reduced-motion turns off auto-rotation, parallax and the long reveal. Without WebGL it draws the same globe, nodes, arcs and handoffs on a 2D canvas. Phones keep the globe, nodes, focus and search, with the typography set under the planet.
+
 ## Screens
 
-Overview · My work · Script bank · Production (board + table, filters, search) · Calendar (month + list; writing periods, drafts due, final delivery, shoots) · Clients and client detail · Batch detail (drafts & documents, script checklist with range selection and bulk actions, brief, deadlines, review notes, delivery records, history) · Review queue (one card per document) · Resources · Settings (deadline rules, timezone & cutoff, reminders, team) · Master log (admins) · What's new. Dashboard cards link to the matching filtered records; chart bars reveal the underlying batches. Admins and managers see the whole team on the Overview; a writer's Overview counts only the scripts assigned to them.
+Overview · My work · Script bank · Production (board + table, filters, search) · Calendar (month + list; writing periods, drafts due, final delivery, shoots) · Clients and client detail · Batch detail (drafts & documents, script checklist with range selection and bulk actions, brief, deadlines, review notes, delivery records, history) · Review queue (one card per document) · Resources · Settings (deadline rules, timezone & cutoff, reminders, team, editors for the Control Center) · Master log (admins) · What's new · Control Center (admin only). Dashboard cards link to the matching filtered records; chart bars reveal the underlying batches. Admins and managers see the whole team on the Overview; a writer's Overview counts only the scripts assigned to them.
 
 Responsive: full sidebar on wide screens, collapsible icon rail on smaller desktops/tablets, navigation drawer and card layouts on phones (My work, deadlines, briefs and delivery confirmation are prioritised).
 
@@ -195,8 +217,12 @@ They cover: deadline maths across month and year boundaries, leap days, DST, mul
 
 ```
 shared/         date & deadline maths, workflow rules, quick-entry parser, API types (used by server and client)
+                control.ts: the Control Center's world model, clocks, sun, coverage and anomalies; cities.ts
 server/         Fastify API: auth, routes/, reminders, migrations, demo seed
+                control/: Control Center clearance and world sources (live workspace, simulated network)
 client/         React app (Vite): styles/tokens.css holds every colour, radius, spacing and type token
+                src/control/: the Control Center (its own styles, overlay typography, engine/ for three.js)
+scripts/        dev runner; gen-landmask.mjs regenerates the globe's land mask from Natural Earth
 test/           vitest suites
 ```
 

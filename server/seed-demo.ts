@@ -15,6 +15,7 @@ import { insertShoot } from './routes/shoots';
 import { insertBriefing } from './routes/clients';
 import { addDays } from '../shared/dates';
 import type { Me } from '../shared/types';
+import { findCity } from '../shared/cities';
 
 export const DEMO_PASSWORD = 'scalemedia-demo';
 
@@ -37,6 +38,12 @@ export async function seedDemo(db: Db, now = new Date()): Promise<boolean> {
     ids[name.split(' ')[0].toLowerCase()] = r!.id;
   }
   await db.query(`update settings set is_demo = true where id = 1`);
+  // where everyone works from, so the Control Center runs on the demo team
+  for (const [key, city, hours] of [['josh', 'Toronto', [9, 18]], ['sarah', 'London', [9, 18]], ['marcus', 'Cape Town', [8, 17]], ['priya', 'Bengaluru', [10, 19]], ['leo', 'Mexico City', [9, 18]]] as const) {
+    const c = findCity(city)!;
+    await db.query(`update users set city = $2, city_code = $3, country = $4, lat = $5, lon = $6, timezone = $7, work_start = $8, work_end = $9 where id = $1`,
+      [ids[key], c.name, c.code, c.country, c.lat, c.lon, c.timezone, hours[0], hours[1]]);
+  }
   const me = (key: string, role: 'manager' | 'writer' = 'writer'): Me => ({ id: ids[key], name: people.find((p) => p[1].toLowerCase().startsWith(key))![1], email: '', role, capacityPerDay: null });
   const josh = me('josh', 'manager');
 
@@ -141,9 +148,10 @@ export async function seedDemo(db: Db, now = new Date()): Promise<boolean> {
   rows = await scriptIds(k.batchId);
   await act(josh, k.batchId, 'submit', pick(rows, 1, 3));
   await act(me('sarah'), k.batchId, 'submit', pick(rows, 4, 8));
-  await act(josh, k.batchId, 'approve', pick(rows, 1, 8));
+  // a manager's delivery covers every approved script, so 6–8 are approved after it: 1–5 delivered, 6–8 still to add
+  await act(josh, k.batchId, 'approve', pick(rows, 1, 5));
   await act(josh, k.batchId, 'deliver', pick(rows, 1, 3), 'Scheduled for next Tuesday', 'https://timeliner.io/');
-  await act(me('sarah'), k.batchId, 'deliver', pick(rows, 4, 5), null, 'https://timeliner.io/');
+  await act(josh, k.batchId, 'approve', pick(rows, 6, 8));
 
   // 5 · Harbor & Pine · no shoot, five scripts after the ideation call, unassigned
   const hpBrief = await insertBriefing(db, josh, harbor, {

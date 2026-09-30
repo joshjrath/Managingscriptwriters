@@ -28,6 +28,30 @@ export const CHANGELOG: ChangelogEntry[] = [
     ],
   },
   {
+    id: '2026-09-30-control-center-admin-editors',
+    date: '2026-09-30',
+    title: 'Control Center: admin only, and editors on the globe',
+    summary: 'Only the admin can open the Control Center now, and you can add editors so their local time shows there too.',
+    changes: [
+      { tag: 'improved', text: 'The Control Center is now for the admin only. Managers and writers are refused, and the link only shows in the admin’s sidebar. It’s no longer on the sign-in page.' },
+      { tag: 'new', text: 'Settings → Editors (admin only): add editors with their city and working hours. They appear in the Control Center with their local time, but they can’t sign in and aren’t offered as writers.' },
+    ],
+  },
+  {
+    id: '2026-09-30-control-center',
+    date: '2026-09-30',
+    title: 'The Control Center',
+    summary: 'For admins and managers: a private view of the whole operation on a live globe.',
+    changes: [
+      { tag: 'new', text: 'Admins and managers can open the Control Center from the small link under the Scale Media wordmark, or from the sign-in page. It asks for your password first, and stays open for 12 hours on that device. Writers can’t open it.' },
+      { tag: 'new', text: 'Everyone on the team appears on a globe at their city, with their local time, whether they’re on shift, what they’re working on and their next deadline. The planet is lit by the real sun, so you can see who is in daylight.' },
+      { tag: 'new', text: 'Other views show each batch and where its scripts are, deadlines as orbits (the closer the deadline, the tighter the orbit), a 24-hour dial of who covers which hours, scripts travelling between writers and reviewers, the team as a network, every script as a star, and delivered work as an archive.' },
+      { tag: 'new', text: 'It points out pressure: several deadlines landing on one person, someone with too much on, revisions piling up, reviews waiting too long, blocked batches and hours nobody covers.' },
+      { tag: 'new', text: 'Settings → Team now has City and Working hours for each person. Until at least two people have a city, the Control Center shows a sample network, clearly labelled as simulated.' },
+      { tag: 'fixed', text: 'The demo workspace sets itself up again.' },
+    ],
+  },
+  {
     id: '2026-09-30-batch-delivery-catch-up',
     date: '2026-09-30',
     title: 'Batches an admin already delivered are now fully delivered',

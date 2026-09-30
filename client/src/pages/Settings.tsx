@@ -5,12 +5,15 @@ import { isManager, ROLE_LABEL, type Role } from '../../../shared/workflow';
 import { AlertTriangle, CalendarClock, Check, Copy, KeyRound, Plus, RefreshCw, UserPlus } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api, useSave } from '../api';
-import type { Settings, UserSummary } from '../../../shared/types';
+import type { Editor, Settings, UserSummary } from '../../../shared/types';
 import { computeDeadlines, DEFAULT_RULES, isValidTimeZone } from '../../../shared/dates';
 import { fmtCutoff, fmtLong, fmtStamp, plural } from '../../../shared/format';
+import { CITIES, cityLabel } from '../../../shared/cities';
 import { PageHeader, useBoot } from '../components/Shell';
 import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, useFieldId, useToast } from '../components/ui';
 
+const HOURS = Array.from({ length: 24 }, (_, h) => h);
+const fmtHour = (h: number) => `${((h + 11) % 12) + 1}:00 ${h < 12 ? 'AM' : 'PM'}`;
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const ZONES = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Phoenix', 'America/Toronto', 'Europe/London', 'Europe/Dublin', 'Europe/Berlin', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Australia/Sydney', 'Pacific/Auckland', 'UTC'];
 
@@ -24,7 +27,10 @@ export function SettingsPage() {
       <PageHeader title="Settings" hideNewWork />
       <div className="grid g-2" style={{ alignItems: 'start' }}>
         <RulesPanel />
-        <TeamPanel />
+        <div className="grid" style={{ alignContent: 'start' }}>
+          <TeamPanel />
+          {me.role === 'owner' && <EditorsPanel />}
+        </div>
       </div>
     </>
   );
@@ -111,7 +117,7 @@ function TeamPanel() {
               <div className="body">
                 <div className="title">{u.name}{u.id === me.id ? ' (you)' : ''}</div>
                 <div className="meta ellipsis">{u.email}</div>
-                <div className="meta">{u.active ? (u.capacityPerDay ? `${u.capacityPerDay} scripts / working day` : 'Capacity not set') : 'Deactivated'}</div>
+                <div className="meta">{u.active ? (u.capacityPerDay ? `${u.capacityPerDay} scripts / working day` : 'Capacity not set') : 'Deactivated'}{u.active && u.city ? ` · ${u.city.split(',')[0]}` : ''}</div>
               </div>
             </button>
             <div className="side">
@@ -240,10 +246,13 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
   const { settings } = useBoot();
   const [password, setPassword] = useState(() => (user ? '' : generatePassword()));
   const [active, setActive] = useState(user?.active ?? true);
+  const [city, setCity] = useState(user?.city ?? '');
+  const [hours, setHours] = useState<[number, number]>(user?.workHours ?? [9, 18]);
   const [share, setShare] = useState<string | null>(null);
+  const place = { city: city.trim() || null, ...(city.trim() ? { workStart: hours[0], workEnd: hours[1] % 24 || 24 } : {}) };
   const save = useSave(() => user
-    ? api(`/api/users/${user.id}`, { method: 'PATCH', body: { name, role, active, capacityPerDay: capacity ? Number(capacity) : null, password: password || undefined } })
-    : api('/api/users', { body: { name, email, role, password, capacityPerDay: capacity ? Number(capacity) : null } }), {
+    ? api(`/api/users/${user.id}`, { method: 'PATCH', body: { name, role, active, capacityPerDay: capacity ? Number(capacity) : null, password: password || undefined, ...place } })
+    : api('/api/users', { body: { name, email, role, password, capacityPerDay: capacity ? Number(capacity) : null, ...place } }), {
     onSuccess: () => {
       if (!user || password) {
         // only now, right after saving, is the plain password known
@@ -256,7 +265,7 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
     },
   });
   const f = save.error?.fields ?? {};
-  const ids = { n: useFieldId('n'), e: useFieldId('e'), r: useFieldId('r'), c: useFieldId('c'), p: useFieldId('p') };
+  const ids = { n: useFieldId('n'), e: useFieldId('e'), r: useFieldId('r'), c: useFieldId('c'), p: useFieldId('p'), city: useFieldId('city'), h: useFieldId('h') };
   if (share) return <ShareDetails message={share} name={firstName(name)} onClose={onClose} />;
   return (
     <Dialog open onClose={onClose} title={user ? `Edit ${user.name}` : 'Add a person'} size="narrow"
@@ -269,6 +278,19 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
           <select className="select" id={ids.r} value={role} onChange={(e) => setRole(e.target.value as Role)}><option value="writer">Writer</option><option value="manager">Manager</option><option value="owner">Admin</option></select>
         </Field>
         <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates and over-capacity warnings."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>
+        <Field label="City" optional htmlFor={ids.city} error={f.city} help="Where they work from. Sets their local time and working hours.">
+          <input className="input" list={`${ids.city}-list`} autoComplete="off" placeholder="Start typing a city" value={city} onChange={(e) => setCity(e.target.value)} {...inputProps(ids.city, f.city)} />
+          <datalist id={`${ids.city}-list`}>{CITIES.map((c) => <option key={cityLabel(c)} value={cityLabel(c)} />)}</datalist>
+        </Field>
+        {city.trim() && (
+          <Field label="Working hours" htmlFor={ids.h} error={f.workEnd ?? f.workStart} help="Their local time.">
+            <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>
+              <select className="select" id={ids.h} value={hours[0]} onChange={(e) => setHours([Number(e.target.value), hours[1]])}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h)}</option>)}</select>
+              <span className="muted">to</span>
+              <select className="select" aria-label="Working hours end" value={hours[1] % 24} onChange={(e) => setHours([hours[0], Number(e.target.value)])}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h)}</option>)}</select>
+            </div>
+          </Field>
+        )}
         <Field label={user ? 'Reset password' : 'Temporary password'} optional={!!user} htmlFor={ids.p} error={f.password} help={user ? 'Leave empty to keep their password. Set one and you’ll get a message to send them.' : 'At least 10 characters. After saving you’ll get a ready-to-send message with this and the sign-in link.'}>
           <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>
             <input className="input" type="text" autoComplete="new-password" spellCheck={false} value={password} onChange={(e) => setPassword(e.target.value)} {...inputProps(ids.p, f.password)} />
@@ -282,6 +304,78 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
           <label className="check"><input type="checkbox" checked={!active} onChange={(e) => setActive(!e.target.checked)} />Deactivate (signs them out; their history is kept)</label>
         )}
         {user && !active && user.active && <div className="banner yellow"><AlertTriangle aria-hidden /><div className="txt"><b>Reassign their open scripts after deactivating.</b></div></div>}
+      </form>
+    </Dialog>
+  );
+}
+
+// ── editors: shown in the Control Center, not part of the platform ───────
+
+function EditorsPanel() {
+  const q = useQuery({ queryKey: ['editors'], queryFn: () => api<{ editors: Editor[] }>('/api/editors') });
+  const [editing, setEditing] = useState<Editor | 'new' | null>(null);
+  const toast = useToast();
+  const remove = useSave((id: number) => api(`/api/editors/${id}`, { method: 'DELETE' }), { onSuccess: () => toast('Editor removed') });
+  const editors = q.data?.editors ?? [];
+  return (
+    <Panel title="Editors" count={editors.length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setEditing('new')}>Add editor</Button>}>
+      {q.isLoading && <Loading height={80} />}
+      {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
+      <div className="rows">
+        {editors.map((e) => (
+          <div key={e.id} className="item">
+            <div className="row-flex" style={{ flexWrap: 'nowrap', minWidth: 0 }}>
+              <Avatar name={e.name} id={100000 + e.id} />
+              <div className="body">
+                <div className="title">{e.name}</div>
+                <div className="meta">{e.city} · {fmtHour(e.workHours[0])} to {fmtHour(e.workHours[1] % 24)}</div>
+              </div>
+            </div>
+            <div className="side">
+              <div className="row-flex s2">
+                <Button variant="sm ghost" onClick={() => setEditing(e)}>Edit</Button>
+                <Button variant="sm ghost" busy={remove.isPending && remove.variables === e.id} onClick={() => remove.mutate(e.id)}>Remove</Button>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {q.data && !editors.length && <p className="muted" style={{ fontSize: 13 }}>No editors yet.</p>}
+      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>Editors only appear in the Control Center, with their local time and working hours. They can’t sign in and aren’t offered as writers. Only admins see this list.</p>
+      {editing && <EditorDialog editor={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />}
+    </Panel>
+  );
+}
+
+function EditorDialog({ editor, onClose }: { editor?: Editor; onClose: () => void }) {
+  const toast = useToast();
+  const [name, setName] = useState(editor?.name ?? '');
+  const [city, setCity] = useState(editor?.city ?? '');
+  const [hours, setHours] = useState<[number, number]>(editor?.workHours ?? [9, 18]);
+  const ids = { n: useFieldId('ed-n'), c: useFieldId('ed-c'), h: useFieldId('ed-h') };
+  const body = { name, city, workStart: hours[0], workEnd: hours[1] % 24 || 24 };
+  const save = useSave(() => (editor ? api(`/api/editors/${editor.id}`, { method: 'PATCH', body }) : api('/api/editors', { body })), {
+    onSuccess: () => { toast(editor ? `${name} updated` : `${name} added`); onClose(); },
+  });
+  const f = save.error?.fields ?? {};
+  return (
+    <Dialog open onClose={onClose} title={editor ? `Edit ${editor.name}` : 'Add an editor'} size="narrow"
+      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={save.isPending} onClick={() => save.mutate(undefined)}>{editor ? 'Save' : 'Add editor'}</Button></div>}>
+      <form className="form" onSubmit={(e) => { e.preventDefault(); save.mutate(undefined); }}>
+        <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
+        <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} autoFocus /></Field>
+        <Field label="City" htmlFor={ids.c} error={f.city} help="Where they work from. Sets their local time.">
+          <input className="input" list={`${ids.c}-list`} autoComplete="off" placeholder="Start typing a city" value={city} onChange={(e) => setCity(e.target.value)} {...inputProps(ids.c, f.city)} />
+          <datalist id={`${ids.c}-list`}>{CITIES.map((c) => <option key={cityLabel(c)} value={cityLabel(c)} />)}</datalist>
+        </Field>
+        <Field label="Working hours" htmlFor={ids.h} error={f.workEnd ?? f.workStart} help="Their local time.">
+          <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>
+            <select className="select" id={ids.h} value={hours[0]} onChange={(e) => setHours([Number(e.target.value), hours[1]])}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h)}</option>)}</select>
+            <span className="muted">to</span>
+            <select className="select" aria-label="Working hours end" value={hours[1] % 24} onChange={(e) => setHours([hours[0], Number(e.target.value)])}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h)}</option>)}</select>
+          </div>
+        </Field>
+        <button type="submit" hidden />
       </form>
     </Dialog>
   );

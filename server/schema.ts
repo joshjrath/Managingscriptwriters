@@ -365,7 +365,38 @@ update scripts s
  where s.batch_id = d.batch_id and s.status = 'approved' and s.removed_at is null;
 update batches set updated_at = now() where id in (select batch_id from catch_up);
 `,
-  // 10 · where each writer's counter stood at the start of the day, so managers can see "+3 today"
+  // 10 · Control Center: a sign-in's clearance to open it, and where each team member works from
+  `
+alter table sessions add column control_until timestamptz;
+alter table users add column city text;
+alter table users add column city_code text;
+alter table users add column country text;
+alter table users add column lat double precision;
+alter table users add column lon double precision;
+alter table users add column timezone text;
+alter table users add column work_start smallint check (work_start between 0 and 23);
+alter table users add column work_end smallint check (work_end between 1 and 47);
+`,
+  // 11 · editors: people shown in the Control Center with their city and hours, who don't use the platform
+  `
+create table editors (
+  id bigint generated always as identity primary key,
+  name text not null,
+  city text not null,
+  city_code text not null,
+  country text not null,
+  lat double precision not null,
+  lon double precision not null,
+  timezone text not null,
+  work_start smallint not null check (work_start between 0 and 23),
+  work_end smallint not null check (work_end between 1 and 47),
+  created_by bigint references users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  removed_at timestamptz
+);
+`,
+  // 12 · where each writer's counter stood at the start of the day, so managers can see "+3 today"
   `
 alter table writer_progress add column day date;
 alter table writer_progress add column day_start int;

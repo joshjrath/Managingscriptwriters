@@ -20,6 +20,7 @@ import { MomentsHost } from './Moments';
 import { ModeBar, RecordingDialog, ViewAsDialog, useModeActions } from './ModeBar';
 import { SPRING, setMotionEnabled, useMotionSetting } from '../motion';
 import { LATEST_CHANGE } from '../../../shared/changelog';
+import { ControlCenterLink } from '../control/Link';
 
 // ── bootstrap context ────────────────────────────────────────────────────
 
@@ -105,7 +106,7 @@ function MobileNav({ onClose }: { onClose: () => void }) {
 
 function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapsed?: boolean; mobile?: boolean }) {
   const boot = useBoot();
-  const { me, counts, settings } = boot;
+  const { me, counts, settings, mode } = boot;
   const manager = isManager(me.role);
   const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; show?: boolean }[] = [
     ...(manager
@@ -125,6 +126,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
         <span className="full">&nbsp;</span>
         <span>{collapsed && !mobile ? 'S' : 'Media'}</span>
       </NavLink>
+      {me.role === 'owner' && !mode?.viewingAs && !mobile && <ControlCenterLink />}
       <SearchBox />
       <LayoutGroup id={mobile ? 'nav-mobile' : 'nav'}>
         <nav className="nav">
