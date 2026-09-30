@@ -22,6 +22,10 @@ export interface UserSummary extends Me {
   removed: boolean;
   /** the temporary password, readable until the person sets their own (owners and managers only) */
   tempPassword: string | null;
+  /** where they work from ("Toronto, Canada"), for their local time */
+  city: string | null;
+  /** local working hours; the end may pass midnight (e.g. [20, 28]) */
+  workHours: [number, number] | null;
 }
 
 export interface Settings {

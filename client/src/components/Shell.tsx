@@ -20,6 +20,7 @@ import { MomentsHost } from './Moments';
 import { ModeBar, RecordingDialog, ViewAsDialog, useModeActions } from './ModeBar';
 import { SPRING, setMotionEnabled, useMotionSetting } from '../motion';
 import { LATEST_CHANGE } from '../../../shared/changelog';
+import { ControlCenterLink } from '../control/Link';
 
 // ── bootstrap context ────────────────────────────────────────────────────
 
@@ -125,6 +126,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
         <span className="full">&nbsp;</span>
         <span>{collapsed && !mobile ? 'S' : 'Media'}</span>
       </NavLink>
+      {manager && !mobile && <ControlCenterLink />}
       <SearchBox />
       <LayoutGroup id={mobile ? 'nav-mobile' : 'nav'}>
         <nav className="nav">

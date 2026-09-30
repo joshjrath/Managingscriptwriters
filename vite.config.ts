@@ -11,6 +11,7 @@ export default defineConfig({
   build: { outDir: '../dist/client', emptyOutDir: true, sourcemap: true, chunkSizeWarningLimit: 800 },
   server: {
     port: Number(process.env.PORT ?? 5173),
-    proxy: { '/api': `http://127.0.0.1:${apiPort}`, '/healthz': `http://127.0.0.1:${apiPort}` },
+    // keep the browser's Host header: the API refuses POSTs whose Origin doesn't match it (CSRF guard)
+    proxy: { '/api': { target: `http://127.0.0.1:${apiPort}`, changeOrigin: false }, '/healthz': `http://127.0.0.1:${apiPort}` },
   },
 });
