@@ -28,6 +28,15 @@ export interface UserSummary extends Me {
   workHours: [number, number] | null;
 }
 
+/** Someone shown in the Control Center (city, local time, hours) who doesn't use the platform. */
+export interface Editor {
+  id: number;
+  name: string;
+  /** "London, United Kingdom" */
+  city: string;
+  workHours: [number, number];
+}
+
 export interface Settings {
   orgName: string;
   timezone: string;

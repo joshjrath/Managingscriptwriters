@@ -1,6 +1,6 @@
 // Control Center access and data, through the real HTTP routes: nothing is
-// served without clearance, clearance is for admins and managers only, and the
-// live workspace takes over from the simulated network once the team is placed.
+// served without clearance, clearance is for admins only, and the live
+// workspace takes over from the simulated network once the team is placed.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
@@ -27,6 +27,7 @@ async function call<T = any>(method: string, url: string, opts: { body?: unknown
 
 let manager = '';
 let writer = '';
+let lead = '';
 const ids: Record<string, number> = {};
 
 beforeAll(async () => {
@@ -40,6 +41,8 @@ beforeAll(async () => {
   ids.josh = users.find((u) => u.name === 'Josh Rath')!.id;
   ids.sarah = users.find((u) => u.name === 'Sarah Chen')!.id;
   writer = (await call('POST', '/api/auth/login', { body: { email: 'sarah@scale.test', password: 'writer-password-1' } })).cookie!;
+  expect((await call('POST', '/api/users', { cookie: manager, body: { name: 'Maya Lead', email: 'maya@scale.test', role: 'manager', password: 'manager-password-1' } })).status).toBe(200);
+  lead = (await call('POST', '/api/auth/login', { body: { email: 'maya@scale.test', password: 'manager-password-1' } })).cookie!;
 });
 
 afterAll(async () => {
@@ -54,7 +57,7 @@ describe('clearance', () => {
     expect(s).toMatchObject({ signedIn: false, eligible: false, cleared: false, operator: null });
   });
 
-  it('a signed-in manager still needs to authorize', async () => {
+  it('a signed-in admin still needs to authorize', async () => {
     const s = (await call<ControlStatus>('GET', '/api/control/status', { cookie: manager })).body;
     expect(s).toMatchObject({ signedIn: true, eligible: true, cleared: false, operator: { callsign: 'JOSH' } });
     const w = await call('GET', '/api/control/world', { cookie: manager });
@@ -71,7 +74,7 @@ describe('clearance', () => {
     expect((await call('GET', '/api/control/world', { cookie: manager })).status).toBe(403);
   });
 
-  it('clears a manager with their own password, and serves the world', async () => {
+  it('clears the admin with their own password, and serves the world', async () => {
     const r = await call('POST', '/api/control/authorize', { cookie: manager, body: { password: 'correct-horse-battery' } });
     expect(r.status).toBe(200);
     expect(new Date(r.body.clearedUntil).getTime()).toBe(NOW.getTime() + 12 * 3_600_000);
@@ -91,7 +94,17 @@ describe('clearance', () => {
     expect((await call<ControlStatus>('GET', '/api/control/status', { cookie: writer })).body.eligible).toBe(false);
   });
 
-  it('signs a manager in from the portal itself', async () => {
+  it('never clears a manager who isn’t the admin', async () => {
+    expect((await call<ControlStatus>('GET', '/api/control/status', { cookie: lead })).body.eligible).toBe(false);
+    const r = await call('POST', '/api/control/authorize', { cookie: lead, body: { password: 'manager-password-1' } });
+    expect(r.status).toBe(403);
+    expect(r.body.error.code).toBe('clearance');
+    const portal = await call('POST', '/api/control/authorize', { body: { email: 'maya@scale.test', password: 'manager-password-1' } });
+    expect(portal.status).toBe(403);
+    expect((await call('GET', '/api/control/world', { cookie: lead })).status).toBe(403);
+  });
+
+  it('signs the admin in from the portal itself', async () => {
     const noEmail = await call('POST', '/api/control/authorize', { body: { password: 'correct-horse-battery' } });
     expect(noEmail.status).toBe(400);
     const r = await call('POST', '/api/control/authorize', { body: { email: 'JOSH@scale.test', password: 'correct-horse-battery' } });
@@ -159,7 +172,7 @@ describe('the live workspace', () => {
     expect((await call('POST', `/api/batches/${batchId}/scripts/action`, { cookie: manager, body: { action: 'approve', scriptIds: [scripts[0].id] } })).status).toBe(200);
 
     const w = (await call<ControlWorld>('GET', '/api/control/world', { cookie: manager })).body;
-    expect(w.source).toMatchObject({ kind: 'workspace', label: 'LIVE WORKSPACE', unplaced: 0 });
+    expect(w.source).toMatchObject({ kind: 'workspace', label: 'LIVE WORKSPACE', unplaced: 1 }) // Maya has no city yet;
     expect(w.writers.map((x) => [x.callsign, x.cityCode, x.timezone])).toEqual(expect.arrayContaining([['JOSH', 'TOR', 'America/Toronto'], ['SARAH', 'LON', 'Europe/London']]));
     const project = w.projects.find((p) => p.title === 'Master Script Batch')!;
     expect(project.client).toBe('Downtown Dental');
@@ -174,5 +187,39 @@ describe('the live workspace', () => {
     ]));
     expect(w.links).toEqual(expect.arrayContaining([expect.objectContaining({ from: sarah.id, to: `u${ids.josh}`, kind: 'review', active: true })]));
     expect(w.activity.length).toBeGreaterThan(0);
+  });
+});
+
+describe('editors', () => {
+  it('are managed by the admin only', async () => {
+    expect((await call('GET', '/api/editors', { cookie: lead })).status).toBe(403);
+    expect((await call('POST', '/api/editors', { cookie: writer, body: { name: 'Ed', city: 'Paris, France' } })).status).toBe(403);
+    const bad = await call('POST', '/api/editors', { cookie: manager, body: { name: 'Ed', city: 'Atlantis' } });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.fields.city).toBeTruthy();
+    const r = await call('POST', '/api/editors', { cookie: manager, body: { name: 'Priya Editor', city: 'Mumbai, India', workStart: 22, workEnd: 6 } });
+    expect(r.status).toBe(200);
+    expect(r.body.editors).toEqual([expect.objectContaining({ name: 'Priya Editor', city: 'Mumbai, India', workHours: [22, 30] })]);
+  });
+
+  it('appear in the Control Center with their local time, but never as users', async () => {
+    const [priya] = (await call('GET', '/api/editors', { cookie: manager })).body.editors;
+    const w = (await call<ControlWorld>('GET', '/api/control/world', { cookie: manager })).body;
+    const node = w.writers.find((x) => x.id === `e${priya.id}`)!;
+    expect(node).toMatchObject({ role: 'editor', timezone: 'Asia/Kolkata', workHours: [22, 30] });
+    expect(w.scripts.some((s) => s.writerId === node.id)).toBe(false);
+    const users = (await call('GET', '/api/users', { cookie: manager })).body.users as { name: string }[];
+    expect(users.some((u) => u.name === 'Priya Editor')).toBe(false);
+    expect((await call('POST', '/api/auth/login', { body: { email: 'priya@scale.test', password: 'anything-at-all' } })).status).toBe(401);
+  });
+
+  it('can be edited and removed', async () => {
+    const [priya] = (await call('GET', '/api/editors', { cookie: manager })).body.editors;
+    const e = await call('PATCH', `/api/editors/${priya.id}`, { cookie: manager, body: { name: 'Priya Editor', city: 'Berlin, Germany', workStart: 9, workEnd: 17 } });
+    expect(e.body.editors[0]).toMatchObject({ city: 'Berlin, Germany', workHours: [9, 17] });
+    expect((await call('DELETE', `/api/editors/${priya.id}`, { cookie: manager })).body.editors).toEqual([]);
+    const w = (await call<ControlWorld>('GET', '/api/control/world', { cookie: manager })).body;
+    expect(w.writers.some((x) => x.id === `e${priya.id}`)).toBe(false);
+    expect((await call('DELETE', `/api/editors/${priya.id}`, { cookie: manager })).status).toBe(404);
   });
 });

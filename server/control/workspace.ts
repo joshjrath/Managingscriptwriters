@@ -12,6 +12,7 @@ import {
 } from '../../shared/control';
 import type { ScriptStatus } from '../../shared/workflow';
 import { finishWorld } from './finish';
+import { loadEditorRows } from './editors';
 
 const H = 3_600_000;
 const D = 24 * H;
@@ -41,9 +42,12 @@ interface ScriptRow {
   approved_by: number | null; submitted_at: string | null; delivered_at: string | null; updated_at: string;
 }
 
-/** Whether enough of the team is placed on the map for the live workspace to be worth showing. */
+/** Whether enough of the team (editors included) is placed on the map for the live workspace to be worth showing. */
 export async function placedCount(db: Db): Promise<number> {
-  const r = await db.one<{ n: number }>(`select count(*) as n from users where active and removed_at is null and lat is not null and lon is not null and timezone is not null`);
+  const r = await db.one<{ n: number }>(
+    `select (select count(*) from users where active and removed_at is null and lat is not null and lon is not null and timezone is not null)
+          + (select count(*) from editors where removed_at is null) as n`,
+  );
   return Number(r?.n ?? 0);
 }
 
@@ -173,6 +177,17 @@ export async function workspaceWorld(db: Db, at: Date): Promise<ControlWorld> {
       weeklyOutput: weekly.get(u.id) ?? 0, workload: (openCount.get(u.id) ?? 0) / weekCapacity, lastActivity: last.get(u.id) ?? null,
     };
   });
+
+  // editors: on the globe with their city and hours, but no scripts or sign-ins
+  for (const e of await loadEditorRows(db)) {
+    writers.push({
+      id: `e${e.id}`, name: e.name, callsign: callsignOf(e.name), initials: initialsOf(e.name),
+      city: e.city, cityCode: e.city_code, country: e.country, lat: e.lat, lon: e.lon, timezone: e.timezone,
+      role: 'editor', status: 'active', workHours: [e.work_start, e.work_end],
+      currentAssignment: null, projectId: null, clientId: null, progress: null, deadline: null, stage: null,
+      weeklyOutput: 0, workload: 0, lastActivity: null,
+    });
+  }
 
   // handoffs: scripts sent for review, and approvals or revisions sent back, in the last three days
   const since = new Date(now - 3 * D).toISOString();

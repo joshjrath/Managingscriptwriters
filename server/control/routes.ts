@@ -1,8 +1,8 @@
 // Control Center access. Hiding the link is only an aesthetic choice: the
 // world is served only to a sign-in that has been cleared for it.
 //
-// Clearance uses the existing accounts. An admin or manager re-enters their own
-// password (or signs in with it, when they arrive signed out), and their
+// Clearance uses the existing accounts. Only admins get in: an admin re-enters
+// their own password (or signs in with it, when they arrive signed out), and their
 // session is cleared for CLEARANCE_HOURS. It's checked on every request,
 // ends when they sign out or lock it, and nothing secret ever reaches the page.
 // To replace this with another identity provider, swap `verifyOperator`.
@@ -17,9 +17,9 @@ import {
 } from '../auth';
 import { auditEvent } from '../audit';
 import { HttpError, parse } from '../http';
-import { isManager } from '../../shared/workflow';
 import { callsignOf, type ControlStatus, type ControlWorld } from '../../shared/control';
 import { simulatedWorld } from './simulated';
+import { isAdmin } from './access';
 import { placedCount, workspaceWorld } from './workspace';
 
 export const CLEARANCE_HOURS = 12;
@@ -60,7 +60,7 @@ export function registerControlRoutes(app: FastifyInstance, ctx: Ctx) {
 
   async function clearedUntil(req: FastifyRequest): Promise<string | null> {
     const token = req.cookies[SESSION_COOKIE];
-    if (!token || !req.realUser || !isManager(req.realUser.role)) return null;
+    if (!token || !req.realUser || !isAdmin(req.realUser.role)) return null;
     const r = await sessions().one<{ until: string | null }>(`select control_until as until from sessions where token_hash = $1`, [sha(token)]);
     return r?.until && new Date(r.until).getTime() > ctx.now().getTime() ? r.until : null;
   }
@@ -71,7 +71,7 @@ export function registerControlRoutes(app: FastifyInstance, ctx: Ctx) {
     const settings = await loadSettings(ctx.db);
     return {
       signedIn: !!real,
-      eligible: !!real && isManager(real.role),
+      eligible: !!real && isAdmin(real.role),
       cleared: !!until,
       clearedUntil: until,
       operator: real ? { name: real.name, callsign: callsignOf(real.name) } : null,
@@ -99,9 +99,9 @@ export function registerControlRoutes(app: FastifyInstance, ctx: Ctx) {
       throw new HttpError(401, 'Key rejected', undefined, 'rejected');
     }
     clearFailures(key);
-    if (!isManager(op.role)) {
-      await auditEvent(sessions(), { userId: op.id, kind: 'denied', summary: 'Tried to open the Control Center — only admins and managers can', ip: req.ip });
-      throw new HttpError(403, 'Clearance is limited to admins and managers', undefined, 'clearance');
+    if (!isAdmin(op.role)) {
+      await auditEvent(sessions(), { userId: op.id, kind: 'denied', summary: 'Tried to open the Control Center — only admins can', ip: req.ip });
+      throw new HttpError(403, 'Clearance is limited to admins', undefined, 'clearance');
     }
     let token = req.cookies[SESSION_COOKIE];
     if (!real || !token) {

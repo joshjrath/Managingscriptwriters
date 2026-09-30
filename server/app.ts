@@ -24,6 +24,7 @@ import { registerRecording, routedDb } from './recording';
 import { registerScriptBankRoutes } from './script-bank';
 import { registerTodayRoutes } from './today';
 import { registerControlRoutes } from './control/routes';
+import { registerEditorRoutes } from './control/editors';
 import { registerUploadCleanup } from './files';
 import type { Db } from './db';
 
@@ -104,6 +105,7 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
   registerScriptBankRoutes(app, ctx);
   registerTodayRoutes(app, ctx);
   registerControlRoutes(app, ctx);
+  registerEditorRoutes(app, ctx);
 
   app.all('/api/*', async () => { throw new HttpError(404, 'Not found'); });
 
