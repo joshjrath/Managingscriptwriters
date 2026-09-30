@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../server/app';
 import { openDb, type Db } from '../server/db';
+import { MIGRATIONS } from '../server/schema';
 import { runReminders } from '../server/reminders';
 import type { Ctx } from '../server/core';
 import type { BatchDetail, Dashboard, Moment } from '../shared/types';
@@ -1144,5 +1145,34 @@ describe('a manager delivering a shared batch', () => {
     await manager.post(`/api/batches/${b2.body.batchId}/review`, { action: 'approve', scriptIds: s2.map((s) => s.id) });
     const w = await sarah.post(`/api/batches/${b2.body.batchId}/scripts/action`, { action: 'deliver', scriptIds: s2.filter((s) => s.assigneeId === ids.sarah).map((s) => s.id) });
     expect(w.body.changed).toHaveLength(1);
+  });
+});
+
+describe('catching up batches a manager delivered before the whole-batch rule', () => {
+  it('delivers the other writers’ approved scripts, and leaves unapproved ones alone', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Stuck delivery', targetCount: 6, finalDue: '2026-10-21', split: [{ writerId: ids.sarah, count: 3 }, { writerId: ids.josh, count: 2 }, { writerId: ids.marcus, count: 1 }] });
+    const batchId = b.body.batchId;
+    const scripts = (await manager.get(`/api/batches/${batchId}`)).body.scripts as { id: number; assigneeId: number }[];
+    const of = (uid: number) => scripts.filter((s) => s.assigneeId === uid).map((s) => s.id);
+    await manager.post(`/api/batches/${batchId}/submissions`, { scriptIds: [...of(ids.sarah), ...of(ids.josh)], url: 'https://docs.google.com/document/d/stuck' });
+    await manager.post(`/api/batches/${batchId}/review`, { action: 'approve', scriptIds: [...of(ids.sarah), ...of(ids.josh)] });
+    // the old behaviour: the manager's delivery covered only their own scripts
+    const d = await db.one<{ id: number }>(`insert into deliveries (batch_id, confirmed_by, timeliner_url) values ($1, $2, 'https://timeliner.io/stuck') returning id`, [batchId, ids.josh]);
+    await db.query(`update scripts set status = 'delivered', delivered_at = now(), delivered_by = $1, delivery_id = $2 where id = any($3::bigint[])`, [ids.josh, d!.id, of(ids.josh)]);
+    // a batch only a writer delivered is not touched
+    const w = await manager.post('/api/batches', { clientId: acmeId, title: 'Writer only', targetCount: 2, finalDue: '2026-10-21', split: [{ writerId: ids.sarah, count: 1 }, { writerId: ids.marcus, count: 1 }] });
+    const ws = (await manager.get(`/api/batches/${w.body.batchId}`)).body.scripts as { id: number; assigneeId: number }[];
+    await manager.post(`/api/batches/${w.body.batchId}/submissions`, { scriptIds: ws.map((s) => s.id), url: 'https://docs.google.com/document/d/w' });
+    await manager.post(`/api/batches/${w.body.batchId}/review`, { action: 'approve', scriptIds: ws.map((s) => s.id) });
+    await sarah.post(`/api/batches/${w.body.batchId}/scripts/action`, { action: 'deliver', scriptIds: ws.filter((s) => s.assigneeId === ids.sarah).map((s) => s.id) });
+
+    await db.tx(async (t) => { for (const stmt of MIGRATIONS[8].split(/;\s*\n/).map((x) => x.trim()).filter(Boolean)) await t.query(stmt); });
+
+    const after = (await manager.get(`/api/batches/${batchId}`)).body;
+    expect(after.scripts.filter((s: any) => s.assigneeId === ids.sarah).map((s: any) => s.status)).toEqual(['delivered', 'delivered', 'delivered']);
+    expect(after.scripts.find((s: any) => s.assigneeId === ids.marcus).status).toBe('not_started');
+    expect(after.activity[0].summary).toMatch(/Delivered the rest of the batch: 3 approved scripts/);
+    const writerOnly = (await manager.get(`/api/batches/${w.body.batchId}`)).body.scripts as { assigneeId: number; status: string }[];
+    expect(writerOnly.find((s) => s.assigneeId === ids.marcus)!.status).toBe('approved');
   });
 });

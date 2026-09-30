@@ -17,6 +17,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-30-batch-delivery-catch-up',
+    date: '2026-09-30',
+    title: 'Batches an admin already delivered are now fully delivered',
+    summary: 'Batches where an admin or manager confirmed delivery before the whole-batch rule have caught up.',
+    changes: [
+      { tag: 'fixed', text: 'If an admin or manager confirmed delivery on a batch before today’s change, the other writers’ approved scripts were left waiting. They’re now delivered too, so the Production board, Overview and calendar show the batch as delivered. The batch history notes the catch-up. Scripts that weren’t approved stay as they are.' },
+    ],
+  },
+  {
     id: '2026-09-30-batch-delivery',
     date: '2026-09-30',
     title: 'Deliver a whole batch from its page',

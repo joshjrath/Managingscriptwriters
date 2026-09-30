@@ -342,4 +342,27 @@ create table past_documents (
 );
 create index past_documents_client_idx on past_documents (client_id) where removed_at is null;
 `,
+  // 9 · a manager's delivery covers the whole batch: catch up batches where a manager
+  // confirmed delivery before that rule, so the other writers' approved scripts go too
+  `
+create temporary table catch_up on commit drop as
+  select distinct on (x.batch_id) x.id, x.batch_id, x.confirmed_by, x.confirmed_at, x.timeliner_url
+    from deliveries x join users u on u.id = x.confirmed_by
+   where u.role in ('owner', 'manager')
+     and exists (select 1 from scripts s where s.batch_id = x.batch_id and s.status = 'approved' and s.removed_at is null)
+   order by x.batch_id, x.confirmed_at desc, x.id desc;
+insert into activity (client_id, batch_id, entity_type, entity_id, actor_id, action, summary, detail)
+  select b.client_id, b.id, 'batch', b.id, d.confirmed_by, 'scripts.deliver',
+         'Delivered the rest of the batch: ' || count(s.id) || ' approved script' || case when count(s.id) = 1 then '' else 's' end || ' (a manager’s delivery covers the whole batch)',
+         jsonb_build_object('action', 'deliver', 'scripts', jsonb_agg(s.number order by s.number), 'deliveryId', d.id, 'catchUp', true)
+    from catch_up d join batches b on b.id = d.batch_id
+    join scripts s on s.batch_id = d.batch_id and s.status = 'approved' and s.removed_at is null
+   group by b.client_id, b.id, d.confirmed_by, d.id;
+update scripts s
+   set status = 'delivered', delivered_at = d.confirmed_at, delivered_by = d.confirmed_by, delivery_id = d.id,
+       timeliner_url = coalesce(s.timeliner_url, d.timeliner_url), version = s.version + 1, updated_at = now()
+  from catch_up d
+ where s.batch_id = d.batch_id and s.status = 'approved' and s.removed_at is null;
+update batches set updated_at = now() where id in (select batch_id from catch_up);
+`,
 ];
