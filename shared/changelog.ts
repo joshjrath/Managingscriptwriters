@@ -17,6 +17,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-30-today-clear',
+    date: '2026-09-30',
+    title: 'Green waves on a clear day',
+    summary: 'When nothing is due today, the Today bar shows the green waves too.',
+    changes: [
+      { tag: 'improved', text: 'A day with nothing due now counts as all clear: the Today bar on My work and the Overview turns into rolling green waves instead of a grey “Nothing due today”.' },
+    ],
+  },
+  {
     id: '2026-09-30-writing-pulse',
     date: '2026-09-30',
     title: 'See writers’ counters move',

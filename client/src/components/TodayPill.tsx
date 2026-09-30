@@ -1,7 +1,8 @@
 // The Today pill: fills as the day's work gets done (drafts sent, deliveries
 // confirmed), and once everything due today is finished it turns into
-// rolling green waves that keep going for the rest of the day. The moment it
-// completes gets a one-time burst of confetti.
+// rolling green waves that keep going for the rest of the day. A day with
+// nothing due is all clear, so it gets the waves too. The moment the day's
+// work completes gets a one-time burst of confetti.
 
 import { useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -38,7 +39,8 @@ export function TodayPill({ userId }: { userId?: number }) {
   const total = t?.total ?? 0;
   const done = t?.done ?? 0;
   const pct = total ? (done / total) * 100 : 0;
-  const allDone = total > 0 && done >= total;
+  const clear = !!t && total === 0;
+  const allDone = clear || (total > 0 && done >= total);
   const [ref, on] = useOnScreen<HTMLElement>();
   const allowed = useMotionAllowed();
   const { shown } = useRise(allDone ? 100 : pct, on && !!t);
@@ -46,7 +48,7 @@ export function TodayPill({ userId }: { userId?: number }) {
 
   // celebrate once per day, per person (or team)
   useEffect(() => {
-    if (!t || !allDone) return;
+    if (!t || !allDone || clear) return;
     const key = `sm.today-done.${t.scope}.${userId ?? 'me'}`;
     try { if (localStorage.getItem(key) === t.date) return; localStorage.setItem(key, t.date); } catch { return; }
     const id = setTimeout(() => {
@@ -60,14 +62,14 @@ export function TodayPill({ userId }: { userId?: number }) {
 
   if (!t) return <div className="today-pill skeleton" aria-hidden />;
   const who = t.scope === 'team' ? 'the team' : t.scope === 'person' ? 'them' : 'you';
-  const label = allDone
-    ? `All done for today. ${plural(total, 'task')} finished.`
-    : total ? `Today: ${done} of ${plural(total, 'task')} done.` : `Nothing due today for ${who}.`;
+  const label = clear
+    ? `Nothing due today for ${who}. All clear.`
+    : allDone ? `All done for today. ${plural(total, 'task')} finished.` : `Today: ${done} of ${plural(total, 'task')} done.`;
 
   return (
     <section
       ref={(el) => { ref.current = el; pill.current = el; }}
-      className={`today-pill${allDone ? ' done' : ''}${total ? '' : ' tp-none'}`}
+      className={`today-pill${allDone ? ' done' : ''}`}
       data-live={on && allowed ? '' : undefined}
       aria-label={label}
       style={{ ['--p' as string]: shown }}
@@ -83,10 +85,10 @@ export function TodayPill({ userId }: { userId?: number }) {
         <span className="tp-ic" aria-hidden>{allDone ? <CheckCheck /> : <Sun />}</span>
         <span className="tp-main">
           <span className="tp-k">Today{t.scope === 'team' ? ' · whole team' : ''}</span>
-          <b>{allDone ? 'All done for today' : total ? <><CountUp value={done} /> / {total} done</> : 'Nothing due today'}</b>
+          <b>{clear ? 'Nothing due today' : allDone ? 'All done for today' : <><CountUp value={done} /> / {total} done</>}</b>
         </span>
         <span className="tp-sub">
-          {allDone ? `${plural(total, 'script task')} finished · enjoy the waves` : total ? remainingText(t) : 'Drafts and deliveries due today show up here.'}
+          {clear ? 'All clear · enjoy the waves' : allDone ? `${plural(total, 'script task')} finished · enjoy the waves` : remainingText(t)}
         </span>
       </div>
     </section>
