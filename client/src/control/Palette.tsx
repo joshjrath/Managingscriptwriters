@@ -84,7 +84,7 @@ export function Palette({ world, now, onClose, onRun }: { world: ControlWorld; n
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(0);
   const input = useRef<HTMLInputElement>(null);
-  const index = useMemo(() => buildIndex(world, now), [world]); // eslint-disable-line react-hooks/exhaustive-deps
+  const index = useMemo(() => buildIndex(world, now), [world]);
   const results = useMemo(() => {
     const scored = index.map((e) => ({ e, s: score(e, q.trim()) })).filter((x) => x.s > 0);
     scored.sort((a, b) => b.s - a.s);

@@ -117,9 +117,15 @@ function rng(seed: number) {
   };
 }
 
-export function simulatedWorld(at: Date, orgName: string): ControlWorld {
+/**
+ * `epoch` anchors the deadlines: pass the start of a stable cycle and they
+ * count down between refreshes instead of being rebuilt from now each time.
+ * Activity and handoffs stay relative to now, since they're replayed anyway.
+ */
+export function simulatedWorld(at: Date, orgName: string, epoch: Date = at): ControlWorld {
   const now = at.getTime();
   const iso = (ms: number) => new Date(now + ms).toISOString();
+  const due = (ms: number) => new Date(epoch.getTime() + ms).toISOString();
   const rand = rng(Math.floor(now / D) * 7919 + 17);
 
   const writers: CcWriter[] = WRITERS.map((w) => {
@@ -148,7 +154,7 @@ export function simulatedWorld(at: Date, orgName: string): ControlWorld {
     const archived = p.archivedAgo != null;
     projects.push({
       id: p.id, title: p.title, clientId: p.client, client: clientName.get(p.client)!, writers: [], stage: 'research',
-      progress: { done: 0, total: 0 }, deadline: iso(p.due), scripts: [], priority: p.priority, archived,
+      progress: { done: 0, total: 0 }, deadline: archived ? iso(p.due) : due(p.due), scripts: [], priority: p.priority, archived,
       completedAt: archived ? iso(-p.archivedAgo!) : null, blocked: null,
       clientWaitingSince: p.clientWaiting ? iso(-p.clientWaiting) : null,
     });
@@ -156,11 +162,11 @@ export function simulatedWorld(at: Date, orgName: string): ControlWorld {
     for (const [state, count, writer, reviewer] of p.plan) {
       for (let i = 0; i < count; i++) {
         const title = p.titles[n] ?? `${p.title} · ${String(n + 1).padStart(2, '0')}`;
-        const due = archived ? p.due - rand() * 2 * D : (p.dueBy?.[state] ?? p.due) + (p.dueBy?.[state] ? rand() * 40 * M : -rand() * 8 * H);
+        const when = archived ? p.due - rand() * 2 * D : (p.dueBy?.[state] ?? p.due) + (p.dueBy?.[state] ? rand() * 40 * M : -rand() * 8 * H);
         const age = archived ? p.archivedAgo! + rand() * 3 * D : state === 'internal_review' ? (0.3 + rand() * 20) * H : (0.2 + rand() * 30) * H;
         scripts.push({
           id: `${p.id}-${n + 1}`, title, code: `VIDEO ${String(code).padStart(3, '0')}`, projectId: p.id,
-          writerId: writer, reviewerId: reviewer, state, deadline: iso(due), progress: PROGRESS[state],
+          writerId: writer, reviewerId: reviewer, state, deadline: archived ? iso(when) : due(when), progress: PROGRESS[state],
           wordCount: state === 'research' ? null : Math.round(140 + rand() * 260), updatedAt: iso(-age),
         });
         n++;

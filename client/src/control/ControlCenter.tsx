@@ -75,6 +75,9 @@ export default function ControlCenter() {
   const exit = () => {
     setLeaving(true);
     sound.sleep();
+    // signing in at the portal also signed in to the site: let it notice
+    qc.removeQueries({ queryKey: ['auth-status'] });
+    qc.removeQueries({ queryKey: ['bootstrap'] });
     setTimeout(() => returnToSite(() => nav('/')), 650);
   };
   const lock = async () => {
@@ -94,7 +97,7 @@ export default function ControlCenter() {
           onReady={() => setEngineReady(true)} onExit={exit} onLock={lock} />
       )}
       {!bootGone && (
-        <div className={`cc-boot${stage === 'live' ? ' fade' : ''}`} onAnimationEnd={() => stage === 'live' && setBootGone(true)}>
+        <div className={`cc-boot${stage === 'live' ? ' fade' : ''}`} onAnimationEnd={(e) => { if (e.target === e.currentTarget && stage === 'live') setBootGone(true); }}>
           {stage === 'wait' && (status.isError ? <Unreachable onRetry={() => status.refetch()} onExit={exit} /> : <Scanning />)}
           {stage === 'portal' && status.data && (
             <Portal status={status.data} onExit={exit} onDenied={() => setStage('denied')}
@@ -222,7 +225,7 @@ function Init({ fresh, operator, world, error, engineReady, onDone }: { fresh: b
       const t = setTimeout(onDone, fresh ? 420 : 200);
       return () => clearTimeout(t);
     }
-  }); // eslint-disable-line react-hooks/exhaustive-deps
+  });
   const doneCount = lines.slice(0, shown).filter((l) => l.done).length;
   return (
     <div className="cc-init" role="status" aria-live="polite">

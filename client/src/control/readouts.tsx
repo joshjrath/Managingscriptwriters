@@ -240,7 +240,7 @@ export function TimezonePanel({ world, now, offset, playing, onScrub, onPlay, on
     <>
       <section className="cc-panel stats tz">
         <h1 className="title cc-serif"><span className="l"><span>Follow</span></span><span className="l"><span><em style={{ fontStyle: 'italic', textTransform: 'none', color: 'var(--ink-2)' }}>the sun</em></span></span></h1>
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(3, auto)' }}>
+        <div className="grid">
           <Stat v={fmtHoursMinutes(cov.coveredMinutes)} l="GLOBAL COVERAGE" warn={cov.coveredMinutes < 20 * 60} />
           <Stat v={`${pad(cov.overlapNow)}`} l={`CURRENT OVERLAP · ${cov.overlapNow === 1 ? 'WRITER' : 'WRITERS'}`} />
           {cov.nextHandoff ? <Stat v={fmtCountdown(cov.nextHandoff.in)} l={`NEXT HANDOFF · ${name(cov.nextHandoff.writerId)?.city.toUpperCase()} SIGNS OFF`} /> : <Stat v="—" l="NEXT HANDOFF" />}

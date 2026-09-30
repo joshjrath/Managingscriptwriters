@@ -295,10 +295,10 @@
 .cc-panel .grid div { display: grid; gap: 5px; animation: cc-fade 800ms var(--ease) both; }
 .cc-panel .grid b { font-weight: 400; font-size: 17px; letter-spacing: 0.06em; color: var(--ink); font-variant-numeric: tabular-nums; }
 .cc-panel .grid b small { font-size: 10px; letter-spacing: 0.2em; color: var(--ink-2); margin-left: 8px; }
-.cc-panel .grid span { font-size: 9px; letter-spacing: 0.26em; color: var(--faint); }
+.cc-panel .grid span { font-size: 9px; letter-spacing: 0.26em; color: var(--faint); max-width: 230px; }
 .cc-panel .grid .warn b { color: var(--amber); }
 
-.cc-scrub { position: absolute; left: 50%; bottom: calc(var(--edge) + 4px); transform: translateX(-50%); z-index: 5; width: min(520px, 46vw); display: grid; gap: 10px; }
+.cc-scrub { position: absolute; left: 50%; bottom: calc(var(--edge) + 4px); transform: translateX(-38%); z-index: 5; width: min(460px, 34vw); display: grid; gap: 10px; }
 .cc-scrub .row { display: flex; justify-content: space-between; align-items: center; font-size: 9px; letter-spacing: 0.24em; color: var(--faint); }
 .cc-scrub .row button { color: var(--dim); }
 .cc-scrub .row button:hover, .cc-scrub .row button.on { color: var(--ink); }

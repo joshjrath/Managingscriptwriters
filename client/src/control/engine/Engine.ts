@@ -214,6 +214,10 @@ export class Engine implements WorldView {
   private ray = new Raycaster();
   private tmp = new Vector3();
   private tmp2 = new Vector3();
+  private tmp3 = new Vector3();
+  private tmp4 = new Vector3();
+  private nrm = new Vector3();
+  private tmpE = new Euler();
   private tmpM = new Matrix4();
   private tmpQ = new Quaternion();
   private sunLocal = new Vector3(1, 0, 0);
@@ -237,7 +241,7 @@ export class Engine implements WorldView {
     this.dpr = this.dprBase;
     this.renderer.setPixelRatio(this.dpr);
 
-    this.surface = buildSurfacePoints(q.sphere);
+    this.surface = buildSurfacePoints(q.sphere, q.dot);
     this.stars = buildStars(q.stars);
     this.globe.add(this.core.mesh, this.surface.points, this.atmo.haloMesh, this.atmo.rimMesh, this.arcs.group);
     this.space.add(this.swarm.archiveLines);
@@ -322,7 +326,6 @@ export class Engine implements WorldView {
 
     // scripts and objects
     this.refreshOrbits();
-    const live = world.projects.filter((p) => !p.archived);
     this.missionIndex = new Map(this.layouts.missionOrder.map((id, i) => [id, i]));
     const objs: Parameters<ObjectsLayer['setObjects']>[0] = [];
     const at = this.now();
@@ -353,7 +356,6 @@ export class Engine implements WorldView {
       if (ra && rb) edges.push({ a: ra, b: rb, kind: e.kind });
     }
     this.objects.setObjects(objs, edges);
-    void live;
     this.dataAt = performance.now();
 
     if (first) {
@@ -438,10 +440,8 @@ export class Engine implements WorldView {
   playHandoff(h: CcHandoff): boolean {
     const route = this.handoffArc.get(h.id);
     if (!route || route.arc < 0) return false;
-    const origin = this.writerIndex.get(h.originNode);
     const [a] = this.arcs.keys()[route.arc].split('|');
     const reverse = a !== h.originNode;
-    void origin;
     const duration = this.opts.reducedMotion ? 0.8 : 2.8;
     this.arcs.launch(route.arc, reverse, this.time, duration, () => {
       this.flashes.set(route.dest, 1);
@@ -781,26 +781,25 @@ export class Engine implements WorldView {
       // geography
       const geoPos = this.tmp.copy(this.geo[i]).applyMatrix4(this.globe.matrixWorld);
       const center = this.tmp2.setFromMatrixPosition(this.globe.matrixWorld);
-      const normal = new Vector3().subVectors(geoPos, center).normalize();
+      const normal = this.nrm.subVectors(geoPos, center).normalize();
       v.pos.copy(geoPos).multiplyScalar(W[0]);
       let ws = W[0];
       if (g && W[1] > 1e-4) {
         const gi = g.index.get(`w:${w.id}`);
         if (gi != null) {
-          const gp = g.nodes[gi].pos.clone().add(new Vector3(Math.sin(this.time * 0.31 + i) * 0.04, Math.cos(this.time * 0.27 + i * 2) * 0.04, 0)).applyMatrix4(this.graphGroup.matrixWorld);
+          const gp = this.tmp3.copy(g.nodes[gi].pos).add(this.tmp4.set(Math.sin(this.time * 0.31 + i) * 0.04, Math.cos(this.time * 0.27 + i * 2) * 0.04, 0)).applyMatrix4(this.graphGroup.matrixWorld);
           v.pos.addScaledVector(gp, W[1]);
           ws += W[1];
         }
       }
       if (this.layouts && W[2] > 1e-4) {
         const sp = this.layouts.space.writers.get(w.id);
-        if (sp) { v.pos.addScaledVector(sp.clone().applyMatrix4(this.space.matrixWorld), W[2]); ws += W[2]; }
+        if (sp) { v.pos.addScaledVector(this.tmp3.copy(sp).applyMatrix4(this.space.matrixWorld), W[2]); ws += W[2]; }
       }
       v.pos.multiplyScalar(1 / Math.max(1e-4, ws));
       v.normal.copy(normal);
       v.billboard = 1 - W[0];
-      const toCam = new Vector3().subVectors(camPos, geoPos).normalize();
-      v.facing = W[0] * normal.dot(toCam) + (1 - W[0]);
+      v.facing = W[0] * normal.dot(this.tmp3.subVectors(camPos, geoPos).normalize()) + (1 - W[0]);
 
       // rhythm by status and time of day
       const phase = p?.phase ?? 'off';
@@ -905,7 +904,7 @@ export class Engine implements WorldView {
       u.uTicks.value = ticks;
       u.uTime.value = this.time;
       u.uSpin.value = 0.1 + i * 0.04;
-      this.tmpQ.setFromEuler(new Euler(...tilt));
+      this.tmpQ.setFromEuler(this.tmpE.set(...tilt));
       o.mesh.quaternion.slerp(this.tmpQ, 1 - Math.exp(-dt * (reduced ? 10 : 1.6)));
       o.mesh.visible = u.uOpacity.value > 0.002;
     });
@@ -945,7 +944,6 @@ export class Engine implements WorldView {
     const s = this.spec;
     const live = this.world.projects.filter((p) => !p.archived).length;
     const f = this.focus;
-    const lit = this.focusedWriters();
     const on = smoothstep(0.85, 1, reveal);
     this.objects.update({
       time: this.time, dt, dpr: this.dpr * this.pxScale, weights: s.objects, missionQuat: this.missionQuat, missionRadius: 1.62 * this.fx.globeScale / 0.9,
@@ -966,7 +964,6 @@ export class Engine implements WorldView {
         a *= mine ? 1.3 : 0.15;
       }
       if (this.hover?.kind === o.kind && this.hover.id === o.id) a *= 1.3;
-      void lit;
       return a * on;
     }, (e: Edge) => {
       let a = 0;
@@ -1097,8 +1094,8 @@ export class Engine implements WorldView {
   private geoAnchor(lat: number, lon: number, out: Vector3): number {
     geoToVec3(lat, lon, 1, out).applyMatrix4(this.globe.matrixWorld);
     const c = this.tmp2.setFromMatrixPosition(this.globe.matrixWorld);
-    const n = new Vector3().subVectors(out, c).normalize();
-    const facing = n.dot(new Vector3().subVectors(this.camera.position, out).normalize());
+    const n = this.nrm.subVectors(out, c).normalize();
+    const facing = n.dot(this.tmp3.subVectors(this.camera.position, out).normalize());
     return Math.min(1, Math.max(0, (facing - 0.08) / 0.2)) * (this.spec.nodes === 'geo' ? 1 : 0);
   }
 
@@ -1108,10 +1105,10 @@ export class Engine implements WorldView {
     const c = this.tmp2.setFromMatrixPosition(this.globe.matrixWorld);
     const r = this.fx.globeScale;
     const o = this.camera.position;
-    const d = new Vector3().subVectors(p, o);
+    const d = this.tmp3.subVectors(p, o);
     const len = d.length();
     d.multiplyScalar(1 / len);
-    const oc = new Vector3().subVectors(o, c);
+    const oc = this.tmp4.subVectors(o, c);
     const b = oc.dot(d);
     const disc = b * b - (oc.lengthSq() - r * r);
     if (disc <= 0) return 1;
@@ -1343,7 +1340,7 @@ export class Engine implements WorldView {
     const next = lower(this.tier);
     if (!next) return;
     this.tier = next;
-    const fresh = buildSurfacePoints(TIERS[next].sphere);
+    const fresh = buildSurfacePoints(TIERS[next].sphere, TIERS[next].dot);
     fresh.material.uniforms.uBumps.value = this.surface.material.uniforms.uBumps.value;
     this.globe.remove(this.surface.points);
     this.surface.points.geometry.dispose();

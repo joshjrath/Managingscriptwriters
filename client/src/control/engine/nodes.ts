@@ -136,6 +136,7 @@ export class NodesLayer {
   private q = new Quaternion();
   private q2 = new Quaternion();
   private s = new Vector3();
+  private at = new Vector3();
   private z = new Vector3(0, 0, 1);
 
   constructor(max = 48) {
@@ -256,9 +257,9 @@ export class NodesLayer {
       this.q.setFromUnitVectors(this.z, v.normal);
       this.q2.copy(cameraQuat);
       this.q.slerp(this.q2, v.billboard);
-      const lift = 1 + (1 - v.billboard) * 0.004;
+      // lifted a hair off the surface so the rings never sink into the core
       this.s.set(v.size, v.size, v.size);
-      this.m.compose(new Vector3().copy(v.pos).multiplyScalar(v.billboard > 0.5 ? 1 : 1).addScaledVector(v.normal, (lift - 1)), this.q, this.s);
+      this.m.compose(this.at.copy(v.pos).addScaledVector(v.normal, (1 - v.billboard) * 0.004), this.q, this.s);
       this.glyphs.setMatrixAt(i, this.m);
       A.set([v.ring, v.period, v.phase, inten], i * 4);
       B.set([v.color.r, v.color.g, v.color.b, v.anomaly], i * 4);

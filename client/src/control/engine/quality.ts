@@ -7,15 +7,17 @@ export interface Quality {
   tier: Tier;
   /** points sampled over the whole sphere (about a third land on land) */
   sphere: number;
+  /** particle size: the denser the sampling, the finer the dots */
+  dot: number;
   stars: number;
   maxDpr: number;
   antialias: boolean;
 }
 
 export const TIERS: Record<Tier, Quality> = {
-  high: { tier: 'high', sphere: 200_000, stars: 2600, maxDpr: 2, antialias: true },
-  medium: { tier: 'medium', sphere: 120_000, stars: 1600, maxDpr: 1.5, antialias: true },
-  low: { tier: 'low', sphere: 64_000, stars: 900, maxDpr: 1, antialias: false },
+  high: { tier: 'high', sphere: 200_000, dot: 7.2, stars: 2600, maxDpr: 2, antialias: true },
+  medium: { tier: 'medium', sphere: 120_000, dot: 8.8, stars: 1600, maxDpr: 1.5, antialias: true },
+  low: { tier: 'low', sphere: 64_000, dot: 11, stars: 900, maxDpr: 1, antialias: false },
 };
 
 export const lower = (t: Tier): Tier | null => (t === 'high' ? 'medium' : t === 'medium' ? 'low' : null);

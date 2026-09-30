@@ -135,7 +135,7 @@ void main() {
   col = mix(col, vec3(1.0, 0.60, 0.34), dusk * 0.55 * (1.0 - grid));
   float facing = dot(viewN, normalize(-mv.xyz));
   float twinkle = step(0.978, seed) * (0.5 + 0.5 * sin(uTime * (1.2 + seed * 3.0) + seed * 60.0));
-  float a = mix(0.24 * uNight, 0.92, day) * (0.5 + 0.62 * aData.w);
+  float a = mix(0.26 * uNight, 0.8, day) * (0.5 + 0.62 * aData.w);
   a += coast * 0.2 + twinkle * 0.3 + bump * 1.1 + pointer * 0.45;
   a *= mix(1.0, 0.1, ocean);
   a = mix(a, (0.05 + aData.w * 0.09) * (0.45 + 0.55 * day) + uGrid * (0.12 + aData.w * 0.2), grid);
@@ -157,7 +157,7 @@ varying vec4 vColor;
 void main() {
   vec2 c = gl_PointCoord - 0.5;
   float d = dot(c, c) * 4.0;
-  float a = 1.0 - smoothstep(0.35, 1.0, d);
+  float a = 1.0 - smoothstep(0.5, 1.0, d);
   if (a <= 0.0) discard;
   gl_FragColor = vec4(vColor.rgb, vColor.a * a);
 }`;
@@ -178,9 +178,10 @@ export function surfaceMaterial(): ShaderMaterial {
   });
 }
 
-export function buildSurfacePoints(count: number) {
+export function buildSurfacePoints(count: number, dot = 11) {
   const { geometry, land } = buildSurface(count);
   const material = surfaceMaterial();
+  material.uniforms.uSize.value = dot;
   const points = new Points(geometry, material);
   points.frustumCulled = false;
   points.renderOrder = 2;

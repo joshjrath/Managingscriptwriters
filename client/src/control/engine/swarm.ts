@@ -263,7 +263,7 @@ export class SwarmLayer {
       const pulse = b.urgent ? 0.75 + 0.25 * Math.sin(t * 5 + b.phase) : 1;
       P[i * 3] = b.pos.x; P[i * 3 + 1] = b.pos.y; P[i * 3 + 2] = b.pos.z;
       C[i * 4] = b.color.r; C[i * 4 + 1] = b.color.g; C[i * 4 + 2] = b.color.b; C[i * 4 + 3] = b.alpha * pulse;
-      S[i] = b.size * (b.urgent ? 1.3 : 1) * (1 + b.w[3] * (b.archived ? 0.5 : 1.1));
+      S[i] = b.size * (b.urgent ? 1.3 : 1) * (1 + b.w[3] * (b.archived ? 0.6 : 1.6));
     });
     this.pos.needsUpdate = this.col.needsUpdate = this.size.needsUpdate = true;
     const lm = this.archiveLines.material as ShaderMaterial;

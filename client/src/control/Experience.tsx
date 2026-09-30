@@ -60,9 +60,12 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
     };
     let v: WorldView | null = null;
     try {
+      // ?quality=high|medium|low overrides the device guess (diagnostics, or a weak GPU)
+      const q = new URLSearchParams(window.location.search).get('quality');
+      const tier = q === 'high' || q === 'medium' || q === 'low' ? q : undefined;
       v = flat
         ? new FlatView(el, common)
-        : new Engine(el, { ...common, onPointerGeo: throttle((g: { lat: number; lon: number } | null) => setGeo(g), 80), onOverscroll: (d) => handlers.current.overscroll(d) });
+        : new Engine(el, { ...common, tier, onPointerGeo: throttle((g: { lat: number; lon: number } | null) => setGeo(g), 80), onOverscroll: (d) => handlers.current.overscroll(d) });
     } catch {
       if (!flat) setFlat(true);
       return;
@@ -71,7 +74,7 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
     setView(v);
     onReady();
     return () => { v?.dispose(); setView(null); };
-  }, [flat]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [flat]);
 
   useEffect(() => { view?.setWorld(world); }, [view, world]);
   useEffect(() => { if (live && view) view.reveal(returning); }, [live, view, returning]);
@@ -100,7 +103,7 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
     return () => cancelAnimationFrame(raf);
   }, [playing]);
 
-  const anomalies = useMemo(() => view?.currentAnomalies ?? [], [view, now]); // eslint-disable-line react-hooks/exhaustive-deps
+  const anomalies = useMemo(() => view?.currentAnomalies ?? [], [view, now]);
 
   // ── moving the world ───────────────────────────────────────────────────
   const setMode = useCallback((m: Mode, keepFocus = false) => {
@@ -165,13 +168,15 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
       for (const h of world.handoffs) if (!seen.current.has(h.id)) { seen.current.add(h.id); play(h, false); }
     }
   }, [world, view, revealed, play]);
+  const replayAt = useRef(-1);
   useEffect(() => {
     if (!view || !revealed || reduced) return;
     const list = world.handoffs.slice().sort((a, b) => a.timestamp.localeCompare(b.timestamp));
     if (!list.length) return;
-    let i = Math.max(0, list.length - 3);
+    // carry on through the list across refreshes, starting near the most recent
+    if (replayAt.current < 0) replayAt.current = Math.max(0, list.length - 3);
     const replay = world.source.kind === 'workspace';
-    const run = () => { play(list[i % list.length], replay); i++; };
+    const run = () => { play(list[replayAt.current % list.length], replay); replayAt.current++; };
     const first = setTimeout(run, mode === 'signals' ? 600 : 2400);
     const every = setInterval(run, mode === 'signals' ? 3800 : 12500);
     return () => { clearTimeout(first); clearInterval(every); };

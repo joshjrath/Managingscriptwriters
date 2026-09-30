@@ -28,12 +28,17 @@ export const LIVE_THRESHOLD = 2;
 
 export type ControlData = 'auto' | 'simulated' | 'workspace';
 
+const SIM_START = Date.now();
+
 export async function loadWorld(ctx: Ctx): Promise<ControlWorld> {
   const mode = ctx.controlData ?? 'auto';
   const at = ctx.now();
   const placed = mode === 'simulated' ? 0 : await placedCount(ctx.db);
   if (mode === 'workspace' || (mode === 'auto' && placed >= LIVE_THRESHOLD)) return workspaceWorld(ctx.db, at);
-  const world = simulatedWorld(at, (await loadSettings(ctx.db)).orgName);
+  // deadlines run on a 12-hour cycle from when the server started, so they tick down between refreshes
+  const cycle = 12 * 3_600_000;
+  const epoch = new Date(SIM_START + Math.floor((at.getTime() - SIM_START) / cycle) * cycle);
+  const world = simulatedWorld(at, (await loadSettings(ctx.db)).orgName, epoch);
   return { ...world, source: { ...world.source, standby: mode === 'auto' ? LIVE_THRESHOLD - placed : null } };
 }
 

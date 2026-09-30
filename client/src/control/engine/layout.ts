@@ -109,23 +109,27 @@ export function computeLayouts(world: ControlWorld): Layouts {
   const rand = mulberry(99);
   const gauss = () => { const u = rand() || 1e-6, v = rand(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
   const writers = new Map<string, Vector3>();
+  // two spiral arms, writers along them as gravity wells
+  const arms = Math.ceil(world.writers.length / 2);
   world.writers.forEach((w, i) => {
-    const a = (i / Math.max(1, world.writers.length)) * Math.PI * 2 + 0.4;
-    const r = 1.1 + (hashString(w.id) - 0.5) * 0.4;
-    writers.set(w.id, new Vector3(Math.cos(a) * r * 1.45, Math.sin(a) * r * 0.7 + (hashString(w.id + 'y') - 0.5) * 0.3, (hashString(w.id + 'z') - 0.5) * 0.8));
+    const t = Math.floor(i / 2) / Math.max(1, arms - 1 || 1);
+    const a = (i % 2) * Math.PI + t * 2.3 + 0.35;
+    const r = 0.6 + t * 1.25;
+    writers.set(w.id, new Vector3(Math.cos(a) * r * 1.45, Math.sin(a) * r * 0.78, (hashString(w.id + 'z') - 0.5) * 0.5));
   });
+  // finished projects spiral out behind, newest nearest
+  const finished = world.projects.filter((p) => p.archived).sort((a, b) => (b.completedAt ?? '').localeCompare(a.completedAt ?? ''));
+  const archiveSlot = new Map(finished.map((p, i) => [p.id, i]));
   const projects = new Map<string, Vector3>();
-  const now = Date.now();
   for (const p of world.projects) {
     const wells = p.writers.map((id) => writers.get(id)).filter(Boolean) as Vector3[];
     const h = hashString(p.id);
     if (p.archived) {
       // finished work drifts back into the field; older light is deeper and further out
-      const age = p.completedAt ? (now - new Date(p.completedAt).getTime()) / 86_400_000 : 60;
-      const depth = 3.4 + Math.min(7, Math.sqrt(age) * 0.6);
-      const a = h * Math.PI * 2 + age * 0.07;
-      const r = 0.6 + Math.min(2.2, Math.sqrt(age) * 0.18) + hashString(p.id + 'r') * 0.4;
-      projects.set(p.id, new Vector3(Math.cos(a) * r * 1.05, Math.sin(a) * r * 0.62, -depth));
+      const i = archiveSlot.get(p.id) ?? 0;
+      const a = i * 2.39996 + 0.6;
+      const r = 0.45 + 0.34 * Math.sqrt(i + 1);
+      projects.set(p.id, new Vector3(Math.cos(a) * r * 1.5, Math.sin(a) * r * 0.85, -3.4 - i * 0.45));
     } else {
       // a project's cluster circles its lead writer's well
       const lead = wells[0] ?? new Vector3();
