@@ -8,9 +8,12 @@ import { api, useSave } from '../api';
 import type { Settings, UserSummary } from '../../../shared/types';
 import { computeDeadlines, DEFAULT_RULES, isValidTimeZone } from '../../../shared/dates';
 import { fmtCutoff, fmtLong, fmtStamp, plural } from '../../../shared/format';
+import { CITIES, cityLabel } from '../../../shared/cities';
 import { PageHeader, useBoot } from '../components/Shell';
 import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, useFieldId, useToast } from '../components/ui';
 
+const HOURS = Array.from({ length: 24 }, (_, h) => h);
+const fmtHour = (h: number) => `${((h + 11) % 12) + 1}:00 ${h < 12 ? 'AM' : 'PM'}`;
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const ZONES = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Phoenix', 'America/Toronto', 'Europe/London', 'Europe/Dublin', 'Europe/Berlin', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Australia/Sydney', 'Pacific/Auckland', 'UTC'];
 
@@ -111,7 +114,7 @@ function TeamPanel() {
               <div className="body">
                 <div className="title">{u.name}{u.id === me.id ? ' (you)' : ''}</div>
                 <div className="meta ellipsis">{u.email}</div>
-                <div className="meta">{u.active ? (u.capacityPerDay ? `${u.capacityPerDay} scripts / working day` : 'Capacity not set') : 'Deactivated'}</div>
+                <div className="meta">{u.active ? (u.capacityPerDay ? `${u.capacityPerDay} scripts / working day` : 'Capacity not set') : 'Deactivated'}{u.active && u.city ? ` · ${u.city.split(',')[0]}` : ''}</div>
               </div>
             </button>
             <div className="side">
@@ -240,10 +243,13 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
   const { settings } = useBoot();
   const [password, setPassword] = useState(() => (user ? '' : generatePassword()));
   const [active, setActive] = useState(user?.active ?? true);
+  const [city, setCity] = useState(user?.city ?? '');
+  const [hours, setHours] = useState<[number, number]>(user?.workHours ?? [9, 18]);
   const [share, setShare] = useState<string | null>(null);
+  const place = { city: city.trim() || null, ...(city.trim() ? { workStart: hours[0], workEnd: hours[1] % 24 || 24 } : {}) };
   const save = useSave(() => user
-    ? api(`/api/users/${user.id}`, { method: 'PATCH', body: { name, role, active, capacityPerDay: capacity ? Number(capacity) : null, password: password || undefined } })
-    : api('/api/users', { body: { name, email, role, password, capacityPerDay: capacity ? Number(capacity) : null } }), {
+    ? api(`/api/users/${user.id}`, { method: 'PATCH', body: { name, role, active, capacityPerDay: capacity ? Number(capacity) : null, password: password || undefined, ...place } })
+    : api('/api/users', { body: { name, email, role, password, capacityPerDay: capacity ? Number(capacity) : null, ...place } }), {
     onSuccess: () => {
       if (!user || password) {
         // only now, right after saving, is the plain password known
@@ -256,7 +262,7 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
     },
   });
   const f = save.error?.fields ?? {};
-  const ids = { n: useFieldId('n'), e: useFieldId('e'), r: useFieldId('r'), c: useFieldId('c'), p: useFieldId('p') };
+  const ids = { n: useFieldId('n'), e: useFieldId('e'), r: useFieldId('r'), c: useFieldId('c'), p: useFieldId('p'), city: useFieldId('city'), h: useFieldId('h') };
   if (share) return <ShareDetails message={share} name={firstName(name)} onClose={onClose} />;
   return (
     <Dialog open onClose={onClose} title={user ? `Edit ${user.name}` : 'Add a person'} size="narrow"
@@ -269,6 +275,19 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
           <select className="select" id={ids.r} value={role} onChange={(e) => setRole(e.target.value as Role)}><option value="writer">Writer</option><option value="manager">Manager</option><option value="owner">Admin</option></select>
         </Field>
         <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates and over-capacity warnings."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>
+        <Field label="City" optional htmlFor={ids.city} error={f.city} help="Where they work from. Sets their local time and working hours.">
+          <input className="input" list={`${ids.city}-list`} autoComplete="off" placeholder="Start typing a city" value={city} onChange={(e) => setCity(e.target.value)} {...inputProps(ids.city, f.city)} />
+          <datalist id={`${ids.city}-list`}>{CITIES.map((c) => <option key={cityLabel(c)} value={cityLabel(c)} />)}</datalist>
+        </Field>
+        {city.trim() && (
+          <Field label="Working hours" htmlFor={ids.h} error={f.workEnd ?? f.workStart} help="Their local time.">
+            <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>
+              <select className="select" id={ids.h} value={hours[0]} onChange={(e) => setHours([Number(e.target.value), hours[1]])}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h)}</option>)}</select>
+              <span className="muted">to</span>
+              <select className="select" aria-label="Working hours end" value={hours[1] % 24} onChange={(e) => setHours([hours[0], Number(e.target.value)])}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h)}</option>)}</select>
+            </div>
+          </Field>
+        )}
         <Field label={user ? 'Reset password' : 'Temporary password'} optional={!!user} htmlFor={ids.p} error={f.password} help={user ? 'Leave empty to keep their password. Set one and you’ll get a message to send them.' : 'At least 10 characters. After saving you’ll get a ready-to-send message with this and the sign-in link.'}>
           <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>
             <input className="input" type="text" autoComplete="new-password" spellCheck={false} value={password} onChange={(e) => setPassword(e.target.value)} {...inputProps(ids.p, f.password)} />

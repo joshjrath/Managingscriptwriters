@@ -365,4 +365,16 @@ update scripts s
  where s.batch_id = d.batch_id and s.status = 'approved' and s.removed_at is null;
 update batches set updated_at = now() where id in (select batch_id from catch_up);
 `,
+  // 10 · Control Center: a sign-in's clearance to open it, and where each team member works from
+  `
+alter table sessions add column control_until timestamptz;
+alter table users add column city text;
+alter table users add column city_code text;
+alter table users add column country text;
+alter table users add column lat double precision;
+alter table users add column lon double precision;
+alter table users add column timezone text;
+alter table users add column work_start smallint check (work_start between 0 and 23);
+alter table users add column work_end smallint check (work_end between 1 and 47);
+`,
 ];

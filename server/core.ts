@@ -23,6 +23,8 @@ export interface Ctx {
   realDb?: Db;
   /** the database this request is using right now (for work that outlives the handler, like streaming a file) */
   dbNow?: () => Db;
+  /** what the Control Center shows: the simulated network, the live workspace, or live once the team is placed (default) */
+  controlData?: import('./control/routes').ControlData;
 }
 
 // ── settings ─────────────────────────────────────────────────────────────
@@ -56,12 +58,19 @@ export async function clockFor(ctx: Ctx, settings?: Settings): Promise<Clock> {
 
 // ── users ────────────────────────────────────────────────────────────────
 
-interface UserRow { id: number; name: string; email: string; role: 'owner' | 'manager' | 'writer'; active: boolean; capacity_per_day: number | null; removed_at: string | null; temp_password: string | null }
+interface UserRow {
+  id: number; name: string; email: string; role: 'owner' | 'manager' | 'writer'; active: boolean; capacity_per_day: number | null;
+  removed_at: string | null; temp_password: string | null; city: string | null; country: string | null; work_start: number | null; work_end: number | null;
+}
 
 export async function loadUsers(db: Db): Promise<UserSummary[]> {
-  const rows = await db.query<UserRow>(`select id, name, email, role, active, capacity_per_day, removed_at, temp_password from users order by active desc, name`);
+  const rows = await db.query<UserRow>(`select id, name, email, role, active, capacity_per_day, removed_at, temp_password, city, country, work_start, work_end from users order by active desc, name`);
   // temp passwords are stripped here; only the team endpoint adds them back for owners and managers
-  return rows.map((r) => ({ id: r.id, name: r.name, email: r.email, role: r.role, active: r.active && !r.removed_at, removed: !!r.removed_at, capacityPerDay: r.capacity_per_day, tempPassword: null }));
+  return rows.map((r) => ({
+    id: r.id, name: r.name, email: r.email, role: r.role, active: r.active && !r.removed_at, removed: !!r.removed_at, capacityPerDay: r.capacity_per_day, tempPassword: null,
+    city: r.city ? `${r.city}${r.country ? `, ${r.country}` : ''}` : null,
+    workHours: r.work_start != null && r.work_end != null ? [r.work_start, r.work_end] : null,
+  }));
 }
 
 export async function managerIds(db: Db): Promise<number[]> {

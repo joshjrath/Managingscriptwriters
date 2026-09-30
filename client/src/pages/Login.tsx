@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { api, type ApiError } from '../api';
 import { Button, Field, FormError, inputProps, useFieldId } from '../components/ui';
+import { ControlCenterLink } from '../control/Link';
 
 export interface AuthStatus { signedIn: boolean; needsSetup: boolean; setupAllowed: boolean; setupHint: string | null; demo: boolean; orgName: string }
 
@@ -30,6 +31,7 @@ export function Login({ status, onDone }: { status: AuthStatus; onDone: () => vo
     <main className="login">
       <div className="login-card">
         <div className="wordmark"><span className="full" style={{ color: '#fff' }}>Scale</span>&nbsp;<span>Media</span></div>
+        {!setup && <ControlCenterLink />}
         <h1>{setup ? 'Set up your workspace' : 'Sign in'}</h1>
         <p className="sub">{setup ? 'Create the first manager account. You can add writers afterwards.' : 'Script production for the Scale Media team.'}</p>
         {setup && !status.setupAllowed ? (

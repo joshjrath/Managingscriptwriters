@@ -12,9 +12,11 @@ import { auditEvent } from '../audit';
 import type { Me, UserSummary } from '../../shared/types';
 import { conflict, HttpError, notFound, parse, zs } from '../http';
 import { computeDeadlines, isValidTimeZone } from '../../shared/dates';
+import { findCity } from '../../shared/cities';
 import { fmtDate } from '../../shared/format';
 import type { Notification } from '../../shared/types';
 
+const PLACE_KEYS = new Set(['city', 'city_code', 'country', 'lat', 'lon', 'timezone']);
 const email = z.string().trim().toLowerCase().email('Enter a valid email').max(200);
 const password = z.string().min(1, 'Enter a password').max(200);
 
@@ -123,12 +125,37 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   const capacity = z.coerce.number().positive('Use a positive number').max(50).nullable().optional();
+  const city = z.string().trim().max(120).nullable().optional();
+  const hour = z.coerce.number().int().min(0).max(47);
+
+  /** Where someone works from and their hours, as columns; a city must come from the list. */
+  function placeColumns(input: { city?: string | null; workStart?: number; workEnd?: number }): Record<string, unknown> {
+    const set: Record<string, unknown> = {};
+    if (input.city !== undefined) {
+      if (!input.city) Object.assign(set, { city: null, city_code: null, country: null, lat: null, lon: null, timezone: null });
+      else {
+        const c = findCity(input.city);
+        if (!c) throw new HttpError(400, 'Pick a city from the list', { city: 'Pick a city from the list' });
+        Object.assign(set, { city: c.name, city_code: c.code, country: c.country, lat: c.lat, lon: c.lon, timezone: c.timezone });
+      }
+    }
+    if (input.workStart !== undefined || input.workEnd !== undefined) {
+      const start = input.workStart ?? 9;
+      let end = input.workEnd ?? 18;
+      if (end <= start) end += 24;
+      if (start > 23 || end - start > 16 || end - start < 1) throw new HttpError(400, 'Use working hours between 1 and 16 hours long', { workEnd: 'Between 1 and 16 hours' });
+      Object.assign(set, { work_start: start, work_end: end });
+    }
+    return set;
+  }
 
   app.post('/api/users', async (req) => {
     const me = requireManager(req);
     const input = parse(z.object({
       name: zs.name('Name', 120), email, role: z.enum(ROLES), password, capacityPerDay: capacity,
+      city, workStart: hour.optional(), workEnd: hour.optional(),
     }), req.body);
+    const place = placeColumns(input);
     const err = validatePassword(input.password);
     if (err) throw new HttpError(400, err, { password: err });
     const existing = await db.one<{ id: number; removed_at: string | null }>(`select id, removed_at from users where lower(email) = $1`, [input.email]);
@@ -149,6 +176,8 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       );
       id = row!.id;
     }
+    const placeKeys = Object.keys(place);
+    if (placeKeys.length) await db.query(`update users set ${placeKeys.map((k, i) => `${k} = $${i + 2}`).join(', ')} where id = $1`, [id, ...placeKeys.map((k) => place[k])]);
     await logActivity(db, { actor: me, action: 'user.created', entityType: 'user', entityId: id, summary: `${existing ? 'Re-added' : 'Added'} ${input.name} as ${input.role}` });
     return { users: await teamFor(me) };
   });
@@ -159,6 +188,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const input = parse(z.object({
       name: zs.name('Name', 120).optional(), role: z.enum(ROLES).optional(), active: z.boolean().optional(),
       capacityPerDay: capacity, password: z.string().max(200).optional(),
+      city, workStart: hour.optional(), workEnd: hour.optional(),
     }), req.body);
     const u = await db.one<{ role: 'owner' | 'manager' | 'writer'; active: boolean; name: string; removed_at: string | null }>(`select role, active, name, removed_at from users where id = $1`, [id]);
     if (!u || u.removed_at) throw notFound('Team member');
@@ -169,6 +199,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     if (input.role !== undefined) set.role = input.role;
     if (input.active !== undefined) set.active = input.active;
     if (input.capacityPerDay !== undefined) set.capacity_per_day = input.capacityPerDay;
+    Object.assign(set, placeColumns(input));
     if (input.password) {
       const err = validatePassword(input.password);
       if (err) throw new HttpError(400, err, { password: err });
@@ -179,7 +210,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     if (keys.length) {
       await db.query(`update users set ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() where id = $1`, [id, ...keys.map((k) => set[k])]);
       if (input.active === false || input.password) await db.query(`delete from sessions where user_id = $1`, [id]);
-      await logActivity(db, { actor: me, action: 'user.updated', entityType: 'user', entityId: id, summary: `Updated ${u.name}: ${keys.filter((k) => k !== 'temp_password').map((k) => (k === 'password_hash' ? 'password reset' : k.replace(/_/g, ' '))).join(', ')}` });
+      await logActivity(db, { actor: me, action: 'user.updated', entityType: 'user', entityId: id, summary: `Updated ${u.name}: ${[...new Set(keys.filter((k) => k !== 'temp_password').map((k) => (k === 'password_hash' ? 'password reset' : PLACE_KEYS.has(k) ? 'location' : k.startsWith('work_') ? 'working hours' : k.replace(/_/g, ' '))))].join(', ')}` });
     }
     return { users: await teamFor(me) };
   });

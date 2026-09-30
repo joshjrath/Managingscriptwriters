@@ -1,0 +1,172 @@
+// Cities a team member can be placed in on the Control Center globe: name,
+// three-letter code, country, latitude, longitude and IANA timezone.
+
+export interface City {
+  name: string;
+  code: string;
+  country: string;
+  lat: number;
+  lon: number;
+  timezone: string;
+}
+
+type Row = [string, string, string, number, number, string];
+
+const ROWS: Row[] = [
+  // North America
+  ['Toronto', 'TOR', 'Canada', 43.6532, -79.3832, 'America/Toronto'],
+  ['Montreal', 'YMQ', 'Canada', 45.5019, -73.5674, 'America/Toronto'],
+  ['Ottawa', 'YOW', 'Canada', 45.4215, -75.6972, 'America/Toronto'],
+  ['Vancouver', 'YVR', 'Canada', 49.2827, -123.1207, 'America/Vancouver'],
+  ['Calgary', 'YYC', 'Canada', 51.0447, -114.0719, 'America/Edmonton'],
+  ['Edmonton', 'YEG', 'Canada', 53.5461, -113.4938, 'America/Edmonton'],
+  ['Winnipeg', 'YWG', 'Canada', 49.8951, -97.1384, 'America/Winnipeg'],
+  ['Halifax', 'YHZ', 'Canada', 44.6488, -63.5752, 'America/Halifax'],
+  ['New York', 'NYC', 'United States', 40.7128, -74.006, 'America/New_York'],
+  ['Boston', 'BOS', 'United States', 42.3601, -71.0589, 'America/New_York'],
+  ['Philadelphia', 'PHL', 'United States', 39.9526, -75.1652, 'America/New_York'],
+  ['Washington', 'WAS', 'United States', 38.9072, -77.0369, 'America/New_York'],
+  ['Atlanta', 'ATL', 'United States', 33.749, -84.388, 'America/New_York'],
+  ['Miami', 'MIA', 'United States', 25.7617, -80.1918, 'America/New_York'],
+  ['Orlando', 'ORL', 'United States', 28.5384, -81.3789, 'America/New_York'],
+  ['Charlotte', 'CLT', 'United States', 35.2271, -80.8431, 'America/New_York'],
+  ['Detroit', 'DTT', 'United States', 42.3314, -83.0458, 'America/Detroit'],
+  ['Chicago', 'CHI', 'United States', 41.8781, -87.6298, 'America/Chicago'],
+  ['Nashville', 'BNA', 'United States', 36.1627, -86.7816, 'America/Chicago'],
+  ['Austin', 'AUS', 'United States', 30.2672, -97.7431, 'America/Chicago'],
+  ['Dallas', 'DFW', 'United States', 32.7767, -96.797, 'America/Chicago'],
+  ['Houston', 'HOU', 'United States', 29.7604, -95.3698, 'America/Chicago'],
+  ['Minneapolis', 'MSP', 'United States', 44.9778, -93.265, 'America/Chicago'],
+  ['Denver', 'DEN', 'United States', 39.7392, -104.9903, 'America/Denver'],
+  ['Salt Lake City', 'SLC', 'United States', 40.7608, -111.891, 'America/Denver'],
+  ['Phoenix', 'PHX', 'United States', 33.4484, -112.074, 'America/Phoenix'],
+  ['Las Vegas', 'LAS', 'United States', 36.1699, -115.1398, 'America/Los_Angeles'],
+  ['Los Angeles', 'LAX', 'United States', 34.0522, -118.2437, 'America/Los_Angeles'],
+  ['San Diego', 'SAN', 'United States', 32.7157, -117.1611, 'America/Los_Angeles'],
+  ['San Francisco', 'SFO', 'United States', 37.7749, -122.4194, 'America/Los_Angeles'],
+  ['Seattle', 'SEA', 'United States', 47.6062, -122.3321, 'America/Los_Angeles'],
+  ['Portland', 'PDX', 'United States', 45.5152, -122.6784, 'America/Los_Angeles'],
+  ['Anchorage', 'ANC', 'United States', 61.2181, -149.9003, 'America/Anchorage'],
+  ['Honolulu', 'HNL', 'United States', 21.3069, -157.8583, 'Pacific/Honolulu'],
+  ['Mexico City', 'MEX', 'Mexico', 19.4326, -99.1332, 'America/Mexico_City'],
+  ['Guadalajara', 'GDL', 'Mexico', 20.6597, -103.3496, 'America/Mexico_City'],
+  ['Monterrey', 'MTY', 'Mexico', 25.6866, -100.3161, 'America/Monterrey'],
+  // Central & South America, Caribbean
+  ['San Juan', 'SJU', 'Puerto Rico', 18.4655, -66.1057, 'America/Puerto_Rico'],
+  ['Kingston', 'KIN', 'Jamaica', 17.9712, -76.7936, 'America/Jamaica'],
+  ['Panama City', 'PTY', 'Panama', 8.9824, -79.5199, 'America/Panama'],
+  ['San José', 'SJO', 'Costa Rica', 9.9281, -84.0907, 'America/Costa_Rica'],
+  ['Bogotá', 'BOG', 'Colombia', 4.711, -74.0721, 'America/Bogota'],
+  ['Medellín', 'MDE', 'Colombia', 6.2442, -75.5812, 'America/Bogota'],
+  ['Lima', 'LIM', 'Peru', -12.0464, -77.0428, 'America/Lima'],
+  ['Quito', 'UIO', 'Ecuador', -0.1807, -78.4678, 'America/Guayaquil'],
+  ['Caracas', 'CCS', 'Venezuela', 10.4806, -66.9036, 'America/Caracas'],
+  ['Santiago', 'SCL', 'Chile', -33.4489, -70.6693, 'America/Santiago'],
+  ['Buenos Aires', 'BUE', 'Argentina', -34.6037, -58.3816, 'America/Argentina/Buenos_Aires'],
+  ['Montevideo', 'MVD', 'Uruguay', -34.9011, -56.1645, 'America/Montevideo'],
+  ['São Paulo', 'SAO', 'Brazil', -23.5505, -46.6333, 'America/Sao_Paulo'],
+  ['Rio de Janeiro', 'RIO', 'Brazil', -22.9068, -43.1729, 'America/Sao_Paulo'],
+  // Europe
+  ['London', 'LON', 'United Kingdom', 51.5074, -0.1278, 'Europe/London'],
+  ['Manchester', 'MAN', 'United Kingdom', 53.4808, -2.2426, 'Europe/London'],
+  ['Edinburgh', 'EDI', 'United Kingdom', 55.9533, -3.1883, 'Europe/London'],
+  ['Dublin', 'DUB', 'Ireland', 53.3498, -6.2603, 'Europe/Dublin'],
+  ['Lisbon', 'LIS', 'Portugal', 38.7223, -9.1393, 'Europe/Lisbon'],
+  ['Porto', 'OPO', 'Portugal', 41.1579, -8.6291, 'Europe/Lisbon'],
+  ['Madrid', 'MAD', 'Spain', 40.4168, -3.7038, 'Europe/Madrid'],
+  ['Barcelona', 'BCN', 'Spain', 41.3874, 2.1686, 'Europe/Madrid'],
+  ['Paris', 'PAR', 'France', 48.8566, 2.3522, 'Europe/Paris'],
+  ['Lyon', 'LYS', 'France', 45.764, 4.8357, 'Europe/Paris'],
+  ['Brussels', 'BRU', 'Belgium', 50.8503, 4.3517, 'Europe/Brussels'],
+  ['Amsterdam', 'AMS', 'Netherlands', 52.3676, 4.9041, 'Europe/Amsterdam'],
+  ['Berlin', 'BER', 'Germany', 52.52, 13.405, 'Europe/Berlin'],
+  ['Hamburg', 'HAM', 'Germany', 53.5511, 9.9937, 'Europe/Berlin'],
+  ['Munich', 'MUC', 'Germany', 48.1351, 11.582, 'Europe/Berlin'],
+  ['Zurich', 'ZRH', 'Switzerland', 47.3769, 8.5417, 'Europe/Zurich'],
+  ['Basel', 'BSL', 'Switzerland', 47.5596, 7.5886, 'Europe/Zurich'],
+  ['Milan', 'MIL', 'Italy', 45.4642, 9.19, 'Europe/Rome'],
+  ['Rome', 'ROM', 'Italy', 41.9028, 12.4964, 'Europe/Rome'],
+  ['Vienna', 'VIE', 'Austria', 48.2082, 16.3738, 'Europe/Vienna'],
+  ['Prague', 'PRG', 'Czechia', 50.0755, 14.4378, 'Europe/Prague'],
+  ['Warsaw', 'WAW', 'Poland', 52.2297, 21.0122, 'Europe/Warsaw'],
+  ['Kraków', 'KRK', 'Poland', 50.0647, 19.945, 'Europe/Warsaw'],
+  ['Budapest', 'BUD', 'Hungary', 47.4979, 19.0402, 'Europe/Budapest'],
+  ['Copenhagen', 'CPH', 'Denmark', 55.6761, 12.5683, 'Europe/Copenhagen'],
+  ['Stockholm', 'STO', 'Sweden', 59.3293, 18.0686, 'Europe/Stockholm'],
+  ['Oslo', 'OSL', 'Norway', 59.9139, 10.7522, 'Europe/Oslo'],
+  ['Helsinki', 'HEL', 'Finland', 60.1699, 24.9384, 'Europe/Helsinki'],
+  ['Tallinn', 'TLL', 'Estonia', 59.437, 24.7536, 'Europe/Tallinn'],
+  ['Athens', 'ATH', 'Greece', 37.9838, 23.7275, 'Europe/Athens'],
+  ['Bucharest', 'BUH', 'Romania', 44.4268, 26.1025, 'Europe/Bucharest'],
+  ['Sofia', 'SOF', 'Bulgaria', 42.6977, 23.3219, 'Europe/Sofia'],
+  ['Belgrade', 'BEG', 'Serbia', 44.7866, 20.4489, 'Europe/Belgrade'],
+  ['Kyiv', 'IEV', 'Ukraine', 50.4501, 30.5234, 'Europe/Kyiv'],
+  ['Istanbul', 'IST', 'Türkiye', 41.0082, 28.9784, 'Europe/Istanbul'],
+  // Africa & Middle East
+  ['Lagos', 'LOS', 'Nigeria', 6.5244, 3.3792, 'Africa/Lagos'],
+  ['Accra', 'ACC', 'Ghana', 5.6037, -0.187, 'Africa/Accra'],
+  ['Dakar', 'DKR', 'Senegal', 14.7167, -17.4677, 'Africa/Dakar'],
+  ['Casablanca', 'CAS', 'Morocco', 33.5731, -7.5898, 'Africa/Casablanca'],
+  ['Cairo', 'CAI', 'Egypt', 30.0444, 31.2357, 'Africa/Cairo'],
+  ['Nairobi', 'NBO', 'Kenya', -1.2921, 36.8219, 'Africa/Nairobi'],
+  ['Addis Ababa', 'ADD', 'Ethiopia', 8.9806, 38.7578, 'Africa/Addis_Ababa'],
+  ['Kigali', 'KGL', 'Rwanda', -1.9441, 30.0619, 'Africa/Kigali'],
+  ['Johannesburg', 'JNB', 'South Africa', -26.2041, 28.0473, 'Africa/Johannesburg'],
+  ['Cape Town', 'CPT', 'South Africa', -33.9249, 18.4241, 'Africa/Johannesburg'],
+  ['Tel Aviv', 'TLV', 'Israel', 32.0853, 34.7818, 'Asia/Jerusalem'],
+  ['Amman', 'AMM', 'Jordan', 31.9454, 35.9284, 'Asia/Amman'],
+  ['Beirut', 'BEY', 'Lebanon', 33.8938, 35.5018, 'Asia/Beirut'],
+  ['Riyadh', 'RUH', 'Saudi Arabia', 24.7136, 46.6753, 'Asia/Riyadh'],
+  ['Doha', 'DOH', 'Qatar', 25.2854, 51.531, 'Asia/Qatar'],
+  ['Dubai', 'DXB', 'United Arab Emirates', 25.2048, 55.2708, 'Asia/Dubai'],
+  ['Abu Dhabi', 'AUH', 'United Arab Emirates', 24.4539, 54.3773, 'Asia/Dubai'],
+  // South & Central Asia
+  ['Karachi', 'KHI', 'Pakistan', 24.8607, 67.0011, 'Asia/Karachi'],
+  ['Lahore', 'LHE', 'Pakistan', 31.5204, 74.3587, 'Asia/Karachi'],
+  ['Mumbai', 'BOM', 'India', 19.076, 72.8777, 'Asia/Kolkata'],
+  ['Delhi', 'DEL', 'India', 28.6139, 77.209, 'Asia/Kolkata'],
+  ['Bengaluru', 'BLR', 'India', 12.9716, 77.5946, 'Asia/Kolkata'],
+  ['Hyderabad', 'HYD', 'India', 17.385, 78.4867, 'Asia/Kolkata'],
+  ['Chennai', 'MAA', 'India', 13.0827, 80.2707, 'Asia/Kolkata'],
+  ['Kolkata', 'CCU', 'India', 22.5726, 88.3639, 'Asia/Kolkata'],
+  ['Colombo', 'CMB', 'Sri Lanka', 6.9271, 79.8612, 'Asia/Colombo'],
+  ['Kathmandu', 'KTM', 'Nepal', 27.7172, 85.324, 'Asia/Kathmandu'],
+  ['Dhaka', 'DAC', 'Bangladesh', 23.8103, 90.4125, 'Asia/Dhaka'],
+  ['Almaty', 'ALA', 'Kazakhstan', 43.222, 76.8512, 'Asia/Almaty'],
+  // East & Southeast Asia
+  ['Bangkok', 'BKK', 'Thailand', 13.7563, 100.5018, 'Asia/Bangkok'],
+  ['Ho Chi Minh City', 'SGN', 'Vietnam', 10.8231, 106.6297, 'Asia/Ho_Chi_Minh'],
+  ['Hanoi', 'HAN', 'Vietnam', 21.0278, 105.8342, 'Asia/Bangkok'],
+  ['Kuala Lumpur', 'KUL', 'Malaysia', 3.139, 101.6869, 'Asia/Kuala_Lumpur'],
+  ['Singapore', 'SIN', 'Singapore', 1.3521, 103.8198, 'Asia/Singapore'],
+  ['Jakarta', 'JKT', 'Indonesia', -6.2088, 106.8456, 'Asia/Jakarta'],
+  ['Bali', 'DPS', 'Indonesia', -8.4095, 115.1889, 'Asia/Makassar'],
+  ['Manila', 'MNL', 'Philippines', 14.5995, 120.9842, 'Asia/Manila'],
+  ['Hong Kong', 'HKG', 'Hong Kong', 22.3193, 114.1694, 'Asia/Hong_Kong'],
+  ['Shenzhen', 'SZX', 'China', 22.5431, 114.0579, 'Asia/Shanghai'],
+  ['Shanghai', 'SHA', 'China', 31.2304, 121.4737, 'Asia/Shanghai'],
+  ['Beijing', 'BJS', 'China', 39.9042, 116.4074, 'Asia/Shanghai'],
+  ['Taipei', 'TPE', 'Taiwan', 25.033, 121.5654, 'Asia/Taipei'],
+  ['Seoul', 'SEL', 'South Korea', 37.5665, 126.978, 'Asia/Seoul'],
+  ['Tokyo', 'TYO', 'Japan', 35.6762, 139.6503, 'Asia/Tokyo'],
+  ['Osaka', 'OSA', 'Japan', 34.6937, 135.5023, 'Asia/Tokyo'],
+  // Oceania
+  ['Perth', 'PER', 'Australia', -31.9505, 115.8605, 'Australia/Perth'],
+  ['Adelaide', 'ADL', 'Australia', -34.9285, 138.6007, 'Australia/Adelaide'],
+  ['Brisbane', 'BNE', 'Australia', -27.4698, 153.0251, 'Australia/Brisbane'],
+  ['Sydney', 'SYD', 'Australia', -33.8688, 151.2093, 'Australia/Sydney'],
+  ['Melbourne', 'MEL', 'Australia', -37.8136, 144.9631, 'Australia/Melbourne'],
+  ['Auckland', 'AKL', 'New Zealand', -36.8485, 174.7633, 'Pacific/Auckland'],
+  ['Wellington', 'WLG', 'New Zealand', -41.2865, 174.7762, 'Pacific/Auckland'],
+];
+
+export const CITIES: City[] = ROWS.map(([name, code, country, lat, lon, timezone]) => ({ name, code, country, lat, lon, timezone }));
+
+/** The label a city is picked by: "Toronto, Canada". */
+export const cityLabel = (c: Pick<City, 'name' | 'country'>) => `${c.name}, ${c.country}`;
+
+export function findCity(label: string): City | undefined {
+  const q = label.trim().toLowerCase();
+  if (!q) return undefined;
+  return CITIES.find((c) => cityLabel(c).toLowerCase() === q) ?? CITIES.find((c) => c.name.toLowerCase() === q);
+}
