@@ -365,4 +365,9 @@ update scripts s
  where s.batch_id = d.batch_id and s.status = 'approved' and s.removed_at is null;
 update batches set updated_at = now() where id in (select batch_id from catch_up);
 `,
+  // 10 · where each writer's counter stood at the start of the day, so managers can see "+3 today"
+  `
+alter table writer_progress add column day date;
+alter table writer_progress add column day_start int;
+`,
 ];

@@ -17,6 +17,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-30-writing-pulse',
+    date: '2026-09-30',
+    title: 'See writers’ counters move',
+    summary: 'A new Writing progress panel on the Overview, a block for every script, and a “+3 today” badge when a writer taps +.',
+    changes: [
+      { tag: 'new', text: 'Overview → Writing progress: the latest counter updates, newest first, with who, which batch, how many are written and how long ago. Click one to open the batch.' },
+      { tag: 'new', text: 'Every writer’s share is drawn as one block per script: delivered, approved, sent for review, written but not sent, and still to write. The ones counted today glow.' },
+      { tag: 'new', text: 'A “+3 today” badge shows how far a writer’s counter went up today, on the Overview, the batch page’s Assignments, and the batch cards on the Production board and Overview.' },
+    ],
+  },
+  {
     id: '2026-09-30-batch-delivery-catch-up',
     date: '2026-09-30',
     title: 'Batches an admin already delivered are now fully delivered',

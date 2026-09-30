@@ -13,6 +13,7 @@ import { fmtDate, fmtRange } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
 import { BatchDrawer, writersText } from '../components/BatchBits';
 import { BatchProgress, Chip, DueChip, edgeFor, Empty, ErrorState, Loading, Seg, StageChip } from '../components/ui';
+import { TodayBump } from '../components/WritingPulse';
 
 const FLAGS = [
   { id: 'overdue', label: 'Overdue', c: 'var(--red)' },
@@ -121,6 +122,7 @@ export function Production() {
                       <span className="foot">
                         <DueChip m={b.next} today={clock.today} />
                         <span className="row-flex s2">
+                          <TodayBump n={b.writtenToday} />
                           {b.blocked && <Chip color="red" icon={<Ban aria-hidden />}>Blocked</Chip>}
                           {b.progress.inReview > 0 && <Chip color="lavender" dot title={`${b.progress.inReview} scripts waiting for review`}>{b.progress.inReview} in review</Chip>}
                           {b.progress.unassigned > 0 && <Chip color="pink" icon={<UserPlus aria-hidden />} title={`${b.progress.unassigned} unassigned scripts`}>{b.progress.unassigned}</Chip>}

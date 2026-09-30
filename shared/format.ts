@@ -53,6 +53,17 @@ export function fmtStamp(isoTs: string | null | undefined, timeZone: string): st
   return new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZone }).format(new Date(isoTs));
 }
 
+/** How long ago: "just now", "12 min ago", "3 h ago", "yesterday", "4 days ago" */
+export function fmtAgo(isoTs: string, now = Date.now()): string {
+  const min = Math.max(0, Math.round((now - Date.parse(isoTs)) / 60000));
+  if (min < 1) return 'just now';
+  if (min < 60) return `${min} min ago`;
+  const h = Math.round(min / 60);
+  if (h < 24) return `${h} h ago`;
+  const d = Math.round(h / 24);
+  return d === 1 ? 'yesterday' : `${d} days ago`;
+}
+
 export function fmtTimeZoneAbbr(timeZone: string, now = new Date()): string {
   const part = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'short' }).formatToParts(now).find((p) => p.type === 'timeZoneName');
   return part?.value ?? timeZone;

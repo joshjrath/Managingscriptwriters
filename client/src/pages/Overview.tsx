@@ -9,6 +9,7 @@ import { api } from '../api';
 import type { Dashboard } from '../../../shared/types';
 import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
 import { compressRanges, isManager } from '../../../shared/workflow';
+import { PipLegend, TodayBump, WritingFeed } from '../components/WritingPulse';
 import { TodayPill } from '../components/TodayPill';
 import { PageHeader, useBoot, useNewWork } from '../components/Shell';
 import { DueChart } from '../components/DueChart';
@@ -108,6 +109,11 @@ export function Overview() {
             </Panel>
 
             <div className="a-side">
+              <Panel title={d.scope === 'mine' ? 'Your writing progress' : 'Writing progress'} sub="from the + / − counters"
+                tools={d.activeBatches.some((b) => b.writtenToday) ? <TodayBump n={d.activeBatches.reduce((n, b) => n + b.writtenToday, 0)} /> : undefined}>
+                <WritingFeed batches={d.activeBatches} />
+                <PipLegend />
+              </Panel>
               <Panel title={d.scope === 'mine' ? 'Your workload' : 'Writer workload'}>
                 {!d.workload.length ? <Empty boxed title="No writers yet">Add your team in Settings → Team.</Empty> : (
                   <div className="rows">

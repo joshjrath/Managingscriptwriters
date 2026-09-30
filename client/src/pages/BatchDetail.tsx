@@ -20,6 +20,7 @@ import {
   Ring, ringColor, StageChip, StatusChip, useFieldId, useToast, Seg,
 } from '../components/ui';
 import { WrittenCounter } from '../components/WrittenCounter';
+import { PipLegend, ScriptPips, TodayBump } from '../components/WritingPulse';
 import { CardList, DecisionDialog, DocumentHistory, SendDialog, SentBackCard, TitlesDialog, WaitingCard } from '../components/Review';
 
 export function BatchPage() {
@@ -102,8 +103,9 @@ function BatchView({ b }: { b: BatchDetail }) {
               {b.writers.map((w) => (
                 <div key={String(w.userId)} className={`item ${w.userId == null ? 'edge-pink' : ''}`}>
                   <div className="body">
-                    <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>{w.userId != null && <Avatar name={w.name} id={w.userId} small />}<span className="title">{w.name}</span></div>
+                    <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>{w.userId != null && <Avatar name={w.name} id={w.userId} small />}<span className="title">{w.name}</span><TodayBump n={w.writtenToday} /></div>
                     <div className="meta">Scripts {w.ranges} · {plural(w.count, 'script')}</div>
+                    {w.userId != null && <ScriptPips w={w} large />}
                   </div>
                   <div className="side">
                     <span className="when num">{w.userId != null && w.written > w.draftReady ? `${w.written} / ${w.count} written` : `${w.draftReady} / ${w.count} drafts ready`}</span>
@@ -115,6 +117,7 @@ function BatchView({ b }: { b: BatchDetail }) {
                 </div>
               ))}
             </div>
+            <PipLegend />
           </Panel>
 
           <Panel title="Deadlines" sub={`due by ${fmtCutoff(settings.cutoff)} ${tz}`}>
