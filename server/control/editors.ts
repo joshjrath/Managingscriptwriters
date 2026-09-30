@@ -10,7 +10,8 @@ import type { Db } from '../db';
 import { logActivity } from '../core';
 import { requireUser } from '../auth';
 import { HttpError, notFound, parse, zs } from '../http';
-import { findCity, cityLabel } from '../../shared/cities';
+import { cityLabel, findCity, shiftOf, zoneFor } from '../../shared/cities';
+import { isValidTimeZone } from '../../shared/dates';
 import type { Editor } from '../../shared/types';
 import { isAdmin } from './access';
 
@@ -25,7 +26,7 @@ export async function loadEditorRows(db: Db): Promise<EditorRow[]> {
   );
 }
 
-const toEditor = (r: EditorRow): Editor => ({ id: r.id, name: r.name, city: cityLabel({ name: r.city, country: r.country }), workHours: [r.work_start, r.work_end] });
+const toEditor = (r: EditorRow): Editor => ({ id: r.id, name: r.name, city: cityLabel({ name: r.city, country: r.country }), timezone: r.timezone, workHours: [r.work_start, r.work_end] });
 
 export function registerEditorRoutes(app: FastifyInstance, ctx: Ctx) {
   const { db } = ctx;
@@ -37,16 +38,17 @@ export function registerEditorRoutes(app: FastifyInstance, ctx: Ctx) {
   const input = z.object({
     name: zs.name('Name', 120),
     city: z.string().trim().min(1, 'Pick a city from the list').max(120),
+    /** defaults to the city's */
+    timezone: z.string().trim().refine(isValidTimeZone, 'Pick a time zone from the list').optional(),
     workStart: z.coerce.number().int().min(0).max(23).default(9),
     workEnd: z.coerce.number().int().min(0).max(47).default(18),
   });
-  /** The city and hours as columns; the end of a shift that passes midnight is stored past 24. */
-  const place = (v: z.infer<typeof input>) => {
+  /** The city, time zone and hours as columns; the end of a shift that passes midnight is stored past 24. */
+  const place = (v: z.infer<typeof input>, current?: EditorRow | null) => {
     const c = findCity(v.city);
     if (!c) throw new HttpError(400, 'Pick a city from the list', { city: 'Pick a city from the list' });
-    const end = v.workEnd <= v.workStart ? v.workEnd + 24 : v.workEnd;
-    if (end - v.workStart > 16) throw new HttpError(400, 'Use working hours up to 16 hours long', { workEnd: 'Up to 16 hours' });
-    return [c.name, c.code, c.country, c.lat, c.lon, c.timezone, v.workStart, end] as const;
+    const [, end] = shiftOf(v.workStart, v.workEnd);
+    return [c.name, c.code, c.country, c.lat, c.lon, zoneFor(c, v.timezone, current), v.workStart, end] as const;
   };
   const list = async () => ({ editors: (await loadEditorRows(db)).map(toEditor) });
 
@@ -70,9 +72,11 @@ export function registerEditorRoutes(app: FastifyInstance, ctx: Ctx) {
     const me = requireAdmin(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const v = parse(input, req.body);
+    const current = await db.one<EditorRow>(`select * from editors where id = $1 and removed_at is null`, [id]);
+    if (!current) throw notFound('Editor');
     const rows = await db.query(
       `update editors set name = $2, city = $3, city_code = $4, country = $5, lat = $6, lon = $7, timezone = $8, work_start = $9, work_end = $10, updated_at = now()
-        where id = $1 and removed_at is null returning id`, [id, v.name, ...place(v)],
+        where id = $1 and removed_at is null returning id`, [id, v.name, ...place(v, current)],
     );
     if (!rows.length) throw notFound('Editor');
     await logActivity(db, { actor: me, action: 'editor.updated', entityType: 'editor', entityId: id, summary: `Updated editor ${v.name}` });

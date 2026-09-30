@@ -40,6 +40,7 @@ export class ArcsLayer {
   highlight: Float32Array = new Float32Array(MAX_ARCS);
   flow: Float32Array = new Float32Array(MAX_ARCS);
   private packets: Packet[] = [];
+  private sig = '';
   private packetPoints: Points;
   private packetPos: BufferAttribute;
   private packetCol: BufferAttribute;
@@ -141,7 +142,16 @@ export class ArcsLayer {
   }
 
   setArcs(defs: ArcDef[]) {
-    this.defs = defs.slice(0, MAX_ARCS);
+    const next = defs.slice(0, MAX_ARCS);
+    // the same arcs between the same places: keep the geometry, just refresh the colours
+    const sig = next.map((d) => `${d.key}:${d.from.x.toFixed(3)},${d.from.y.toFixed(3)},${d.to.x.toFixed(3)},${d.to.y.toFixed(3)}`).join('|');
+    if (sig === this.sig) {
+      next.forEach((d, i) => (this.material.uniforms.uColors.value as Color[])[i].copy(d.color));
+      this.defs = next;
+      return;
+    }
+    this.sig = sig;
+    this.defs = next;
     this.index = new Map(this.defs.map((d, i) => [d.key, i]));
     this.heights = this.defs.map((d) => arcHeight(d.from, d.to));
     const pos = new Float32Array(this.defs.length * SEGMENTS * 2 * 3);
@@ -160,12 +170,20 @@ export class ArcsLayer {
       }
       (this.material.uniforms.uColors.value as Color[])[i].copy(d.color);
     });
-    const g = this.lines.geometry;
+    const old = this.lines.geometry;
+    const g = new BufferGeometry();
     g.setAttribute('position', new BufferAttribute(pos, 3));
     g.setAttribute('aT', new BufferAttribute(at, 1));
     g.setAttribute('aArc', new BufferAttribute(arc, 1));
     g.computeBoundingSphere();
+    this.lines.geometry = g;
+    old.dispose();
     this.packets = this.packets.filter((p) => p.arc < this.defs.length);
+  }
+
+  /** Whether a handoff is travelling right now (the view draws more often while one is). */
+  get moving(): boolean {
+    return this.packets.some((p) => !p.done);
   }
 
   indexOf(key: string): number {

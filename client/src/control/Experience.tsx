@@ -12,6 +12,7 @@ import {
 } from './overlay';
 import { AnomalyReadout, CityStatement, ClientStatement, ProjectStatement, SystemPanel, TimezonePanel, WriterReadout, WriterReadoutMobile } from './readouts';
 import { Palette, type Command } from './Palette';
+import { People } from './People';
 import { sound } from './sound';
 
 export interface SyncInfo { at: number; skew: number; ok: number; total: number; packets: number }
@@ -32,6 +33,7 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
   const [filter, setFilter] = useState<Filter>(null);
   const [hover, setHover] = useState<Target | null>(null);
   const [palette, setPalette] = useState(false);
+  const [people, setPeople] = useState(false);
   const [geo, setGeo] = useState<{ lat: number; lon: number } | null>(null);
   const [now, setNow] = useState(() => new Date());
   const [offset, setOffset] = useState(0);
@@ -79,7 +81,9 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
   useEffect(() => { view?.setWorld(world); }, [view, world]);
   useEffect(() => { if (live && view) view.reveal(returning); }, [live, view, returning]);
   useEffect(() => { view?.setMode(mode); }, [view, mode]);
-  useEffect(() => { view?.setFocus(focus); }, [view, focus]);
+  // someone just placed may reach the focus a moment before the refreshed world does: aim again once they're in it
+  const focusIn = focus?.kind === 'writer' ? world.writers.some((w) => w.id === focus.id) : true;
+  useEffect(() => { view?.setFocus(focus); }, [view, focus, focusIn]);
   useEffect(() => { view?.setFilter(filter); }, [view, filter]);
   useEffect(() => { view?.setTimeOffset(offset); }, [view, offset]);
 
@@ -222,6 +226,7 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
         else if (c.action === 'lock') onLock();
         else if (c.action === 'sound') toggleSound();
         else if (c.action === 'now') { setPlaying(false); setOffset(0); }
+        else if (c.action === 'people') setPeople(true);
     }
   };
 
@@ -230,7 +235,8 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
   // ── keyboard ───────────────────────────────────────────────────────────
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
+      if (people) { if (e.key === 'Escape') setPeople(false); return; }
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPalette((p) => !p); return; }
       if (palette || typing) return;
       if (e.key === '/') { e.preventDefault(); setPalette(true); return; }
@@ -259,7 +265,7 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
   // ── what to show ───────────────────────────────────────────────────────
   const anomaly = focus?.kind === 'anomaly' ? anomalies.find((a) => a.id === focus.id) : null;
   const geoFocusMode = GEO_MODES.includes(mode);
-  let statement: React.ReactNode = <Statement mode={mode} world={world} now={now} anomalies={anomalies} />;
+  let statement: React.ReactNode = <Statement mode={mode} world={world} now={now} anomalies={anomalies} onPeople={() => setPeople(true)} />;
   if (focus?.kind === 'project') statement = <ProjectStatement world={world} id={focus.id} now={now} />;
   else if (focus?.kind === 'client') statement = <ClientStatement world={world} id={focus.id} now={now} />;
   else if (focus?.kind === 'city') { const [lat, lon] = focus.id.split(',').map(Number); statement = <CityStatement world={world} lat={lat} lon={lon} now={now} />; }
@@ -289,7 +295,7 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
             {focus?.kind === 'writer' && geoFocusMode && !narrow && <WriterReadout world={world} id={focus.id} now={now} anomalies={anomalies} />}
             {anomaly && <AnomalyReadout world={world} anomaly={anomaly} />}
           </div>
-          <Top world={world} now={now} offset={offset} soundOn={soundOn} onSound={toggleSound} onPalette={() => setPalette(true)} onExit={onExit} />
+          <Top world={world} now={now} offset={offset} soundOn={soundOn} onSound={toggleSound} onPalette={() => setPalette(true)} onPeople={() => setPeople((p) => !p)} peopleOpen={people} onExit={onExit} />
           <Nav mode={mode} onMode={(m) => setMode(m)} />
           {statement}
           {focus?.kind === 'writer' && !geoFocusMode && <SpaceWriterStatement world={world} id={focus.id} />}
@@ -301,10 +307,19 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
               onScrub={(ms) => { setPlaying(false); setOffset(ms); }} onPlay={() => setPlaying((p) => !p)} onNow={() => { setPlaying(false); setOffset(0); }}
               onFocus={(id) => setFocus({ kind: 'writer', id })} />
           )}
-          {mode === 'system' && view && <SystemPanel world={world} stats={view.stats} sync={sync} anomalies={anomalies} onLock={onLock} />}
+          {mode === 'system' && view && <SystemPanel world={world} stats={view.stats} sync={sync} anomalies={anomalies} onLock={onLock} onPeople={() => setPeople(true)} />}
           {focus && <button className="cc-back" onClick={() => setFocus(null)}>← {MODES.find((m) => m.mode === mode)?.label ?? 'WORLD'} <kbd>ESC</kbd></button>}
           {filter && !focus && <button className="cc-back" onClick={() => setFilter(null)}>{filter === 'online' ? 'WRITERS ONLINE' : filter === 'reviews' ? 'REVIEWS' : 'PRESSURE'} · CLEAR <kbd>ESC</kbd></button>}
           {palette && <Palette world={world} now={now} onClose={() => setPalette(false)} onRun={run} />}
+          {people && (
+            <People now={now} onClose={() => setPeople(false)}
+              onPlaced={(id) => {
+                // the panel steps aside and the globe turns to where they now are
+                setPeople(false);
+                if (!GEO_MODES.includes(mode) || mode === 'missions' || mode === 'deadlines') setMode('world', true);
+                setFocus({ kind: 'writer', id });
+              }} />
+          )}
         </>
       )}
       <PaletteDim open={palette} />

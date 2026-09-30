@@ -24,6 +24,8 @@ export interface UserSummary extends Me {
   tempPassword: string | null;
   /** where they work from ("Toronto, Canada"), for their local time */
   city: string | null;
+  /** their IANA time zone: the city's, unless one was chosen */
+  timezone: string | null;
   /** local working hours; the end may pass midnight (e.g. [20, 28]) */
   workHours: [number, number] | null;
 }
@@ -34,6 +36,8 @@ export interface Editor {
   name: string;
   /** "London, United Kingdom" */
   city: string;
+  /** IANA time zone: the city's, unless one was chosen */
+  timezone: string;
   workHours: [number, number];
 }
 

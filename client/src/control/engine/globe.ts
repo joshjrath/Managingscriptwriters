@@ -5,6 +5,7 @@ import {
   AdditiveBlending, BackSide, BufferAttribute, BufferGeometry, Color, FrontSide, Mesh, NormalBlending, Points,
   ShaderMaterial, SphereGeometry, Vector3, Vector4,
 } from 'three';
+import { releaseAfterUpload } from './buffers';
 import { isLand, landMask } from './landmask';
 import { DEG, mulberry, noise3 } from './math';
 
@@ -18,8 +19,16 @@ export function buildSurface(count: number): { geometry: BufferGeometry; land: n
   const rand = mulberry(20260930);
   const golden = Math.PI * (3 - Math.sqrt(5));
   const spacing = Math.sqrt((4 * Math.PI) / count);
-  const pos: number[] = [];
-  const data: number[] = [];
+  // typed arrays sized for the worst case (every sample kept, plus the graticule), trimmed at the end
+  const cap = count + 12_000;
+  const pos = new Float32Array(cap * 3);
+  const data = new Float32Array(cap * 4);
+  let n = 0;
+  const put = (x: number, y: number, z: number, a: number, b: number, c: number, d: number) => {
+    pos[n * 3] = x; pos[n * 3 + 1] = y; pos[n * 3 + 2] = z;
+    data[n * 4] = a; data[n * 4 + 1] = b; data[n * 4 + 2] = c; data[n * 4 + 3] = d;
+    n++;
+  };
   const t1 = new Vector3(), t2 = new Vector3(), p = new Vector3(), up = new Vector3(0, 1, 0);
   let land = 0;
   for (let i = 0; i < count; i++) {
@@ -38,15 +47,13 @@ export function buildSurface(count: number): { geometry: BufferGeometry; land: n
     if (isLand(mask, lat, lon)) {
       const d = 0.55;
       const coast = !isLand(mask, lat + d, lon) || !isLand(mask, lat - d, lon) || !isLand(mask, lat, lon + d / Math.max(0.2, Math.cos(lat * DEG))) || !isLand(mask, lat, lon - d / Math.max(0.2, Math.cos(lat * DEG)));
-      const n = noise3(p.x * 3.2 + 7, p.y * 3.2, p.z * 3.2) * 0.62 + noise3(p.x * 11 + 3, p.y * 11, p.z * 11) * 0.38;
+      const nz = noise3(p.x * 3.2 + 7, p.y * 3.2, p.z * 3.2) * 0.62 + noise3(p.x * 11 + 3, p.y * 11, p.z * 11) * 0.38;
       // most sit on the surface; some a hair above; a few float
       const lift = seed > 0.994 ? 0.02 + rand() * 0.035 : seed > 0.86 ? 0.003 + rand() * 0.009 : 0;
-      pos.push(p.x, p.y, p.z);
-      data.push(seed, coast ? 1 : 0, lift, n);
+      put(p.x, p.y, p.z, seed, coast ? 1 : 0, lift, nz);
       land++;
     } else if (rand() < 0.085) {
-      pos.push(p.x, p.y, p.z);
-      data.push(seed, 2, 0, noise3(p.x * 5, p.y * 5, p.z * 5));
+      put(p.x, p.y, p.z, seed, 2, 0, noise3(p.x * 5, p.y * 5, p.z * 5));
     }
   }
   // graticule: dotted parallels and meridians every 15°
@@ -55,22 +62,21 @@ export function buildSurface(count: number): { geometry: BufferGeometry; land: n
     for (let s = 0; s < steps; s++) {
       const lon = (s / steps) * 360 - 180;
       const phi = lat * DEG, lam = lon * DEG;
-      pos.push(Math.cos(phi) * Math.sin(lam) * 1.002, Math.sin(phi) * 1.002, Math.cos(phi) * Math.cos(lam) * 1.002);
-      data.push(rand(), 3, 0, lat === 0 ? 1 : 0.35);
+      put(Math.cos(phi) * Math.sin(lam) * 1.002, Math.sin(phi) * 1.002, Math.cos(phi) * Math.cos(lam) * 1.002, rand(), 3, 0, lat === 0 ? 1 : 0.35);
     }
   }
   for (let lon = -180; lon < 180; lon += 15) {
     for (let lat = -80; lat <= 80; lat += 0.75) {
       const phi = lat * DEG, lam = lon * DEG;
-      pos.push(Math.cos(phi) * Math.sin(lam) * 1.002, Math.sin(phi) * 1.002, Math.cos(phi) * Math.cos(lam) * 1.002);
-      data.push(rand(), 3, 0, lon === 0 ? 0.8 : 0.3);
+      put(Math.cos(phi) * Math.sin(lam) * 1.002, Math.sin(phi) * 1.002, Math.cos(phi) * Math.cos(lam) * 1.002, rand(), 3, 0, lon === 0 ? 0.8 : 0.3);
     }
   }
   const geometry = new BufferGeometry();
-  geometry.setAttribute('position', new BufferAttribute(new Float32Array(pos), 3));
-  geometry.setAttribute('aData', new BufferAttribute(new Float32Array(data), 4));
+  geometry.setAttribute('position', new BufferAttribute(pos.slice(0, n * 3), 3));
+  geometry.setAttribute('aData', new BufferAttribute(data.slice(0, n * 4), 4));
   geometry.boundingSphere = null;
   geometry.computeBoundingSphere();
+  releaseAfterUpload(geometry);
   return { geometry, land };
 }
 
@@ -230,6 +236,7 @@ export function buildCore() {
     blending: NormalBlending,
   });
   const mesh = new Mesh(new SphereGeometry(0.994, 96, 64), material);
+  releaseAfterUpload(mesh.geometry);
   mesh.renderOrder = 0;
   return { mesh, material };
 }
@@ -266,6 +273,7 @@ export function buildAtmosphere() {
     blending: AdditiveBlending,
   });
   const haloMesh = new Mesh(new SphereGeometry(1, 96, 64), halo);
+  releaseAfterUpload(haloMesh.geometry);
   haloMesh.scale.setScalar(ATMO_K);
   haloMesh.renderOrder = 1;
 
@@ -291,6 +299,7 @@ export function buildAtmosphere() {
     blending: AdditiveBlending,
   });
   const rimMesh = new Mesh(new SphereGeometry(1.006, 96, 64), rim);
+  releaseAfterUpload(rimMesh.geometry);
   rimMesh.renderOrder = 3;
   return { haloMesh, rimMesh, halo, rim };
 }
@@ -344,6 +353,7 @@ export function buildStars(count: number) {
     blending: AdditiveBlending,
   });
   const points = new Points(geometry, material);
+  releaseAfterUpload(geometry);
   points.frustumCulled = false;
   points.renderOrder = -1;
   return { points, material };

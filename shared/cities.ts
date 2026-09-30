@@ -170,3 +170,48 @@ export function findCity(label: string): City | undefined {
   if (!q) return undefined;
   return CITIES.find((c) => cityLabel(c).toLowerCase() === q) ?? CITIES.find((c) => c.name.toLowerCase() === q);
 }
+
+/**
+ * The time zone to store for a place: the one chosen, else the one already
+ * stored when the city hasn't changed (so a hand-picked zone survives edits
+ * that don't touch it), else the city's own.
+ */
+export function zoneFor(city: City, chosen: string | undefined, current?: { city: string | null; country: string | null; timezone: string | null } | null): string {
+  if (chosen) return chosen;
+  if (current?.timezone && current.city === city.name && current.country === city.country) return current.timezone;
+  return city.timezone;
+}
+
+/**
+ * Working hours as stored: the end is after the start, past 24 when the shift
+ * crosses midnight, and at most a full day later (the same start and end
+ * means around the clock).
+ */
+export function shiftOf(start: number, end: number): [number, number] {
+  let e = end;
+  while (e <= start) e += 24;
+  while (e - start > 24) e -= 24;
+  return [start, e];
+}
+
+
+/** How long a stored shift is, in words: "9 hours", "around the clock". */
+export function shiftLength([start, end]: [number, number]): string {
+  const n = end - start;
+  return n >= 24 ? 'around the clock' : `${n} hour${n === 1 ? '' : 's'}`;
+}
+
+/** Every time zone this runtime knows, for pickers (the listed cities' zones if it can't say). */
+export function timeZoneList(): string[] {
+  const all = (Intl as { supportedValuesOf?: (key: string) => string[] }).supportedValuesOf?.('timeZone');
+  return all?.length ? all : [...new Set(CITIES.map((c) => c.timezone))].sort();
+}
+
+/** A zone's offset from UTC at a moment: "GMT+5:30". */
+export function zoneOffset(tz: string, at = new Date()): string {
+  try {
+    return new Intl.DateTimeFormat('en-US', { timeZone: tz, timeZoneName: 'shortOffset' }).formatToParts(at).find((p) => p.type === 'timeZoneName')?.value ?? '';
+  } catch {
+    return '';
+  }
+}

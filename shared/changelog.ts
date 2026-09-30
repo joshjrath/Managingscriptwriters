@@ -17,6 +17,20 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-30-control-center-people',
+    date: '2026-09-30',
+    title: 'Control Center: real data, and placing people from inside it',
+    summary: 'The Control Center now only shows your real team and work, you can place people and editors from inside it, and it’s much lighter on your computer.',
+    changes: [
+      { tag: 'improved', text: 'The Control Center only shows your real workspace now: your team, editors, batches and clients. The sample people and clients are gone. Until someone is on the map, the globe is empty and offers to place your team.' },
+      { tag: 'new', text: 'PEOPLE, at the top of the Control Center: set each team member’s city, time zone and working hours, and add, edit or remove editors, without leaving it. You see their local time as you type, and saving turns the globe to them.' },
+      { tag: 'new', text: 'Time zones: someone’s time zone follows their city, but you can change it (in the Control Center or in Settings). If their city isn’t listed, pick the nearest one and set their time zone.' },
+      { tag: 'improved', text: 'Working hours can be any length now, up to around the clock (the same start and end). The 16-hour limit is gone.' },
+      { tag: 'improved', text: 'The Control Center uses much less graphics memory and power: it draws less often when nothing is moving, stops completely in a hidden tab, and frees everything when you leave.' },
+      { tag: 'fixed', text: 'The “network quiet” messages in the Control Center sat off to the side instead of under the numbers.' },
+    ],
+  },
+  {
     id: '2026-09-30-control-center-admin-editors',
     date: '2026-09-30',
     title: 'Control Center: admin only, and editors on the globe',

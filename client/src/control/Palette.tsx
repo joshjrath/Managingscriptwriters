@@ -14,7 +14,7 @@ export type Command =
   | { kind: 'script'; id: string }
   | { kind: 'mode'; mode: Mode; filter?: Filter; play?: boolean }
   | { kind: 'filter'; filter: Filter }
-  | { kind: 'action'; action: 'exit' | 'lock' | 'sound' | 'now' };
+  | { kind: 'action'; action: 'exit' | 'lock' | 'sound' | 'now' | 'people' };
 
 interface Entry { kind: string; label: string; hint: string; terms: string; command: Command }
 
@@ -32,6 +32,7 @@ const MODE_WORDS: [string, string, Command, string][] = [
   ['WRITERS ONLINE', 'writers online on shift active who is working', { kind: 'filter', filter: 'online' }, 'SHOW WHO IS ON SHIFT'],
   ['REVIEWS', 'reviews review queue pending approvals', { kind: 'filter', filter: 'reviews' }, 'WHAT IS WAITING FOR REVIEW'],
   ['PRESSURE', 'pressure anomalies problems risks alerts overloaded', { kind: 'filter', filter: 'pressure' }, 'WHERE THE SYSTEM IS STRAINED'],
+  ['PEOPLE', 'people team editors editor add place city cities location locations time zone timezone hours working map roster', { kind: 'action', action: 'people' }, 'PLACE THE TEAM · ADD EDITORS'],
   ['RETURN TO NOW', 'now live reset time', { kind: 'action', action: 'now' }, 'LIVE CLOCK'],
   ['SOUND', 'sound audio mute unmute', { kind: 'action', action: 'sound' }, 'TOGGLE SOUND'],
   ['LOCK', 'lock clearance sign out', { kind: 'action', action: 'lock' }, 'END CLEARANCE'],

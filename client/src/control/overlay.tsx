@@ -39,8 +39,8 @@ const pad = (n: number, w = 2) => String(n).padStart(w, '0');
 
 // ── frame ────────────────────────────────────────────────────────────────
 
-export function Top({ world, now, offset, soundOn, onSound, onPalette, onExit }: {
-  world: ControlWorld; now: Date; offset: number; soundOn: boolean; onSound: () => void; onPalette: () => void; onExit: () => void;
+export function Top({ world, now, offset, soundOn, onSound, onPalette, onPeople, peopleOpen, onExit }: {
+  world: ControlWorld; now: Date; offset: number; soundOn: boolean; onSound: () => void; onPalette: () => void; onPeople: () => void; peopleOpen: boolean; onExit: () => void;
 }) {
   const mac = /Mac|iPhone|iPad/.test(navigator.platform);
   const date = now.toISOString().slice(0, 10);
@@ -56,6 +56,7 @@ export function Top({ world, now, offset, soundOn, onSound, onPalette, onExit }:
         <div className={`date${scrubbed ? ' scrub' : ''}`}>{date} {scrubbed ? `· ${offset > 0 ? '+' : '−'}${fmtCountdown(Math.abs(offset))}` : ''}</div>
         <div className="cc-controls">
           <button onClick={onPalette} aria-label="Open command search"><kbd>{mac ? '⌘' : 'CTRL'} K</kbd><span className="wide">SEARCH</span></button>
+          <button onClick={onPeople} className={peopleOpen ? 'on' : ''} aria-expanded={peopleOpen}>PEOPLE{world.source.unplaced ? <span className="dot" aria-label={`${world.source.unplaced} not on the map`} /> : null}</button>
           <button onClick={onSound} className={soundOn ? 'on' : ''} aria-pressed={soundOn}>SOUND {soundOn ? 'ON' : 'OFF'}</button>
           <button onClick={onExit}>EXIT</button>
         </div>
@@ -108,7 +109,7 @@ function Metric({ v, l, warn }: { v: ReactNode; l: string; warn?: boolean }) {
   return <div className={warn ? 'warn' : ''}><b>{v}</b><span>{l}</span></div>;
 }
 
-export function Statement({ mode, world, now, anomalies }: { mode: Mode; world: ControlWorld; now: Date; anomalies: Anomaly[] }) {
+export function Statement({ mode, world, now, anomalies, onPeople }: { mode: Mode; world: ControlWorld; now: Date; anomalies: Anomaly[]; onPeople: () => void }) {
   const m = metricsOf(world, now);
   const cov = coverageOf(world.writers, now);
   const live = world.projects.filter((p) => !p.archived);
@@ -129,7 +130,7 @@ export function Statement({ mode, world, now, anomalies }: { mode: Mode; world: 
       const w = writerName(cov.nextOnline.writerId);
       empty = <div className="empty"><b>GLOBAL NETWORK QUIET</b>NEXT NODE ONLINE · {w?.city.toUpperCase()} · {fmtCountdown(cov.nextOnline.in)}</div>;
     }
-    if (!world.writers.length) empty = <div className="empty"><b>NO NODES PLACED</b>SET CITIES IN SETTINGS → TEAM</div>;
+    if (!world.writers.length) empty = <div className="empty"><b>NO ONE ON THE MAP YET</b><button className="go" onClick={onPeople}>PLACE YOUR TEAM AND EDITORS →</button></div>;
   } else if (mode === 'missions') {
     const next = live.filter((p) => p.deadline && new Date(p.deadline) > now).sort((a, b) => a.deadline!.localeCompare(b.deadline!))[0];
     metrics = (
