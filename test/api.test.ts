@@ -1115,3 +1115,34 @@ describe('past scripts in the script bank', () => {
     expect((await app.inject({ method: 'GET', url: pdf.href, headers: { cookie: sarah.cookie } })).statusCode).toBe(404);
   });
 });
+
+describe('a manager delivering a shared batch', () => {
+  it('delivers every approved script for everyone, and tells the other writers', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Shared delivery', targetCount: 6, finalDue: '2026-10-21', split: [{ writerId: ids.sarah, count: 3 }, { writerId: ids.josh, count: 2 }, { writerId: ids.marcus, count: 1 }] });
+    const batchId = b.body.batchId;
+    const scripts = (await manager.get(`/api/batches/${batchId}`)).body.scripts as { id: number; assigneeId: number; number: number }[];
+    const of = (uid: number) => scripts.filter((s) => s.assigneeId === uid).map((s) => s.id);
+    await sarah.post(`/api/batches/${batchId}/submissions`, { scriptIds: of(ids.sarah), url: 'https://docs.google.com/document/d/sarah' });
+    await manager.post(`/api/batches/${batchId}/submissions`, { scriptIds: of(ids.josh), url: 'https://docs.google.com/document/d/josh' });
+    await manager.post(`/api/batches/${batchId}/review`, { action: 'approve', scriptIds: [...of(ids.sarah), ...of(ids.josh)] });
+    // the manager confirms only their own two…
+    const r = await manager.post(`/api/batches/${batchId}/scripts/action`, { action: 'deliver', scriptIds: of(ids.josh), timelinerUrl: null, note: null });
+    expect(r.status).toBe(200);
+    // …and the whole batch goes: Sarah's approved scripts too, Marcus's unwritten one stays
+    expect(r.body.changed).toHaveLength(5);
+    const after = r.body.batch.scripts as { assigneeId: number; status: string }[];
+    expect(after.filter((s) => s.assigneeId !== ids.marcus).every((s) => s.status === 'delivered')).toBe(true);
+    expect(after.find((s) => s.assigneeId === ids.marcus)!.status).toBe('not_started');
+    expect(r.body.batch.activity[0].summary).toMatch(/on behalf of Sarah Chen/);
+    const notes = (await sarah.get('/api/notifications')).body.notifications;
+    expect(notes[0]).toMatchObject({ title: 'Delivered to Timeliner · Shared delivery' });
+    expect(notes[0].body).toMatch(/Josh Rath marked your scripts .* delivered/);
+    // a writer confirming delivers only their own
+    const b2 = await manager.post('/api/batches', { clientId: acmeId, title: 'Writer delivery', targetCount: 2, finalDue: '2026-10-21', split: [{ writerId: ids.sarah, count: 1 }, { writerId: ids.marcus, count: 1 }] });
+    const s2 = (await manager.get(`/api/batches/${b2.body.batchId}`)).body.scripts as { id: number; assigneeId: number }[];
+    await manager.post(`/api/batches/${b2.body.batchId}/submissions`, { scriptIds: s2.map((s) => s.id), url: 'https://docs.google.com/document/d/both' });
+    await manager.post(`/api/batches/${b2.body.batchId}/review`, { action: 'approve', scriptIds: s2.map((s) => s.id) });
+    const w = await sarah.post(`/api/batches/${b2.body.batchId}/scripts/action`, { action: 'deliver', scriptIds: s2.filter((s) => s.assigneeId === ids.sarah).map((s) => s.id) });
+    expect(w.body.changed).toHaveLength(1);
+  });
+});

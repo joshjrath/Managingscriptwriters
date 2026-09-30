@@ -78,6 +78,8 @@ function BatchView({ b }: { b: BatchDetail }) {
           <div className="banner pink"><UserPlus aria-hidden /><div className="txt"><b>{plural(b.progress.unassigned, 'script')} unassigned</b><span>{manager ? 'Select them in the checklist below and use “Assign to…”.' : 'A manager needs to assign these.'}</span></div></div>
         )}
 
+        <ReadyToDeliver b={b} />
+
         <div className="grid g-main-side">
           <Panel title="Progress" tools={manager ? <Button variant="sm ghost" icon={<SlidersHorizontal aria-hidden />} onClick={() => setTarget(true)}>Change script count</Button> : undefined}>
             <div className="row-flex" style={{ alignItems: 'center', gap: 22, flexWrap: 'nowrap', marginBottom: 18 }}>
@@ -188,6 +190,47 @@ function BatchView({ b }: { b: BatchDetail }) {
 // ── drafts & documents ───────────────────────────────────────────────────
 
 /** Scripts go back and forth as documents: one PDF or link per writer, reviewed in one go. */
+/** Approved scripts waiting for Timeliner. Writers confirm their own; a
+ *  manager's confirmation delivers every approved script in the batch. */
+function ReadyToDeliver({ b }: { b: BatchDetail }) {
+  const { me } = useBoot();
+  const manager = isManager(me.role);
+  const toast = useToast();
+  const [open, setOpen] = useState(false);
+  const ready = b.scripts.filter((s) => s.status === 'approved' && (manager || s.assigneeId === me.id));
+  const run = useSave((v: { url: string | null; note: string | null }) => api<{ changed: number[] }>(`/api/batches/${b.id}/scripts/action`, {
+    body: { action: 'deliver', scriptIds: ready.map((s) => s.id), timelinerUrl: v.url, note: v.note, versions: Object.fromEntries(ready.map((s) => [s.id, s.version])) },
+  }), { onSuccess: (o) => { toast(`Marked ${plural(o.changed.length, 'script')} delivered`); setOpen(false); } });
+  if (!ready.length) return null;
+  const nums = compressRanges(ready.map((s) => s.number));
+  // who the scripts belong to, for the manager's summary
+  const byWriter = new Map<string, number[]>();
+  for (const s of ready) {
+    const who = s.assigneeId === me.id ? 'You' : s.assigneeName ?? 'Unassigned';
+    byWriter.set(who, [...(byWriter.get(who) ?? []), s.number]);
+  }
+  const others = [...byWriter.keys()].filter((k) => k !== 'You' && k !== 'Unassigned');
+  const breakdown = [...byWriter.entries()].map(([who, n]) => `${who} ${compressRanges(n)}`).join(' · ');
+  const notYet = b.progress.total - b.progress.delivered - b.progress.awaitingDelivery;
+  return (
+    <>
+      <div className="todo-block mint">
+        <div style={{ minWidth: 0 }}>
+          <div className="t">{plural(ready.length, 'script')} approved <span className="muted num">({manager ? breakdown : nums})</span></div>
+          <div className="s">{manager
+            ? `Add them to Timeliner, then confirm here. This marks all of them delivered for everyone${others.length ? `, including ${others.join(', ')}` : ''}.${notYet > 0 ? ` ${plural(notYet, 'script')} not approved yet will stay as they are.` : ''}`
+            : 'Add them to Timeliner, then confirm here.'}</div>
+        </div>
+        <Button variant="primary pill" icon={<Send aria-hidden />} onClick={() => setOpen(true)}>
+          {manager && others.length ? 'Mark batch delivered' : `Mark ${plural(ready.length, 'script')} delivered`}
+        </Button>
+      </div>
+      {open && <DeliverDialog count={ready.length} nums={nums} forName={manager && others.length ? others.join(', ') : null} busy={run.isPending} error={run.error}
+        onClose={() => setOpen(false)} onSubmit={(url, note) => run.mutate({ url, note })} />}
+    </>
+  );
+}
+
 function DocumentsPanel({ b }: { b: BatchDetail }) {
   const { me } = useBoot();
   const manager = isManager(me.role);
@@ -268,9 +311,9 @@ function ScriptChecklist({ b }: { b: BatchDetail }) {
     api<{ changed: number[] }>(`/api/batches/${b.id}/scripts/action`, {
       body: { action: v.action, scriptIds: v.ids, note: v.note ?? null, timelinerUrl: v.timelinerUrl ?? null, versions: Object.fromEntries(b.scripts.filter((s) => v.ids.includes(s.id)).map((s) => [s.id, s.version])) },
     }), {
-    onSuccess: (_o, v) => {
-      const nums = compressRanges(b.scripts.filter((s) => v.ids.includes(s.id)).map((s) => s.number));
-      toast(`${ACTION_RULES[v.action].label}: script${v.ids.length > 1 ? 's' : ''} ${nums}`);
+    onSuccess: (o, v) => {
+      const nums = compressRanges(b.scripts.filter((s) => o.changed.includes(s.id)).map((s) => s.number));
+      toast(`${ACTION_RULES[v.action].label}: script${o.changed.length > 1 ? 's' : ''} ${nums}`);
       setSel(new Set()); setDialog(null);
     },
   });
@@ -405,7 +448,7 @@ function ScriptChecklist({ b }: { b: BatchDetail }) {
 
       {dialog?.action === 'submit' && <SendDialog batchId={b.id} batchTitle={b.title} candidates={sendable} preselect={dialog.ids} onClose={() => { setDialog(null); setSel(new Set()); }} />}
       {dialog?.action === 'request_revisions' && <DecisionDialog batchId={b.id} scripts={b.scripts.filter((s) => dialog.ids.includes(s.id))} submissionId={null} mode="revisions" onClose={() => { setDialog(null); setSel(new Set()); }} />}
-      {dialog?.action === 'deliver' && <DeliverDialog count={dialog.ids.length} nums={compressRanges(b.scripts.filter((s) => dialog.ids.includes(s.id)).map((s) => s.number))} busy={run.isPending} error={run.error}
+      {dialog?.action === 'deliver' && <DeliverDialog count={dialog.ids.length} extra={manager ? b.progress.awaitingDelivery - dialog.ids.length : 0} nums={compressRanges(b.scripts.filter((s) => dialog.ids.includes(s.id)).map((s) => s.number))} busy={run.isPending} error={run.error}
         onClose={() => setDialog(null)} onSubmit={(url, note) => run.mutate({ action: 'deliver', ids: dialog.ids, timelinerUrl: url, note })} />}
       {dialog?.action === 'undo_delivery' && <NoteDialog title="Undo delivery?" label="Reason" busy={run.isPending} error={run.error} confirm="Move back to approved" variant="danger"
         scripts={compressRanges(b.scripts.filter((s) => dialog.ids.includes(s.id)).map((s) => s.number))}
@@ -441,7 +484,7 @@ export function NoteDialog({ title, label, required, busy, error, confirm, varia
   );
 }
 
-export function DeliverDialog({ count, nums, busy, error, onClose, onSubmit }: { count: number; nums: string; busy: boolean; error: ApiError | null; onClose: () => void; onSubmit: (url: string | null, note: string | null) => void }) {
+export function DeliverDialog({ count, nums, forName, extra = 0, busy, error, onClose, onSubmit }: { count: number; nums: string; forName?: string | null; extra?: number; busy: boolean; error: ApiError | null; onClose: () => void; onSubmit: (url: string | null, note: string | null) => void }) {
   const { me } = useBoot();
   const [url, setUrl] = useState('');
   const [note, setNote] = useState('');
@@ -456,7 +499,10 @@ export function DeliverDialog({ count, nums, busy, error, onClose, onSubmit }: {
     <Dialog open onClose={onClose} title={`Confirm delivery to Timeliner`} sub={`${plural(count, 'script')}: ${nums}`} size="narrow"
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={busy} onClick={submit} icon={<Send aria-hidden />}>Mark {plural(count, 'script')} delivered</Button></div>}>
       <div className="form">
-        <div className="banner"><Send aria-hidden /><div className="txt"><b>Add the scripts to Timeliner first.</b><span>This records a writer-confirmed delivery by {me.name} with today’s time. It isn’t verified by Timeliner itself. Managers are notified.</span></div></div>
+        <div className="banner"><Send aria-hidden /><div className="txt"><b>Add the scripts to Timeliner first.</b><span>{forName
+          ? `This records that ${me.name} confirmed delivery on behalf of ${forName}, with today’s time. ${forName} ${forName.includes(',') ? 'are' : 'is'} notified.`
+          : `This records a writer-confirmed delivery by ${me.name} with today’s time. It isn’t verified by Timeliner itself. Managers are notified.`}</span></div></div>
+        {extra > 0 && <div className="banner yellow"><Send aria-hidden /><div className="txt"><b>The whole batch is delivered</b><span>As a manager, confirming also marks the other {plural(extra, 'approved script')} in this batch delivered, for everyone working on it.</span></div></div>}
         <FormError error={error} />
         <Field label="Timeliner link" optional htmlFor={a} error={err || error?.fields.timelinerUrl}><input className="input" type="url" placeholder="https://" value={url} onChange={(e) => setUrl(e.target.value)} {...inputProps(a, err)} /></Field>
         <Field label="Delivery note" optional htmlFor={c}><textarea className="textarea" id={c} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Scheduled for next Tuesday" /></Field>

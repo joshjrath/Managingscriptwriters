@@ -17,6 +17,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-30-batch-delivery',
+    date: '2026-09-30',
+    title: 'Deliver a whole batch from its page',
+    summary: 'Approved scripts now have a “Mark delivered” button on the batch page, and a manager’s delivery covers the whole batch.',
+    changes: [
+      { tag: 'new', text: 'The batch page shows approved scripts waiting for Timeliner at the top, with a button to confirm delivery. Writers see their own scripts there.' },
+      { tag: 'improved', text: 'When an admin or manager marks delivery, every approved script in the batch is delivered for everyone working on it, not just their own share. Scripts that aren’t approved yet stay as they are.' },
+      { tag: 'improved', text: 'The other writers get a notification, and the batch history says it was done on their behalf.' },
+    ],
+  },
+  {
     id: '2026-09-29-past-scripts',
     date: '2026-09-29',
     title: 'Past scripts in the Script bank, and the counter on batch pages',

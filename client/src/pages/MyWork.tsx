@@ -140,9 +140,9 @@ function MyBatch({ e, writerId }: { e: Entry; writerId: number }) {
   const sendable = e.mine.filter((s) => !isApproved(s.status));
   const written = writtenOf(e, writerId);
   const [dialog, setDialog] = useState<null | { kind: 'send'; preselect: number[]; resend?: boolean } | { kind: 'titles' } | { kind: 'deliver' }>(null);
-  const deliver = useSave((v: { url: string | null; note: string | null }) => api(`/api/batches/${b.id}/scripts/action`, {
+  const deliver = useSave((v: { url: string | null; note: string | null }) => api<{ changed: number[] }>(`/api/batches/${b.id}/scripts/action`, {
     body: { action: 'deliver', scriptIds: st.approved.map((s) => s.id), timelinerUrl: v.url, note: v.note, versions: Object.fromEntries(st.approved.map((s) => [s.id, s.version])) },
-  }), { onSuccess: () => { confetti({ y: innerHeight * 0.55, count: 70, spread: 120, power: 13 }); toast(`Delivery confirmed for scripts ${nums(st.approved)}`); setDialog(null); } });
+  }), { onSuccess: (o) => { confetti({ y: innerHeight * 0.55, count: 70, spread: 120, power: 13 }); toast(o.changed.length > st.approved.length ? `Delivery confirmed for all ${o.changed.length} approved scripts in this batch` : `Delivery confirmed for scripts ${nums(st.approved)}`); setDialog(null); } });
   const edge = b.next?.overdue || b.blocked ? 'edge-red' : b.next?.dueToday ? 'edge-yellow' : '';
   const waiting = e.groups.filter((g) => g.kind === 'waiting');
   const sentBack = e.groups.filter((g) => g.kind === 'sent_back');
@@ -244,7 +244,7 @@ function MyBatch({ e, writerId }: { e: Entry; writerId: number }) {
       </div>
       {dialog?.kind === 'send' && <SendDialog batchId={b.id} batchTitle={b.title} candidates={sendable} preselect={dialog.preselect} resend={dialog.resend} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'titles' && <TitlesDialog batchId={b.id} scripts={e.mine} onClose={() => setDialog(null)} />}
-      {dialog?.kind === 'deliver' && <DeliverDialog count={st.approved.length} nums={nums(st.approved)} busy={deliver.isPending} error={deliver.error} onClose={() => setDialog(null)} onSubmit={(url, note) => deliver.mutate({ url, note })} />}
+      {dialog?.kind === 'deliver' && <DeliverDialog count={st.approved.length} extra={isManager(me.role) ? b.progress.awaitingDelivery - st.approved.length : 0} nums={nums(st.approved)} busy={deliver.isPending} error={deliver.error} onClose={() => setDialog(null)} onSubmit={(url, note) => deliver.mutate({ url, note })} />}
     </Panel>
   );
 }

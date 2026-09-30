@@ -692,6 +692,12 @@ export async function applyScriptAction(
       `select b.client_id, b.title, c.name as client_name, b.archived_at from batches b join clients c on c.id = b.client_id where b.id = $1`, [batchId],
     );
     if (!b) throw notFound('Batch');
+    // a manager confirming delivery delivers the whole batch: every approved
+    // script goes, whoever wrote it (scripts still in the works stay as they are)
+    if (action === 'deliver' && isManager(me.role)) {
+      const rest = await t.query<{ id: number }>(`select id from scripts where batch_id = $1 and removed_at is null and status = 'approved'`, [batchId]);
+      for (const r of rest) if (!ids.includes(r.id)) ids.push(r.id);
+    }
     const rows = await t.query<{ id: number; number: number; status: ScriptStatus; assignee_id: number | null; version: number }>(
       `select id, number, status, assignee_id, version from scripts
         where batch_id = $1 and removed_at is null and id in (${ids.map((_, i) => `$${i + 2}`).join(',')})
@@ -772,7 +778,13 @@ export async function applyScriptAction(
         await t.query(`update scripts set status = $1, version = version + 1, updated_at = now() where id in (${idList.map((_, i) => `$${i + 2}`).join(',')})`, [rule.to, ...idList]);
     }
 
-    const onBehalf = opts.actingFor && opts.actingFor !== me.id ? ' (on behalf of the writer)' : '';
+    // a manager confirming someone else's delivery does it on their behalf
+    const others = [...new Set(rows.map((r) => r.assignee_id).filter((x): x is number => x != null && x !== me.id))];
+    let onBehalf = opts.actingFor && opts.actingFor !== me.id ? ' (on behalf of the writer)' : '';
+    if (action === 'deliver' && others.length) {
+      const named = await t.query<{ name: string }>(`select name from users where id in (${others.map((_, i) => `$${i + 1}`).join(',')}) order by name`, others);
+      onBehalf = ` (on behalf of ${named.map((n) => n.name).join(', ')})`;
+    }
     const verb: Record<ScriptAction, string> = {
       start: 'Started', reset: 'Marked not started', submit: 'Submitted for review', withdraw: 'Withdrew from review',
       approve: 'Approved', request_revisions: 'Requested revisions on', deliver: 'Confirmed delivery to Timeliner for', undo_delivery: 'Undid delivery of',
@@ -811,10 +823,15 @@ export async function applyScriptAction(
     } else if (action === 'request_revisions') {
       await notify(t, writers, { type: 'revision_request', title: `Revisions requested · ${b.title}`, body: `${scriptsWord}: ${opts.note}${attached ? ' (their changes are attached)' : ''}`, link: '/my-work' }, me.id);
     } else if (action === 'deliver') {
-      await notify(t, await managerIds(t), {
+      const mgrs = await managerIds(t);
+      await notify(t, mgrs, {
         type: 'delivery', title: `Delivered to Timeliner · ${b.client_name}`,
-        body: `${me.name} confirmed script${rows.length > 1 ? 's' : ''} ${nums} of ${b.title} (writer-confirmed).`, link,
+        body: `${me.name} confirmed script${rows.length > 1 ? 's' : ''} ${nums} of ${b.title}${onBehalf || ' (writer-confirmed)'}.`, link,
       }, me.id);
+      const told = others.filter((id) => !mgrs.includes(id));
+      if (told.length) {
+        await notify(t, told, { type: 'delivery', title: `Delivered to Timeliner · ${b.title}`, body: `${me.name} marked your script${rows.length > 1 ? 's' : ''} ${nums} delivered.`, link }, me.id);
+      }
     } else if (action === 'undo_delivery') {
       await notify(t, writers, { type: 'delivery', title: `Delivery undone · ${b.title}`, body: `${me.name} moved script${rows.length > 1 ? 's' : ''} ${nums} back to approved.`, link }, me.id);
     }

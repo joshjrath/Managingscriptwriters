@@ -32,6 +32,7 @@ A batch reads e.g. **"20 / 45 drafts ready · 44%"**, with approved and delivere
 - Writers move their own scripts: start, submit for review, withdraw, and confirm delivery.
 - **Admins and managers have exactly the same permissions** (Admin is a label; the first account is the admin). Only they approve, request revisions (a note is required), assign/reassign, change deadlines or script counts, move shoots, and manage clients, briefings, the team and settings.
 - **A script must be approved before it can be marked delivered** — no action, bulk selection or quick control can skip review.
+- **A manager's delivery covers the whole batch:** when an admin or manager confirms delivery (from My work, the batch page's “Mark delivered” block or the checklist), every approved script in the batch is delivered, whoever wrote it. The other writers are notified and the history says it was on their behalf. A writer's confirmation covers only their own scripts.
 - Partial review is normal: approve ten scripts while the rest are still being written.
 - Lowering a batch's script count needs an explicit choice of which not-started / in-progress scripts to remove. Submitted, approved and delivered work is never removed; removed scripts stay in history and come back first if the count goes up again.
 - Stale edits are rejected (409) instead of overwriting someone else's change.
