@@ -3,9 +3,10 @@
 // float among the people, joined by fine lines of who works on what.
 
 import {
-  AdditiveBlending, BufferAttribute, BufferGeometry, Color, DynamicDrawUsage, LineSegments, Matrix4, Points, Quaternion,
+  AdditiveBlending, BufferAttribute, BufferGeometry, Color, LineSegments, Matrix4, Points, Quaternion,
   ShaderMaterial, Vector3,
 } from 'three';
+import { fitGeometry, markUsed } from './buffers';
 import { hashString } from './math';
 
 export const OBJ_LAYOUT = { mission: 0, graph: 1, deadline: 2, space: 3 } as const;
@@ -28,6 +29,10 @@ export interface SpaceObject {
 }
 
 export type EndRef = { writer: number } | { obj: number };
+
+const EDGE_COLOR: Record<string, [number, number, number]> = {
+  review: [0.72, 0.6, 1], client: [0.55, 0.9, 1], collab: [0.6, 0.75, 1], other: [0.6, 0.8, 1],
+};
 
 export interface Edge {
   a: EndRef;
@@ -58,6 +63,7 @@ export class ObjectsLayer {
   points: Points;
   lines: LineSegments;
   private material: ShaderMaterial;
+  private ok = [false, false, false, false];
   private pos!: BufferAttribute;
   private col!: BufferAttribute;
   private info!: BufferAttribute;
@@ -131,22 +137,11 @@ export class ObjectsLayer {
       return { ...o, seed: hashString(o.id), w: old?.w ?? Float32Array.from([1, 0, 0, 0]), pos: old?.pos ?? new Vector3(), alpha: old?.alpha ?? 0 };
     });
     this.edges = edges.map((e) => ({ ...e, alpha: 0 }));
-    const n = Math.max(1, this.objects.length);
-    const g = this.points.geometry;
-    this.pos = new BufferAttribute(new Float32Array(n * 3), 3).setUsage(DynamicDrawUsage);
-    this.col = new BufferAttribute(new Float32Array(n * 4), 4).setUsage(DynamicDrawUsage);
-    this.info = new BufferAttribute(new Float32Array(n * 2), 2).setUsage(DynamicDrawUsage);
-    g.setAttribute('position', this.pos);
-    g.setAttribute('aColor', this.col);
-    g.setAttribute('aInfo', this.info);
-    g.setDrawRange(0, this.objects.length);
-    const m = Math.max(1, this.edges.length);
-    const lg = this.lines.geometry;
-    this.lpos = new BufferAttribute(new Float32Array(m * 6), 3).setUsage(DynamicDrawUsage);
-    this.lcol = new BufferAttribute(new Float32Array(m * 8), 4).setUsage(DynamicDrawUsage);
-    lg.setAttribute('position', this.lpos);
-    lg.setAttribute('aColor', this.lcol);
-    lg.setDrawRange(0, this.edges.length * 2);
+    // buffers are kept between refreshes and only grow when the data outgrows them
+    const pts = fitGeometry(this.points, this.objects.length, { position: 3, aColor: 4, aInfo: 2 });
+    this.pos = pts.position; this.col = pts.aColor; this.info = pts.aInfo;
+    const lines = fitGeometry(this.lines, this.edges.length, { position: 3, aColor: 4 }, 2);
+    this.lpos = lines.position; this.lcol = lines.aColor;
   }
 
   /** Where an object sits on the mission orbit (world space). */
@@ -162,7 +157,8 @@ export class ObjectsLayer {
       const k = 1 - Math.exp(-f.dt * (f.reduced ? 6 : 1.6 + o.seed * 1.8));
       for (let l = 0; l < 4; l++) o.w[l] += (f.weights[l] - o.w[l]) * k;
       const [mission, graph, deadline, space] = this.slots;
-      const ok = [false, false, false, false];
+      const ok = this.ok;
+      ok.fill(false);
       if (o.missionIndex >= 0) { this.missionPoint(o.missionIndex, f, mission); ok[0] = true; }
       if (o.graphPos) {
         graph.copy(o.graphPos).add(this.tmp.set(Math.sin(f.time * 0.3 + o.seed * 9) * 0.04, Math.cos(f.time * 0.23 + o.seed * 7) * 0.04, Math.sin(f.time * 0.19 + o.seed * 5) * 0.04)).applyMatrix4(f.graph);
@@ -185,10 +181,10 @@ export class ObjectsLayer {
       if (ws > 1e-4) o.pos.copy(this.tmp.multiplyScalar(1 / ws));
       const target = emphasis(o) * Math.min(1, (ws / Math.max(1e-4, total)) * 1.2);
       o.alpha += (target - o.alpha) * (1 - Math.exp(-f.dt * 4));
-      P.set([o.pos.x, o.pos.y, o.pos.z], i * 3);
+      P[i * 3] = o.pos.x; P[i * 3 + 1] = o.pos.y; P[i * 3 + 2] = o.pos.z;
       const pulse = o.urgent ? 0.8 + 0.2 * Math.sin(f.time * 4 + o.seed * 6) : 1;
-      C.set([o.color.r, o.color.g, o.color.b, o.alpha * pulse], i * 4);
-      I.set([o.size, o.kind === 'project' ? 0 : 1], i * 2);
+      C[i * 4] = o.color.r; C[i * 4 + 1] = o.color.g; C[i * 4 + 2] = o.color.b; C[i * 4 + 3] = o.alpha * pulse;
+      I[i * 2] = o.size; I[i * 2 + 1] = o.kind === 'project' ? 0 : 1;
     });
     const L = this.lpos.array as Float32Array, LC = this.lcol.array as Float32Array;
     const end = (r: EndRef) => ('writer' in r ? f.writerPos(r.writer) : this.objects[r.obj]?.pos ?? null);
@@ -196,12 +192,15 @@ export class ObjectsLayer {
       const a = end(e.a), b = end(e.b);
       e.alpha += (edgeEmphasis(e) - e.alpha) * (1 - Math.exp(-f.dt * 4));
       if (!a || !b) { LC.fill(0, i * 8, i * 8 + 8); return; }
-      L.set([a.x, a.y, a.z, b.x, b.y, b.z], i * 6);
-      const c = e.kind === 'review' ? [0.72, 0.6, 1] : e.kind === 'client' ? [0.55, 0.9, 1] : e.kind === 'collab' ? [0.6, 0.75, 1] : [0.6, 0.8, 1];
-      LC.set([...c, e.alpha, ...c, e.alpha * 0.55], i * 8);
+      L[i * 6] = a.x; L[i * 6 + 1] = a.y; L[i * 6 + 2] = a.z; L[i * 6 + 3] = b.x; L[i * 6 + 4] = b.y; L[i * 6 + 5] = b.z;
+      const c = EDGE_COLOR[e.kind] ?? EDGE_COLOR.other;
+      const o = i * 8;
+      LC[o] = LC[o + 4] = c[0]; LC[o + 1] = LC[o + 5] = c[1]; LC[o + 2] = LC[o + 6] = c[2];
+      LC[o + 3] = e.alpha; LC[o + 7] = e.alpha * 0.55;
     });
-    this.pos.needsUpdate = this.col.needsUpdate = this.info.needsUpdate = true;
-    this.lpos.needsUpdate = this.lcol.needsUpdate = true;
+    const n = this.objects.length, m = this.edges.length * 2;
+    markUsed(this.pos, n); markUsed(this.col, n); markUsed(this.info, n);
+    markUsed(this.lpos, m); markUsed(this.lcol, m);
   }
 
   dispose() {

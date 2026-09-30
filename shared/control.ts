@@ -151,8 +151,6 @@ export interface ControlSource {
   unplaced: number;
   /** handoffs are replayed from a scripted sequence rather than observed */
   replayed: boolean;
-  /** simulated only: how many more team members need a city before the live workspace takes over */
-  standby: number | null;
 }
 
 export interface ControlWorld {

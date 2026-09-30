@@ -4,7 +4,7 @@
 // straight onto the bound DOM elements, so nothing re-renders per frame.
 
 import {
-  Color, Euler, Group, Matrix4, PerspectiveCamera, Quaternion, Raycaster, Scene, Sphere, Vector2, Vector3, WebGLRenderer,
+  Color, Euler, Group, Matrix4, Mesh, PerspectiveCamera, Quaternion, Raycaster, Scene, ShaderMaterial, Sphere, Texture, Vector2, Vector3, WebGLRenderer,
 } from 'three';
 import {
   anomaliesOf, coverageOf, presenceOf, SLOTS, SLOT_MIN, subsolarPoint,
@@ -184,6 +184,7 @@ export class Engine implements WorldView {
   private revealFrom = { yaw: 0, dist: 1 };
   private presenceAt = 0;
   private dataAt = 0;
+  private builtAt = 0;
   private bindings = new Set<Binding>();
   private handoffArc = new Map<string, { arc: number; dest: number }>();
   private missionIndex = new Map<string, number>();
@@ -196,6 +197,8 @@ export class Engine implements WorldView {
   private last = 0;
   private time = 0;
   private frames: number[] = [];
+  /** frame times against the rate asked for, in 60 fps terms: what the watchdog judges */
+  private load: number[] = [];
   private watchUntil = 0;
   private downgrades = 0;
   private tier: Tier;
@@ -229,13 +232,14 @@ export class Engine implements WorldView {
     this.opts = opts;
     this.host = canvas.parentElement ?? document.body;
     // WebGL may be unavailable; the caller catches this and shows the 2D fallback
-    const probe = canvas.getContext('webgl2', { powerPreference: 'high-performance', antialias: true, alpha: true });
+    // no multisampling, no stencil, no preserved buffer, and whichever GPU the system prefers (not the power-hungry one)
+    const probe = canvas.getContext('webgl2', { powerPreference: 'default', antialias: false, alpha: true, stencil: false, depth: true, preserveDrawingBuffer: false });
     if (!probe) throw new Error('webgl2 unavailable');
     const dbg = probe.getExtension('WEBGL_debug_renderer_info');
     const gpu = dbg ? String(probe.getParameter(dbg.UNMASKED_RENDERER_WEBGL)) : null;
     this.tier = opts.tier ?? pickTier(gpu);
     const q = TIERS[this.tier];
-    this.renderer = new WebGLRenderer({ canvas, context: probe, antialias: q.antialias, alpha: true, powerPreference: 'high-performance' });
+    this.renderer = new WebGLRenderer({ canvas, context: probe, antialias: q.antialias, alpha: true, stencil: false, powerPreference: 'default' });
     this.renderer.setClearColor(0x000000, 0);
     this.dprBase = Math.min(window.devicePixelRatio || 1, q.maxDpr);
     this.dpr = this.dprBase;
@@ -288,7 +292,18 @@ export class Engine implements WorldView {
   }
 
   setWorld(world: ControlWorld) {
-    const first = !this.world;
+    const prev = this.world;
+    // a refresh with nothing new on the map (unchanged parts keep their identity
+    // across refreshes): keep every buffer and layout as it is, but rebuild at
+    // least once a minute so project orbits keep tightening as deadlines near
+    if (prev && prev.writers === world.writers && prev.scripts === world.scripts && prev.projects === world.projects
+      && prev.clients === world.clients && prev.links === world.links && prev.handoffs === world.handoffs
+      && performance.now() - this.builtAt < 60_000) {
+      this.world = world;
+      return;
+    }
+    this.builtAt = performance.now();
+    const first = !prev;
     this.world = world;
     this.writers = world.writers.slice(0, this.nodes.max);
     this.writerIndex = new Map(this.writers.map((w, i) => [w.id, i]));
@@ -488,11 +503,21 @@ export class Engine implements WorldView {
     this.arcs.dispose();
     this.swarm.dispose();
     this.objects.dispose();
-    this.surface.points.geometry.dispose();
-    this.surface.material.dispose();
-    this.stars.points.geometry.dispose();
-    this.stars.material.dispose();
+    // everything else in the scene: geometry, materials and any textures they hold
+    this.scene.traverse((o) => {
+      const m = o as Mesh;
+      m.geometry?.dispose();
+      const mats = Array.isArray(m.material) ? m.material : m.material ? [m.material] : [];
+      for (const mat of mats) {
+        for (const u of Object.values((mat as ShaderMaterial).uniforms ?? {})) if ((u.value as Texture | null)?.isTexture) (u.value as Texture).dispose();
+        mat.dispose();
+      }
+    });
+    this.renderer.renderLists.dispose();
     this.renderer.dispose();
+    // give the GPU memory back now rather than whenever the page lets go of the canvas
+    // (not while the canvas is still on the page: React may mount it again)
+    setTimeout(() => { if (!c.isConnected) this.renderer.forceContextLoss(); }, 0);
   }
 
   writerAnomaly(id: string): Anomaly[] {
@@ -564,14 +589,32 @@ export class Engine implements WorldView {
 
   // ── per frame ──────────────────────────────────────────────────────────
 
+  /**
+   * How often to draw right now. Smooth while anything moves (a drag, a camera
+   * move, the reveal, a handoff in flight), half that while the planet is just
+   * turning, and slower still while the window isn't in front. Frames that
+   * aren't drawn cost nothing.
+   */
+  private frameInterval(): number {
+    if (!document.hasFocus()) return 1000 / 15;
+    const busy = !!this.drag || !!this.pinch || !!this.tween || this.revealing || this.time - this.lastInteraction < 2.5 || this.arcs.moving;
+    return busy ? 1000 / 60 : 1000 / 30;
+  }
+
   private frame = (ms: number) => {
     if (!this.running) return;
     this.raf = requestAnimationFrame(this.frame);
-    const dt = Math.min(0.05, (ms - this.last) / 1000);
+    const interval = this.frameInterval();
+    const raw = ms - this.last;
+    if (raw < interval - 3) return;
+    // time follows the clock at any frame rate (only a long stall is cut short)
+    const dt = Math.min(0.1, raw / 1000);
     this.last = ms;
     this.time += dt;
-    this.frames.push(dt * 1000);
+    this.frames.push(raw);
     if (this.frames.length > 90) this.frames.shift();
+    this.load.push((raw * (1000 / 60)) / interval);
+    if (this.load.length > 90) this.load.shift();
     this.watchPerformance();
     try {
       this.step(dt);
@@ -1322,15 +1365,16 @@ export class Engine implements WorldView {
 
   /** If frames drop, spend fewer pixels, then fewer particles. */
   private watchPerformance() {
-    if (this.revealing || this.frames.length < 60) return;
+    if (this.revealing || this.load.length < 60) return;
     if (!this.watchUntil) { this.watchUntil = this.time + 3; return; }
     if (this.time < this.watchUntil) return;
-    const sorted = this.frames.slice().sort((a, b) => a - b);
+    const sorted = this.load.slice().sort((a, b) => a - b);
     const median = sorted[Math.floor(sorted.length / 2)];
     this.opts.onStats?.(this.stats);
     this.watchUntil = this.time + 3;
     if (median < 30 || this.downgrades > 4) return;
     this.downgrades++;
+    this.load.length = 0;
     if (this.dpr > 1) {
       this.dpr = Math.max(1, this.dpr * 0.75);
       this.renderer.setPixelRatio(this.dpr);

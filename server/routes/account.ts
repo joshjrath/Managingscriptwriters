@@ -12,7 +12,7 @@ import { auditEvent } from '../audit';
 import type { Me, UserSummary } from '../../shared/types';
 import { conflict, HttpError, notFound, parse, zs } from '../http';
 import { computeDeadlines, isValidTimeZone } from '../../shared/dates';
-import { findCity } from '../../shared/cities';
+import { findCity, shiftOf, zoneFor } from '../../shared/cities';
 import { fmtDate } from '../../shared/format';
 import type { Notification } from '../../shared/types';
 
@@ -126,24 +126,31 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
 
   const capacity = z.coerce.number().positive('Use a positive number').max(50).nullable().optional();
   const city = z.string().trim().max(120).nullable().optional();
+  const timezone = z.string().trim().refine(isValidTimeZone, 'Pick a time zone from the list').optional();
   const hour = z.coerce.number().int().min(0).max(47);
 
   /** Where someone works from and their hours, as columns; a city must come from the list. */
-  function placeColumns(input: { city?: string | null; workStart?: number; workEnd?: number }): Record<string, unknown> {
+  /** The time zone follows the city unless one is chosen; a chosen one is kept while the city stays the same. */
+  function placeColumns(
+    input: { city?: string | null; timezone?: string; workStart?: number; workEnd?: number },
+    current?: { city: string | null; country: string | null; timezone: string | null } | null,
+  ): Record<string, unknown> {
     const set: Record<string, unknown> = {};
     if (input.city !== undefined) {
       if (!input.city) Object.assign(set, { city: null, city_code: null, country: null, lat: null, lon: null, timezone: null });
       else {
         const c = findCity(input.city);
         if (!c) throw new HttpError(400, 'Pick a city from the list', { city: 'Pick a city from the list' });
-        Object.assign(set, { city: c.name, city_code: c.code, country: c.country, lat: c.lat, lon: c.lon, timezone: c.timezone });
+        Object.assign(set, { city: c.name, city_code: c.code, country: c.country, lat: c.lat, lon: c.lon, timezone: zoneFor(c, input.timezone, current) });
       }
+    } else if (input.timezone !== undefined) {
+      if (!current?.city) throw new HttpError(400, 'Pick a city first', { city: 'Pick a city first' });
+      set.timezone = input.timezone;
     }
     if (input.workStart !== undefined || input.workEnd !== undefined) {
       const start = input.workStart ?? 9;
-      let end = input.workEnd ?? 18;
-      if (end <= start) end += 24;
-      if (start > 23 || end - start > 16 || end - start < 1) throw new HttpError(400, 'Use working hours between 1 and 16 hours long', { workEnd: 'Between 1 and 16 hours' });
+      if (start > 23) throw new HttpError(400, 'Pick a start time', { workStart: 'Pick a start time' });
+      const [, end] = shiftOf(start, input.workEnd ?? 18);
       Object.assign(set, { work_start: start, work_end: end });
     }
     return set;
@@ -153,7 +160,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const me = requireManager(req);
     const input = parse(z.object({
       name: zs.name('Name', 120), email, role: z.enum(ROLES), password, capacityPerDay: capacity,
-      city, workStart: hour.optional(), workEnd: hour.optional(),
+      city, timezone, workStart: hour.optional(), workEnd: hour.optional(),
     }), req.body);
     const place = placeColumns(input);
     const err = validatePassword(input.password);
@@ -188,9 +195,11 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const input = parse(z.object({
       name: zs.name('Name', 120).optional(), role: z.enum(ROLES).optional(), active: z.boolean().optional(),
       capacityPerDay: capacity, password: z.string().max(200).optional(),
-      city, workStart: hour.optional(), workEnd: hour.optional(),
+      city, timezone, workStart: hour.optional(), workEnd: hour.optional(),
     }), req.body);
-    const u = await db.one<{ role: 'owner' | 'manager' | 'writer'; active: boolean; name: string; removed_at: string | null }>(`select role, active, name, removed_at from users where id = $1`, [id]);
+    const u = await db.one<{ role: 'owner' | 'manager' | 'writer'; active: boolean; name: string; removed_at: string | null; city: string | null; country: string | null; timezone: string | null }>(
+      `select role, active, name, removed_at, city, country, timezone from users where id = $1`, [id],
+    );
     if (!u || u.removed_at) throw notFound('Team member');
     if (isManager(u.role) && (input.role === 'writer' || input.active === false)) await keepAManager(id);
     if (input.active === false && id === me.id) throw new HttpError(400, 'You can’t deactivate your own account');
@@ -199,7 +208,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     if (input.role !== undefined) set.role = input.role;
     if (input.active !== undefined) set.active = input.active;
     if (input.capacityPerDay !== undefined) set.capacity_per_day = input.capacityPerDay;
-    Object.assign(set, placeColumns(input));
+    Object.assign(set, placeColumns(input, u));
     if (input.password) {
       const err = validatePassword(input.password);
       if (err) throw new HttpError(400, err, { password: err });

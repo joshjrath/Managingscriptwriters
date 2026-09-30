@@ -275,8 +275,8 @@ export function TimezonePanel({ world, now, offset, playing, onScrub, onPlay, on
   );
 }
 
-export function SystemPanel({ world, stats, sync, anomalies, onLock }: {
-  world: ControlWorld; stats: EngineStats; sync: { at: number; ok: number; total: number; packets: number }; anomalies: Anomaly[]; onLock: () => void;
+export function SystemPanel({ world, stats, sync, anomalies, onLock, onPeople }: {
+  world: ControlWorld; stats: EngineStats; sync: { at: number; ok: number; total: number; packets: number }; anomalies: Anomaly[]; onLock: () => void; onPeople: () => void;
 }) {
   const [, force] = useState(0);
   useEffect(() => { const t = setInterval(() => force((n) => n + 1), 1000); return () => clearInterval(t); }, []);
@@ -301,8 +301,8 @@ export function SystemPanel({ world, stats, sync, anomalies, onLock }: {
       {rows.map(([k, v, tone]) => <div key={k}><span>{k}</span><b className={tone}>{v}</b></div>)}
       <p className="note">
         {world.source.kind === 'simulated'
-          ? <>THIS IS THE SIMULATED NETWORK. {world.source.standby ? `PLACE ${world.source.standby} MORE TEAM MEMBER${world.source.standby === 1 ? '' : 'S'} IN A CITY (SETTINGS → TEAM) AND THE LIVE WORKSPACE TAKES OVER.` : 'SET BY CONTROL_CENTER_DATA ON THE SERVER.'} HANDOFFS ARE REPLAYED, NOT OBSERVED.</>
-          : <>LIVE WORKSPACE: PEOPLE, BATCHES, SCRIPTS AND REVIEWS FROM THE PLATFORM, REFRESHED EVERY 20 SECONDS.{world.source.unplaced ? ` ${world.source.unplaced} TEAM MEMBER${world.source.unplaced === 1 ? ' HAS' : 'S HAVE'} NO CITY YET.` : ''}</>}
+          ? <>THIS IS THE SIMULATED NETWORK: SAMPLE PEOPLE AND CLIENTS, SET BY CONTROL_CENTER_DATA ON THE SERVER. HANDOFFS ARE REPLAYED, NOT OBSERVED.</>
+          : <>LIVE WORKSPACE: YOUR TEAM, EDITORS, BATCHES, SCRIPTS AND REVIEWS FROM THE PLATFORM, REFRESHED EVERY 20 SECONDS.{world.source.unplaced ? <> {world.source.unplaced} TEAM MEMBER{world.source.unplaced === 1 ? ' HAS' : 'S HAVE'} NO CITY YET. <button onClick={onPeople}>PLACE THEM</button></> : ''}</>}
         {' '}<button onClick={onLock}>LOCK CLEARANCE</button>
       </p>
     </section>
