@@ -37,6 +37,7 @@ export class FlatView implements WorldView {
   private raf = 0;
   private running = false;
   private t0 = performance.now();
+  private last = 0;
   private revealStart = -1;
   private bindings = new Set<{ key: string; el: HTMLElement }>();
   private packets: { from: number; to: number; start: number; h: CcHandoff }[] = [];
@@ -67,7 +68,10 @@ export class FlatView implements WorldView {
     canvas.addEventListener('pointerdown', this.onDown);
     window.addEventListener('pointermove', this.onMove);
     window.addEventListener('pointerup', this.onUp);
+    document.addEventListener('visibilitychange', this.onVisibility);
   }
+
+  private onVisibility = () => { if (document.hidden) this.stop(); else this.start(); };
 
   get stats(): EngineStats { return { fps: 60, tier: 'low', dpr: 1, particles: this.land.length, land: this.land.length }; }
   get currentAnomalies() { return this.anomalies; }
@@ -128,6 +132,7 @@ export class FlatView implements WorldView {
     this.canvas.removeEventListener('pointerdown', this.onDown);
     window.removeEventListener('pointermove', this.onMove);
     window.removeEventListener('pointerup', this.onUp);
+    document.removeEventListener('visibilitychange', this.onVisibility);
   }
 
   // ── drawing ────────────────────────────────────────────────────────────
@@ -142,7 +147,13 @@ export class FlatView implements WorldView {
   private draw = (ms: number) => {
     if (!this.running) return;
     this.raf = requestAnimationFrame(this.draw);
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    // drawn on the CPU, so only as often as needed: 30 fps unless something is moving, 15 in a window in the back
+    const busy = !!this.drag || !!this.goal || this.packets.length > 0 || (this.revealStart >= 0 && ms - this.revealStart < 2000);
+    const interval = !document.hasFocus() ? 1000 / 15 : busy ? 1000 / 60 : 1000 / 30;
+    if (ms - this.last < interval - 3) return;
+    const dt = Math.min(0.1, (ms - (this.last || ms)) / 1000);
+    this.last = ms;
+    const dpr = Math.min(1.5, window.devicePixelRatio || 1);
     const rect = this.canvas.getBoundingClientRect();
     if (rect.width * dpr !== this.canvas.width || rect.height * dpr !== this.canvas.height) {
       this.canvas.width = rect.width * dpr;
@@ -162,7 +173,7 @@ export class FlatView implements WorldView {
       this.yaw = this.goal.from.yaw + (this.goal.yaw - this.goal.from.yaw) * e;
       this.pitch = this.goal.from.pitch + (this.goal.pitch - this.goal.from.pitch) * e;
       if (p >= 1) this.goal = null;
-    } else if (!this.drag && !this.focus && !this.opts.reducedMotion) this.yaw += 0.0025;
+    } else if (!this.drag && !this.focus && !this.opts.reducedMotion) this.yaw += 0.15 * dt;
 
     const R = Math.min(this.w, this.h) * (this.w < this.h ? 0.43 : 0.32) * this.zoom * (this.focus ? 1.25 : 1);
     const cx = this.w / 2 - (this.focus ? this.w * 0.1 : 0), cy = this.h / 2;

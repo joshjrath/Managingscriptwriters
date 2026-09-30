@@ -20,26 +20,22 @@ import { HttpError, parse } from '../http';
 import { callsignOf, type ControlStatus, type ControlWorld } from '../../shared/control';
 import { simulatedWorld } from './simulated';
 import { isAdmin } from './access';
-import { placedCount, workspaceWorld } from './workspace';
+import { workspaceWorld } from './workspace';
 
 export const CLEARANCE_HOURS = 12;
-/** the live workspace takes over from the simulated network once this many people have a city */
-export const LIVE_THRESHOLD = 2;
 
-export type ControlData = 'auto' | 'simulated' | 'workspace';
+/** Where the world comes from: the real workspace, or (only when set on the server) the simulated network. */
+export type ControlData = 'simulated' | 'workspace';
 
 const SIM_START = Date.now();
 
 export async function loadWorld(ctx: Ctx): Promise<ControlWorld> {
-  const mode = ctx.controlData ?? 'auto';
   const at = ctx.now();
-  const placed = mode === 'simulated' ? 0 : await placedCount(ctx.db);
-  if (mode === 'workspace' || (mode === 'auto' && placed >= LIVE_THRESHOLD)) return workspaceWorld(ctx.db, at);
+  if (ctx.controlData !== 'simulated') return workspaceWorld(ctx.db, at);
   // deadlines run on a 12-hour cycle from when the server started, so they tick down between refreshes
   const cycle = 12 * 3_600_000;
   const epoch = new Date(SIM_START + Math.floor((at.getTime() - SIM_START) / cycle) * cycle);
-  const world = simulatedWorld(at, (await loadSettings(ctx.db)).orgName, epoch);
-  return { ...world, source: { ...world.source, standby: mode === 'auto' ? LIVE_THRESHOLD - placed : null } };
+  return simulatedWorld(at, (await loadSettings(ctx.db)).orgName, epoch);
 }
 
 interface Operator { id: number; name: string; role: 'owner' | 'manager' | 'writer'; active: boolean }

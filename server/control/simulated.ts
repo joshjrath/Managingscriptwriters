@@ -1,6 +1,6 @@
-// The simulated network: a centralized, believable Scale Media operation for
-// the Control Center to run on before the team's cities are set (or when
-// CONTROL_CENTER_DATA=simulated). Every time is relative to now, so deadlines
+// The simulated network: a centralized, believable Scale Media operation with
+// sample people and clients, used only when the server sets
+// CONTROL_CENTER_DATA=simulated (the default is the real workspace). Every time is relative to now, so deadlines
 // keep approaching and the world always looks current. It's labelled
 // "SIMULATED NETWORK" everywhere it matters, and nothing here pretends to be a
 // live integration.
@@ -228,7 +228,7 @@ export function simulatedWorld(at: Date, orgName: string, epoch: Date = at): Con
   ];
 
   return finishWorld({
-    source: { kind: 'simulated', label: 'SIMULATED NETWORK', unplaced: 0, replayed: true, standby: null },
+    source: { kind: 'simulated', label: 'SIMULATED NETWORK', unplaced: 0, replayed: true },
     generatedAt: at.toISOString(), orgName, writers, clients: CLIENTS, projects, scripts, activity, handoffs, links,
   }, at);
 }

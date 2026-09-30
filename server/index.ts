@@ -40,7 +40,7 @@ async function main() {
     setupHint,
     // paste-notes import reads notes with Claude when an API key is configured
     notesReader: env.ANTHROPIC_API_KEY ? claudeNotesReader() : null,
-    controlData: env.CONTROL_CENTER_DATA === 'simulated' || env.CONTROL_CENTER_DATA === 'workspace' ? env.CONTROL_CENTER_DATA : 'auto',
+    controlData: env.CONTROL_CENTER_DATA === 'simulated' ? 'simulated' : 'workspace',
   };
   const staticDir = env.STATIC_DIR ?? path.resolve(here, '../client');
   const app = await buildApp(ctx, { staticDir, logger: production });

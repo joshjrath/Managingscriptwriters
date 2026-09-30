@@ -1,17 +1,19 @@
 // Control Center access and data, through the real HTTP routes: nothing is
-// served without clearance, clearance is for admins only, and the live
-// workspace takes over from the simulated network once the team is placed.
+// served without clearance, clearance is for admins only, and the world is the
+// real workspace (the simulated network only when the server asks for it).
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../server/app';
 import { openDb, type Db } from '../server/db';
 import type { Ctx } from '../server/core';
+import { loadWorld } from '../server/control/routes';
 import type { ControlStatus, ControlWorld } from '../shared/control';
 
 let NOW = new Date('2026-09-28T16:00:00Z');
 let db: Db;
 let app: FastifyInstance;
+let ctx: Ctx;
 
 type Res<T = any> = { status: number; body: T; cookie: string | null };
 async function call<T = any>(method: string, url: string, opts: { body?: unknown; cookie?: string } = {}): Promise<Res<T>> {
@@ -32,7 +34,7 @@ const ids: Record<string, number> = {};
 
 beforeAll(async () => {
   db = await openDb({ memory: true });
-  const ctx: Ctx = { db, now: () => NOW, secureCookies: false, allowSetup: true, uploadLimitBytes: 1024 * 1024 };
+  ctx = { db, now: () => NOW, secureCookies: false, allowSetup: true, uploadLimitBytes: 1024 * 1024 };
   app = await buildApp(ctx);
   const setup = await call('POST', '/api/auth/setup', { body: { name: 'Josh Rath', email: 'josh@scale.test', password: 'correct-horse-battery' } });
   manager = setup.cookie!;
@@ -81,9 +83,10 @@ describe('clearance', () => {
     expect((await call<ControlStatus>('GET', '/api/control/status', { cookie: manager })).body.cleared).toBe(true);
     const w = await call<ControlWorld>('GET', '/api/control/world', { cookie: manager });
     expect(w.status).toBe(200);
-    // nobody has a city yet: the simulated network, clearly labelled, and how many more to place
-    expect(w.body.source).toMatchObject({ kind: 'simulated', label: 'SIMULATED NETWORK', standby: 2 });
-    expect(w.body.writers.length).toBeGreaterThan(4);
+    // nobody has a city yet: the real, empty workspace (never sample people or clients)
+    expect(w.body.source).toMatchObject({ kind: 'workspace', label: 'LIVE WORKSPACE', unplaced: 3 });
+    expect(w.body.writers).toEqual([]);
+    expect(w.body.clients).toEqual([]);
   });
 
   it('never clears a writer, even with the right password', async () => {
@@ -156,12 +159,13 @@ describe('the live workspace', () => {
     const sarah = r.body.users.find((u: any) => u.id === ids.sarah);
     expect(sarah.city).toBe('London, United Kingdom');
     expect(sarah.workHours).toEqual([20, 28]);
-    // one person placed isn't a network yet
+    // on the globe straight away
     const w = (await call<ControlWorld>('GET', '/api/control/world', { cookie: manager })).body;
-    expect(w.source).toMatchObject({ kind: 'simulated', standby: 1 });
+    expect(w.source).toMatchObject({ kind: 'workspace', unplaced: 2 });
+    expect(w.writers.map((x) => [x.callsign, x.timezone, x.workHours])).toEqual([['SARAH', 'Europe/London', [20, 28]]]);
   });
 
-  it('takes over once two people are placed, with real batches, scripts and handoffs', async () => {
+  it('shows real batches, scripts and handoffs between the people placed', async () => {
     await call('PATCH', `/api/users/${ids.josh}`, { cookie: manager, body: { city: 'Toronto, Canada', workStart: 9, workEnd: 18 } });
     const client = (await call('POST', '/api/clients', { cookie: manager, body: { name: 'Downtown Dental' } })).body.clientId;
     const b = await call('POST', '/api/batches', { cookie: manager, body: { clientId: client, title: 'Master Script Batch', targetCount: 6, draftDue: '2026-10-02', finalDue: '2026-10-05', split: [{ writerId: ids.sarah, count: 6 }] } });
@@ -190,6 +194,45 @@ describe('the live workspace', () => {
   });
 });
 
+describe('time zones and shifts', () => {
+  it('follow the city unless one is chosen, and a chosen one survives edits that keep the city', async () => {
+    const sarah = () => call('GET', '/api/users', { cookie: manager }).then((r) => r.body.users.find((u: any) => u.id === ids.sarah));
+    expect((await sarah()).timezone).toBe('Europe/London');
+    const bad = await call('PATCH', `/api/users/${ids.sarah}`, { cookie: manager, body: { timezone: 'Mars/Olympus' } });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.fields.timezone).toBeTruthy();
+    await call('PATCH', `/api/users/${ids.sarah}`, { cookie: manager, body: { city: 'London, United Kingdom', timezone: 'Europe/Dublin', workStart: 20, workEnd: 4 } });
+    expect((await sarah()).timezone).toBe('Europe/Dublin');
+    await call('PATCH', `/api/users/${ids.sarah}`, { cookie: manager, body: { city: 'London, United Kingdom', workStart: 20, workEnd: 4 } });
+    expect((await sarah()).timezone).toBe('Europe/Dublin');
+    const w = (await call<ControlWorld>('GET', '/api/control/world', { cookie: manager })).body;
+    expect(w.writers.find((x) => x.callsign === 'SARAH')!.timezone).toBe('Europe/Dublin');
+    // moving city goes back to the new city's zone
+    await call('PATCH', `/api/users/${ids.sarah}`, { cookie: manager, body: { city: 'Lisbon, Portugal' } });
+    expect((await sarah()).timezone).toBe('Europe/Lisbon');
+    await call('PATCH', `/api/users/${ids.sarah}`, { cookie: manager, body: { city: 'London, United Kingdom', workStart: 20, workEnd: 4 } });
+  });
+
+  it('can be any length, up to around the clock', async () => {
+    const hours = async (workStart: number, workEnd: number) => {
+      const r = await call('PATCH', `/api/users/${ids.josh}`, { cookie: manager, body: { workStart, workEnd } });
+      expect(r.status).toBe(200);
+      return r.body.users.find((u: any) => u.id === ids.josh).workHours;
+    };
+    expect(await hours(0, 10)).toEqual([0, 10]);
+    expect(await hours(6, 4)).toEqual([6, 28]);
+    expect(await hours(0, 24)).toEqual([0, 24]);
+    expect(await hours(9, 9)).toEqual([9, 33]);
+    expect(await hours(9, 18)).toEqual([9, 18]);
+  });
+
+  it('uses the simulated network only when the server asks for it', async () => {
+    const w = await loadWorld({ ...ctx, controlData: 'simulated' });
+    expect(w.source).toMatchObject({ kind: 'simulated', label: 'SIMULATED NETWORK' });
+    expect((await loadWorld(ctx)).source.kind).toBe('workspace');
+  });
+});
+
 describe('editors', () => {
   it('are managed by the admin only', async () => {
     expect((await call('GET', '/api/editors', { cookie: lead })).status).toBe(403);
@@ -199,7 +242,20 @@ describe('editors', () => {
     expect(bad.body.error.fields.city).toBeTruthy();
     const r = await call('POST', '/api/editors', { cookie: manager, body: { name: 'Priya Editor', city: 'Mumbai, India', workStart: 22, workEnd: 6 } });
     expect(r.status).toBe(200);
-    expect(r.body.editors).toEqual([expect.objectContaining({ name: 'Priya Editor', city: 'Mumbai, India', workHours: [22, 30] })]);
+    expect(r.body.editors).toEqual([expect.objectContaining({ name: 'Priya Editor', city: 'Mumbai, India', timezone: 'Asia/Kolkata', workHours: [22, 30] })]);
+  });
+
+  it('can have their own time zone and a shift of any length', async () => {
+    const r = await call('POST', '/api/editors', { cookie: manager, body: { name: 'Tomas Night', city: 'Bangkok, Thailand', timezone: 'Asia/Ho_Chi_Minh', workStart: 9, workEnd: 9 } });
+    const tomas = r.body.editors.find((e: any) => e.name === 'Tomas Night');
+    expect(tomas).toMatchObject({ timezone: 'Asia/Ho_Chi_Minh', workHours: [9, 33] });
+    // an edit that keeps the city keeps the chosen zone
+    const e = await call('PATCH', `/api/editors/${tomas.id}`, { cookie: manager, body: { name: 'Tomas Night', city: 'Bangkok, Thailand', workStart: 0, workEnd: 24 } });
+    expect(e.body.editors.find((x: any) => x.id === tomas.id)).toMatchObject({ timezone: 'Asia/Ho_Chi_Minh', workHours: [0, 24] });
+    const w = (await call<ControlWorld>('GET', '/api/control/world', { cookie: manager })).body;
+    expect(w.writers.find((x) => x.id === `e${tomas.id}`)).toMatchObject({ timezone: 'Asia/Ho_Chi_Minh', workHours: [0, 24] });
+    expect((await call('POST', '/api/editors', { cookie: manager, body: { name: 'X', city: 'Paris, France', timezone: 'Nowhere/Land' } })).status).toBe(400);
+    await call('DELETE', `/api/editors/${tomas.id}`, { cookie: manager });
   });
 
   it('appear in the Control Center with their local time, but never as users', async () => {

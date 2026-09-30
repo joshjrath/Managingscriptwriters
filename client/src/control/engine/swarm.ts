@@ -5,10 +5,11 @@
 // transitions feel like a swarm reorganizing rather than a page swapping.
 
 import {
-  AdditiveBlending, BufferAttribute, BufferGeometry, Color, DynamicDrawUsage, LineSegments, Matrix4, Points, Quaternion,
+  AdditiveBlending, BufferAttribute, BufferGeometry, Color, LineSegments, Matrix4, Points, Quaternion,
   ShaderMaterial, Vector3,
 } from 'three';
 import type { CcScript, ScriptState } from '../../../../shared/control';
+import { fitGeometry, markUsed } from './buffers';
 import { hashString } from './math';
 
 export const LAYOUT = { world: 0, deadline: 1, mission: 2, space: 3, graph: 4 } as const;
@@ -76,6 +77,7 @@ export class SwarmLayer {
   points: Points;
   archiveLines: LineSegments;
   private material: ShaderMaterial;
+  private archiveKey = '';
   private pos!: BufferAttribute;
   private col!: BufferAttribute;
   private size!: BufferAttribute;
@@ -148,15 +150,9 @@ export class SwarmLayer {
         updatedMs: new Date(x.script.updatedAt).getTime(),
       };
     });
-    const n = this.bodies.length;
-    const g = this.points.geometry;
-    this.pos = new BufferAttribute(new Float32Array(Math.max(1, n) * 3), 3).setUsage(DynamicDrawUsage);
-    this.col = new BufferAttribute(new Float32Array(Math.max(1, n) * 4), 4).setUsage(DynamicDrawUsage);
-    this.size = new BufferAttribute(new Float32Array(Math.max(1, n)), 1).setUsage(DynamicDrawUsage);
-    g.setAttribute('position', this.pos);
-    g.setAttribute('aColor', this.col);
-    g.setAttribute('aSize', this.size);
-    g.setDrawRange(0, n);
+    // buffers are kept between refreshes and only grow when the data outgrows them
+    const a = fitGeometry(this.points, this.bodies.length, { position: 3, aColor: 4, aSize: 1 });
+    this.pos = a.position; this.col = a.aColor; this.size = a.aSize;
 
     // finished projects become constellations: their stars joined in a quiet chain
     const byProject = new Map<string, Vector3[]>();
@@ -173,7 +169,16 @@ export class SwarmLayer {
         cur = next;
       }
     }
-    this.archiveLines.geometry.setAttribute('position', new BufferAttribute(new Float32Array(seg), 3));
+    // rebuilt only when the finished work changes, and the old buffer freed at once
+    const key = [...byProject].map(([id, stars]) => `${id}:${stars.length}`).join('|');
+    if (key !== this.archiveKey) {
+      this.archiveKey = key;
+      const old = this.archiveLines.geometry;
+      const g = new BufferGeometry();
+      g.setAttribute('position', new BufferAttribute(new Float32Array(seg), 3));
+      this.archiveLines.geometry = g;
+      old.dispose();
+    }
   }
 
   update(f: SwarmFrame, emphasis: (b: ScriptBody) => number) {
@@ -265,7 +270,8 @@ export class SwarmLayer {
       C[i * 4] = b.color.r; C[i * 4 + 1] = b.color.g; C[i * 4 + 2] = b.color.b; C[i * 4 + 3] = b.alpha * pulse;
       S[i] = b.size * (b.urgent ? 1.3 : 1) * (1 + b.w[3] * (b.archived ? 0.6 : 1.6));
     });
-    this.pos.needsUpdate = this.col.needsUpdate = this.size.needsUpdate = true;
+    const n = this.bodies.length;
+    markUsed(this.pos, n); markUsed(this.col, n); markUsed(this.size, n);
     const lm = this.archiveLines.material as ShaderMaterial;
     lm.uniforms.uOpacity.value = this.archiveOpacity;
     this.archiveLines.visible = this.archiveOpacity > 0.002;

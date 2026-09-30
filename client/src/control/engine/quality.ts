@@ -14,10 +14,14 @@ export interface Quality {
   antialias: boolean;
 }
 
+// Kept deliberately light: the canvas is the biggest cost (pixels × samples),
+// so there's no multisampling at any tier (the dots are antialiased in their
+// shader) and the pixel ratio stays under 1.5, and the particle counts are
+// what the look needs, not what the GPU could take.
 export const TIERS: Record<Tier, Quality> = {
-  high: { tier: 'high', sphere: 200_000, dot: 7.2, stars: 2600, maxDpr: 2, antialias: true },
-  medium: { tier: 'medium', sphere: 120_000, dot: 8.8, stars: 1600, maxDpr: 1.5, antialias: true },
-  low: { tier: 'low', sphere: 64_000, dot: 11, stars: 900, maxDpr: 1, antialias: false },
+  high: { tier: 'high', sphere: 150_000, dot: 8.2, stars: 1400, maxDpr: 1.5, antialias: false },
+  medium: { tier: 'medium', sphere: 100_000, dot: 9.6, stars: 1000, maxDpr: 1.25, antialias: false },
+  low: { tier: 'low', sphere: 60_000, dot: 11.5, stars: 700, maxDpr: 1, antialias: false },
 };
 
 export const lower = (t: Tier): Tier | null => (t === 'high' ? 'medium' : t === 'medium' ? 'low' : null);

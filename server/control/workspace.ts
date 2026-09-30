@@ -42,15 +42,6 @@ interface ScriptRow {
   approved_by: number | null; submitted_at: string | null; delivered_at: string | null; updated_at: string;
 }
 
-/** Whether enough of the team (editors included) is placed on the map for the live workspace to be worth showing. */
-export async function placedCount(db: Db): Promise<number> {
-  const r = await db.one<{ n: number }>(
-    `select (select count(*) from users where active and removed_at is null and lat is not null and lon is not null and timezone is not null)
-          + (select count(*) from editors where removed_at is null) as n`,
-  );
-  return Number(r?.n ?? 0);
-}
-
 /** A calendar date's deadline as an instant: the organisation's cutoff on that day, in its timezone. */
 export function deadlineInstant(date: string, tz: string, cutoff: string): string {
   const [y, m, d] = date.split('-').map(Number);
@@ -72,13 +63,14 @@ export async function workspaceWorld(db: Db, at: Date): Promise<ControlWorld> {
   const placedIds = new Set(placed.map((u) => u.id));
   const nid = (id: number | null | undefined) => (id != null && placedIds.has(id) ? `u${id}` : null);
 
-  // live batches, plus finished work from the last year for the archive
-  const batches = await db.query<BatchRow>(
-    `select b.id, b.client_id, c.name as client_name, b.title, b.priority, b.draft_due, b.final_due, b.blocked, b.blocker_note,
-            b.archived_at, b.created_by, c.owner_id
-       from batches b join clients c on c.id = b.client_id
-      order by b.id desc limit 400`,
-  );
+  // live batches, plus the most recently finished ones for the archive; kept to
+  // what the view can show so each refresh stays small on the server and the device
+  const cols = `b.id, b.client_id, c.name as client_name, b.title, b.priority, b.draft_due, b.final_due, b.blocked, b.blocker_note,
+            b.archived_at, b.created_by, c.owner_id`;
+  const batches = [
+    ...await db.query<BatchRow>(`select ${cols} from batches b join clients c on c.id = b.client_id where b.archived_at is null order by b.id desc limit 200`),
+    ...await db.query<BatchRow>(`select ${cols} from batches b join clients c on c.id = b.client_id where b.archived_at is not null order by b.archived_at desc limit 60`),
+  ];
   const scriptRows = batches.length
     ? await db.query<ScriptRow>(
       `select id, batch_id, number, title, assignee_id, status, approved_by, submitted_at, delivered_at, updated_at
@@ -256,7 +248,7 @@ export async function workspaceWorld(db: Db, at: Date): Promise<ControlWorld> {
   }));
 
   return finishWorld({
-    source: { kind: 'workspace', label: 'LIVE WORKSPACE', unplaced: users.length - placed.length, replayed: false, standby: null },
+    source: { kind: 'workspace', label: 'LIVE WORKSPACE', unplaced: users.length - placed.length, replayed: false },
     generatedAt: at.toISOString(), orgName: settings.orgName, writers, clients: [...clients.values()],
     projects, scripts, activity, handoffs, links: [...linkMap.values()],
   }, at);

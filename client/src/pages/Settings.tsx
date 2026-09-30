@@ -1,6 +1,6 @@
 // Settings (managers): deadline rules, timezone and cutoff, reminders, team.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { isManager, ROLE_LABEL, type Role } from '../../../shared/workflow';
 import { AlertTriangle, CalendarClock, Check, Copy, KeyRound, Plus, RefreshCw, UserPlus } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
@@ -8,7 +8,7 @@ import { api, useSave } from '../api';
 import type { Editor, Settings, UserSummary } from '../../../shared/types';
 import { computeDeadlines, DEFAULT_RULES, isValidTimeZone } from '../../../shared/dates';
 import { fmtCutoff, fmtLong, fmtStamp, plural } from '../../../shared/format';
-import { CITIES, cityLabel } from '../../../shared/cities';
+import { CITIES, cityLabel, findCity, shiftLength, shiftOf, timeZoneList, zoneOffset } from '../../../shared/cities';
 import { PageHeader, useBoot } from '../components/Shell';
 import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, useFieldId, useToast } from '../components/ui';
 
@@ -247,9 +247,10 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
   const [password, setPassword] = useState(() => (user ? '' : generatePassword()));
   const [active, setActive] = useState(user?.active ?? true);
   const [city, setCity] = useState(user?.city ?? '');
+  const [tz, setTz] = useState(user?.timezone ?? findCity(user?.city ?? '')?.timezone ?? '');
   const [hours, setHours] = useState<[number, number]>(user?.workHours ?? [9, 18]);
   const [share, setShare] = useState<string | null>(null);
-  const place = { city: city.trim() || null, ...(city.trim() ? { workStart: hours[0], workEnd: hours[1] % 24 || 24 } : {}) };
+  const place = { city: city.trim() || null, ...(city.trim() ? { timezone: tz || undefined, workStart: hours[0], workEnd: hours[1] % 24 || 24 } : {}) };
   const save = useSave(() => user
     ? api(`/api/users/${user.id}`, { method: 'PATCH', body: { name, role, active, capacityPerDay: capacity ? Number(capacity) : null, password: password || undefined, ...place } })
     : api('/api/users', { body: { name, email, role, password, capacityPerDay: capacity ? Number(capacity) : null, ...place } }), {
@@ -265,7 +266,7 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
     },
   });
   const f = save.error?.fields ?? {};
-  const ids = { n: useFieldId('n'), e: useFieldId('e'), r: useFieldId('r'), c: useFieldId('c'), p: useFieldId('p'), city: useFieldId('city'), h: useFieldId('h') };
+  const ids = { n: useFieldId('n'), e: useFieldId('e'), r: useFieldId('r'), c: useFieldId('c'), p: useFieldId('p') };
   if (share) return <ShareDetails message={share} name={firstName(name)} onClose={onClose} />;
   return (
     <Dialog open onClose={onClose} title={user ? `Edit ${user.name}` : 'Add a person'} size="narrow"
@@ -278,19 +279,8 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
           <select className="select" id={ids.r} value={role} onChange={(e) => setRole(e.target.value as Role)}><option value="writer">Writer</option><option value="manager">Manager</option><option value="owner">Admin</option></select>
         </Field>
         <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates and over-capacity warnings."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>
-        <Field label="City" optional htmlFor={ids.city} error={f.city} help="Where they work from. Sets their local time and working hours.">
-          <input className="input" list={`${ids.city}-list`} autoComplete="off" placeholder="Start typing a city" value={city} onChange={(e) => setCity(e.target.value)} {...inputProps(ids.city, f.city)} />
-          <datalist id={`${ids.city}-list`}>{CITIES.map((c) => <option key={cityLabel(c)} value={cityLabel(c)} />)}</datalist>
-        </Field>
-        {city.trim() && (
-          <Field label="Working hours" htmlFor={ids.h} error={f.workEnd ?? f.workStart} help="Their local time.">
-            <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>
-              <select className="select" id={ids.h} value={hours[0]} onChange={(e) => setHours([Number(e.target.value), hours[1]])}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h)}</option>)}</select>
-              <span className="muted">to</span>
-              <select className="select" aria-label="Working hours end" value={hours[1] % 24} onChange={(e) => setHours([hours[0], Number(e.target.value)])}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h)}</option>)}</select>
-            </div>
-          </Field>
-        )}
+        <PlaceFields optional city={city} tz={tz} hours={hours} f={f}
+          onChange={(v) => { if (save.error) save.reset(); if (v.city !== undefined) setCity(v.city); if (v.tz !== undefined) setTz(v.tz); if (v.hours) setHours(v.hours); }} />
         <Field label={user ? 'Reset password' : 'Temporary password'} optional={!!user} htmlFor={ids.p} error={f.password} help={user ? 'Leave empty to keep their password. Set one and you’ll get a message to send them.' : 'At least 10 characters. After saving you’ll get a ready-to-send message with this and the sign-in link.'}>
           <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>
             <input className="input" type="text" autoComplete="new-password" spellCheck={false} value={password} onChange={(e) => setPassword(e.target.value)} {...inputProps(ids.p, f.password)} />
@@ -328,7 +318,7 @@ function EditorsPanel() {
               <Avatar name={e.name} id={100000 + e.id} />
               <div className="body">
                 <div className="title">{e.name}</div>
-                <div className="meta">{e.city} · {fmtHour(e.workHours[0])} to {fmtHour(e.workHours[1] % 24)}</div>
+                <div className="meta">{e.city} · {e.workHours[1] - e.workHours[0] >= 24 ? 'Around the clock' : `${fmtHour(e.workHours[0])} to ${fmtHour(e.workHours[1] % 24)}`}</div>
               </div>
             </div>
             <div className="side">
@@ -351,9 +341,10 @@ function EditorDialog({ editor, onClose }: { editor?: Editor; onClose: () => voi
   const toast = useToast();
   const [name, setName] = useState(editor?.name ?? '');
   const [city, setCity] = useState(editor?.city ?? '');
+  const [tz, setTz] = useState(editor?.timezone ?? '');
   const [hours, setHours] = useState<[number, number]>(editor?.workHours ?? [9, 18]);
-  const ids = { n: useFieldId('ed-n'), c: useFieldId('ed-c'), h: useFieldId('ed-h') };
-  const body = { name, city, workStart: hours[0], workEnd: hours[1] % 24 || 24 };
+  const ids = { n: useFieldId('ed-n') };
+  const body = { name, city, timezone: tz || undefined, workStart: hours[0], workEnd: hours[1] % 24 || 24 };
   const save = useSave(() => (editor ? api(`/api/editors/${editor.id}`, { method: 'PATCH', body }) : api('/api/editors', { body })), {
     onSuccess: () => { toast(editor ? `${name} updated` : `${name} added`); onClose(); },
   });
@@ -364,19 +355,55 @@ function EditorDialog({ editor, onClose }: { editor?: Editor; onClose: () => voi
       <form className="form" onSubmit={(e) => { e.preventDefault(); save.mutate(undefined); }}>
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
         <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} autoFocus /></Field>
-        <Field label="City" htmlFor={ids.c} error={f.city} help="Where they work from. Sets their local time.">
-          <input className="input" list={`${ids.c}-list`} autoComplete="off" placeholder="Start typing a city" value={city} onChange={(e) => setCity(e.target.value)} {...inputProps(ids.c, f.city)} />
-          <datalist id={`${ids.c}-list`}>{CITIES.map((c) => <option key={cityLabel(c)} value={cityLabel(c)} />)}</datalist>
-        </Field>
-        <Field label="Working hours" htmlFor={ids.h} error={f.workEnd ?? f.workStart} help="Their local time.">
-          <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>
-            <select className="select" id={ids.h} value={hours[0]} onChange={(e) => setHours([Number(e.target.value), hours[1]])}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h)}</option>)}</select>
-            <span className="muted">to</span>
-            <select className="select" aria-label="Working hours end" value={hours[1] % 24} onChange={(e) => setHours([hours[0], Number(e.target.value)])}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h)}</option>)}</select>
-          </div>
-        </Field>
+        <PlaceFields city={city} tz={tz} hours={hours} f={f}
+          onChange={(v) => { if (save.error) save.reset(); if (v.city !== undefined) setCity(v.city); if (v.tz !== undefined) setTz(v.tz); if (v.hours) setHours(v.hours); }} />
         <button type="submit" hidden />
       </form>
     </Dialog>
+  );
+}
+
+/**
+ * City, time zone and working hours. The time zone follows the city unless
+ * it's changed, and a shift can be any length up to around the clock.
+ */
+function PlaceFields({ city, tz, hours, f, optional, onChange }: {
+  city: string; tz: string; hours: [number, number]; f: Record<string, string>; optional?: boolean;
+  onChange: (v: { city?: string; tz?: string; hours?: [number, number] }) => void;
+}) {
+  const ids = { c: useFieldId('pl-c'), z: useFieldId('pl-z'), h: useFieldId('pl-h') };
+  const zones = useMemo(() => {
+    const list = timeZoneList();
+    return tz && !list.includes(tz) ? [tz, ...list] : list;
+  }, [tz]);
+  const offsets = useMemo(() => new Map(zones.map((z) => [z, zoneOffset(z)])), [zones]);
+  const known = findCity(city);
+  const placed = !!city.trim();
+  return (
+    <>
+      <Field label="City" optional={optional} htmlFor={ids.c} error={f.city} help="Where they work from. Sets their local time.">
+        <input className="input" list={`${ids.c}-list`} autoComplete="off" placeholder="Start typing a city" value={city}
+          onChange={(e) => { const c = findCity(e.target.value); onChange({ city: e.target.value, ...(c ? { tz: c.timezone } : {}) }); }} {...inputProps(ids.c, f.city)} />
+        <datalist id={`${ids.c}-list`}>{CITIES.map((c) => <option key={cityLabel(c)} value={cityLabel(c)} />)}</datalist>
+      </Field>
+      {placed && (
+        <Field label="Time zone" htmlFor={ids.z} error={f.timezone}
+          help={known && tz && tz !== known.timezone ? `Changed from ${known.name}’s (${known.timezone.replace(/_/g, ' ')}).` : 'Follows the city. Change it if theirs is different.'}>
+          <select className="select" id={ids.z} value={tz} onChange={(e) => onChange({ tz: e.target.value })}>
+            {!tz && <option value="">Pick a city first</option>}
+            {zones.map((z) => <option key={z} value={z}>{z.replace(/_/g, ' ')}{offsets.get(z) ? ` · ${offsets.get(z)}` : ''}</option>)}
+          </select>
+        </Field>
+      )}
+      {placed && (
+        <Field label="Working hours" htmlFor={ids.h} error={f.workEnd ?? f.workStart} help={`Their local time · ${shiftLength(shiftOf(hours[0], hours[1]))}. The same start and end means around the clock.`}>
+          <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>
+            <select className="select" id={ids.h} value={hours[0]} onChange={(e) => onChange({ hours: [Number(e.target.value), hours[1]] })}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h)}</option>)}</select>
+            <span className="muted">to</span>
+            <select className="select" aria-label="Working hours end" value={hours[1] % 24} onChange={(e) => onChange({ hours: [hours[0], Number(e.target.value)] })}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h)}</option>)}</select>
+          </div>
+        </Field>
+      )}
+    </>
   );
 }
