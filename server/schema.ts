@@ -377,4 +377,23 @@ alter table users add column timezone text;
 alter table users add column work_start smallint check (work_start between 0 and 23);
 alter table users add column work_end smallint check (work_end between 1 and 47);
 `,
+  // 11 · editors: people shown in the Control Center with their city and hours, who don't use the platform
+  `
+create table editors (
+  id bigint generated always as identity primary key,
+  name text not null,
+  city text not null,
+  city_code text not null,
+  country text not null,
+  lat double precision not null,
+  lon double precision not null,
+  timezone text not null,
+  work_start smallint not null check (work_start between 0 and 23),
+  work_end smallint not null check (work_end between 1 and 47),
+  created_by bigint references users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  removed_at timestamptz
+);
+`,
 ];

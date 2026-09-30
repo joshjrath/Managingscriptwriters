@@ -133,7 +133,7 @@ function Denied({ onExit }: { onExit: () => void }) {
   return (
     <div className="cc-denied" role="alert">
       <b>CLEARANCE INSUFFICIENT</b>
-      <p>THIS SYSTEM IS LIMITED TO OPERATIONS STAFF: ADMINS AND MANAGERS OF THE SCALE MEDIA NETWORK.</p>
+      <p>THIS SYSTEM IS LIMITED TO THE ADMIN OF THE SCALE MEDIA NETWORK.</p>
       <button onClick={onExit}>← RETURN TO THE SITE</button>
     </div>
   );
@@ -195,7 +195,7 @@ function Portal({ status, onAuthorized, onDenied, onExit }: { status: ControlSta
         </div>
       </form>
       <div className="note">
-        {status.operator ? `OPERATOR ${status.operator.name.toUpperCase()} · CONFIRM WITH YOUR PASSWORD` : 'ADMINS AND MANAGERS · SIGN IN WITH YOUR PLATFORM ACCOUNT'}
+        {status.operator ? `OPERATOR ${status.operator.name.toUpperCase()} · CONFIRM WITH YOUR PASSWORD` : 'ADMIN ONLY · SIGN IN WITH YOUR PLATFORM ACCOUNT'}
         {status.demo ? <><br />DEMO WORKSPACE · THE DEMO PASSWORD WORKS HERE</> : null}
       </div>
     </div>

@@ -17,6 +17,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-09-30-control-center-admin-editors',
+    date: '2026-09-30',
+    title: 'Control Center: admin only, and editors on the globe',
+    summary: 'Only the admin can open the Control Center now, and you can add editors so their local time shows there too.',
+    changes: [
+      { tag: 'improved', text: 'The Control Center is now for the admin only. Managers and writers are refused, and the link only shows in the admin’s sidebar. It’s no longer on the sign-in page.' },
+      { tag: 'new', text: 'Settings → Editors (admin only): add editors with their city and working hours. They appear in the Control Center with their local time, but they can’t sign in and aren’t offered as writers.' },
+    ],
+  },
+  {
     id: '2026-09-30-control-center',
     date: '2026-09-30',
     title: 'The Control Center',

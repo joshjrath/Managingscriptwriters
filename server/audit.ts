@@ -65,6 +65,8 @@ const MUTATIONS: Record<string, string> = {
   '/api/moments/seen': 'dismiss a celebration',
   '/api/me/whats-new': 'open What’s new',
   '/api/control/authorize': 'open the Control Center',
+  '/api/editors': 'add an editor',
+  '/api/editors/:id': 'change an editor',
 };
 
 async function describeView(db: Db, route: string, params: Record<string, string>, query: Record<string, string>, me: Me): Promise<{ key: string; summary: string; link: string | null } | null> {
