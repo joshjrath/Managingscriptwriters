@@ -1,4 +1,5 @@
-// Settings (managers): deadline rules, timezone and cutoff, reminders, team.
+// Settings (managers): deadline rules, timezone and cutoff, reminders, team;
+// the admin also picks the site's colour palette.
 
 import { useEffect, useMemo, useState } from 'react';
 import { isManager, ROLE_LABEL, type Role } from '../../../shared/workflow';
@@ -9,6 +10,8 @@ import type { Editor, Settings, UserSummary } from '../../../shared/types';
 import { computeDeadlines, DEFAULT_RULES, isValidTimeZone } from '../../../shared/dates';
 import { fmtCutoff, fmtLong, fmtStamp, plural } from '../../../shared/format';
 import { CITIES, cityLabel, findCity, shiftLength, shiftOf, timeZoneList, zoneOffset } from '../../../shared/cities';
+import { ACCENT_LABEL, ACCENTS, darkTextContrast, DEFAULT_PALETTE, HEX, PALETTES, resolveTheme, SURFACE_LABEL, SURFACES, surfaceSwatch, type Accent, type WorkspaceTheme } from '../../../shared/palettes';
+import { applyTheme, restoreTheme } from '../theme';
 import { PageHeader, useBoot } from '../components/Shell';
 import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, useFieldId, useToast } from '../components/ui';
 
@@ -25,6 +28,7 @@ export function SettingsPage() {
   return (
     <>
       <PageHeader title="Settings" hideNewWork />
+      {me.role === 'owner' && <div style={{ marginBottom: 'var(--gap)' }}><PalettePanel /></div>}
       <div className="grid g-2" style={{ alignItems: 'start' }}>
         <RulesPanel />
         <div className="grid" style={{ alignContent: 'start' }}>
@@ -33,6 +37,86 @@ export function SettingsPage() {
         </div>
       </div>
     </>
+  );
+}
+
+// ── colour palette (admin) ───────────────────────────────────────────────
+
+const sameTheme = (a: WorkspaceTheme | null, b: WorkspaceTheme | null) => JSON.stringify(resolveTheme(a)) === JSON.stringify(resolveTheme(b));
+
+function PalettePanel() {
+  const { settings } = useBoot();
+  const toast = useToast();
+  const [draft, setDraft] = useState<WorkspaceTheme>(settings.theme ?? { preset: DEFAULT_PALETTE.id });
+  const [open, setOpen] = useState(() => resolveTheme(settings.theme).custom);
+  const r = resolveTheme(draft);
+  const dirty = !sameTheme(draft, settings.theme);
+  // preview as you choose; leaving the page without saving goes back
+  useEffect(() => { applyTheme(draft, { preview: true }); }, [JSON.stringify(draft)]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => restoreTheme(), []);
+  const save = useSave(() => api<{ settings: Settings }>('/api/settings/theme', { method: 'PUT', body: { ...draft } }), {
+    onSuccess: (out) => { applyTheme(out.settings.theme); toast(`Colour palette saved: ${resolveTheme(out.settings.theme).palette.name}. Everyone sees it now.`); },
+  });
+  const weak = ACCENTS.filter((k) => darkTextContrast(r.colors[k]) < 4.5);
+  const pick = (id: string) => setDraft({ preset: id });
+  const setColor = (k: Accent, v: string) => setDraft({ ...draft, colors: { ...draft.colors, [k]: v.toUpperCase() } });
+  return (
+    <Panel title="Colour palette" sub="the whole site, for everyone · admin only"
+      tools={dirty ? <div className="row-flex s2">
+        <Button variant="sm ghost" onClick={() => setDraft(settings.theme ?? { preset: DEFAULT_PALETTE.id })}>Cancel</Button>
+        <Button variant="sm primary" busy={save.isPending} disabled={weak.length > 0} onClick={() => save.mutate(undefined)}>Save palette</Button>
+      </div> : <span className="muted" style={{ fontSize: 12.5 }}>Saved</span>}>
+      <FormError error={save.error} />
+      <div className="pal-grid" role="radiogroup" aria-label="Palettes">
+        {PALETTES.map((p) => {
+          const on = r.palette.id === p.id;
+          const surf = surfaceSwatch(p.surfaces);
+          return (
+            <button key={p.id} type="button" role="radio" aria-checked={on} className={`pal-card${on ? ' on' : ''}`} onClick={() => pick(p.id)}
+              style={{ ['--pb' as string]: surf[0], ['--pp' as string]: surf[2], ['--pr' as string]: surf[4], ['--pa' as string]: p.colors.brand, ['--py' as string]: p.colors.action }}>
+              <span className="pal-top"><span className="pal-name">{p.name}</span>{on && <span className="pal-check" aria-hidden><Check /></span>}</span>
+              <span className="pal-vibe">{p.vibe}</span>
+              <span className="pal-mock" aria-hidden>
+                <span className="pal-nav">My work</span>
+                <span className="pal-btn">Mark delivered</span>
+              </span>
+              <span className="pal-dots" aria-hidden>{ACCENTS.map((k) => <i key={k} style={{ background: p.colors[k] }} />)}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="pal-custom">
+        <button type="button" className="btn sm ghost" aria-expanded={open} onClick={() => setOpen(!open)}>{open ? 'Hide' : 'Customise'} colours{r.custom ? ' · customised' : ''}</button>
+        {r.custom && <button type="button" className="btn sm ghost" onClick={() => pick(r.palette.id)}>Reset to {r.palette.name}</button>}
+      </div>
+      {open && (
+        <div className="stack s4" style={{ marginTop: 14 }}>
+          <div className="row-flex s3" style={{ alignItems: 'center' }}>
+            <span className="section-title" style={{ margin: 0 }}>Background</span>
+            <Seg role="group" aria-label="Background tone">
+              {SURFACES.map((t) => <button key={t} type="button" aria-pressed={r.surfaces === t} onClick={() => setDraft({ ...draft, surfaces: t })}><i className="pal-tone" style={{ background: surfaceSwatch(t)[3] }} aria-hidden />{SURFACE_LABEL[t]}</button>)}
+            </Seg>
+          </div>
+          <div className="pal-colors">
+            {ACCENTS.map((k) => {
+              const v = r.colors[k];
+              const low = darkTextContrast(v) < 4.5;
+              return (
+                <label key={k} className={`pal-color${low ? ' low' : ''}`}>
+                  <input type="color" value={v.toLowerCase()} onChange={(e) => setColor(k, e.target.value)} aria-label={`${ACCENT_LABEL[k].name} colour`} />
+                  <span className="pal-color-txt">
+                    <b>{ACCENT_LABEL[k].name}</b>
+                    <span>{low ? 'Too dark for dark text on it. Pick a lighter shade.' : ACCENT_LABEL[k].use}</span>
+                  </span>
+                  <input className="input num pal-hex" value={v} maxLength={7} spellCheck={false} aria-label={`${ACCENT_LABEL[k].name} hex`}
+                    onChange={(e) => { const x = e.target.value.trim(); if (HEX.test(x)) setColor(k, x); }} />
+                </label>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </Panel>
   );
 }
 

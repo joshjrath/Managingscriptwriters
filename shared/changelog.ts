@@ -17,6 +17,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-01-palettes',
+    date: '2026-10-01',
+    title: 'Colour palettes',
+    summary: 'The admin can change the site’s colours for everyone: six palettes with the same feel, or your own tweaks.',
+    changes: [
+      { tag: 'new', text: 'Settings → Colour palette (admin only): pick Scale Media (the original), Sunset, Rose gold, Glacier, Citrus or Iris. Each keeps the dark look with bright pastel accents. You see it as you click, and Save applies it across the whole site for everyone, the sign-in page included.' },
+      { tag: 'new', text: 'Customise colours: change any of the seven colours (brand, action, in progress, review, done, revisions, alert) and the background tone (charcoal, warm, cool or plum). Colours too dark for the dark text on them are flagged and can’t be saved. Reset goes back to the palette.' },
+      { tag: 'improved', text: 'Confetti and celebrations use the palette’s colours.' },
+    ],
+  },
+  {
     id: '2026-09-30-today-clear',
     date: '2026-09-30',
     title: 'Green waves on a clear day',

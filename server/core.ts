@@ -7,6 +7,7 @@ import {
   compressRanges, deriveStage, milestone, nextMilestone, summarize,
   type ScriptLite, type ScriptStatus,
 } from '../shared/workflow';
+import type { WorkspaceTheme } from '../shared/palettes';
 import type { BatchSummary, Me, Priority, Settings, UserSummary, WriterShare, DateMode } from '../shared/types';
 
 export interface Ctx {
@@ -32,7 +33,7 @@ export interface Ctx {
 interface SettingsRow {
   org_name: string; timezone: string; cutoff: string; draft_offset_days: number; final_offset_days: number;
   day_mode: 'calendar' | 'business'; working_days: number[] | string; reminder_lead_days: number; plan_reminder_days: number;
-  is_demo: boolean; reminders_last_run_at: string | null;
+  is_demo: boolean; reminders_last_run_at: string | null; theme: WorkspaceTheme | string | null;
 }
 
 export async function loadSettings(db: Db): Promise<Settings> {
@@ -44,6 +45,7 @@ export async function loadSettings(db: Db): Promise<Settings> {
     draftOffsetDays: r.draft_offset_days, finalOffsetDays: r.final_offset_days,
     dayMode: r.day_mode, workingDays: wd, reminderLeadDays: r.reminder_lead_days, planReminderDays: r.plan_reminder_days ?? 14,
     isDemo: r.is_demo, remindersLastRunAt: r.reminders_last_run_at,
+    theme: typeof r.theme === 'string' ? JSON.parse(r.theme) : r.theme ?? null,
   };
 }
 

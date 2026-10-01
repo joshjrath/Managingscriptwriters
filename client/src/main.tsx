@@ -26,6 +26,9 @@ import { MasterLogPage } from './pages/MasterLog';
 import { WhatsNewPage } from './pages/WhatsNew';
 import { MotionProvider } from './motion';
 import { loadControlCenter } from './control/leave';
+import { applyRememberedTheme, applyTheme } from './theme';
+
+applyRememberedTheme();
 
 // The Control Center is its own world (and brings three.js), so it loads only when visited.
 const ControlCenter = lazy(loadControlCenter);
@@ -38,6 +41,11 @@ function Gate() {
     window.addEventListener('auth:lost', lost);
     return () => window.removeEventListener('auth:lost', lost);
   }, [status]);
+
+  // the admin's colour palette, for everyone (the sign-in page included)
+  const theme = boot.data ? boot.data.settings.theme : status.data?.theme;
+  const themeKey = JSON.stringify(theme ?? null);
+  useEffect(() => { if (theme !== undefined) applyTheme(theme); }, [themeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (status.isLoading || (status.data?.signedIn && boot.isLoading)) {
     return <div className="loading-center" role="status"><span className="wordmark" style={{ fontSize: 28 }}>Scale&nbsp;<span>Media</span></span><span>Loading…</span></div>;

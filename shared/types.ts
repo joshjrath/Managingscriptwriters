@@ -1,6 +1,7 @@
 // Shapes returned by the API. The server builds these; the client renders them.
 
 import type { Clock, DayMode, ISODate } from './dates';
+import type { WorkspaceTheme } from './palettes';
 import type { Milestone, Progress, Role, ScriptStatus, Stage } from './workflow';
 
 export type Priority = 'low' | 'normal' | 'high' | 'urgent';
@@ -54,6 +55,8 @@ export interface Settings {
   planReminderDays: number;
   isDemo: boolean;
   remindersLastRunAt: string | null;
+  /** the colour palette the admin picked for the whole site (null = the original) */
+  theme: WorkspaceTheme | null;
 }
 
 export interface ClientLite {

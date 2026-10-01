@@ -3,8 +3,11 @@
 // short-lived canvas), never block clicks, and do nothing when motion is off.
 
 import { motionAllowed } from './motion';
+import { themeColors } from './theme';
 
-export const PALETTE = ['#F2A599', '#F4ED70', '#60D1BE', '#9D89EF', '#55C7E8', '#E77AB5'];
+const FALLBACK = ['#F2A599', '#F4ED70', '#60D1BE', '#9D89EF', '#55C7E8', '#E77AB5'];
+// the workspace palette's accents, read when the effect runs
+const palette = () => { const c = themeColors(); return c.length ? c : FALLBACK; };
 
 // ── confetti ─────────────────────────────────────────────────────────────
 
@@ -55,7 +58,7 @@ function ensureCanvas() {
 }
 
 /** A confetti shot from (x, y), aimed at `angle` degrees (−90 is straight up). */
-export function confetti({ x = innerWidth / 2, y = innerHeight / 2, count = 90, angle = -90, spread = 70, power = 14, colors = PALETTE }: { x?: number; y?: number; count?: number; angle?: number; spread?: number; power?: number; colors?: string[] } = {}) {
+export function confetti({ x = innerWidth / 2, y = innerHeight / 2, count = 90, angle = -90, spread = 70, power = 14, colors = palette() }: { x?: number; y?: number; count?: number; angle?: number; spread?: number; power?: number; colors?: string[] } = {}) {
   if (!motionAllowed()) return;
   const s = ensureCanvas();
   for (let i = 0; i < count; i++) {
@@ -80,7 +83,7 @@ export function celebrate() {
 // ── particle burst ───────────────────────────────────────────────────────
 
 /** Little sparks flying out from a point, e.g. from the button you just pressed. */
-export function burst(x: number, y: number, { colors = PALETTE, count = 16, distance = 56 }: { colors?: string[]; count?: number; distance?: number } = {}) {
+export function burst(x: number, y: number, { colors = palette(), count = 16, distance = 56 }: { colors?: string[]; count?: number; distance?: number } = {}) {
   if (!motionAllowed()) return;
   for (let i = 0; i < count; i++) {
     const el = document.createElement('i');

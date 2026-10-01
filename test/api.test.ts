@@ -1202,3 +1202,29 @@ describe('catching up batches a manager delivered before the whole-batch rule', 
     expect(writerOnly.find((s) => s.assigneeId === ids.marcus)!.status).toBe('approved');
   });
 });
+
+describe('colour palette', () => {
+  it('only the admin can change it; everyone, signed in or not, gets it', async () => {
+    expect((await call('GET', '/api/auth/status')).body.theme).toBeNull();
+    const put = (who: string, body: unknown) => call('PUT', '/api/settings/theme', { cookie: who, body });
+    // writers and managers can't
+    expect((await put(sarah.cookie, { preset: 'sunset' })).status).toBe(403);
+    await manager.post('/api/users', { name: 'Pal Manager', email: 'pal@scale.test', role: 'manager', password: 'pal-manager-temp' });
+    const pal = await login('pal@scale.test', 'pal-manager-temp');
+    expect((await put(pal, { preset: 'sunset' })).status).toBe(403);
+    // unknown presets and colours too dark for dark text are refused
+    expect((await put(manager.cookie, { preset: 'neon' })).status).toBe(400);
+    const dark = await put(manager.cookie, { preset: 'scale', colors: { brand: '#202020' } });
+    expect(dark.status).toBe(400);
+    expect(JSON.stringify(dark.body.error)).toMatch(/Too dark/);
+    // a preset with a tweak keeps only what differs
+    const ok = await put(manager.cookie, { preset: 'glacier', surfaces: 'cool', colors: { brand: '#ffc2a8', action: '#EFEA86' } });
+    expect(ok.status).toBe(200);
+    expect(ok.body.settings.theme).toEqual({ preset: 'glacier', colors: { brand: '#FFC2A8' } });
+    expect((await sarah.get('/api/bootstrap')).body.settings.theme).toEqual({ preset: 'glacier', colors: { brand: '#FFC2A8' } });
+    expect((await call('GET', '/api/auth/status')).body.theme.preset).toBe('glacier');
+    expect((await manager.get('/api/master-log')).status).toBeLessThan(500);
+    // back to the original
+    expect((await put(manager.cookie, { preset: 'scale' })).body.settings.theme).toEqual({ preset: 'scale' });
+  });
+});

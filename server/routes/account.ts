@@ -10,11 +10,13 @@ import { assigneesOf, batchLink, loadSettings, loadUsers, logActivity, notify, r
 import { compressRanges, isManager } from '../../shared/workflow';
 import { auditEvent } from '../audit';
 import type { Me, UserSummary } from '../../shared/types';
-import { conflict, HttpError, notFound, parse, zs } from '../http';
+import { conflict, forbidden, HttpError, notFound, parse, zs } from '../http';
 import { computeDeadlines, isValidTimeZone } from '../../shared/dates';
 import { findCity, shiftOf, zoneFor } from '../../shared/cities';
 import { fmtDate } from '../../shared/format';
 import type { Notification } from '../../shared/types';
+import { ACCENTS, darkTextContrast, HEX, PALETTES, resolveTheme, SURFACES, type Accent, type WorkspaceTheme } from '../../shared/palettes';
+import { isAdmin } from '../control/access';
 
 const PLACE_KEYS = new Set(['city', 'city_code', 'country', 'lat', 'lon', 'timezone']);
 const email = z.string().trim().toLowerCase().email('Enter a valid email').max(200);
@@ -33,6 +35,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       setupHint: ctx.setupHint ?? null,
       demo: settings.isDemo,
       orgName: settings.orgName,
+      theme: settings.theme,
     };
   });
 
@@ -283,6 +286,27 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.get('/api/settings', async (req) => {
     requireUser(req);
+    return { settings: await loadSettings(db) };
+  });
+
+  // the colour palette: the admin's choice, applied to the whole site for everyone
+  app.put('/api/settings/theme', async (req) => {
+    const me = requireUser(req);
+    if (!isAdmin(me.role)) throw forbidden('Only the admin can change the colour palette');
+    const hex = z.string().regex(HEX, 'Use a colour like #F2A599').refine((v) => darkTextContrast(v) >= 4.5, 'Too dark: dark text on this colour would be hard to read. Pick a lighter shade.');
+    const input = parse(z.object({
+      preset: z.enum(PALETTES.map((p) => p.id) as [string, ...string[]], { message: 'Choose one of the palettes' }),
+      surfaces: z.enum(SURFACES).optional(),
+      colors: z.object(Object.fromEntries(ACCENTS.map((k) => [k, hex.optional()])) as Record<Accent, z.ZodOptional<typeof hex>>).optional(),
+    }), req.body);
+    const r = resolveTheme(input);
+    // keep only what differs from the preset, so presets stay clean
+    const colors = Object.fromEntries(ACCENTS.filter((k) => r.colors[k] !== r.palette.colors[k]).map((k) => [k, r.colors[k]]));
+    const theme: WorkspaceTheme = { preset: r.palette.id, ...(r.surfaces !== r.palette.surfaces ? { surfaces: r.surfaces } : {}), ...(Object.keys(colors).length ? { colors } : {}) };
+    await db.tx(async (t) => {
+      await t.query(`update settings set theme = $1::jsonb, updated_at = now() where id = 1`, [JSON.stringify(theme)]);
+      await logActivity(t, { actor: me, action: 'settings.theme', entityType: 'settings', summary: `Changed the colour palette to ${r.palette.name}${r.custom ? ' (customised)' : ''}` });
+    });
     return { settings: await loadSettings(db) };
   });
 

@@ -57,6 +57,7 @@ const MUTATIONS: Record<string, string> = {
   '/api/resources/upload': 'upload a file',
   '/api/resources/:id': 'remove a resource',
   '/api/settings': 'change settings',
+  '/api/settings/theme': 'change the colour palette',
   '/api/users': 'add a team member',
   '/api/users/:id': 'edit a team member',
   '/api/users/:id/remove': 'remove a team member',

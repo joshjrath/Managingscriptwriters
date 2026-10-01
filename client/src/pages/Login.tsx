@@ -1,10 +1,11 @@
 // One sign-in page for everyone, plus first-run setup of the first manager.
 
+import type { WorkspaceTheme } from '../../../shared/palettes';
 import { useState } from 'react';
 import { api, type ApiError } from '../api';
 import { Button, Field, FormError, inputProps, useFieldId } from '../components/ui';
 
-export interface AuthStatus { signedIn: boolean; needsSetup: boolean; setupAllowed: boolean; setupHint: string | null; demo: boolean; orgName: string }
+export interface AuthStatus { signedIn: boolean; needsSetup: boolean; setupAllowed: boolean; setupHint: string | null; demo: boolean; orgName: string; theme?: WorkspaceTheme | null }
 
 export function Login({ status, onDone }: { status: AuthStatus; onDone: () => void }) {
   const setup = status.needsSetup;

@@ -401,4 +401,8 @@ create table editors (
 alter table writer_progress add column day date;
 alter table writer_progress add column day_start int;
 `,
+  // 13 · the workspace colour palette, chosen by the admin and used across the whole site
+  `
+alter table settings add column theme jsonb;
+`,
 ];
