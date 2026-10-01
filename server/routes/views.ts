@@ -132,10 +132,12 @@ export async function computeCounts(ctx: Ctx, me: Me, batches?: BatchSummary[], 
     }
   }
   const unread = await ctx.db.one<{ n: number }>(`select count(*) as n from notifications where user_id = $1 and read_at is null`, [me.id]);
+  const msgs = await ctx.db.one<{ n: number }>(`select count(*) as n from messages m join users u on u.id = m.sender_id where m.recipient_id = $1 and m.read_at is null and u.active`, [me.id]);
   return {
     myOpenScripts: myOpen,
     reviewQueue: isManager(me.role) ? data.summaries.reduce((n, b) => n + b.progress.inReview, 0) : 0,
     unreadNotifications: unread?.n ?? 0,
+    unreadMessages: Number(msgs?.n ?? 0),
     attention: attentionFor(data.summaries).length,
   };
 }

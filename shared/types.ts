@@ -70,6 +70,7 @@ export interface Counts {
   myOpenScripts: number;
   reviewQueue: number;
   unreadNotifications: number;
+  unreadMessages: number;
   attention: number;
 }
 
@@ -643,4 +644,28 @@ export interface Todo {
   doneAt: string | null;
   /** may change the text, date or remove it (the person who added it, or a manager) */
   canEdit: boolean;
+}
+
+/** A direct message between two team members. */
+export interface ChatMessage {
+  id: number;
+  fromId: number;
+  toId: number;
+  body: string;
+  createdAt: string;
+  readAt: string | null;
+}
+
+/** One conversation in the list: the other person, the latest message and how many you haven't read. */
+export interface ChatThread {
+  userId: number;
+  name: string;
+  role: Role;
+  last: ChatMessage;
+  unread: number;
+}
+
+export interface ChatInbox {
+  threads: ChatThread[];
+  unread: number;
 }

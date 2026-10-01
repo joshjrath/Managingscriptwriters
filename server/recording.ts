@@ -202,7 +202,7 @@ export function registerRecording(app: FastifyInstance, ctx: Ctx, realDb: Db, al
       if (path.startsWith('/api/admin/') || path === '/api/auth/logout') return;
       if (req.method === 'GET' && path === '/api/moments') return reply.send([]);
       if (req.method !== 'GET' && req.method !== 'HEAD') {
-        if (path in QUIET) return reply.send(QUIET[path]);
+        if (path in QUIET || /^\/api\/messages\/\d+\/read$/.test(path)) return reply.send(QUIET[path] ?? { ok: true });
         throw new HttpError(403, `You’re viewing as ${req.viewingAs.name}, so changes are off. Turn on Recording mode to try things out.`, undefined, 'viewing_as');
       }
     }

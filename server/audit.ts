@@ -59,6 +59,7 @@ const MUTATIONS: Record<string, string> = {
   '/api/settings': 'change settings',
   '/api/settings/theme': 'change the colour palette',
   '/api/todos': 'add a to-do',
+  '/api/messages/:userId': 'send a message',
   '/api/todos/:id': 'change a to-do',
   '/api/users': 'add a team member',
   '/api/users/:id': 'edit a team member',

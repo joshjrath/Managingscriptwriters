@@ -21,6 +21,7 @@ import { BatchPage } from './pages/BatchDetail';
 import { ReviewPage } from './pages/Review';
 import { ResourcesPage } from './pages/Resources';
 import { ScriptBankPage } from './pages/ScriptBank';
+import { WritersPage } from './pages/Writers';
 import { SettingsPage } from './pages/Settings';
 import { MasterLogPage } from './pages/MasterLog';
 import { WhatsNewPage } from './pages/WhatsNew';
@@ -68,6 +69,7 @@ function Gate() {
         <Route path="/review" element={<ReviewPage />} />
         <Route path="/resources" element={<ResourcesPage />} />
         <Route path="/scripts" element={<ScriptBankPage />} />
+        <Route path="/writers" element={<WritersPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/log" element={<MasterLogPage />} />
         <Route path="/whats-new" element={<WhatsNewPage />} />

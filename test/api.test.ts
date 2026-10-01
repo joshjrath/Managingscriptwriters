@@ -1272,3 +1272,34 @@ describe('to-dos', () => {
     expect(r.body.batch.scripts.map((x: any) => x.status)).toEqual(['revisions_needed', 'revisions_needed', 'approved']);
   });
 });
+
+describe('messages', () => {
+  it('sends, lists conversations with unread counts, fetches only newer, and marks read', async () => {
+    const a = await manager.post(`/api/messages/${ids.sarah}`, { body: 'Hey Sarah, can you look at script 4?' });
+    expect(a.status).toBe(200);
+    expect(a.body.message).toMatchObject({ fromId: ids.josh, toId: ids.sarah, readAt: null });
+    await manager.post(`/api/messages/${ids.sarah}`, { body: 'No rush' });
+    // her inbox shows one thread with 2 unread, and her counts know
+    let inbox = (await sarah.get('/api/messages')).body;
+    expect(inbox.unread).toBe(2);
+    expect(inbox.threads[0]).toMatchObject({ userId: ids.josh, name: 'Josh Rath', unread: 2, last: { body: 'No rush' } });
+    expect((await sarah.get('/api/bootstrap')).body.counts.unreadMessages).toBe(2);
+    // the thread, oldest first; then only what's newer
+    const thread = (await sarah.get(`/api/messages/${ids.josh}`)).body.messages;
+    expect(thread.map((m: any) => m.body)).toEqual(['Hey Sarah, can you look at script 4?', 'No rush']);
+    const reply = await sarah.post(`/api/messages/${ids.josh}`, { body: 'On it!' });
+    const newer = (await manager.get(`/api/messages/${ids.sarah}?after=${thread[1].id}`)).body.messages;
+    expect(newer).toEqual([expect.objectContaining({ id: reply.body.message.id, body: 'On it!' })]);
+    // reading clears her unread; his message shows as seen
+    expect((await sarah.post(`/api/messages/${ids.josh}/read`)).status).toBe(200);
+    inbox = (await sarah.get('/api/messages')).body;
+    expect(inbox.unread).toBe(0);
+    expect((await manager.get(`/api/messages/${ids.sarah}`)).body.messages[0].readAt).toBeTruthy();
+    // Marcus can't see their conversation
+    expect((await marcus.get('/api/messages')).body.threads.some((t: any) => t.userId === ids.josh && t.last.body === 'On it!')).toBe(false);
+    expect((await marcus.get(`/api/messages/${ids.josh}`)).body.messages.some((m: any) => m.body === 'On it!')).toBe(false);
+    // no empty messages, none to yourself
+    expect((await sarah.post(`/api/messages/${ids.josh}`, { body: '   ' })).status).toBe(400);
+    expect((await sarah.post(`/api/messages/${ids.sarah}`, { body: 'hi me' })).status).toBe(400);
+  });
+});

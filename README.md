@@ -81,6 +81,8 @@ Change a shoot's dates from **Change dates** on the batch or client page, by cli
 
 ### Today pill
 
+**Messages.** Anyone on the team can message anyone else. The round button in the bottom-right corner lists conversations; each one opens as a docked chat window along the bottom (up to three, one on phones), Messenger-style, and an incoming message pops its window open. Unread counts show on the button and in the sidebar. **Writers** (managers; **Messages** for writers) lists the team with workload, open to-dos, local time and the latest message. The client polls lightly: the inbox every 8 seconds and an open chat every 3 seconds for only newer messages, and nothing while the tab is hidden. While viewing as someone, chats are read-only and opening one doesn't mark anything read.
+
 **To-dos.** Admins and managers can give anyone a to-do (with an optional due date), from **Team to-dos** on the Overview or **Add to-do** on a writer's row on a batch page (which links it to that batch). It shows on that person's My work and Overview, they're notified, and whoever gave it is notified when it's ticked off. Everyone can also add their own. Only the person it's for (or a manager) can tick it off; only whoever added it (or a manager) can change or remove it. Finished to-dos stay visible for a week.
 
 **Sending approved work back.** On a batch page, each writer's row has **Send back for revisions…** for managers whenever that writer has approved or in-review scripts: pick the scripts (all by default) and write what to change.

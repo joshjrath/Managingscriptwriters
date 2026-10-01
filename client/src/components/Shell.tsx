@@ -7,7 +7,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bell, Building2, CalendarDays, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
-  Circle, Eye, Library, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Wand2,
+  Circle, Eye, Library, MessageCircle, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
 } from 'lucide-react';
 import { LayoutGroup, m } from 'framer-motion';
 import { api, queryClient, useSave } from '../api';
@@ -21,6 +21,7 @@ import { ModeBar, RecordingDialog, ViewAsDialog, useModeActions } from './ModeBa
 import { SPRING, setMotionEnabled, useMotionSetting } from '../motion';
 import { LATEST_CHANGE } from '../../../shared/changelog';
 import { ControlCenterLink } from '../control/Link';
+import { ChatProvider, useInbox } from './Chat';
 
 // ── bootstrap context ────────────────────────────────────────────────────
 
@@ -69,6 +70,7 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
   return (
     <BootCtx.Provider value={boot}>
       <NewWorkCtx.Provider value={(tab = 'shoot', preset) => setNewWork({ tab, preset })}>
+        <ChatProvider>
         <div className={`app${collapsed ? ' collapsed' : ''}${expanded ? ' expanded' : ''}${boot.mode?.recording ? ' recording' : ''}`}>
           <aside className="sidebar" aria-label="Main navigation">
             <Rail onToggle={toggle} collapsed={railCollapsed} />
@@ -89,6 +91,7 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
         <NewWorkDialog state={newWork} onClose={() => setNewWork(null)} />
         <MomentsHost />
         <ModeBar />
+        </ChatProvider>
       </NewWorkCtx.Provider>
     </BootCtx.Provider>
   );
@@ -108,6 +111,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
   const boot = useBoot();
   const { me, counts, settings, mode } = boot;
   const manager = isManager(me.role);
+  const inbox = useInbox();
   const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; show?: boolean }[] = [
     ...(manager
       ? [{ to: '/overview', label: 'Overview', icon: <LayoutDashboard />, count: counts.attention || undefined, hot: counts.attention > 0 }, { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined }]
@@ -116,6 +120,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
     { to: '/review', label: 'Review queue', icon: <ClipboardCheck />, count: manager ? counts.reviewQueue || undefined : undefined },
+    { to: '/writers', label: manager ? 'Writers' : 'Messages', icon: manager ? <Users /> : <MessageCircle />, count: (inbox.data?.unread ?? counts.unreadMessages) || undefined, hot: (inbox.data?.unread ?? counts.unreadMessages) > 0 },
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
   ];
@@ -132,7 +137,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
         <nav className="nav">
           {items.map((it) => (
             <NavItem key={it.to} to={it.to} icon={it.icon} label={it.label} collapsed={collapsed}>
-              {it.count != null && <span className={`count${it.hot ? ' hot' : ''}`} aria-label={`${it.count} ${it.to === '/review' ? 'awaiting review' : it.to === '/overview' ? 'need attention' : 'open scripts'}`}>{it.count}</span>}
+              {it.count != null && <span className={`count${it.hot ? ' hot' : ''}`} aria-label={`${it.count} ${it.to === '/review' ? 'awaiting review' : it.to === '/overview' ? 'need attention' : it.to === '/writers' ? 'unread messages' : 'open scripts'}`}>{it.count}</span>}
               {it.hot && <span className="dot-badge" aria-hidden />}
             </NavItem>
           ))}

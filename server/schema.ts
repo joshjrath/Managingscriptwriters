@@ -421,4 +421,18 @@ create table todos (
 );
 create index todos_user_idx on todos (user_id) where removed_at is null;
 `,
+  // 15 · direct messages between team members (the chat bubbles in the corner)
+  `
+create table messages (
+  id bigint generated always as identity primary key,
+  sender_id bigint not null references users(id),
+  recipient_id bigint not null references users(id),
+  body text not null,
+  created_at timestamptz not null default now(),
+  read_at timestamptz,
+  check (sender_id <> recipient_id)
+);
+create index messages_pair_idx on messages (least(sender_id, recipient_id), greatest(sender_id, recipient_id), id desc);
+create index messages_unread_idx on messages (recipient_id) where read_at is null;
+`,
 ];

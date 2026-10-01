@@ -17,6 +17,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-01-messages',
+    date: '2026-10-01',
+    title: 'Messages, and a Writers tab',
+    summary: 'Message anyone on the team from inside the site. Chats pop up in the bottom-right corner, like Messenger.',
+    changes: [
+      { tag: 'new', text: 'Messages: the round button in the bottom-right corner lists your conversations. Each chat opens as a small window along the bottom of the screen; minimise it to its name bar or close it. Up to three can be open at once (one on a phone). Enter sends, Shift+Enter starts a new line, and you can see when your message was seen.' },
+      { tag: 'new', text: 'When someone messages you, their chat pops open on its own, and the button and the sidebar show how many messages you haven’t read.' },
+      { tag: 'new', text: 'Writers (admins and managers): everyone on the team on one page, with their batches, scripts left to write and deliver, open to-dos, local time, next deadline and the latest message. Message, Their work and Add to-do are one click away. Writers get the same page as Messages.' },
+    ],
+  },
+  {
     id: '2026-10-01-todos',
     date: '2026-10-01',
     title: 'To-dos for anyone, and sending approved scripts back',
