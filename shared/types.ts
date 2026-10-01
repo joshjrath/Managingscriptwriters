@@ -626,3 +626,21 @@ export interface SearchResults {
 export interface ApiErrorBody {
   error: { message: string; code?: string; fields?: Record<string, string> };
 }
+
+/** Something a manager asked a writer to do, or a note-to-self. */
+export interface Todo {
+  id: number;
+  userId: number;
+  userName: string;
+  text: string;
+  due: ISODate | null;
+  batchId: number | null;
+  batchTitle: string | null;
+  clientName: string | null;
+  createdById: number;
+  createdByName: string;
+  createdAt: string;
+  doneAt: string | null;
+  /** may change the text, date or remove it (the person who added it, or a manager) */
+  canEdit: boolean;
+}

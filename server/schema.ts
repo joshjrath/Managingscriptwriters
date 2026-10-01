@@ -405,4 +405,20 @@ alter table writer_progress add column day_start int;
   `
 alter table settings add column theme jsonb;
 `,
+  // 14 · to-dos: things a manager asks a writer to do (or a writer notes for themselves)
+  `
+create table todos (
+  id bigint generated always as identity primary key,
+  user_id bigint not null references users(id),
+  batch_id bigint references batches(id),
+  text text not null,
+  due date,
+  created_by bigint not null references users(id),
+  created_at timestamptz not null default now(),
+  done_at timestamptz,
+  done_by bigint references users(id),
+  removed_at timestamptz
+);
+create index todos_user_idx on todos (user_id) where removed_at is null;
+`,
 ];

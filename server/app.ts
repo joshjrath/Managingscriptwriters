@@ -12,6 +12,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { HttpError } from './http';
 import type { Ctx } from './core';
 import { registerAccountRoutes } from './routes/account';
+import { registerTodoRoutes } from './todos';
 import { registerBatchRoutes } from './routes/batches';
 import { registerClientRoutes } from './routes/clients';
 import { registerShootRoutes } from './routes/shoots';
@@ -104,6 +105,7 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
   registerNotesImportRoutes(app, ctx);
   registerScriptBankRoutes(app, ctx);
   registerTodayRoutes(app, ctx);
+  registerTodoRoutes(app, ctx);
   registerControlRoutes(app, ctx);
   registerEditorRoutes(app, ctx);
 

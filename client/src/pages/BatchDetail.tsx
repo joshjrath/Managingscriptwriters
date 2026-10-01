@@ -6,7 +6,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle, Archive, ArchiveRestore, Ban, CalendarClock, Camera, Check, CheckCheck, ChevronDown, ExternalLink, FileText,
-  Flag, Link2, OctagonAlert, Pencil, PlayCircle, RotateCcw, Send, SlidersHorizontal, Trash2, Upload, UserPlus,
+  Flag, Link2, ListTodo, OctagonAlert, Pencil, PlayCircle, RotateCcw, Send, SlidersHorizontal, Trash2, Upload, UserPlus,
 } from 'lucide-react';
 import { api, useSave, type ApiError } from '../api';
 import type { BatchDetail, ClientDetail, Priority, ReschedulePreview, Resource, ResourceCategory, Script } from '../../../shared/types';
@@ -21,6 +21,7 @@ import {
 } from '../components/ui';
 import { WrittenCounter } from '../components/WrittenCounter';
 import { PipLegend, ScriptPips, TodayBump } from '../components/WritingPulse';
+import { TodoDialog, TodoPanel } from '../components/Todos';
 import { CardList, DecisionDialog, DocumentHistory, SendDialog, SentBackCard, TitlesDialog, WaitingCard } from '../components/Review';
 
 export function BatchPage() {
@@ -46,6 +47,8 @@ function BatchView({ b }: { b: BatchDetail }) {
   const canBlock = manager || b.isAssigned;
   // your own share of this batch, if you're writing some of it
   const mine = b.writers.find((w) => w.userId === me.id);
+  const [todoFor, setTodoFor] = useState<number | null>(null);
+  const [sendBack, setSendBack] = useState<number | null>(null);
   const tz = fmtTimeZoneAbbr(settings.timezone);
 
   return (
@@ -106,6 +109,14 @@ function BatchView({ b }: { b: BatchDetail }) {
                     <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>{w.userId != null && <Avatar name={w.name} id={w.userId} small />}<span className="title">{w.name}</span><TodayBump n={w.writtenToday} /></div>
                     <div className="meta">Scripts {w.ranges} · {plural(w.count, 'script')}</div>
                     {w.userId != null && <ScriptPips w={w} large />}
+                    {manager && w.userId != null && (
+                      <div className="row-flex s2" style={{ marginTop: 10 }}>
+                        <Button variant="sm ghost" icon={<ListTodo aria-hidden />} onClick={() => setTodoFor(w.userId)}>Add to-do</Button>
+                        {b.scripts.some((s) => s.assigneeId === w.userId && (s.status === 'approved' || s.status === 'ready_for_review')) && (
+                          <Button variant="sm ghost" icon={<RotateCcw aria-hidden />} onClick={() => setSendBack(w.userId)}>Send back for revisions…</Button>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="side">
                     <span className="when num">{w.userId != null && w.written > w.draftReady ? `${w.written} / ${w.count} written` : `${w.draftReady} / ${w.count} drafts ready`}</span>
@@ -162,6 +173,7 @@ function BatchView({ b }: { b: BatchDetail }) {
             <BriefSection b={b} />
           </Panel>
           <div className="stack" style={{ gap: 'var(--gap)' }}>
+            <TodoPanel batchId={b.id} title="To-dos for this batch" hideWhenEmpty />
             <ReviewNotes b={b} />
             <Deliveries b={b} />
           </div>
@@ -181,6 +193,8 @@ function BatchView({ b }: { b: BatchDetail }) {
         </Panel>
       </div>
 
+      {todoFor != null && <TodoDialog userId={todoFor} batchId={b.id} onClose={() => setTodoFor(null)} />}
+      {sendBack != null && <SendBackDialog b={b} writerId={sendBack} onClose={() => setSendBack(null)} />}
       {manager && <EditBatchDialog b={b} open={edit} onClose={() => setEdit(false)} />}
       {manager && target && <TargetDialog b={b} onClose={() => setTarget(false)} />}
       {manager && resched && b.shootId && <RescheduleDialog shootId={b.shootId} start={b.shootStart!} end={b.shootEnd} onClose={() => setResched(false)} />}
@@ -468,6 +482,43 @@ function ScriptLinks({ s }: { s: Script }) {
       {s.docUrl && <a href={s.docUrl} target="_blank" rel="noopener noreferrer" aria-label={`Script ${s.number} document`} title="Writing document"><FileText /></a>}
       {s.timelinerUrl && <a href={s.timelinerUrl} target="_blank" rel="noopener noreferrer" aria-label={`Script ${s.number} in Timeliner`} title="Timeliner"><Send /></a>}
     </span>
+  );
+}
+
+/** Send a writer's approved (or in-review) scripts back for revisions, all or some of them. */
+function SendBackDialog({ b, writerId, onClose }: { b: BatchDetail; writerId: number; onClose: () => void }) {
+  const toast = useToast();
+  const eligible = b.scripts.filter((s) => s.assigneeId === writerId && (s.status === 'approved' || s.status === 'ready_for_review'));
+  const name = b.writers.find((w) => w.userId === writerId)?.name ?? 'the writer';
+  const [range, setRange] = useState(compressRanges(eligible.map((s) => s.number)));
+  const [note, setNote] = useState('');
+  const [err, setErr] = useState<{ range?: string; note?: string }>({});
+  const ids = { r: useFieldId('sb-range'), n: useFieldId('sb-note') };
+  const run = useSave((v: { ids: number[]; note: string }) => api(`/api/batches/${b.id}/scripts/action`, {
+    body: { action: 'request_revisions', scriptIds: v.ids, note: v.note, timelinerUrl: null, versions: Object.fromEntries(b.scripts.filter((s) => v.ids.includes(s.id)).map((s) => [s.id, s.version])) },
+  }), { onSuccess: (_o, v) => { toast(`Sent ${plural(v.ids.length, 'script')} back to ${name}`); onClose(); } });
+  const submit = () => {
+    const max = Math.max(...b.scripts.map((s) => s.number), 0);
+    const nums = parseRanges(range, max);
+    const picked = nums ? eligible.filter((s) => nums.includes(s.number)) : [];
+    const e: typeof err = {};
+    if (!nums || !picked.length) e.range = `Pick from ${compressRanges(eligible.map((s) => s.number))}`;
+    if (!note.trim()) e.note = 'Add a note so they know what to change';
+    setErr(e);
+    if (Object.keys(e).length) return;
+    run.mutate({ ids: picked.map((s) => s.id), note: note.trim() });
+  };
+  return (
+    <Dialog open onClose={onClose} title={`Send back to ${name}`} sub="They’ll see your note on their My work and get a notification." size="narrow"
+      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="danger" busy={run.isPending} onClick={submit} icon={<RotateCcw aria-hidden />}>Send back for revisions</Button></div>}>
+      <form className="form" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+        <FormError error={run.error} />
+        <Field label="Scripts" htmlFor={ids.r} error={err.range} help={`Approved or waiting for review: ${compressRanges(eligible.map((s) => s.number))}`}>
+          <input className="input num" value={range} onChange={(e) => setRange(e.target.value)} {...inputProps(ids.r, err.range)} />
+        </Field>
+        <Field label="What to change" htmlFor={ids.n} error={err.note}><textarea className="textarea" autoFocus value={note} onChange={(e) => setNote(e.target.value)} {...inputProps(ids.n, err.note)} /></Field>
+      </form>
+    </Dialog>
   );
 }
 

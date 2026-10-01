@@ -1228,3 +1228,47 @@ describe('colour palette', () => {
     expect((await put(manager.cookie, { preset: 'scale' })).body.settings.theme).toEqual({ preset: 'scale' });
   });
 });
+
+describe('to-dos', () => {
+  it('a manager gives a writer a to-do; the writer sees it, ticks it off, and the manager is told', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Todo batch', targetCount: 2, finalDue: '2026-10-22', split: [{ writerId: ids.sarah, count: 2 }] });
+    const add = await manager.post('/api/todos', { userId: ids.sarah, text: 'Rewrite the hook on script 2', due: '2026-10-05', batchId: b.body.batchId });
+    expect(add.status).toBe(200);
+    expect(add.body.todo).toMatchObject({ userId: ids.sarah, createdByName: 'Josh Rath', batchTitle: 'Todo batch', due: '2026-10-05', doneAt: null });
+    const id = add.body.todo.id;
+    // it's on her list and she's notified; Marcus doesn't see it
+    const hers = (await sarah.get('/api/todos')).body.todos;
+    expect(hers.map((t: any) => t.id)).toContain(id);
+    expect(hers.find((t: any) => t.id === id).canEdit).toBe(false);
+    expect((await sarah.get('/api/notifications')).body.notifications[0]).toMatchObject({ type: 'todo', title: 'New to-do from Josh Rath' });
+    expect((await marcus.get('/api/todos')).body.todos.some((t: any) => t.id === id)).toBe(false);
+    expect((await marcus.get(`/api/todos?userId=${ids.sarah}`)).body.todos.some((t: any) => t.id === id)).toBe(false);
+    // managers see everyone's, and per batch
+    expect((await manager.get('/api/todos?all=1')).body.todos.some((t: any) => t.id === id)).toBe(true);
+    expect((await manager.get(`/api/todos?batchId=${b.body.batchId}`)).body.todos).toHaveLength(1);
+    // writers can't give others to-dos, or change or remove one they were given
+    expect((await sarah.post('/api/todos', { userId: ids.marcus, text: 'Do my work' })).status).toBe(403);
+    expect((await sarah.patch(`/api/todos/${id}`, { text: 'Never mind' })).status).toBe(403);
+    expect((await sarah.del(`/api/todos/${id}`)).status).toBe(403);
+    expect((await marcus.patch(`/api/todos/${id}`, { done: true })).status).toBe(403);
+    // she ticks it off and the manager hears about it
+    const done = await sarah.patch(`/api/todos/${id}`, { done: true });
+    expect(done.body.todo.doneAt).toBeTruthy();
+    expect((await manager.get('/api/notifications')).body.notifications[0]).toMatchObject({ type: 'todo_done', title: 'To-do done · Sarah Chen' });
+    // anyone can keep their own list
+    const own = await marcus.post('/api/todos', { text: 'Read the brief' });
+    expect(own.body.todo).toMatchObject({ userId: ids.marcus, canEdit: true });
+    expect((await marcus.del(`/api/todos/${own.body.todo.id}`)).status).toBe(200);
+    expect((await marcus.get('/api/todos')).body.todos.some((t: any) => t.id === own.body.todo.id)).toBe(false);
+  });
+
+  it('approved scripts can be sent back for revisions from the batch page', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Send back batch', targetCount: 3, finalDue: '2026-10-22', split: [{ writerId: ids.sarah, count: 3 }] });
+    const s = (await manager.get(`/api/batches/${b.body.batchId}`)).body.scripts as { id: number }[];
+    await sarah.post(`/api/batches/${b.body.batchId}/submissions`, { scriptIds: s.map((x) => x.id), url: 'https://docs.google.com/document/d/sb' });
+    await manager.post(`/api/batches/${b.body.batchId}/review`, { action: 'approve', scriptIds: s.map((x) => x.id) });
+    const r = await manager.post(`/api/batches/${b.body.batchId}/scripts/action`, { action: 'request_revisions', scriptIds: [s[0].id, s[1].id], note: 'Tighter openings please' });
+    expect(r.status).toBe(200);
+    expect(r.body.batch.scripts.map((x: any) => x.status)).toEqual(['revisions_needed', 'revisions_needed', 'approved']);
+  });
+});

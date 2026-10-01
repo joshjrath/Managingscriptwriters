@@ -10,6 +10,7 @@ import type { Dashboard } from '../../../shared/types';
 import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
 import { compressRanges, isManager } from '../../../shared/workflow';
 import { PipLegend, TodayBump, WritingFeed } from '../components/WritingPulse';
+import { TodoPanel } from '../components/Todos';
 import { TodayPill } from '../components/TodayPill';
 import { PageHeader, useBoot, useNewWork } from '../components/Shell';
 import { DueChart } from '../components/DueChart';
@@ -109,6 +110,7 @@ export function Overview() {
             </Panel>
 
             <div className="a-side">
+              {d.scope === 'mine' ? <TodoPanel title="Your to-dos" /> : <TodoPanel all title="Team to-dos" sub="open, for everyone" />}
               <Panel title={d.scope === 'mine' ? 'Your writing progress' : 'Writing progress'} sub="from the + / − counters"
                 tools={d.activeBatches.some((b) => b.writtenToday) ? <TodayBump n={d.activeBatches.reduce((n, b) => n + b.writtenToday, 0)} /> : undefined}>
                 <WritingFeed batches={d.activeBatches} />

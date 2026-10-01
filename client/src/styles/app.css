@@ -1320,3 +1320,28 @@ html.cc-returning #root > * { animation: ccr-in 1100ms cubic-bezier(0.22, 1, 0.3
 .pal-color.low .pal-color-txt span { color: var(--red); }
 .pal-hex { width: 96px; flex: none; text-transform: uppercase; }
 @media (max-width: 760px) { .pal-colors { grid-template-columns: 1fr; } }
+
+/* ── to-dos ────────────────────────────────────────────────────────────── */
+.todos { display: flex; flex-direction: column; gap: 6px; }
+.todos + .todos, .btn + .todos { margin-top: 8px; }
+.todo { display: flex; align-items: flex-start; gap: 12px; padding: 10px 10px 10px 12px; border-radius: var(--r-row); background: var(--row); }
+.todo-box {
+  flex: none; width: 22px; height: 22px; margin-top: 1px; border-radius: 7px; border: 2px solid var(--btn-hover); background: none;
+  display: grid; place-items: center; cursor: pointer; color: var(--on-accent); transition: background var(--t) var(--ease), border-color var(--t) var(--ease), transform var(--t) var(--ease);
+}
+.todo-box:hover:not(:disabled) { border-color: var(--mint); }
+.todo-box:active:not(:disabled) { transform: scale(0.9); }
+.todo-box:disabled { cursor: default; opacity: .7; }
+.todo-box svg { width: 14px; height: 14px; stroke-width: 3; }
+.todo.done .todo-box { background: var(--mint); border-color: var(--mint); }
+.todo-body { flex: 1; min-width: 0; }
+.todo-text { font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+.todo.done .todo-text { color: var(--text-3); text-decoration: line-through; }
+.todo-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 5px; font-size: 12px; color: var(--text-2); }
+.todo-meta:empty { display: none; }
+.todo-link { color: var(--text-2); text-decoration: underline; text-underline-offset: 2px; }
+.todo-link:hover { color: var(--text); }
+.todo-tools { display: flex; gap: 2px; flex: none; opacity: .55; transition: opacity var(--t) var(--ease); }
+.todo:hover .todo-tools, .todo:focus-within .todo-tools { opacity: 1; }
+.icon-btn.sm { width: 30px; height: 30px; }
+.icon-btn.sm svg { width: 15px; height: 15px; }

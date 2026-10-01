@@ -58,6 +58,8 @@ const MUTATIONS: Record<string, string> = {
   '/api/resources/:id': 'remove a resource',
   '/api/settings': 'change settings',
   '/api/settings/theme': 'change the colour palette',
+  '/api/todos': 'add a to-do',
+  '/api/todos/:id': 'change a to-do',
   '/api/users': 'add a team member',
   '/api/users/:id': 'edit a team member',
   '/api/users/:id/remove': 'remove a team member',

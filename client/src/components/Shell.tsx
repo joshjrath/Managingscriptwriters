@@ -304,7 +304,7 @@ function SearchBox() {
 
 const NOTE_COLOR: Record<string, string> = {
   overdue: 'var(--red)', blocker: 'var(--red)', deadline: 'var(--yellow)', deadline_change: 'var(--yellow)', review_request: 'var(--lavender)',
-  revision_request: 'var(--pink)', planning: 'var(--salmon)', approval: 'var(--mint)', delivery: 'var(--mint)', assignment: 'var(--cyan)',
+  revision_request: 'var(--pink)', planning: 'var(--salmon)', approval: 'var(--mint)', delivery: 'var(--mint)', assignment: 'var(--cyan)', todo: 'var(--salmon)', todo_done: 'var(--mint)',
 };
 
 export function NotificationsButton({ className = '' }: { className?: string }) {

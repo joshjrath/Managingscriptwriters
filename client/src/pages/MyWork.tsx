@@ -12,6 +12,7 @@ import type { MyWork, Script } from '../../../shared/types';
 import { compressRanges, isApproved, isManager, type Milestone } from '../../../shared/workflow';
 import { fmtDate, fmtLong, fmtRange, fmtStamp, fmtWeekday, plural } from '../../../shared/format';
 import { TodayPill } from '../components/TodayPill';
+import { TodoPanel } from '../components/Todos';
 import { WrittenCounter } from '../components/WrittenCounter';
 import { PageHeader, useBoot } from '../components/Shell';
 import { BatchProgress, Button, Chip, CountUp, DueChip, Empty, ErrorState, ExtLink, Loading, Panel, Ring, ringColor, useToast } from '../components/ui';
@@ -44,6 +45,7 @@ export function MyWorkPage() {
       {q.data && (
         <div className="stack" style={{ gap: 'var(--gap)' }}>
           <TodayPill userId={viewing !== me.id ? viewing : undefined} />
+          <TodoPanel userId={viewing} title={viewing === me.id ? 'Your to-dos' : `${who?.name.split(' ')[0] ?? 'Their'}’s to-dos`} />
           {!q.data.batches.length && <Panel><Empty icon={<CheckCheck />} title="Nothing assigned right now">New assignments show up here and in your notifications.</Empty></Panel>}
           {next && <NextUp e={next} today={clock.today} writerId={viewing} />}
           {active.map((e) => <MyBatch key={e.batch.id} e={e} writerId={viewing} />)}

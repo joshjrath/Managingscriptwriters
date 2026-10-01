@@ -17,6 +17,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-01-todos',
+    date: '2026-10-01',
+    title: 'To-dos for anyone, and sending approved scripts back',
+    summary: 'Give any writer a to-do that shows on their My work and Overview, and send approved scripts back for revisions from the batch page.',
+    changes: [
+      { tag: 'new', text: 'To-dos: admins and managers can give anyone a to-do, with an optional date, from the Overview (Team to-dos) or from a writer’s row on a batch page (linked to that batch). It shows on their My work and Overview and they get a notification. They tick it off and you’re told. Finished to-dos stay for a week.' },
+      { tag: 'new', text: 'Everyone can keep their own to-dos too, from Your to-dos on My work or the Overview.' },
+      { tag: 'new', text: 'Batch page → a writer’s row → Send back for revisions: pick which of their approved or in-review scripts to send back and say what to change. They see it on My work and get a notification.' },
+    ],
+  },
+  {
     id: '2026-10-01-palettes',
     date: '2026-10-01',
     title: 'Colour palettes',
