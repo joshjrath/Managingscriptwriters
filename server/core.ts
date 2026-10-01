@@ -207,7 +207,7 @@ export function buildSummary(row: BatchRow, scriptRows: ScriptLiteRow[], names: 
       return {
         userId: uid, name: uid == null ? 'Unassigned' : names.get(uid) ?? 'Unknown',
         count: list.length, ranges: compressRanges(list.map((s) => s.number)),
-        draftReady: p.draftReady, approved: p.approved, delivered: p.delivered,
+        draftReady: p.draftReady, approved: p.approved, delivered: p.delivered, revisions: p.revisions,
         written: writtenNow, writtenAt: rep?.at ?? null,
         writtenToday: rep && rep.day === clock.today && rep.dayStart != null ? Math.max(0, writtenNow - rep.dayStart) : 0,
         first: Math.min(...list.map((s) => s.number)),

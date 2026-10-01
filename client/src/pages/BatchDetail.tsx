@@ -106,7 +106,7 @@ function BatchView({ b }: { b: BatchDetail }) {
               {b.writers.map((w) => (
                 <div key={String(w.userId)} className={`item ${w.userId == null ? 'edge-pink' : ''}`}>
                   <div className="body">
-                    <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>{w.userId != null && <Avatar name={w.name} id={w.userId} small />}<span className="title">{w.name}</span><TodayBump n={w.writtenToday} /></div>
+                    <div className="row-flex s2" style={{ rowGap: 6 }}>{w.userId != null && <Avatar name={w.name} id={w.userId} small />}<span className="title" style={{ whiteSpace: 'nowrap' }}>{w.name}</span><TodayBump n={w.writtenToday} />{w.revisions > 0 && <Chip color="pink" icon={<RotateCcw aria-hidden />}>{w.revisions} sent back</Chip>}</div>
                     <div className="meta">Scripts {w.ranges} · {plural(w.count, 'script')}</div>
                     {w.userId != null && <ScriptPips w={w} large />}
                     {manager && w.userId != null && (
@@ -119,8 +119,8 @@ function BatchView({ b }: { b: BatchDetail }) {
                     )}
                   </div>
                   <div className="side">
-                    <span className="when num">{w.userId != null && w.written > w.draftReady ? `${w.written} / ${w.count} written` : `${w.draftReady} / ${w.count} drafts ready`}</span>
-                    <span className="muted num" style={{ fontSize: 12 }}>{w.written > w.draftReady ? `${w.draftReady} sent · ` : ''}{w.delivered} delivered{w.writtenAt ? ` · updated ${fmtStamp(w.writtenAt, settings.timezone)}` : ''}</span>
+                    <span className="when num">{w.userId != null && w.written > w.draftReady + w.revisions ? `${w.written} / ${w.count} written` : `${w.draftReady} / ${w.count} drafts ready`}</span>
+                    <span className="muted num" style={{ fontSize: 12 }}>{w.revisions > 0 ? `${w.revisions} sent back · ` : ''}{w.written > w.draftReady + w.revisions ? `${w.draftReady} sent · ` : ''}{w.delivered} delivered{w.writtenAt ? ` · updated ${fmtStamp(w.writtenAt, settings.timezone)}` : ''}</span>
                     {manager && w.userId != null && w.userId !== me.id && w.draftReady < w.count && (
                       <WrittenCounter compact batchId={b.id} writerId={w.userId} forOther total={w.count} sent={w.draftReady} written={Math.max(w.written, w.draftReady)} />
                     )}

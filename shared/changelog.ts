@@ -17,6 +17,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-01-pips-sent-back',
+    date: '2026-10-01',
+    title: 'Sent-back scripts show in Writing progress',
+    summary: 'Scripts sent back for revisions now have their own colour in the script blocks.',
+    changes: [
+      { tag: 'fixed', text: 'In Writing progress and on the batch page, scripts sent back for revisions showed as “written, not sent”. They now show in the revisions colour as “Sent back”, with an “N sent back” tag next to the writer, until the writer sends the new version.' },
+      { tag: 'fixed', text: 'Long names no longer get cut off next to the “+3 today” and “sent back” tags.' },
+    ],
+  },
+  {
     id: '2026-10-01-messages',
     date: '2026-10-01',
     title: 'Messages, and a Writers tab',

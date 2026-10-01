@@ -160,6 +160,8 @@ export interface WriterShare {
   /** approved, including delivered */
   approved: number;
   delivered: number;
+  /** sent back for revisions, waiting to be resubmitted */
+  revisions: number;
   /** the writer's own "written so far" count (never less than what they've sent) */
   written: number;
   writtenAt: string | null;
