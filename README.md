@@ -81,7 +81,7 @@ Change a shoot's dates from **Change dates** on the batch or client page, by cli
 
 ### Today pill
 
-**Drafts from final delivery.** Entering a final delivery date fills drafts due with the same gap the shoot rules leave between them (`draftFromFinal` in `shared/dates.ts`: draft offset − final offset, in calendar or working days), in New batch, the New shoot overrides and Edit batch, until drafts are changed by hand. The server does the same for a batch created without a shoot and without a drafts date.
+**Drafts from final delivery.** Entering a final delivery date fills drafts due with the same gap the shoot rules leave between them (`draftFromFinal` in `shared/dates.ts`: draft offset − final offset, in calendar or working days), in New batch, the New shoot overrides and Edit batch, until drafts are changed by hand. The server does the same for a batch created without a shoot and without a drafts date. Migration 18 (`fillMissingDeadlines` in `server/backfill.ts`, a one-time function migration) gave every existing batch with only one deadline the other one: from its shoot when it has one, otherwise by the same gap.
 
 **Client resources on a batch.** When creating a batch (or a shoot with its scripts), the form lists the chosen client's resources (links and files) to pick for the writers; picked ones are stored in `batch_resources` and show on those writers' My work with the batch. A batch page lists the picked ones under *This batch* and the rest under *More from {client}*, where managers can add or take off resources (taking one off never deletes it from the client). Resources must belong to the batch's client.
 

@@ -121,3 +121,12 @@ describe('drafts from a final delivery date', () => {
     expect(draftFromFinal('2026-10-10', { ...DEFAULT_RULES, draftOffsetDays: 3, finalOffsetDays: 3 }).rule).toBe('same day as final delivery');
   });
 });
+
+describe('final delivery from a drafts date', () => {
+  it('adds the same gap forward', async () => {
+    const { finalFromDraft, DEFAULT_RULES } = await import('../shared/dates');
+    expect(finalFromDraft('2026-10-08', DEFAULT_RULES).date).toBe('2026-10-10');
+    // Thursday + 2 working days → Monday
+    expect(finalFromDraft('2026-10-08', { ...DEFAULT_RULES, dayMode: 'business' }).date).toBe('2026-10-12');
+  });
+});

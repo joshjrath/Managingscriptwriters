@@ -17,6 +17,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-02-fill-missing-deadlines',
+    date: '2026-10-02',
+    title: 'Existing batches got their missing deadline',
+    summary: 'Batches that had only a final delivery date now have drafts due too, and the other way round.',
+    changes: [
+      { tag: 'fixed', text: 'Every batch that had only one of its two deadlines now has both. Batches on a shoot got the shoot’s date for the missing one; others got it from the date they had, by the same gap as your deadline rules (for example drafts 2 days before final delivery). Each batch’s history notes the date that was added.' },
+    ],
+  },
+  {
     id: '2026-10-02-drafts-from-final',
     date: '2026-10-02',
     title: 'Drafts follow the final delivery date',

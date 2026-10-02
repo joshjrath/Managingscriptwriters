@@ -149,7 +149,8 @@ export async function migrate(db: Db): Promise<void> {
     const version = i + 1;
     if (done.has(version)) continue;
     await db.tx(async (t) => {
-      for (const stmt of splitStatements(sql)) await t.query(stmt);
+      if (typeof sql === 'function') await sql(t);
+      else for (const stmt of splitStatements(sql)) await t.query(stmt);
       await t.query(`insert into schema_migrations (version) values ($1)`, [version]);
     });
   }

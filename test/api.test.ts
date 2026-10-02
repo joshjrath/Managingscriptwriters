@@ -1192,7 +1192,7 @@ describe('catching up batches a manager delivered before the whole-batch rule', 
     await manager.post(`/api/batches/${w.body.batchId}/review`, { action: 'approve', scriptIds: ws.map((s) => s.id) });
     await sarah.post(`/api/batches/${w.body.batchId}/scripts/action`, { action: 'deliver', scriptIds: ws.filter((s) => s.assigneeId === ids.sarah).map((s) => s.id) });
 
-    await db.tx(async (t) => { for (const stmt of MIGRATIONS[8].split(/;\s*\n/).map((x) => x.trim()).filter(Boolean)) await t.query(stmt); });
+    await db.tx(async (t) => { for (const stmt of (MIGRATIONS[8] as string).split(/;\s*\n/).map((x) => x.trim()).filter(Boolean)) await t.query(stmt); });
 
     const after = (await manager.get(`/api/batches/${batchId}`)).body;
     expect(after.scripts.filter((s: any) => s.assigneeId === ids.sarah).map((s: any) => s.status)).toEqual(['delivered', 'delivered', 'delivered']);
@@ -1370,5 +1370,41 @@ describe('final delivery sets drafts due', () => {
     // a drafts date you give is kept as it is
     const own = await manager.post('/api/batches', { clientId: acmeId, title: 'Both dates', targetCount: 1, draftDue: '2026-11-10', finalDue: '2026-11-20', split: [] });
     expect((await manager.get(`/api/batches/${own.body.batchId}`)).body.draftDue).toBe('2026-11-10');
+  });
+});
+
+describe('filling in missing deadlines on existing batches', () => {
+  it('gives each batch the date it was missing, by the shoot or by the rules’ gap', async () => {
+    const { fillMissingDeadlines } = await import('../server/backfill');
+    const { draftFromFinal, finalFromDraft } = await import('../shared/dates');
+    const s = (await manager.get('/api/settings')).body.settings;
+    const mk = async (title: string, extra: Record<string, unknown> = {}) => (await manager.post('/api/batches', { clientId: acmeId, title, targetCount: 1, finalDue: '2026-12-10', split: [], ...extra })).body.batchId as number;
+    const onlyFinal = await mk('Backfill only final');
+    const onlyDraft = await mk('Backfill only draft');
+    const both = await mk('Backfill both', { draftDue: '2026-12-01' });
+    // the old state: one of the two missing
+    await db.query(`update batches set draft_due = null where id = $1`, [onlyFinal]);
+    await db.query(`update batches set final_due = null, draft_due = '2026-12-03' where id = $1`, [onlyDraft]);
+    await db.tx((t) => fillMissingDeadlines(t));
+    const get = async (id: number) => (await manager.get(`/api/batches/${id}`)).body;
+    const a = await get(onlyFinal);
+    expect(a.draftDue).toBe(draftFromFinal('2026-12-10', s).date);
+    expect(a.activity[0].summary).toMatch(/Drafts due set to .* it was missing/);
+    const b = await get(onlyDraft);
+    expect(b.finalDue).toBe(finalFromDraft('2026-12-03', s).date);
+    expect(b.activity[0].summary).toMatch(/Final delivery set to/);
+    const c = await get(both);
+    expect([c.draftDue, c.finalDue]).toEqual(['2026-12-01', '2026-12-10']);
+    // a batch on a shoot gets the shoot's rule
+    const sh = await manager.post('/api/shoots', { clientId: acmeId, startDate: '2026-12-20', batch: { targetCount: 1, split: [] } });
+    await db.query(`update batches set final_due = null where id = $1`, [sh.body.batchId]);
+    await db.tx((t) => fillMissingDeadlines(t));
+    const d = await get(sh.body.batchId);
+    expect(d.finalDueMode).toBe('auto');
+    expect(d.finalDue).toBe((await import('../shared/dates')).computeDeadlines('2026-12-20', s).finalDue);
+    // running again changes nothing
+    const before = (await db.query(`select count(*)::int as n from activity where action = 'batch.deadlines_filled'`))[0];
+    await db.tx((t) => fillMissingDeadlines(t));
+    expect((await db.query(`select count(*)::int as n from activity where action = 'batch.deadlines_filled'`))[0]).toEqual(before);
   });
 });

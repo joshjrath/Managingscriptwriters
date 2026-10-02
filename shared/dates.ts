@@ -152,6 +152,28 @@ export function draftFromFinal(finalDue: ISODate, rules: DeadlineRules): { date:
   };
 }
 
+/** Count forward `n` working days from `date` (exclusive of `date`). */
+export function addWorkingDays(date: ISODate, n: number, workingDays: number[]): ISODate {
+  if (!workingDays.length) throw new Error('The working week has no days');
+  let d = date;
+  let left = n;
+  while (left > 0) {
+    d = addDays(d, 1);
+    if (workingDays.includes(weekday(d))) left--;
+  }
+  return d;
+}
+
+/** The other way round: final delivery from a drafts date, by the same gap. */
+export function finalFromDraft(draftDue: ISODate, rules: DeadlineRules): { date: ISODate; rule: string } {
+  const gap = Math.max(0, rules.draftOffsetDays - rules.finalOffsetDays);
+  const unit = rules.dayMode === 'business' ? 'working day' : 'calendar day';
+  return {
+    date: !gap ? draftDue : rules.dayMode === 'business' ? addWorkingDays(draftDue, gap, rules.workingDays) : addDays(draftDue, gap),
+    rule: gap ? `${gap} ${unit}${gap === 1 ? '' : 's'} after drafts` : 'same day as drafts',
+  };
+}
+
 export function ruleText(days: number, mode: DayMode): string {
   const unit = mode === 'business' ? 'working day' : 'calendar day';
   return `${days} ${unit}${days === 1 ? '' : 's'} before shoot starts`;

@@ -1,6 +1,12 @@
 // Ordered migrations. Never edit a shipped migration; append a new one.
+// Most are SQL; a function is a one-time data fix that needs app logic.
 
-export const MIGRATIONS: string[] = [
+import type { Db } from './db';
+import { fillMissingDeadlines } from './backfill';
+
+export type Migration = string | ((t: Db) => Promise<void>);
+
+export const MIGRATIONS: Migration[] = [
   /* 1 · initial schema */ `
 create table settings (
   id int primary key default 1 check (id = 1),
@@ -448,4 +454,6 @@ create index batch_resources_resource_idx on batch_resources (resource_id);
   `
 alter table users add column timezone_confirmed_at timestamptz;
 `,
+  // 18 · batches with only drafts due or only final delivery get the other date
+  fillMissingDeadlines,
 ];
