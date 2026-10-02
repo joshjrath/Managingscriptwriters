@@ -41,6 +41,8 @@ export const batchFields = {
   brief: zs.text(),
   nextAction: zs.text(500),
   briefingIds: z.array(zs.id).max(50).default([]),
+  /** client resources (links and files) to give the batch's writers */
+  resourceIds: z.array(zs.id).max(100).default([]),
   split: splitSchema,
 };
 
@@ -56,6 +58,7 @@ const patchSchema = z.object({
   plannedStart: optionalDate,
   nextAction: zs.text(500),
   briefingIds: z.array(zs.id).max(50).optional(),
+  resourceIds: z.array(zs.id).max(100).optional(),
   shootId: zs.id.nullable().optional(),
   draftDue: dateChange.optional(),
   finalDue: dateChange.optional(),
@@ -70,8 +73,15 @@ export interface CreatedBatch {
 
 interface ShootRef { id: number; start_date: ISODate; end_date: ISODate | null; client_id: number }
 
+/** Resources picked for a batch must be the client's own (not another client's, not removed). */
+async function checkClientResources(t: Db, clientId: number, ids: number[]) {
+  if (!ids.length) return;
+  const ok = await t.query(`select id from resources where client_id = $1 and removed_at is null and id in (${ids.map((_, i) => `$${i + 2}`).join(',')})`, [clientId, ...ids]);
+  if (ok.length !== ids.length) throw new HttpError(400, 'Choose resources from this client', { resourceIds: 'Choose resources from this client' });
+}
+
 export async function insertBatch(
-  t: Db, me: Me, input: Omit<BatchInput, 'shootId'> & { shootId?: number | null }, settings: Settings, clock: Clock,
+  t: Db, me: Me, input: Omit<BatchInput, 'shootId' | 'resourceIds'> & { shootId?: number | null; resourceIds?: number[] }, settings: Settings, clock: Clock,
 ): Promise<CreatedBatch> {
   const fields: Record<string, string> = {};
   const client = await t.one<{ id: number; name: string; status: string }>(`select id, name, status from clients where id = $1`, [input.clientId]);
@@ -116,6 +126,9 @@ export async function insertBatch(
     if (ok.length !== new Set(input.briefingIds).size) throw new HttpError(400, 'A selected briefing belongs to another client', { briefingIds: 'Choose briefings for this client' });
   }
 
+  const resourceIds = [...new Set(input.resourceIds ?? [])];
+  await checkClientResources(t, input.clientId, resourceIds);
+
   const row = await t.one<{ id: number }>(
     `insert into batches (client_id, shoot_id, title, brief, target_count, priority, planned_start, draft_due, draft_due_mode,
                           final_due, final_due_mode, next_action, created_by)
@@ -130,6 +143,9 @@ export async function insertBatch(
 
   for (const bid of new Set(input.briefingIds)) {
     await t.query(`insert into batch_briefings (batch_id, briefing_id) values ($1, $2) on conflict do nothing`, [batchId, bid]);
+  }
+  for (const rid of resourceIds) {
+    await t.query(`insert into batch_resources (batch_id, resource_id) values ($1, $2) on conflict do nothing`, [batchId, rid]);
   }
 
   const shareText = describeSplit(owners, active);
@@ -205,7 +221,7 @@ export async function loadBatchDetail(ctx: Ctx, id: number, me: Me): Promise<Bat
     brief: row.brief,
     clientBrandVoice: row.brand_voice,
     clientGuidance: row.guidance,
-    scripts, briefings, resources: [...batchResources, ...clientResources], revisions, deliveries, activity,
+    scripts, briefings, resources: [...batchResources, ...clientResources.filter((r) => !batchResources.some((x) => x.id === r.id))], revisions, deliveries, activity,
     draftRule: hasShoot && row.draft_due_mode === 'auto' ? ruleText(settings.draftOffsetDays, settings.dayMode) : null,
     finalRule: hasShoot && row.final_due_mode === 'auto' ? ruleText(settings.finalOffsetDays, settings.dayMode) : null,
     canEdit: isManager(me.role),
@@ -366,6 +382,17 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
         await t.query(`delete from batch_briefings where batch_id = $1`, [id]);
         for (const bid of ids) await t.query(`insert into batch_briefings (batch_id, briefing_id) values ($1, $2)`, [id, bid]);
         changes.push('briefings updated');
+      }
+
+      if (input.resourceIds) {
+        const ids = [...new Set(input.resourceIds)];
+        await checkClientResources(t, b.client_id, ids);
+        const before = (await t.query<{ resource_id: number }>(`select resource_id from batch_resources where batch_id = $1`, [id])).map((r) => Number(r.resource_id));
+        await t.query(`delete from batch_resources where batch_id = $1`, [id]);
+        for (const rid of ids) await t.query(`insert into batch_resources (batch_id, resource_id) values ($1, $2)`, [id, rid]);
+        const added = ids.filter((x) => !before.includes(x)).length;
+        const removed = before.filter((x) => !ids.includes(x)).length;
+        if (added || removed) changes.push(`client resources ${[added && `${added} attached`, removed && `${removed} detached`].filter(Boolean).join(', ')}`);
       }
 
       const keys = Object.keys(set);

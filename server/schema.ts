@@ -435,4 +435,13 @@ create table messages (
 create index messages_pair_idx on messages (least(sender_id, recipient_id), greatest(sender_id, recipient_id), id desc);
 create index messages_unread_idx on messages (recipient_id) where read_at is null;
 `,
+  // 16 · client resources (links and files) picked for a batch, so its writers get them with the batch
+  `
+create table batch_resources (
+  batch_id bigint not null references batches(id) on delete cascade,
+  resource_id bigint not null references resources(id) on delete cascade,
+  primary key (batch_id, resource_id)
+);
+create index batch_resources_resource_idx on batch_resources (resource_id);
+`,
 ];

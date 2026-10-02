@@ -262,6 +262,8 @@ export interface Resource {
   createdByName: string;
   createdById: number;
   createdAt: string;
+  /** a client resource picked for this batch (only set when loaded for a batch) */
+  attached?: boolean;
 }
 
 export type ResourceCategory = 'folder' | 'example' | 'asset' | 'recording' | 'document' | 'other';

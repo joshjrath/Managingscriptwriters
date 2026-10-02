@@ -57,7 +57,14 @@ interface RevisionRow {
 export async function loadRevisions(db: Db, where: { batchId?: number; scriptIds?: number[]; openOnly?: boolean; batchIds?: number[] }): Promise<RevisionRequest[]> {
   const cond: string[] = [];
   const params: unknown[] = [];
-  if (where.batchId) { params.push(where.batchId); cond.push(`r.batch_id = $${params.length}`); }
+  // a batch's own resources plus the client resources picked for it
+  let attached = 'false';
+  if (where.batchId) {
+    params.push(where.batchId);
+    const p = `$${params.length}`;
+    attached = `exists (select 1 from batch_resources br where br.batch_id = ${p} and br.resource_id = r.id)`;
+    cond.push(`(r.batch_id = ${p} or ${attached})`);
+  }
   if (where.scriptIds) { if (!where.scriptIds.length) return []; cond.push(`r.script_id in (${inList(where.scriptIds, params)})`); }
   if (where.batchIds) { if (!where.batchIds.length) return []; cond.push(`r.batch_id in (${inList(where.batchIds, params)})`); }
   if (where.openOnly) cond.push(`r.resolved_at is null`);
@@ -117,7 +124,7 @@ interface ResourceRow {
   id: number; client_id: number; client_name: string; briefing_id: number | null; briefing_title: string | null;
   batch_id: number | null; batch_title: string | null; kind: 'link' | 'file'; category: Resource['category']; title: string;
   url: string | null; file_id: number | null; file_name: string | null; file_size: number | null; notes: string | null;
-  created_by: number; created_by_name: string; created_at: string;
+  created_by: number; created_by_name: string; created_at: string; attached: boolean;
 }
 
 export async function loadResources(db: Db, where: { clientId?: number; batchId?: number; briefingIds?: number[]; clientOnly?: boolean; q?: string; category?: string; id?: number; includeArchivedClients?: boolean } = {}): Promise<Resource[]> {
@@ -125,7 +132,14 @@ export async function loadResources(db: Db, where: { clientId?: number; batchId?
   const params: unknown[] = [];
   if (where.id) { params.push(where.id); cond.push(`r.id = $${params.length}`); }
   if (where.clientId) { params.push(where.clientId); cond.push(`r.client_id = $${params.length}`); }
-  if (where.batchId) { params.push(where.batchId); cond.push(`r.batch_id = $${params.length}`); }
+  // a batch's own resources plus the client resources picked for it
+  let attached = 'false';
+  if (where.batchId) {
+    params.push(where.batchId);
+    const p = `$${params.length}`;
+    attached = `exists (select 1 from batch_resources br where br.batch_id = ${p} and br.resource_id = r.id)`;
+    cond.push(`(r.batch_id = ${p} or ${attached})`);
+  }
   if (where.briefingIds) { if (!where.briefingIds.length) return []; cond.push(`r.briefing_id in (${inList(where.briefingIds, params)})`); }
   if (where.clientOnly) cond.push(`r.batch_id is null and r.briefing_id is null`);
   if (where.category) { params.push(where.category); cond.push(`r.category = $${params.length}`); }
@@ -138,7 +152,7 @@ export async function loadResources(db: Db, where: { clientId?: number; batchId?
   const rows = await db.query<ResourceRow>(
     `select r.id, r.client_id, c.name as client_name, r.briefing_id, bf.title as briefing_title, r.batch_id, b.title as batch_title,
             r.kind, r.category, r.title, r.url, r.file_id, f.filename as file_name, f.size as file_size, r.notes,
-            r.created_by, u.name as created_by_name, r.created_at
+            r.created_by, u.name as created_by_name, r.created_at, ${attached} as attached
        from resources r
        join clients c on c.id = r.client_id
        join users u on u.id = r.created_by
@@ -154,6 +168,7 @@ export async function loadResources(db: Db, where: { clientId?: number; batchId?
     batchId: r.batch_id, batchTitle: r.batch_title, kind: r.kind, category: r.category, title: r.title, url: r.url,
     fileId: r.file_id, fileName: r.file_name, fileSize: r.file_size, notes: r.notes,
     createdById: r.created_by, createdByName: r.created_by_name, createdAt: r.created_at,
+    ...(r.attached ? { attached: true } : {}),
   }));
 }
 

@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, CalendarDays, Camera, CheckCheck, ChevronDown, FileText, Plus, Sparkles, Trash2, Type, Users, Wand2 } from 'lucide-react';
+import { AlertTriangle, CalendarDays, Camera, CheckCheck, ChevronDown, FileText, Link2, PlayCircle, Plus, Sparkles, Trash2, Type, Users, Wand2 } from 'lucide-react';
 import { NotesImport } from './NotesImport';
 import { api, ApiError, queryClient, useSave } from '../api';
 import { useBoot } from './Shell';
@@ -194,6 +194,29 @@ function BriefingPicker({ client, value, onChange }: { client: ClientDetail | un
   );
 }
 
+/** Pick links and files from the client's Resources to give this batch's writers. */
+export function ResourcePicker({ client, value, onChange }: { client: ClientDetail | undefined; value: number[]; onChange: (v: number[]) => void }) {
+  if (!client) return <span className="muted" style={{ fontSize: 13 }}>Choose a client to pick from its resources.</span>;
+  const list = client.resources.filter((r) => r.batchId == null && r.briefingId == null);
+  if (!list.length) return <span className="muted" style={{ fontSize: 13 }}>This client has no resources yet. Add links and files from the client page.</span>;
+  const all = list.every((r) => value.includes(r.id));
+  return (
+    <div className="res-pick">
+      <button type="button" className="btn sm ghost res-pick-all" onClick={() => onChange(all ? [] : list.map((r) => r.id))}>{all ? 'Clear all' : `Select all ${list.length}`}</button>
+      {list.map((r) => {
+        const on = value.includes(r.id);
+        return (
+          <label key={r.id} className={`res-pick-item${on ? ' on' : ''}`} title={r.title}>
+            <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked ? [...value, r.id] : value.filter((x) => x !== r.id))} />
+            <span className="ic" aria-hidden>{r.kind === 'file' ? <FileText /> : r.category === 'recording' ? <PlayCircle /> : <Link2 />}</span>
+            <span className="txt"><b className="ellipsis">{r.title}</b><span className="muted">{RESOURCE_LABEL[r.category]}{r.kind === 'file' ? ` · ${r.fileName ?? 'file'}` : ' · link'}</span></span>
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 function PlannedStart({ id, value, onChange, draftDue, parts, error }: { id: string; value: string; onChange: (v: string) => void; draftDue: ISODate | ''; parts: SplitPart[]; error?: string }) {
   const { users, settings } = useBoot();
   const first = parts.find((p) => p.writerId !== '' && Number(p.count) > 0);
@@ -325,6 +348,9 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   const [draftOverride, setDraftOverride] = useState('');
   const [finalOverride, setFinalOverride] = useState('');
   const [briefingIds, setBriefingIds] = useState<number[]>([]);
+  const [resourceIds, setResourceIds] = useState<number[]>([]);
+  // picks belong to one client; start over when the client changes
+  useEffect(() => { setResourceIds([]); }, [clientId]);
   const [brief, setBrief] = useState('');
   const [location, setLocation] = useState('');
   const [local, setLocal] = useState<Record<string, string>>({});
@@ -389,7 +415,7 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
       batch: later ? undefined : {
         title: batchTitle || null, targetCount: Number(count), priority, plannedStart: planned || null,
         draftDue: draftOverride || null, finalDue: finalOverride || null, brief: brief || null, nextAction: null,
-        briefingIds, split: cleanSplit(parts),
+        briefingIds, resourceIds, split: cleanSplit(parts),
       },
     });
   };
@@ -413,6 +439,7 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
         {!later && <div className="field full"><span className="lbl">Writers <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional — assign later if you’re not sure</span></span><SplitEditor total={Number(count) || 0} parts={parts} onChange={setParts} error={f['batch.split']} /></div>}
       </div>
       <div className="field"><span className="lbl">Recording & files <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional</span></span><AttachmentsSection value={attach} onChange={setAttach} errors={f} /></div>
+      {clientId !== '' && !later && <div className="field"><span className="lbl">Client resources for the writers <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional · they get these with the batch</span></span><ResourcePicker client={client.data} value={resourceIds} onChange={setResourceIds} /></div>}
       <Advanced>
         <div className="form-grid">
           <Field label="Shoot name" optional htmlFor={ids.title}><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Autumn range shoot" id={ids.title} /></Field>
@@ -448,6 +475,9 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   const [priority, setPriority] = useState<Priority>('normal');
   const [planned, setPlanned] = useState('');
   const [briefingIds, setBriefingIds] = useState<number[]>([]);
+  const [resourceIds, setResourceIds] = useState<number[]>([]);
+  // picks belong to one client; start over when the client changes
+  useEffect(() => { setResourceIds([]); }, [clientId]);
   const [brief, setBrief] = useState('');
   const [nextAction, setNextAction] = useState('');
   const [local, setLocal] = useState<Record<string, string>>({});
@@ -496,7 +526,7 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
     if (Object.keys(errs).length) return;
     save.mutate({
       clientId, title, targetCount: Number(count), shootId: shootId || null, draftDue: draft || null, finalDue: final || null,
-      priority, plannedStart: planned || null, briefingIds, brief: brief || null, nextAction: nextAction || null, split: cleanSplit(parts),
+      priority, plannedStart: planned || null, briefingIds, resourceIds, brief: brief || null, nextAction: nextAction || null, split: cleanSplit(parts),
     });
   };
   return (
@@ -521,6 +551,7 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
         <div className="field full"><span className="lbl">Writers</span><SplitEditor total={Number(count) || 0} parts={parts} onChange={setParts} error={f.split} /></div>
       </div>
       <div className="field"><span className="lbl">Recording & files <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional</span></span><AttachmentsSection value={attach} onChange={setAttach} errors={f} /></div>
+      {clientId !== '' && <div className="field"><span className="lbl">Client resources for the writers <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional · they get these with the batch</span></span><ResourcePicker client={client.data} value={resourceIds} onChange={setResourceIds} /></div>}
       <Advanced>
         <div className="form-grid">
           <Field label="Priority" htmlFor={ids.pr}><select className="select" id={ids.pr} value={priority} onChange={(e) => setPriority(e.target.value as Priority)}>{PRIORITIES.map((x) => <option key={x} value={x}>{PRIORITY_LABEL[x]}</option>)}</select></Field>

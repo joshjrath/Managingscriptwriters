@@ -33,6 +33,7 @@ const shootCreate = z.object({
     brief: batchFields.brief,
     nextAction: batchFields.nextAction,
     briefingIds: batchFields.briefingIds,
+    resourceIds: z.array(zs.id).max(100).optional(),
     split: batchFields.split,
   }).optional(), // leave out to schedule the shoot now and plan its scripts later
 });

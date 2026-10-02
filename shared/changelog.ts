@@ -17,6 +17,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-02-batch-resources',
+    date: '2026-10-02',
+    title: 'Give a batch the client’s links and files',
+    summary: 'When you create a batch, pick which of the client’s resources (links and PDFs) its writers get.',
+    changes: [
+      { tag: 'new', text: 'New work → New batch (and New shoot when you plan the scripts now): once you choose the client, “Client resources for the writers” lists its links and files. Tick the ones the writers need, or Select all. They show on the writers’ My work with the batch.' },
+      { tag: 'new', text: 'On a batch page, Brief & resources shows the picked ones under This batch and the client’s other resources under “More from …”. Admins and managers can Add to batch, Add all to batch or Take off batch at any time. Taking one off only removes it from the batch, not from the client.' },
+    ],
+  },
+  {
     id: '2026-10-01-pips-sent-back',
     date: '2026-10-01',
     title: 'Sent-back scripts show in Writing progress',

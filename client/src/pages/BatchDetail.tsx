@@ -6,7 +6,7 @@ import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle, Archive, ArchiveRestore, Ban, CalendarClock, Camera, Check, CheckCheck, ChevronDown, ExternalLink, FileText,
-  Flag, Link2, ListTodo, OctagonAlert, Pencil, PlayCircle, RotateCcw, Send, SlidersHorizontal, Trash2, Upload, UserPlus,
+  Flag, Link2, ListTodo, OctagonAlert, Plus, Pencil, PlayCircle, RotateCcw, Send, SlidersHorizontal, Trash2, Upload, UserPlus,
 } from 'lucide-react';
 import { api, useSave, type ApiError } from '../api';
 import type { BatchDetail, ClientDetail, Priority, ReschedulePreview, Resource, ResourceCategory, Script } from '../../../shared/types';
@@ -628,17 +628,18 @@ function ScriptDialog({ s, b, onClose }: { s: Script; b: BatchDetail; onClose: (
 
 const RES_ICON: Record<ResourceCategory, ReactNode> = { folder: <Link2 />, example: <FileText />, asset: <Upload />, recording: <PlayCircle />, document: <FileText />, other: <Link2 /> };
 
-export function ResourceRow({ r, onRemove }: { r: Resource; onRemove?: () => void }) {
+export function ResourceRow({ r, onRemove, extra }: { r: Resource; onRemove?: () => void; extra?: ReactNode }) {
   const href = r.kind === 'file' ? `/api/files/${r.fileId}` : r.url!;
   return (
     <div className="res">
       <span className="ic" style={{ ['--c' as string]: r.category === 'recording' ? 'var(--salmon)' : 'var(--cyan)' }}>{RES_ICON[r.category]}</span>
       <div style={{ minWidth: 0 }}>
         <div className="t">{r.title}</div>
-        <div className="s">{RESOURCE_LABEL[r.category]}{r.kind === 'file' ? ` · ${r.fileName} · ${fmtBytes(r.fileSize)}` : ''} · added by {r.createdByName}</div>
+        <div className="s">{r.attached ? 'From the client’s resources · ' : ''}{RESOURCE_LABEL[r.category]}{r.kind === 'file' ? ` · ${r.fileName} · ${fmtBytes(r.fileSize)}` : ''} · added by {r.createdByName}</div>
       </div>
       <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>
         <a className="btn sm" href={href} target="_blank" rel="noopener noreferrer">{r.kind === 'file' ? 'Open file' : 'Open'}<ExternalLink aria-hidden /></a>
+        {extra}
         {onRemove && <button type="button" className="icon-btn sm" onClick={onRemove} aria-label={`Remove ${r.title}`} title="Remove"><Trash2 size={15} /></button>}
       </div>
     </div>
@@ -648,9 +649,14 @@ export function ResourceRow({ r, onRemove }: { r: Resource; onRemove?: () => voi
 function BriefSection({ b }: { b: BatchDetail }) {
   const { me } = useBoot();
   const toast = useToast();
+  const manager = isManager(me.role);
   const remove = useSave((id: number) => api(`/api/resources/${id}`, { method: 'DELETE' }), { onSuccess: () => toast('Resource removed') });
-  const batchRes = b.resources.filter((r) => r.batchId === b.id);
-  const clientRes = b.resources.filter((r) => r.batchId !== b.id);
+  const batchRes = b.resources.filter((r) => r.batchId === b.id || r.attached);
+  const clientRes = b.resources.filter((r) => r.batchId !== b.id && !r.attached);
+  const attachedIds = b.resources.filter((r) => r.attached).map((r) => r.id);
+  // picking a client resource gives it to this batch's writers (on their My work too)
+  const pick = useSave((v: { ids: number[]; on: boolean }) => api(`/api/batches/${b.id}`, { method: 'PATCH', body: { resourceIds: v.on ? [...new Set([...attachedIds, ...v.ids])] : attachedIds.filter((x) => !v.ids.includes(x)) } }),
+    { onSuccess: (_o, v) => toast(v.on ? `Added ${plural(v.ids.length, 'resource')} to this batch` : 'Taken off this batch (still in the client’s resources)') });
   return (
     <div className="stack s4">
       {b.brief ? <div><div className="section-title">Batch brief</div><p className="prose">{b.brief}</p></div> : <p className="muted">No batch-specific brief.{isManager(me.role) ? ' Add one with “Edit batch”.' : ''}</p>}
@@ -678,8 +684,19 @@ function BriefSection({ b }: { b: BatchDetail }) {
       {batchRes.some((r) => r.category === 'recording' && r.url) && (
         <div className="links row-flex s2">{batchRes.filter((r) => r.category === 'recording' && r.url).map((r) => <ExtLink key={r.id} href={r.url!} className="btn sm salmon"><PlayCircle aria-hidden />{r.title}</ExtLink>)}</div>
       )}
-      {batchRes.length > 0 && <div className="stack s2"><div className="section-title">This batch</div>{batchRes.map((r) => <ResourceRow key={r.id} r={r} onRemove={isManager(me.role) || r.createdById === me.id ? () => remove.mutate(r.id) : undefined} />)}</div>}
-      {clientRes.length > 0 && <div className="stack s2"><div className="section-title">Client folders, examples & assets</div>{clientRes.map((r) => <ResourceRow key={r.id} r={r} />)}</div>}
+      {batchRes.length > 0 && <div className="stack s2"><div className="section-title">This batch</div>{batchRes.map((r) => r.attached
+        ? <ResourceRow key={r.id} r={r} extra={manager ? <Button variant="sm ghost" busy={pick.isPending} onClick={() => pick.mutate({ ids: [r.id], on: false })}>Take off batch</Button> : undefined} />
+        : <ResourceRow key={r.id} r={r} onRemove={manager || r.createdById === me.id ? () => remove.mutate(r.id) : undefined} />)}</div>}
+      {clientRes.length > 0 && (
+        <div className="stack s2">
+          <div className="row-flex s2" style={{ justifyContent: 'space-between' }}>
+            <div className="section-title" style={{ margin: 0 }}>More from {b.clientName}</div>
+            {manager && clientRes.length > 1 && <Button variant="sm ghost" busy={pick.isPending} onClick={() => pick.mutate({ ids: clientRes.map((r) => r.id), on: true })}>Add all to batch</Button>}
+          </div>
+          {manager && <p className="muted" style={{ fontSize: 12.5, margin: 0 }}>Add the ones the writers need, so they get them on My work with this batch.</p>}
+          {clientRes.map((r) => <ResourceRow key={r.id} r={r} extra={manager ? <Button variant="sm" icon={<Plus aria-hidden />} busy={pick.isPending} onClick={() => pick.mutate({ ids: [r.id], on: true })}>Add to batch</Button> : undefined} />)}
+        </div>
+      )}
       {!b.briefings.length && !batchRes.length && !clientRes.length && <Empty boxed title="No briefing materials yet">Attach a briefing call or add links so writers know what applies.</Empty>}
     </div>
   );

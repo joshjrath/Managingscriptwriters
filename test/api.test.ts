@@ -1303,3 +1303,40 @@ describe('messages', () => {
     expect((await sarah.post(`/api/messages/${ids.sarah}`, { body: 'hi me' })).status).toBe(400);
   });
 });
+
+describe('client resources picked for a batch', () => {
+  it('picked on creation, shown to the writers on My work, and attachable or detachable later', async () => {
+    const client = (await manager.get(`/api/clients/${acmeId}`)).body;
+    const folder = client.resources.find((r: any) => r.title === 'Brand folder' && r.batchId == null);
+    expect(folder).toBeTruthy();
+    const extra = (await manager.post('/api/resources', { clientId: acmeId, category: 'example', title: 'Winning hooks', url: 'https://example.com/hooks' })).body;
+    const extraId = extra.resource?.id ?? extra.id;
+    expect(extraId).toBeTruthy();
+    // another client's resources can't be picked
+    const other = await manager.post('/api/clients', { name: 'Pick Test Other Co.', links: [{ title: 'Other folder', url: 'https://drive.example/o', category: 'folder' }] });
+    const otherRes = (await manager.get(`/api/clients/${other.body.clientId}`)).body.resources[0];
+    const bad = await manager.post('/api/batches', { clientId: acmeId, title: 'Bad pick', targetCount: 1, resourceIds: [otherRes.id], split: [{ writerId: ids.sarah, count: 1 }] });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.fields.resourceIds).toBeTruthy();
+    // pick one when creating the batch
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Picked resources', targetCount: 2, finalDue: '2026-10-22', resourceIds: [folder.id], split: [{ writerId: ids.sarah, count: 2 }] });
+    expect(b.status).toBe(200);
+    const id = b.body.batchId;
+    let d = (await manager.get(`/api/batches/${id}`)).body;
+    expect(d.resources.find((r: any) => r.id === folder.id)).toMatchObject({ attached: true });
+    expect(d.resources.filter((r: any) => r.id === folder.id)).toHaveLength(1);
+    expect(d.resources.find((r: any) => r.id === extraId).attached).toBeUndefined();
+    // the writer gets it on My work; the unpicked one isn't there
+    const mine = (await sarah.get('/api/my-work')).body.batches.find((e: any) => e.batch.id === id);
+    expect(mine.resources.map((r: any) => r.id)).toEqual([folder.id]);
+    // add the other one from the batch page, then take the first off
+    expect((await manager.patch(`/api/batches/${id}`, { resourceIds: [folder.id, extraId] })).status).toBe(200);
+    expect((await manager.patch(`/api/batches/${id}`, { resourceIds: [extraId] })).status).toBe(200);
+    d = (await manager.get(`/api/batches/${id}`)).body;
+    expect(d.resources.filter((r: any) => r.attached).map((r: any) => r.id)).toEqual([extraId]);
+    expect(d.resources.some((r: any) => r.id === folder.id)).toBe(true); // still listed as a client resource
+    expect(d.activity[0].summary).toMatch(/client resources 1 detached/);
+    // writers can't change the picks
+    expect((await sarah.patch(`/api/batches/${id}`, { resourceIds: [] })).status).toBe(403);
+  });
+});
