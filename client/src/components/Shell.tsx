@@ -368,7 +368,7 @@ export function NotificationsButton({ className = '' }: { className?: string }) 
 
 export function PageHeader({ title, sub, crumbs, children, hideNewWork }: { title: ReactNode; sub?: ReactNode; crumbs?: ReactNode; children?: ReactNode; hideNewWork?: boolean }) {
   const displayTz = useDisplayTz();
-  const { me } = useBoot();
+  const { me, settings } = useBoot();
   const openNew = useNewWork();
   useEffect(() => { if (typeof title === 'string') document.title = `${title} · Scale Media`; }, [title]);
   return (
@@ -380,7 +380,7 @@ export function PageHeader({ title, sub, crumbs, children, hideNewWork }: { titl
       </div>
       <div className="head-tools">
         {children}
-        <OrgDate tz={displayTz} />
+        <OrgDate tz={displayTz} hq={settings.timezone} />
         {isManager(me.role) && !hideNewWork && <Button variant="primary pill lg" icon={<Plus aria-hidden />} onClick={() => openNew('shoot')}>New work</Button>}
         <NotificationsButton />
       </div>
@@ -388,12 +388,23 @@ export function PageHeader({ title, sub, crumbs, children, hideNewWork }: { titl
   );
 }
 
-function OrgDate({ tz }: { tz: string }) {
+/** Today and the time in your own time zone; when that isn't HQ's, HQ's time underneath. */
+function OrgDate({ tz, hq }: { tz: string; hq: string }) {
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t); }, []);
-  const { date } = nowInZone(tz, now);
+  const { date, minutes } = nowInZone(tz, now);
   const d = new Date(date + 'T12:00:00Z');
   const label = d.toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' });
   const time = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: tz });
-  return <time className="today-date" dateTime={date}>{label} · {time} {fmtTimeZoneAbbr(tz, now)}</time>;
+  // a different zone with the same clock (Toronto and New York) doesn't need a second line
+  const at = nowInZone(hq, now);
+  const sameClock = at.date === date && at.minutes === minutes;
+  const hqTime = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: hq });
+  const hqDay = at.date === date ? '' : ` · ${new Date(at.date + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'short', timeZone: 'UTC' })}`;
+  return (
+    <span className="clock-stack">
+      <time className="today-date" dateTime={date}>{label} · {time} {fmtTimeZoneAbbr(tz, now)}</time>
+      {!sameClock && <span className="hq-time" title={`Workspace time zone: ${hq.replace(/_/g, ' ')}. Deadlines follow this time.`}><i aria-hidden />HQ · {hqTime} {fmtTimeZoneAbbr(hq, now)}{hqDay}</span>}
+    </span>
+  );
 }

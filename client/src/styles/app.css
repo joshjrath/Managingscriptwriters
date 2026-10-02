@@ -138,6 +138,9 @@ main.page-main { padding: 28px 28px 72px 22px; min-width: 0; }
 .page-head .crumbs a:hover { color: var(--text); text-decoration: underline; }
 .head-tools { margin-left: auto; display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; justify-content: flex-end; }
 .today-date { color: var(--text-2); font-size: 14px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.clock-stack { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; }
+.hq-time { display: inline-flex; align-items: center; gap: 6px; color: var(--text-3); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; cursor: help; }
+.hq-time i { width: 6px; height: 6px; border-radius: 50%; background: var(--salmon); }
 .icon-btn {
   position: relative; width: 44px; height: 44px; border-radius: 50%; border: 0; background: var(--panel); color: var(--text);
   display: grid; place-items: center; cursor: pointer; transition: background var(--t);
@@ -730,7 +733,7 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0 6px; font-
   main.page-main { padding: 6px 16px 60px; }
   .page-head { margin: 8px 0 18px; align-items: flex-start; }
   .page-head .head-tools { margin-left: 0; width: 100%; justify-content: flex-start; }
-  .page-head .head-tools .today-date, .page-head .head-tools .icon-btn.bell { display: none; }
+  .page-head .head-tools .clock-stack, .page-head .head-tools .icon-btn.bell { display: none; }
   .cards4 { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
   .stat-card { min-height: 130px; padding: 20px 18px 16px; }
   .stat-card .corner { display: none; }

@@ -17,6 +17,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-02-hq-clock',
+    date: '2026-10-02',
+    title: 'HQ time at the top',
+    summary: 'People outside HQ’s time zone see HQ time under their own clock.',
+    changes: [
+      { tag: 'new', text: 'If your time zone isn’t HQ’s (EST for Scale Media), the clock at the top of every page shows your time with HQ time underneath, e.g. “HQ · 3:07 AM EDT”, plus the day when it’s different. Deadlines follow HQ time.' },
+      { tag: 'improved', text: 'Settings calls the workspace time zone the HQ time zone.' },
+    ],
+  },
+  {
     id: '2026-10-02-your-timezone',
     date: '2026-10-02',
     title: 'Times in your own time zone',
