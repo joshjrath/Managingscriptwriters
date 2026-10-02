@@ -17,6 +17,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-02-drafts-from-final',
+    date: '2026-10-02',
+    title: 'Drafts follow the final delivery date',
+    summary: 'Enter a final delivery date and drafts due fills itself in, using the same gap as your shoot rules.',
+    changes: [
+      { tag: 'new', text: 'When you set a final delivery date (New batch, New shoot overrides, or Edit batch), drafts due is set for you by the same gap as your deadline rules in Settings. With drafts 5 days and final 3 days before a shoot, that’s 2 days before final delivery (working days if you count working days). You can still change drafts yourself; once you do, it stays put.' },
+      { tag: 'improved', text: 'The client page no longer shows an empty “Briefings & ideation calls” panel. Recordings and documents go in Resources. Older briefing records still show, as “Briefing calls”, for clients that have them.' },
+    ],
+  },
+  {
     id: '2026-10-02-hq-clock',
     date: '2026-10-02',
     title: 'HQ time at the top',

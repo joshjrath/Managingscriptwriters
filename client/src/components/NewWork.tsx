@@ -10,7 +10,7 @@ import { NotesImport } from './NotesImport';
 import { api, ApiError, queryClient, useSave } from '../api';
 import { useBoot } from './Shell';
 import { Button, Dialog, Field, FormError, inputProps, Seg, useFieldId, useToast } from './ui';
-import { addDays, computeDeadlines, dueState, suggestStart, type ISODate } from '../../../shared/dates';
+import { addDays, computeDeadlines, draftFromFinal, dueState, suggestStart, type ISODate } from '../../../shared/dates';
 import { evenSplit, isManager } from '../../../shared/workflow';
 import { fmtBytes, fmtDate, fmtLong, fmtRange, plural } from '../../../shared/format';
 import { parseEntry, type ParsedEntry } from '../../../shared/parse';
@@ -347,6 +347,9 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   const [planned, setPlanned] = useState('');
   const [draftOverride, setDraftOverride] = useState('');
   const [finalOverride, setFinalOverride] = useState('');
+  // drafts follow a final delivery date until you set them yourself
+  const [draftFollows, setDraftFollows] = useState(true);
+  const overrideFinal = (v: string) => { setFinalOverride(v); if (draftFollows) setDraftOverride(v ? draftFromFinal(v as ISODate, settings).date : ''); };
   const [briefingIds, setBriefingIds] = useState<number[]>([]);
   const [resourceIds, setResourceIds] = useState<number[]>([]);
   // picks belong to one client; start over when the client changes
@@ -446,10 +449,13 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
           <Field label="Batch name" optional htmlFor={ids.bt} help="Defaults to the shoot name and dates."><input className="input" value={batchTitle} onChange={(e) => setBatchTitle(e.target.value)} id={ids.bt} /></Field>
           <Field label="Priority" htmlFor={ids.pr}><select className="select" id={ids.pr} value={priority} onChange={(e) => setPriority(e.target.value as Priority)}>{PRIORITIES.map((x) => <option key={x} value={x}>{PRIORITY_LABEL[x]}</option>)}</select></Field>
           <PlannedStart id={ids.ps} value={planned} onChange={setPlanned} draftDue={(draftOverride || (start ? computeDeadlines(start, settings).draftDue : '')) as ISODate} parts={parts} error={f['batch.plannedStart']} />
-          <Field label="Override drafts due" optional htmlFor={ids.dd} error={f['batch.draftDue'] ?? f.draftDue} help="Only if this batch needs a different date than the rule."><input className="input" type="date" value={draftOverride} onChange={(e) => setDraftOverride(e.target.value)} {...inputProps(ids.dd, f.draftDue)} /></Field>
-          <Field label="Override final delivery" optional htmlFor={ids.fd} error={f['batch.finalDue']}><input className="input" type="date" value={finalOverride} onChange={(e) => setFinalOverride(e.target.value)} id={ids.fd} /></Field>
+          <Field label="Override final delivery" optional htmlFor={ids.fd} error={f['batch.finalDue']} help="Drafts move with it, by the same gap as your shoot rules."><input className="input" type="date" value={finalOverride} onChange={(e) => overrideFinal(e.target.value)} id={ids.fd} /></Field>
+          <Field label="Override drafts due" optional htmlFor={ids.dd} error={f['batch.draftDue'] ?? f.draftDue}
+            help={draftFollows && finalOverride && draftOverride ? `Set from final delivery: ${draftFromFinal(finalOverride as ISODate, settings).rule}.` : 'Only if this batch needs a different date than the rule.'}>
+            <input className="input" type="date" value={draftOverride} onChange={(e) => { setDraftOverride(e.target.value); setDraftFollows(!e.target.value); }} {...inputProps(ids.dd, f.draftDue)} />
+          </Field>
           <Field label="Location" optional htmlFor={ids.loc}><input className="input" value={location} onChange={(e) => setLocation(e.target.value)} id={ids.loc} /></Field>
-          <div className="field full"><span className="lbl">Attach briefings</span><BriefingPicker client={client.data} value={briefingIds} onChange={setBriefingIds} /></div>
+          {client.data && client.data.briefings.length > 0 && <div className="field full"><span className="lbl">Attach briefings</span><BriefingPicker client={client.data} value={briefingIds} onChange={setBriefingIds} /></div>}
           <Field label="Brief for writers" optional htmlFor={ids.brief} className="full"><textarea className="textarea" value={brief} onChange={(e) => setBrief(e.target.value)} id={ids.brief} placeholder="What these scripts need to do, tone notes, anything batch-specific." /></Field>
         </div>
       </Advanced>
@@ -470,6 +476,7 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   const [count, setCount] = useState<number | ''>('');
   const [shootId, setShootId] = useState<number | ''>(preset?.shootId ?? '');
   const [draft, setDraft] = useState('');
+  const [draftFollows, setDraftFollows] = useState(true);
   const [final, setFinal] = useState('');
   const [parts, setParts] = useState<SplitPart[]>([{ writerId: '', count: '' }]);
   const [priority, setPriority] = useState<Priority>('normal');
@@ -542,11 +549,11 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
             {shoots.map((s) => <option key={s.id} value={s.id}>{s.title ? `${s.title} · ` : ''}{fmtRange(s.startDate, s.endDate)}</option>)}
           </select>
         </Field>
-        <Field label={shoot ? 'Drafts due (override)' : 'Drafts due'} optional={!!shoot} htmlFor={ids.draft} error={f.draftDue} help={auto && !draft ? `${fmtDate(auto.draftDue)} · ${auto.draftRule}` : undefined}>
-          <input className="input" type="date" value={draft} onChange={(e) => setDraft(e.target.value)} {...inputProps(ids.draft, f.draftDue)} />
+        <Field label={shoot ? 'Drafts due (override)' : 'Drafts due'} optional={!!shoot} htmlFor={ids.draft} error={f.draftDue} help={draftFollows && final && draft ? `Set from final delivery: ${draftFromFinal(final as ISODate, settings).rule}` : auto && !draft ? `${fmtDate(auto.draftDue)} · ${auto.draftRule}` : undefined}>
+          <input className="input" type="date" value={draft} onChange={(e) => { setDraft(e.target.value); setDraftFollows(!e.target.value); }} {...inputProps(ids.draft, f.draftDue)} />
         </Field>
         <Field label={shoot ? 'Final delivery (override)' : 'Final delivery to Timeliner'} optional={!!shoot} htmlFor={ids.final} error={f.finalDue} help={auto && !final ? `${fmtDate(auto.finalDue)} · ${auto.finalRule}` : undefined}>
-          <input className="input" type="date" value={final} onChange={(e) => setFinal(e.target.value)} {...inputProps(ids.final, f.finalDue)} />
+          <input className="input" type="date" value={final} onChange={(e) => { const v = e.target.value; setFinal(v); if (draftFollows) setDraft(v ? draftFromFinal(v as ISODate, settings).date : ''); }} {...inputProps(ids.final, f.finalDue)} />
         </Field>
         <div className="field full"><span className="lbl">Writers</span><SplitEditor total={Number(count) || 0} parts={parts} onChange={setParts} error={f.split} /></div>
       </div>
@@ -556,7 +563,7 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
         <div className="form-grid">
           <Field label="Priority" htmlFor={ids.pr}><select className="select" id={ids.pr} value={priority} onChange={(e) => setPriority(e.target.value as Priority)}>{PRIORITIES.map((x) => <option key={x} value={x}>{PRIORITY_LABEL[x]}</option>)}</select></Field>
           <PlannedStart id={ids.ps} value={planned} onChange={setPlanned} draftDue={(draft || auto?.draftDue || '') as ISODate} parts={parts} error={f.plannedStart} />
-          <div className="field full"><span className="lbl">Attach briefings</span><BriefingPicker client={client.data} value={briefingIds} onChange={setBriefingIds} /></div>
+          {client.data && client.data.briefings.length > 0 && <div className="field full"><span className="lbl">Attach briefings</span><BriefingPicker client={client.data} value={briefingIds} onChange={setBriefingIds} /></div>}
           <Field label="Brief for writers" optional htmlFor={ids.brief} className="full"><textarea className="textarea" id={ids.brief} value={brief} onChange={(e) => setBrief(e.target.value)} /></Field>
           <Field label="Next action" optional htmlFor={ids.na} className="full"><input className="input" id={ids.na} value={nextAction} onChange={(e) => setNextAction(e.target.value)} placeholder="e.g. Confirm tone with the client" /></Field>
         </div>

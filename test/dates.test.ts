@@ -109,3 +109,15 @@ describe('helpers', () => {
     expect(suggestStart('2026-10-07', 10, 0, [1, 2, 3, 4, 5])).toBeNull();
   });
 });
+
+describe('drafts from a final delivery date', () => {
+  it('keeps the same gap as the shoot rules', async () => {
+    const { draftFromFinal, DEFAULT_RULES } = await import('../shared/dates');
+    // drafts 5 days and final 3 days before a shoot → drafts 2 days before final
+    expect(draftFromFinal('2026-10-10', { ...DEFAULT_RULES, draftOffsetDays: 5, finalOffsetDays: 3, dayMode: 'calendar' })).toEqual({ date: '2026-10-08', rule: '2 calendar days before final delivery' });
+    // working days skip the weekend: Monday Oct 12 → Thursday Oct 8
+    expect(draftFromFinal('2026-10-12', { ...DEFAULT_RULES, draftOffsetDays: 5, finalOffsetDays: 3, dayMode: 'business', workingDays: [1, 2, 3, 4, 5] }).date).toBe('2026-10-08');
+    // no gap: same day
+    expect(draftFromFinal('2026-10-10', { ...DEFAULT_RULES, draftOffsetDays: 3, finalOffsetDays: 3 }).rule).toBe('same day as final delivery');
+  });
+});

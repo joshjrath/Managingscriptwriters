@@ -12,7 +12,7 @@ import { api, useSave, type ApiError } from '../api';
 import type { BatchDetail, ClientDetail, Priority, ReschedulePreview, Resource, ResourceCategory, Script } from '../../../shared/types';
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
 import { ACTION_RULES, checkAction, compressRanges, parseRanges, STATUS_LABEL, type ScriptAction, type ScriptStatus, isManager } from '../../../shared/workflow';
-import { addDays, computeDeadlines, diffDays, isISODate, suggestStart, type ISODate } from '../../../shared/dates';
+import { addDays, computeDeadlines, diffDays, draftFromFinal, isISODate, suggestStart, type ISODate } from '../../../shared/dates';
 import { cutoffIn, fmtBytes, fmtCutoff, fmtDate, fmtLong, fmtRange, fmtStamp, fmtTimeZoneAbbr, plural } from '../../../shared/format';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import {
@@ -776,13 +776,19 @@ function EditBatchDialog({ b, open, onClose }: { b: BatchDetail; open: boolean; 
   const [draft, setDraft] = useState(b.draftDue ?? '');
   const [finalMode, setFinalMode] = useState(b.finalDueMode);
   const [final, setFinal] = useState(b.finalDue ?? '');
+  // a new final delivery date moves drafts by the shoot rules' gap, unless you've changed drafts here yourself
+  const [draftTouched, setDraftTouched] = useState(false);
+  const changeFinal = (v: string) => {
+    setFinal(v);
+    if (!draftTouched && v) { setDraftMode('manual'); setDraft(draftFromFinal(v as ISODate, settings).date); }
+  };
   const [brief, setBrief] = useState(b.brief ?? '');
   const [nextAction, setNextAction] = useState(b.nextAction ?? '');
   const [briefingIds, setBriefingIds] = useState<number[]>(b.briefings.map((x) => x.id));
   useEffect(() => {
     if (!open) return;
     setTitle(b.title); setPriority(b.priority); setPlanned(b.plannedStart ?? ''); setShootId(b.shootId ?? ''); setDraftMode(b.draftDueMode); setDraft(b.draftDue ?? '');
-    setFinalMode(b.finalDueMode); setFinal(b.finalDue ?? ''); setBrief(b.brief ?? ''); setNextAction(b.nextAction ?? ''); setBriefingIds(b.briefings.map((x) => x.id));
+    setFinalMode(b.finalDueMode); setFinal(b.finalDue ?? ''); setDraftTouched(false); setBrief(b.brief ?? ''); setNextAction(b.nextAction ?? ''); setBriefingIds(b.briefings.map((x) => x.id));
   }, [open, b]);
   const shoot = client.data?.shoots.find((s) => s.id === shootId);
   const auto = shoot ? computeDeadlines(shoot.startDate, settings) : null;
@@ -815,8 +821,9 @@ function EditBatchDialog({ b, open, onClose }: { b: BatchDetail; open: boolean; 
             </select>
           </Field>
         </div>
-        <DateModeField label="Drafts due" id={ids.d} hasShoot={!!shootId} mode={draftMode} setMode={setDraftMode} date={draft} setDate={setDraft} auto={auto?.draftDue} rule={auto?.draftRule} error={f.draftDue} />
-        <DateModeField label="Final delivery to Timeliner" id={ids.f} hasShoot={!!shootId} mode={finalMode} setMode={setFinalMode} date={final} setDate={setFinal} auto={auto?.finalDue} rule={auto?.finalRule} error={f.finalDue} />
+        <DateModeField label="Drafts due" id={ids.d} hasShoot={!!shootId} mode={draftMode} setMode={(m) => { setDraftTouched(true); setDraftMode(m); }} date={draft} setDate={(v) => { setDraftTouched(true); setDraft(v); }} auto={auto?.draftDue} rule={auto?.draftRule} error={f.draftDue}
+          note={!draftTouched && final && final !== (b.finalDue ?? '') ? `Moved with final delivery: ${draftFromFinal(final as ISODate, settings).rule}.` : undefined} />
+        <DateModeField label="Final delivery to Timeliner" id={ids.f} hasShoot={!!shootId} mode={finalMode} setMode={setFinalMode} date={final} setDate={changeFinal} auto={auto?.finalDue} rule={auto?.finalRule} error={f.finalDue} />
         <Field label="Planned writing start" optional htmlFor={ids.ps} error={f.plannedStart}
           help={est ? `Estimate: ${fmtDate(est)} for ${wu!.name}’s ${remaining} remaining scripts at ${wu!.capacityPerDay}/working day. Only an estimate.` : 'Set writer capacity in Settings → Team to get an estimate.'}>
           <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}><input className="input" type="date" value={planned} onChange={(e) => setPlanned(e.target.value)} {...inputProps(ids.ps, f.plannedStart)} />{est && <Button variant="sm" onClick={() => setPlanned(est)}>Use estimate</Button>}</div>
@@ -833,9 +840,9 @@ function EditBatchDialog({ b, open, onClose }: { b: BatchDetail; open: boolean; 
   );
 }
 
-function DateModeField({ label, id, hasShoot, mode, setMode, date, setDate, auto, rule, error }: { label: string; id: string; hasShoot: boolean; mode: 'auto' | 'manual'; setMode: (m: 'auto' | 'manual') => void; date: string; setDate: (d: string) => void; auto?: string; rule?: string; error?: string }) {
+function DateModeField({ label, id, hasShoot, mode, setMode, date, setDate, auto, rule, error, note }: { label: string; id: string; hasShoot: boolean; mode: 'auto' | 'manual'; setMode: (m: 'auto' | 'manual') => void; date: string; setDate: (d: string) => void; auto?: string; rule?: string; error?: string; note?: string }) {
   return (
-    <Field label={label} htmlFor={id} error={error} help={hasShoot && mode === 'auto' && auto ? `${fmtLong(auto)} · ${rule}` : hasShoot && mode === 'manual' ? 'Manual override — kept if the shoot moves, and flagged for review.' : undefined}>
+    <Field label={label} htmlFor={id} error={error} help={note ?? (hasShoot && mode === 'auto' && auto ? `${fmtLong(auto)} · ${rule}` : hasShoot && mode === 'manual' ? 'Manual override — kept if the shoot moves, and flagged for review.' : undefined)}>
       {hasShoot && (
         <Seg role="group" aria-label={`${label} mode`} style={{ marginBottom: 6, alignSelf: 'flex-start' }}>
           <button type="button" aria-pressed={mode === 'auto'} onClick={() => setMode('auto')}>Automatic</button>

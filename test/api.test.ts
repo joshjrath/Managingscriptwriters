@@ -1357,3 +1357,18 @@ describe('your own time zone', () => {
     expect((await manager.get('/api/users')).body.users.find((u: any) => u.id === ids.marcus).timezone).toBe('Asia/Kolkata');
   });
 });
+
+describe('final delivery sets drafts due', () => {
+  it('a batch given only a final date gets drafts by the rules’ gap', async () => {
+    const s = (await manager.get('/api/settings')).body.settings;
+    const r = await manager.post('/api/batches', { clientId: acmeId, title: 'Final only', targetCount: 1, finalDue: '2026-11-20', split: [] });
+    expect(r.status).toBe(200);
+    const d = (await manager.get(`/api/batches/${r.body.batchId}`)).body;
+    const { draftFromFinal } = await import('../shared/dates');
+    expect(d.finalDue).toBe('2026-11-20');
+    expect(d.draftDue).toBe(draftFromFinal('2026-11-20', s).date);
+    // a drafts date you give is kept as it is
+    const own = await manager.post('/api/batches', { clientId: acmeId, title: 'Both dates', targetCount: 1, draftDue: '2026-11-10', finalDue: '2026-11-20', split: [] });
+    expect((await manager.get(`/api/batches/${own.body.batchId}`)).body.draftDue).toBe('2026-11-10');
+  });
+});

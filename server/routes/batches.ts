@@ -16,7 +16,7 @@ import { conflict, forbidden, HttpError, notFound, optionalDate, parse, zs } fro
 import {
   loadActivity, loadBriefings, loadDeliveries, loadResources, loadRevisions, loadScripts,
 } from '../records';
-import { computeDeadlines, dueState, ruleText, type Clock, type ISODate } from '../../shared/dates';
+import { computeDeadlines, draftFromFinal, dueState, ruleText, type Clock, type ISODate } from '../../shared/dates';
 import {
   ACTION_RULES, checkAction, compressRanges, isDraftReady, SCRIPT_ACTIONS, splitAssignments, STAGES, summarize,
   type ScriptAction, type ScriptStatus,
@@ -95,9 +95,11 @@ export async function insertBatch(
   }
 
   const auto = shoot ? computeDeadlines(shoot.start_date, rulesOf(settings)) : null;
-  const draftDue = input.draftDue ?? auto?.draftDue ?? null;
+  // without a shoot, a final delivery date on its own sets drafts by the same gap as the shoot rules
+  const fromFinal = !auto && input.finalDue && !input.draftDue ? draftFromFinal(input.finalDue, rulesOf(settings)).date : null;
+  const draftDue = input.draftDue ?? fromFinal ?? auto?.draftDue ?? null;
   const finalDue = input.finalDue ?? auto?.finalDue ?? null;
-  const draftMode = input.draftDue || !auto ? 'manual' : 'auto';
+  const draftMode = input.draftDue || fromFinal || !auto ? 'manual' : 'auto';
   const finalMode = input.finalDue || !auto ? 'manual' : 'auto';
 
   if (draftDue && finalDue && draftDue > finalDue) fields.draftDue = 'Drafts must be due on or before final delivery';

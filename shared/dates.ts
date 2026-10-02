@@ -137,6 +137,21 @@ export function computeDeadlines(shootStart: ISODate, rules: DeadlineRules): Com
   };
 }
 
+/**
+ * Drafts due when only the final delivery date is known: the same gap the
+ * shoot rules leave between them. With drafts 5 days and final 3 days before
+ * a shoot, drafts are due 2 days before final delivery (working days in
+ * business-day mode).
+ */
+export function draftFromFinal(finalDue: ISODate, rules: DeadlineRules): { date: ISODate; rule: string } {
+  const gap = Math.max(0, rules.draftOffsetDays - rules.finalOffsetDays);
+  const unit = rules.dayMode === 'business' ? 'working day' : 'calendar day';
+  return {
+    date: gap ? offsetBefore(finalDue, gap, rules) : finalDue,
+    rule: gap ? `${gap} ${unit}${gap === 1 ? '' : 's'} before final delivery` : 'same day as final delivery',
+  };
+}
+
 export function ruleText(days: number, mode: DayMode): string {
   const unit = mode === 'business' ? 'working day' : 'calendar day';
   return `${days} ${unit}${days === 1 ? '' : 's'} before shoot starts`;

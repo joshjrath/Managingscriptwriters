@@ -213,8 +213,9 @@ export function ClientPage() {
           </Panel>
         </div>
         <div className="stack" style={{ gap: 'var(--gap)' }}>
-          <Panel title="Briefings & ideation calls" count={c.briefings.length} tools={manager ? <Button variant="sm" icon={<Plus aria-hidden />} onClick={() => setBrief('new')}>Add briefing</Button> : undefined}>
-            {!c.briefings.length ? <Empty boxed icon={<PlayCircle />} title="No briefing records yet">Add the call date, Phantom recording link, document and writing instructions.</Empty> : (
+          {/* recordings and documents live in Resources now; older briefing records still show here */}
+          {c.briefings.length > 0 && <Panel title="Briefing calls" count={c.briefings.length}>
+            {(
               <div className="stack s2">
                 {c.briefings.map((b) => (
                   <div key={b.id} className="brief">
@@ -231,7 +232,7 @@ export function ClientPage() {
                 ))}
               </div>
             )}
-          </Panel>
+          </Panel>}
           <Panel title="Batches" tools={<Seg role="group" aria-label="Batches"><button aria-pressed={tab === 'active'} onClick={() => setTab('active')}>Active {active.length}</button><button aria-pressed={tab === 'done'} onClick={() => setTab('done')}>Completed {done.length}</button></Seg>}>
             {(tab === 'active' ? active : done).length === 0 ? <Empty boxed title={tab === 'active' ? 'No active batches' : 'Nothing completed yet'} /> : (
               <div className="rows">{(tab === 'active' ? active : done).map((b) => <BatchItem key={b.id} b={b} ring />)}</div>
