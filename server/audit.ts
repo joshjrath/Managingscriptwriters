@@ -68,6 +68,7 @@ const MUTATIONS: Record<string, string> = {
   '/api/script-bank/past/:id': 'remove past scripts',
   '/api/moments/seen': 'dismiss a celebration',
   '/api/me/whats-new': 'open What’s new',
+  '/api/me/timezone': 'set their time zone',
   '/api/control/authorize': 'open the Control Center',
   '/api/editors': 'add an editor',
   '/api/editors/:id': 'change an editor',

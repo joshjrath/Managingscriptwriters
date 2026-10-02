@@ -75,6 +75,33 @@ export function fmtCutoff(cutoff: string): string {
   return `${hh}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
+/**
+ * The workspace's daily cutoff as a time in someone else's zone, on a given day:
+ * 11:59 PM in New York is "9:29 AM (next day)" in Bengaluru. Null when it's the same.
+ */
+export function cutoffIn(cutoff: string, orgTz: string, tz: string, day: string): string | null {
+  if (orgTz === tz) return null;
+  try {
+    const [h, m] = cutoff.split(':').map(Number);
+    const [y, mo, d] = day.split('-').map(Number);
+    // the instant when the org's wall clock reads `day cutoff` (two passes settle DST edges)
+    const wall = Date.UTC(y, mo - 1, d, h, m);
+    const offset = (at: number) => {
+      const p = new Intl.DateTimeFormat('en-CA', { timeZone: orgTz, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(at));
+      const g = (t: string) => Number(p.find((x) => x.type === t)?.value);
+      return Date.UTC(g('year'), g('month') - 1, g('day'), g('hour'), g('minute')) - at;
+    };
+    let at = wall - offset(wall);
+    at = wall - offset(at);
+    const time = new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(new Date(at));
+    const theirDay = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(at));
+    const shift = theirDay > day ? ' (next day)' : theirDay < day ? ' (day before)' : '';
+    return `${time}${shift}`;
+  } catch {
+    return null;
+  }
+}
+
 export const plural = (n: number, one: string, many = one + 's') => `${n} ${n === 1 ? one : many}`;
 
 export function fmtBytes(n: number | null | undefined): string {

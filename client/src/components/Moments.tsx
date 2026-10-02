@@ -14,7 +14,7 @@ import { compressRanges } from '../../../shared/workflow';
 import { fmtStamp, plural } from '../../../shared/format';
 import { celebrate, confetti } from '../fx';
 import { SPRING } from '../motion';
-import { useBoot } from './Shell';
+import { useDisplayTz } from './Shell';
 import { Button } from './ui';
 
 const RANK: Record<MomentKind, number> = { batch_done: 0, team_batch_done: 1, drafts_done: 2, team_drafts_done: 3, approved: 4, revisions: 6 };
@@ -95,7 +95,7 @@ export function MomentsHost() {
 }
 
 function MomentDialog({ moments, onClose }: { moments: Moment[]; onClose: () => void }) {
-  const { settings } = useBoot();
+  const displayTz = useDisplayTz();
   const nav = useNavigate();
   const ref = useRef<HTMLDialogElement>(null);
   const [hero, ...rest] = moments;
@@ -117,7 +117,7 @@ function MomentDialog({ moments, onClose }: { moments: Moment[]; onClose: () => 
           <span className="ring1" /><span className="ring2" />
           {t.icon}
         </m.div>
-        <div className="moment-kicker">{hero.clientName} · {hero.self ? 'just now' : fmtStamp(hero.createdAt, settings.timezone)}</div>
+        <div className="moment-kicker">{hero.clientName} · {hero.self ? 'just now' : fmtStamp(hero.createdAt, displayTz)}</div>
         <h2 id="moment-title" className="moment-title">
           {words.map((w, i) => (
             <m.span key={i} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING, delay: 0.22 + i * 0.035 }}>{w} </m.span>

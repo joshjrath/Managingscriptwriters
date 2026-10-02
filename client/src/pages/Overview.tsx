@@ -12,12 +12,13 @@ import { compressRanges, isManager } from '../../../shared/workflow';
 import { PipLegend, TodayBump, WritingFeed } from '../components/WritingPulse';
 import { TodoPanel } from '../components/Todos';
 import { TodayPill } from '../components/TodayPill';
-import { PageHeader, useBoot, useNewWork } from '../components/Shell';
+import { PageHeader, useBoot, useNewWork, useDisplayTz } from '../components/Shell';
 import { DueChart } from '../components/DueChart';
 import { AttentionRow, BatchItem } from '../components/BatchBits';
 import { Avatar, Chip, CountUp, DateTile, Empty, ErrorState, Loading, Panel } from '../components/ui';
 
 export function Overview() {
+  const displayTz = useDisplayTz();
   const { me, clock } = useBoot();
   const nav = useNavigate();
   const openNew = useNewWork();
@@ -154,7 +155,7 @@ export function Overview() {
                           <div className="title">{x.batchTitle}</div>
                           <div className="meta"><span>Scripts {compressRanges(x.scriptNumbers)}</span><span>by {x.confirmedByName}</span></div>
                         </div>
-                        <div className="side"><Chip color="mint" icon={<CheckCheck aria-hidden />}>{plural(x.scriptNumbers.length, 'script')}</Chip><span className="muted nowrap" style={{ fontSize: 12 }}>{fmtStamp(x.confirmedAt, clock.timezone)}</span></div>
+                        <div className="side"><Chip color="mint" icon={<CheckCheck aria-hidden />}>{plural(x.scriptNumbers.length, 'script')}</Chip><span className="muted nowrap" style={{ fontSize: 12 }}>{fmtStamp(x.confirmedAt, displayTz)}</span></div>
                       </Link>
                     ))}
                   </div>

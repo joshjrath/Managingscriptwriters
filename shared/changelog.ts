@@ -17,6 +17,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-02-your-timezone',
+    date: '2026-10-02',
+    title: 'Times in your own time zone',
+    summary: 'Everyone picks their time zone, and messages, notifications, activity and the clock show in it.',
+    changes: [
+      { tag: 'new', text: 'The next time you open the site it asks which time zone you’re in, with your device’s already picked. After that, message times, notifications, activity, review and delivery times, the Master log and the clock at the top all show in your time. Change it any time from your name in the sidebar → Time zone.' },
+      { tag: 'new', text: 'If your device moves to a different time zone (travelling, say), the site asks whether to switch.' },
+      { tag: 'improved', text: 'Deadlines stay on the workspace’s time so everyone shares one cutoff, and the batch page now shows it in yours too, e.g. “due by 11:59 PM EDT · 9:29 AM (next day) your time”.' },
+      { tag: 'improved', text: 'A time zone can be set without a city in Settings → Team, and clearing someone’s city keeps their time zone.' },
+    ],
+  },
+  {
     id: '2026-10-02-batch-resources',
     date: '2026-10-02',
     title: 'Give a batch the client’s links and files',

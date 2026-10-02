@@ -11,7 +11,7 @@ import { api, ApiError, useSave } from '../api';
 import type { Attachment, ReviewGroup, Script, Submission } from '../../../shared/types';
 import { compressRanges, parseRanges, parseTitleLines } from '../../../shared/workflow';
 import { fmtBytes, fmtStamp, plural } from '../../../shared/format';
-import { useBoot } from './Shell';
+import { useBoot, useDisplayTz } from './Shell';
 import { burst, centerOf, confetti, plane } from '../fx';
 import { SPRING } from '../motion';
 import { Button, Chip, Dialog, DueChip, Field, FormError, inputProps, Seg, useFieldId, useToast } from './ui';
@@ -284,7 +284,8 @@ function TitlesPreview({ scripts }: { scripts: Script[] }) {
 
 /** One document (or one writer's scripts) waiting for review. */
 export function WaitingCard({ group, showBatch = true, onReplace }: { group: ReviewGroup; showBatch?: boolean; onReplace?: () => void }) {
-  const { me, clock, settings } = useBoot();
+  const displayTz = useDisplayTz();
+  const { me, clock } = useBoot();
   const toast = useToast();
   const manager = me.role !== 'writer';
   const [dialog, setDialog] = useState<null | { mode: 'revisions' | 'approve_edits'; scripts: Script[] }>(null);
@@ -317,7 +318,7 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
           <div className="rc-title">{group.writerId === me.id ? 'You' : group.writerName} sent {n === 1 ? `script ${nums}` : `${n} scripts (${nums})`}{sub ? ' as one document' : ''}</div>
           <div className="rc-meta">
             {sub && sub.version > 1 && <Chip color="lavender">Version {sub.version}</Chip>}
-            {group.since && <span>{fmtStamp(group.since, settings.timezone)}</span>}
+            {group.since && <span>{fmtStamp(group.since, displayTz)}</span>}
           </div>
         </div>
         <DueChip m={group.batch.final} today={clock.today} />
@@ -367,7 +368,8 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
 
 /** Scripts sent back in one decision: the note, the reviewer's changes, and what to do next. */
 export function SentBackCard({ group, onResend, showBatch = true }: { group: ReviewGroup; onResend?: () => void; showBatch?: boolean }) {
-  const { me, settings } = useBoot();
+  const displayTz = useDisplayTz();
+  const { me } = useBoot();
   const r = group.review;
   const n = group.scripts.length;
   const nums = compressRanges(group.scripts.map((s) => s.number));
@@ -377,7 +379,7 @@ export function SentBackCard({ group, onResend, showBatch = true }: { group: Rev
         <div style={{ minWidth: 0 }}>
           {showBatch && <div className="rc-client">{group.batch.clientName} · <Link to={`/batches/${group.batch.id}`} className="rc-batch">{group.batch.title}</Link></div>}
           <div className="rc-title">{n === 1 ? `Script ${nums}` : `${n} scripts (${nums})`} sent back to {group.writerId === me.id ? 'you' : group.writerName}</div>
-          <div className="rc-meta">{r && <span>by {r.reviewedByName} · {fmtStamp(r.createdAt, settings.timezone)}</span>}</div>
+          <div className="rc-meta">{r && <span>by {r.reviewedByName} · {fmtStamp(r.createdAt, displayTz)}</span>}</div>
         </div>
         <Chip color="pink" icon={<RotateCcw aria-hidden />}>Revisions needed</Chip>
       </div>
@@ -391,7 +393,7 @@ export function SentBackCard({ group, onResend, showBatch = true }: { group: Rev
 
 /** Every version and decision for one writer's scripts, newest first. */
 export function DocumentHistory({ submissions }: { submissions: Submission[] }) {
-  const { settings } = useBoot();
+  const displayTz = useDisplayTz();
   if (!submissions.length) return null;
   const items = submissions.flatMap((s) => [
     { at: s.createdAt, key: `s${s.id}`, node: <><b>Version {s.version}</b> sent by {s.submittedByName} · scripts {compressRanges(s.scriptNumbers)} {hasDoc(s) && <a className="link" href={docHref(s)} target="_blank" rel="noopener noreferrer">open</a>}{s.note ? ` — “${s.note}”` : ''}</> , c: 'var(--lavender)' },
@@ -399,7 +401,7 @@ export function DocumentHistory({ submissions }: { submissions: Submission[] }) 
   ]).sort((a, b) => b.at.localeCompare(a.at));
   return (
     <div className="timeline">
-      {items.map((i) => <div key={i.key} className="tl" style={{ ['--c' as string]: i.c }}><span className="d" /><div><div className="s">{i.node}</div><div className="w">{fmtStamp(i.at, settings.timezone)}</div></div></div>)}
+      {items.map((i) => <div key={i.key} className="tl" style={{ ['--c' as string]: i.c }}><span className="d" /><div><div className="s">{i.node}</div><div className="w">{fmtStamp(i.at, displayTz)}</div></div></div>)}
     </div>
   );
 }

@@ -14,7 +14,7 @@ import { fmtDate, fmtLong, fmtRange, fmtStamp, fmtWeekday, plural } from '../../
 import { TodayPill } from '../components/TodayPill';
 import { TodoPanel } from '../components/Todos';
 import { WrittenCounter } from '../components/WrittenCounter';
-import { PageHeader, useBoot } from '../components/Shell';
+import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import { BatchProgress, Button, Chip, CountUp, DueChip, Empty, ErrorState, ExtLink, Loading, Panel, Ring, ringColor, useToast } from '../components/ui';
 import { CardList, SendDialog, SentBackCard, TitlesDialog, WaitingCard } from '../components/Review';
 import { DeliverDialog } from './BatchDetail';
@@ -23,6 +23,7 @@ import { confetti } from '../fx';
 type Entry = MyWork['batches'][number];
 
 export function MyWorkPage() {
+  const displayTz = useDisplayTz();
   const { me, users, clock } = useBoot();
   const [params, setParams] = useSearchParams();
   const viewing = isManager(me.role) && params.get('userId') ? Number(params.get('userId')) : me.id;
@@ -63,7 +64,7 @@ export function MyWorkPage() {
             <Panel title="Your delivery confirmations">
               <div className="rows">{q.data.recentDeliveries.map((d) => (
                 <div key={d.id} className="item edge-mint">
-                  <div className="body"><div className="top">{d.clientName}</div><div className="title">{d.batchTitle}</div><div className="meta">Scripts {compressRanges(d.scriptNumbers) || '—'} · {fmtStamp(d.confirmedAt, clock.timezone)}</div></div>
+                  <div className="body"><div className="top">{d.clientName}</div><div className="title">{d.batchTitle}</div><div className="meta">Scripts {compressRanges(d.scriptNumbers) || '—'} · {fmtStamp(d.confirmedAt, displayTz)}</div></div>
                   <div className="side"><Chip color="mint">Writer-confirmed</Chip></div>
                 </div>
               ))}</div>

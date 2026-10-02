@@ -10,7 +10,7 @@ import { api, qs, useSave, type ApiError } from '../api';
 import type { Deliverable, DeliverableState, ScriptBankPage } from '../../../shared/types';
 import { fmtDate, fmtStamp, plural } from '../../../shared/format';
 import { STATUS_SHORT, isManager, type ScriptStatus } from '../../../shared/workflow';
-import { PageHeader, useBoot } from '../components/Shell';
+import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import { Button, Chip, Dialog, Empty, ErrorState, Field, FormError, Loading, Panel, Seg, inputProps, useFieldId, useToast } from '../components/ui';
 
 const STATE: Record<DeliverableState, { label: string; color: string }> = {
@@ -24,7 +24,8 @@ const STATE: Record<DeliverableState, { label: string; color: string }> = {
 const scriptNumber = (q: string) => (/^#?\d{1,4}$/.test(q) ? Number(q.replace('#', '')) : null);
 
 export function ScriptBankPage() {
-  const { clients, users, settings, me } = useBoot();
+  const displayTz = useDisplayTz();
+  const { clients, users, me } = useBoot();
   const manager = isManager(me.role);
   const [adding, setAdding] = useState(false);
   const [params, setParams] = useSearchParams();
@@ -103,7 +104,7 @@ export function ScriptBankPage() {
             </Empty>
           ) : (
             <div className="rows bank">
-              {items.map((d) => (d.past ? <PastRow key={d.key} d={d} manager={manager} /> : <DeliverableRow key={d.key} d={d} tz={settings.timezone} num={num} />))}
+              {items.map((d) => (d.past ? <PastRow key={d.key} d={d} manager={manager} /> : <DeliverableRow key={d.key} d={d} tz={displayTz} num={num} />))}
             </div>
           )}
           {bank.hasNextPage && (

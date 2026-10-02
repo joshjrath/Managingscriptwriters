@@ -1340,3 +1340,20 @@ describe('client resources picked for a batch', () => {
     expect((await sarah.patch(`/api/batches/${id}`, { resourceIds: [] })).status).toBe(403);
   });
 });
+
+describe('your own time zone', () => {
+  it('starts unconfirmed, is set by the person, and shows in their bootstrap only', async () => {
+    let boot = (await marcus.get('/api/bootstrap')).body;
+    expect(boot.timezone.confirmed).toBe(false);
+    expect((await marcus.post('/api/me/timezone', { timezone: 'Mars/Olympus' })).status).toBe(400);
+    const r = await marcus.post('/api/me/timezone', { timezone: 'Asia/Kolkata' });
+    expect(r.status).toBe(200);
+    boot = (await marcus.get('/api/bootstrap')).body;
+    expect(boot.timezone).toEqual({ mine: 'Asia/Kolkata', confirmed: true });
+    // the workspace's time zone (deadlines) is unchanged, and nobody else's moves
+    expect(boot.settings.timezone).not.toBe('Asia/Kolkata');
+    expect((await sarah.get('/api/bootstrap')).body.timezone.mine).not.toBe('Asia/Kolkata');
+    // it's what the team sees for them too
+    expect((await manager.get('/api/users')).body.users.find((u: any) => u.id === ids.marcus).timezone).toBe('Asia/Kolkata');
+  });
+});

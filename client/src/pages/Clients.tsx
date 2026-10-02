@@ -12,7 +12,7 @@ import { confetti } from '../fx';
 import { SOFT } from '../motion';
 import type { Briefing, ClientDetail, ClientSummary } from '../../../shared/types';
 import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
-import { PageHeader, useBoot, useNewWork } from '../components/Shell';
+import { PageHeader, useBoot, useNewWork, useDisplayTz } from '../components/Shell';
 import { BatchItem } from '../components/BatchBits';
 import { Button, Chip, DateTile, Dialog, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel, Seg, useFieldId, useToast } from '../components/ui';
 import { RescheduleDialog, ResourceDialog, ResourceRow } from './BatchDetail';
@@ -138,8 +138,9 @@ export function ClientsPage() {
 }
 
 export function ClientPage() {
+  const displayTz = useDisplayTz();
   const { id } = useParams();
-  const { me, settings, users, clock } = useBoot();
+  const { me, users, clock } = useBoot();
   const manager = isManager(me.role);
   const openNew = useNewWork();
   const toast = useToast();
@@ -206,7 +207,7 @@ export function ClientPage() {
           <Panel title="History">
             {!c.activity.length ? <Empty title="No history yet" /> : (
               <div className="timeline" style={{ maxHeight: 460, overflowY: 'auto' }}>
-                {c.activity.map((a) => <div key={a.id} className="tl"><span className="d" /><div><div className="s">{a.summary}{a.batchTitle && <span className="muted"> · {a.batchTitle}</span>}</div><div className="w">{a.actorName ?? 'System'} · {fmtStamp(a.createdAt, settings.timezone)}</div></div></div>)}
+                {c.activity.map((a) => <div key={a.id} className="tl"><span className="d" /><div><div className="s">{a.summary}{a.batchTitle && <span className="muted"> · {a.batchTitle}</span>}</div><div className="w">{a.actorName ?? 'System'} · {fmtStamp(a.createdAt, displayTz)}</div></div></div>)}
               </div>
             )}
           </Panel>

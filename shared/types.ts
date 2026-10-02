@@ -144,6 +144,8 @@ export interface Bootstrap {
   notesImport: boolean;
   /** the newest What's new entry this person has opened */
   whatsNewSeen: string | null;
+  /** this person's own time zone (times across the site show in it) and whether they've confirmed it */
+  timezone: { mine: string | null; confirmed: boolean };
   settings: Settings;
   users: UserSummary[];
   clients: ClientLite[];

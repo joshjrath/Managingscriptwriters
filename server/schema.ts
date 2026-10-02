@@ -444,4 +444,8 @@ create table batch_resources (
 );
 create index batch_resources_resource_idx on batch_resources (resource_id);
 `,
+  // 17 · each person confirms their own time zone; times across the site show in it
+  `
+alter table users add column timezone_confirmed_at timestamptz;
+`,
 ];

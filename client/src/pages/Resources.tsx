@@ -10,7 +10,7 @@ import { api, qs } from '../api';
 import type { Resource, ResourceCategory } from '../../../shared/types';
 import { RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
 import { fmtBytes, fmtDate, fmtStamp } from '../../../shared/format';
-import { PageHeader, useBoot } from '../components/Shell';
+import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import { Empty, ErrorState, Loading, Panel } from '../components/ui';
 
 type BriefingLink = { briefingId: number; briefingTitle: string; clientId: number; clientName: string; kind: 'recording' | 'document'; url: string; callDate: string | null };
@@ -18,7 +18,8 @@ type BriefingLink = { briefingId: number; briefingTitle: string; clientId: numbe
 const ICON: Record<ResourceCategory, typeof Link2> = { folder: FolderOpen, example: FileText, asset: Image, recording: PlayCircle, document: FileText, other: Link2 };
 
 export function ResourcesPage() {
-  const { clients, settings } = useBoot();
+  const displayTz = useDisplayTz();
+  const { clients } = useBoot();
   const [params, setParams] = useSearchParams();
   const [text, setText] = useState(params.get('q') ?? '');
   const q = params.get('q') ?? '';
@@ -67,7 +68,7 @@ export function ResourcesPage() {
                         <Link className="link" to={`/clients/${r.clientId}`}>{r.clientName}</Link>
                         {r.batchId && <> › <Link className="link" to={`/batches/${r.batchId}`}>{r.batchTitle}</Link></>}
                         {r.briefingTitle && <> › {r.briefingTitle}</>}
-                        {' · '}{RESOURCE_LABEL[r.category]}{r.kind === 'file' ? ` · ${fmtBytes(r.fileSize)}` : ''} · {r.createdByName}, {fmtStamp(r.createdAt, settings.timezone)}
+                        {' · '}{RESOURCE_LABEL[r.category]}{r.kind === 'file' ? ` · ${fmtBytes(r.fileSize)}` : ''} · {r.createdByName}, {fmtStamp(r.createdAt, displayTz)}
                       </div>
                     </div>
                     <a className="btn sm" href={href} target="_blank" rel="noopener noreferrer">{r.kind === 'file' ? 'Open file' : 'Open'}<ExternalLink aria-hidden /></a>

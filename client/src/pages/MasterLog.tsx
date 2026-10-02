@@ -8,7 +8,7 @@ import { Ban, Eye, KeyRound, Lock, Pencil, ScrollText } from 'lucide-react';
 import { api, qs } from '../api';
 import type { AuditEntry } from '../../../shared/types';
 import { fmtWeekday } from '../../../shared/format';
-import { PageHeader, useBoot } from '../components/Shell';
+import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import { Button, Chip, Empty, ErrorState, Loading, Panel, Seg } from '../components/ui';
 
 type Kind = 'all' | AuditEntry['kind'];
@@ -30,7 +30,8 @@ function localParts(iso: string, timeZone: string) {
 }
 
 export function MasterLogPage() {
-  const { me, users, settings, clock } = useBoot();
+  const displayTz = useDisplayTz();
+  const { me, users, clock } = useBoot();
   const [kind, setKind] = useState<Kind>('all');
   const [userId, setUserId] = useState('');
   const [text, setText] = useState('');
@@ -72,7 +73,7 @@ export function MasterLogPage() {
         {unique.length > 0 && (
           <div className="stack s2">
             {unique.map((e) => {
-              const { day, time } = localParts(e.at, settings.timezone);
+              const { day, time } = localParts(e.at, displayTz);
               const header = day !== lastDay ? (day === clock.today ? 'Today' : fmtWeekday(day)) : null;
               lastDay = day;
               const chip = KIND_CHIP[e.kind];

@@ -7,7 +7,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bell, Building2, CalendarDays, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
-  Circle, Eye, Library, MessageCircle, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
+  Circle, Eye, Globe2, Library, MessageCircle, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
 } from 'lucide-react';
 import { LayoutGroup, m } from 'framer-motion';
 import { api, queryClient, useSave } from '../api';
@@ -22,6 +22,7 @@ import { SPRING, setMotionEnabled, useMotionSetting } from '../motion';
 import { LATEST_CHANGE } from '../../../shared/changelog';
 import { ControlCenterLink } from '../control/Link';
 import { ChatProvider, useInbox } from './Chat';
+import { openTimezoneDialog, TimezonePrompt } from './TimezonePrompt';
 
 // ── bootstrap context ────────────────────────────────────────────────────
 
@@ -30,6 +31,12 @@ export function useBoot(): Bootstrap {
   const b = useContext(BootCtx);
   if (!b) throw new Error('useBoot outside provider');
   return b;
+}
+
+/** The time zone to show times in: the person's own, or the workspace's until they've set one. */
+export function useDisplayTz(): string {
+  const b = useBoot();
+  return b.timezone?.mine ?? b.settings.timezone;
 }
 export const useIsManager = () => isManager(useBoot().me.role);
 
@@ -90,6 +97,7 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
         </div>
         <NewWorkDialog state={newWork} onClose={() => setNewWork(null)} />
         <MomentsHost />
+        <TimezonePrompt />
         <ModeBar />
         </ChatProvider>
       </NewWorkCtx.Provider>
@@ -191,6 +199,7 @@ function NavItem({ to, icon, label, collapsed, children }: { to: string; icon: R
 
 function UserMenu() {
   const { me, mode } = useBoot();
+  const tzNow = useDisplayTz();
   const motionOn = useMotionSetting();
   const [open, setOpen] = useState(false);
   const [pw, setPw] = useState(false);
@@ -224,6 +233,7 @@ function UserMenu() {
             </>
           )}
           {!mode?.viewingAs && <button role="menuitem" onClick={() => { setPw(true); setOpen(false); }}><KeyRound />Change password</button>}
+          {!mode?.viewingAs && <button role="menuitem" onClick={() => { setOpen(false); openTimezoneDialog(); }}><Globe2 />Time zone<span className="menu-hint">{fmtTimeZoneAbbr(tzNow)}</span></button>}
           <button role="menuitemcheckbox" aria-checked={motionOn} onClick={() => setMotionEnabled(!motionOn)}><Wand2 />Animations<span className={`switch${motionOn ? ' on' : ''}`} aria-hidden><i /></span></button>
           <button role="menuitem" onClick={logout}><LogOut />Sign out</button>
         </div>
@@ -313,7 +323,7 @@ const NOTE_COLOR: Record<string, string> = {
 };
 
 export function NotificationsButton({ className = '' }: { className?: string }) {
-  const { settings } = useBoot();
+  const displayTz = useDisplayTz();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
@@ -344,7 +354,7 @@ export function NotificationsButton({ className = '' }: { className?: string }) 
               <span style={{ minWidth: 0 }}>
                 <div className="t">{n.title}</div>
                 {n.body && <div className="b">{n.body}</div>}
-                <div className="w">{fmtStamp(n.createdAt, settings.timezone)}{n.readAt ? '' : ' · unread'}</div>
+                <div className="w">{fmtStamp(n.createdAt, displayTz)}{n.readAt ? '' : ' · unread'}</div>
               </span>
             </button>
           ))}
@@ -357,7 +367,8 @@ export function NotificationsButton({ className = '' }: { className?: string }) 
 // ── page header ──────────────────────────────────────────────────────────
 
 export function PageHeader({ title, sub, crumbs, children, hideNewWork }: { title: ReactNode; sub?: ReactNode; crumbs?: ReactNode; children?: ReactNode; hideNewWork?: boolean }) {
-  const { me, settings } = useBoot();
+  const displayTz = useDisplayTz();
+  const { me } = useBoot();
   const openNew = useNewWork();
   useEffect(() => { if (typeof title === 'string') document.title = `${title} · Scale Media`; }, [title]);
   return (
@@ -369,7 +380,7 @@ export function PageHeader({ title, sub, crumbs, children, hideNewWork }: { titl
       </div>
       <div className="head-tools">
         {children}
-        <OrgDate tz={settings.timezone} />
+        <OrgDate tz={displayTz} />
         {isManager(me.role) && !hideNewWork && <Button variant="primary pill lg" icon={<Plus aria-hidden />} onClick={() => openNew('shoot')}>New work</Button>}
         <NotificationsButton />
       </div>

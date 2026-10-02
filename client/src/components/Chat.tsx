@@ -12,7 +12,7 @@ import { api, queryClient } from '../api';
 import type { ChatInbox, ChatMessage } from '../../../shared/types';
 import { ROLE_LABEL } from '../../../shared/workflow';
 import { fmtAgo } from '../../../shared/format';
-import { useBoot } from './Shell';
+import { useBoot, useDisplayTz } from './Shell';
 import { Avatar } from './ui';
 import { SPRING } from '../motion';
 
@@ -169,8 +169,9 @@ function dayLabel(ts: string, tz: string) {
 const timeOf = (ts: string, tz: string) => new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(new Date(ts));
 
 function ChatWindow({ userId, min, onMin, onClose }: { userId: number; min: boolean; onMin: () => void; onClose: () => void }) {
-  const { me, users, mode, settings } = useBoot();
-  const tz = settings.timezone;
+  const displayTz = useDisplayTz();
+  const { me, users, mode } = useBoot();
+  const tz = displayTz;
   const who = users.find((u) => u.id === userId);
   const name = who?.name ?? 'Team member';
   const [msgs, setMsgs] = useState<ChatMessage[] | null>(null);

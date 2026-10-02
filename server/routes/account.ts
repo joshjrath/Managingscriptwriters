@@ -105,6 +105,14 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     return { ok: true };
   });
 
+  // your own time zone: everything time-of-day on the site shows in it
+  app.post('/api/me/timezone', async (req) => {
+    const me = requireUser(req);
+    const { timezone } = parse(z.object({ timezone: z.string().trim().refine(isValidTimeZone, 'Pick a time zone from the list') }), req.body);
+    await db.query(`update users set timezone = $2, timezone_confirmed_at = now(), updated_at = now() where id = $1`, [me.id, timezone]);
+    return { timezone: { mine: timezone, confirmed: true } };
+  });
+
   // ── team ───────────────────────────────────────────────────────────────
 
   const ROLES = ['owner', 'manager', 'writer'] as const;
@@ -140,14 +148,14 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
   ): Record<string, unknown> {
     const set: Record<string, unknown> = {};
     if (input.city !== undefined) {
-      if (!input.city) Object.assign(set, { city: null, city_code: null, country: null, lat: null, lon: null, timezone: null });
+      // clearing the city keeps their time zone: people can set that themselves without a city
+      if (!input.city) Object.assign(set, { city: null, city_code: null, country: null, lat: null, lon: null, timezone: input.timezone ?? current?.timezone ?? null });
       else {
         const c = findCity(input.city);
         if (!c) throw new HttpError(400, 'Pick a city from the list', { city: 'Pick a city from the list' });
         Object.assign(set, { city: c.name, city_code: c.code, country: c.country, lat: c.lat, lon: c.lon, timezone: zoneFor(c, input.timezone, current) });
       }
     } else if (input.timezone !== undefined) {
-      if (!current?.city) throw new HttpError(400, 'Pick a city first', { city: 'Pick a city first' });
       set.timezone = input.timezone;
     }
     if (input.workStart !== undefined || input.workEnd !== undefined) {

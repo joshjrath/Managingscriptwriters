@@ -13,8 +13,8 @@ import type { BatchDetail, ClientDetail, Priority, ReschedulePreview, Resource, 
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
 import { ACTION_RULES, checkAction, compressRanges, parseRanges, STATUS_LABEL, type ScriptAction, type ScriptStatus, isManager } from '../../../shared/workflow';
 import { addDays, computeDeadlines, diffDays, isISODate, suggestStart, type ISODate } from '../../../shared/dates';
-import { fmtBytes, fmtCutoff, fmtDate, fmtLong, fmtRange, fmtStamp, fmtTimeZoneAbbr, plural } from '../../../shared/format';
-import { PageHeader, useBoot } from '../components/Shell';
+import { cutoffIn, fmtBytes, fmtCutoff, fmtDate, fmtLong, fmtRange, fmtStamp, fmtTimeZoneAbbr, plural } from '../../../shared/format';
+import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import {
   Avatar, BatchProgress, Button, Chip, CountUp, Dialog, DueChip, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel,
   Ring, ringColor, StageChip, StatusChip, useFieldId, useToast, Seg,
@@ -33,6 +33,7 @@ export function BatchPage() {
 }
 
 function BatchView({ b }: { b: BatchDetail }) {
+  const displayTz = useDisplayTz();
   const { me, clock, settings } = useBoot();
   const manager = isManager(me.role);
   const toast = useToast();
@@ -49,7 +50,7 @@ function BatchView({ b }: { b: BatchDetail }) {
   const mine = b.writers.find((w) => w.userId === me.id);
   const [todoFor, setTodoFor] = useState<number | null>(null);
   const [sendBack, setSendBack] = useState<number | null>(null);
-  const tz = fmtTimeZoneAbbr(settings.timezone);
+  const tz = fmtTimeZoneAbbr(settings.timezone); // deadlines are the workspace's
 
   return (
     <>
@@ -67,7 +68,7 @@ function BatchView({ b }: { b: BatchDetail }) {
         {b.blocked && (
           <div className="banner red" role="status">
             <OctagonAlert aria-hidden />
-            <div className="txt"><b>Blocked: {b.blockerNote}</b><span>Flagged by {b.blockedByName ?? 'someone'} · {fmtStamp(b.blockedAt, settings.timezone)}. Workflow stage is still tracked separately.</span></div>
+            <div className="txt"><b>Blocked: {b.blockerNote}</b><span>Flagged by {b.blockedByName ?? 'someone'} · {fmtStamp(b.blockedAt, displayTz)}. Workflow stage is still tracked separately.</span></div>
             {canBlock && <Button variant="sm" busy={unblock.isPending} onClick={() => unblock.mutate(undefined)}>Clear blocker</Button>}
           </div>
         )}
@@ -120,7 +121,7 @@ function BatchView({ b }: { b: BatchDetail }) {
                   </div>
                   <div className="side">
                     <span className="when num">{w.userId != null && w.written > w.draftReady + w.revisions ? `${w.written} / ${w.count} written` : `${w.draftReady} / ${w.count} drafts ready`}</span>
-                    <span className="muted num" style={{ fontSize: 12 }}>{w.revisions > 0 ? `${w.revisions} sent back · ` : ''}{w.written > w.draftReady + w.revisions ? `${w.draftReady} sent · ` : ''}{w.delivered} delivered{w.writtenAt ? ` · updated ${fmtStamp(w.writtenAt, settings.timezone)}` : ''}</span>
+                    <span className="muted num" style={{ fontSize: 12 }}>{w.revisions > 0 ? `${w.revisions} sent back · ` : ''}{w.written > w.draftReady + w.revisions ? `${w.draftReady} sent · ` : ''}{w.delivered} delivered{w.writtenAt ? ` · updated ${fmtStamp(w.writtenAt, displayTz)}` : ''}</span>
                     {manager && w.userId != null && w.userId !== me.id && w.draftReady < w.count && (
                       <WrittenCounter compact batchId={b.id} writerId={w.userId} forOther total={w.count} sent={w.draftReady} written={Math.max(w.written, w.draftReady)} />
                     )}
@@ -131,7 +132,7 @@ function BatchView({ b }: { b: BatchDetail }) {
             <PipLegend />
           </Panel>
 
-          <Panel title="Deadlines" sub={`due by ${fmtCutoff(settings.cutoff)} ${tz}`}>
+          <Panel title="Deadlines" sub={`due by ${fmtCutoff(settings.cutoff)} ${tz}${(() => { const mine = cutoffIn(settings.cutoff, settings.timezone, displayTz, clock.today); return mine ? ` · ${mine} your time` : ''; })()}`}>
             <div className="deadline-list">
               <div className="deadline" style={{ ['--c' as string]: 'var(--salmon)' }}>
                 <span className="ic"><Camera /></span>
@@ -185,7 +186,7 @@ function BatchView({ b }: { b: BatchDetail }) {
               {b.activity.map((a) => (
                 <div key={a.id} className="tl" style={{ ['--c' as string]: a.action.includes('deliver') ? 'var(--mint)' : a.action.includes('revision') ? 'var(--pink)' : a.action.includes('approve') ? 'var(--mint)' : a.action.includes('submit') ? 'var(--lavender)' : a.action.includes('block') ? 'var(--red)' : a.action.includes('deadline') ? 'var(--yellow)' : 'var(--line)' }}>
                   <span className="d" />
-                  <div><div className="s">{a.summary}</div><div className="w">{a.actorName ?? 'System'} · {fmtStamp(a.createdAt, settings.timezone)}</div></div>
+                  <div><div className="s">{a.summary}</div><div className="w">{a.actorName ?? 'System'} · {fmtStamp(a.createdAt, displayTz)}</div></div>
                 </div>
               ))}
             </div>
@@ -587,7 +588,8 @@ function AssignDialog({ count, busy, error, onClose, onSubmit }: { count: number
 }
 
 function ScriptDialog({ s, b, onClose }: { s: Script; b: BatchDetail; onClose: () => void }) {
-  const { me, settings } = useBoot();
+  const displayTz = useDisplayTz();
+  const { me } = useBoot();
   const toast = useToast();
   const canEdit = isManager(me.role) || s.assigneeId === me.id;
   const [title, setTitle] = useState(s.title ?? '');
@@ -603,20 +605,20 @@ function ScriptDialog({ s, b, onClose }: { s: Script; b: BatchDetail; onClose: (
       footer={canEdit ? <div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={save.isPending} onClick={() => save.mutate(undefined)}>Save script</Button></div> : undefined}>
       <div className="form">
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
-        {s.openRevision && <div className="banner pink"><RotateCcw aria-hidden /><div className="txt"><b>Revisions requested</b><span>{s.openRevision.note} — {s.openRevision.requestedByName}, {fmtStamp(s.openRevision.requestedAt, settings.timezone)}</span></div></div>}
+        {s.openRevision && <div className="banner pink"><RotateCcw aria-hidden /><div className="txt"><b>Revisions requested</b><span>{s.openRevision.note} — {s.openRevision.requestedByName}, {fmtStamp(s.openRevision.requestedAt, displayTz)}</span></div></div>}
         <Field label="Title" optional htmlFor={ids.t}><input className="input" id={ids.t} value={title} onChange={(e) => setTitle(e.target.value)} disabled={!canEdit} placeholder={`Script ${s.number}`} /></Field>
         <Field label="Writing document link" optional htmlFor={ids.d} error={f.docUrl}><input className="input" type="url" placeholder="https://docs.google.com/…" value={docUrl} onChange={(e) => setDocUrl(e.target.value)} disabled={!canEdit} {...inputProps(ids.d, f.docUrl)} /></Field>
         <Field label="Timeliner link" optional htmlFor={ids.l} error={f.timelinerUrl}><input className="input" type="url" placeholder="https://" value={tl} onChange={(e) => setTl(e.target.value)} disabled={!canEdit} {...inputProps(ids.l, f.timelinerUrl)} /></Field>
         <Field label="Notes" optional htmlFor={ids.n}><textarea className="textarea" id={ids.n} value={notes} onChange={(e) => setNotes(e.target.value)} disabled={!canEdit} /></Field>
         {!canEdit && <p className="muted" style={{ fontSize: 13 }}>Only {s.assigneeName ?? 'the assigned writer'} or a manager can edit this script.</p>}
         <dl className="kv">
-          <dt>Submitted</dt><dd>{s.submittedAt ? fmtStamp(s.submittedAt, settings.timezone) : '—'}</dd>
-          <dt>Approved</dt><dd>{s.approvedAt ? `${fmtStamp(s.approvedAt, settings.timezone)} by ${s.approvedByName}` : '—'}</dd>
-          <dt>Delivered</dt><dd>{s.deliveredAt ? `${fmtStamp(s.deliveredAt, settings.timezone)} by ${s.deliveredByName} (writer-confirmed)` : '—'}</dd>
+          <dt>Submitted</dt><dd>{s.submittedAt ? fmtStamp(s.submittedAt, displayTz) : '—'}</dd>
+          <dt>Approved</dt><dd>{s.approvedAt ? `${fmtStamp(s.approvedAt, displayTz)} by ${s.approvedByName}` : '—'}</dd>
+          <dt>Delivered</dt><dd>{s.deliveredAt ? `${fmtStamp(s.deliveredAt, displayTz)} by ${s.deliveredByName} (writer-confirmed)` : '—'}</dd>
         </dl>
         {history.length > 0 && (
           <div><div className="section-title">Revision history</div>
-            <div className="timeline">{history.map((r) => <div key={r.id} className="tl" style={{ ['--c' as string]: r.resolvedAt ? 'var(--mint)' : 'var(--pink)' }}><span className="d" /><div><div className="s">{r.note}</div><div className="w">{r.requestedByName} · {fmtStamp(r.requestedAt, settings.timezone)}{r.resolvedAt ? ` · resolved (${r.resolution}) ${fmtStamp(r.resolvedAt, settings.timezone)}` : ' · open'}</div></div></div>)}</div>
+            <div className="timeline">{history.map((r) => <div key={r.id} className="tl" style={{ ['--c' as string]: r.resolvedAt ? 'var(--mint)' : 'var(--pink)' }}><span className="d" /><div><div className="s">{r.note}</div><div className="w">{r.requestedByName} · {fmtStamp(r.requestedAt, displayTz)}{r.resolvedAt ? ` · resolved (${r.resolution}) ${fmtStamp(r.resolvedAt, displayTz)}` : ' · open'}</div></div></div>)}</div>
           </div>
         )}
       </div>
@@ -703,7 +705,7 @@ function BriefSection({ b }: { b: BatchDetail }) {
 }
 
 function ReviewNotes({ b }: { b: BatchDetail }) {
-  const { settings } = useBoot();
+  const displayTz = useDisplayTz();
   // one entry per decision: sending ten scripts back with one note is one note
   const groups = new Map<string, { key: string; note: string; by: string; at: string; open: number[]; done: number[]; resolution: string | null }>();
   for (const r of b.revisions) {
@@ -726,7 +728,7 @@ function ReviewNotes({ b }: { b: BatchDetail }) {
               </div>
               <div className="side">
                 {g.open.length ? <Chip color="pink" icon={<RotateCcw aria-hidden />}>{g.done.length ? `${g.open.length} still open` : 'Open'}</Chip> : <Chip color="mint" icon={<Check aria-hidden />}>{g.resolution === 'approved' ? 'Approved' : 'Resubmitted'}</Chip>}
-                <span className="muted nowrap" style={{ fontSize: 12 }}>{fmtStamp(g.at, settings.timezone)}</span>
+                <span className="muted nowrap" style={{ fontSize: 12 }}>{fmtStamp(g.at, displayTz)}</span>
               </div>
             </div>
           ))}
@@ -737,7 +739,7 @@ function ReviewNotes({ b }: { b: BatchDetail }) {
 }
 
 function Deliveries({ b }: { b: BatchDetail }) {
-  const { settings } = useBoot();
+  const displayTz = useDisplayTz();
   return (
     <Panel title="Delivery records" sub="writer-confirmed">
       {b.progress.delivered < b.progress.total && b.progress.delivered > 0 && <div className="banner yellow" style={{ marginBottom: 12 }}><AlertTriangle aria-hidden /><div className="txt"><b>Partially delivered: {b.progress.delivered} / {b.progress.total}</b><span>The batch is complete only when every script is recorded as delivered.</span></div></div>}
@@ -747,7 +749,7 @@ function Deliveries({ b }: { b: BatchDetail }) {
             <div key={d.id} className="item edge-mint">
               <div className="body">
                 <div className="title">Scripts {compressRanges(d.scriptNumbers) || '—'}</div>
-                <div className="meta"><span>Writer-confirmed by <b style={{ color: 'var(--text)' }}>{d.confirmedByName}</b></span><span>{fmtStamp(d.confirmedAt, settings.timezone)}</span></div>
+                <div className="meta"><span>Writer-confirmed by <b style={{ color: 'var(--text)' }}>{d.confirmedByName}</b></span><span>{fmtStamp(d.confirmedAt, displayTz)}</span></div>
                 {d.note && <div className="muted" style={{ fontSize: 13 }}>{d.note}</div>}
                 {d.scriptNumbers.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>These scripts were later moved back to approved.</div>}
               </div>

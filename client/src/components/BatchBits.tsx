@@ -10,7 +10,7 @@ import type { AttentionItem, AttentionKind, BatchDetail, BatchSummary } from '..
 import { PRIORITY_LABEL } from '../../../shared/types';
 import { fmtDate, fmtLong, fmtRange, fmtStamp } from '../../../shared/format';
 import { BatchProgress, Button, Chip, Dialog, DueChip, ErrorState, Loading, Ring, ringColor, StageChip, edgeFor } from './ui';
-import { useBoot } from './Shell';
+import { useBoot, useDisplayTz } from './Shell';
 import { TodayBump } from './WritingPulse';
 
 export function writersText(b: BatchSummary): string {
@@ -92,7 +92,8 @@ export function AttentionRow({ a }: { a: AttentionItem }) {
 // ── quick inspect drawer ─────────────────────────────────────────────────
 
 export function BatchDrawer({ id, onClose }: { id: number | null; onClose: () => void }) {
-  const { clock, settings } = useBoot();
+  const displayTz = useDisplayTz();
+  const { clock } = useBoot();
   const nav = useNavigate();
   const q = useQuery({ queryKey: ['batch', id], queryFn: () => api<BatchDetail>(`/api/batches/${id}`), enabled: id != null });
   const b = q.data;
@@ -104,7 +105,7 @@ export function BatchDrawer({ id, onClose }: { id: number | null; onClose: () =>
       {b && (
         <div className="stack s4">
           <div className="row-flex s2"><StageChip stage={b.stage} /><DueChip m={b.next} today={clock.today} />{b.blocked && <Chip color="red" icon={<Ban aria-hidden />}>Blocked</Chip>}</div>
-          {b.blocked && <div className="banner red"><OctagonAlert aria-hidden /><div className="txt"><b>{b.blockerNote}</b><span>Flagged by {b.blockedByName ?? 'someone'} · {fmtStamp(b.blockedAt, settings.timezone)}</span></div></div>}
+          {b.blocked && <div className="banner red"><OctagonAlert aria-hidden /><div className="txt"><b>{b.blockerNote}</b><span>Flagged by {b.blockedByName ?? 'someone'} · {fmtStamp(b.blockedAt, displayTz)}</span></div></div>}
           <BatchProgress p={b.progress} written={b.written} />
           <div className="deadline-list">
             {b.shootStart && <div className="deadline" style={{ ['--c' as string]: 'var(--salmon)' }}><span className="ic"><Camera /></span><div><div className="k">Shoot</div><div className="v">{fmtRange(b.shootStart, b.shootEnd)}</div></div></div>}
@@ -126,7 +127,7 @@ export function BatchDrawer({ id, onClose }: { id: number | null; onClose: () =>
           <div>
             <div className="section-title">Recent activity</div>
             <div className="timeline">
-              {b.activity.slice(0, 6).map((a) => <div key={a.id} className="tl"><span className="d" /><div><div className="s">{a.summary}</div><div className="w">{a.actorName ?? 'System'} · {fmtStamp(a.createdAt, settings.timezone)}</div></div></div>)}
+              {b.activity.slice(0, 6).map((a) => <div key={a.id} className="tl"><span className="d" /><div><div className="s">{a.summary}</div><div className="w">{a.actorName ?? 'System'} · {fmtStamp(a.createdAt, displayTz)}</div></div></div>)}
             </div>
           </div>
         </div>

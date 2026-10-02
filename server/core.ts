@@ -71,7 +71,7 @@ export async function loadUsers(db: Db): Promise<UserSummary[]> {
   return rows.map((r) => ({
     id: r.id, name: r.name, email: r.email, role: r.role, active: r.active && !r.removed_at, removed: !!r.removed_at, capacityPerDay: r.capacity_per_day, tempPassword: null,
     city: r.city ? `${r.city}${r.country ? `, ${r.country}` : ''}` : null,
-    timezone: r.city ? r.timezone : null,
+    timezone: r.timezone,
     workHours: r.work_start != null && r.work_end != null ? [r.work_start, r.work_end] : null,
   }));
 }
