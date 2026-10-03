@@ -18,7 +18,7 @@ import type { Me } from '../shared/types';
 
 const READ_PIECE = 512 * 1024;
 const WRITE_PIECE = 4 * 1024 * 1024;
-const BLOCKED_EXT = /\.(exe|bat|cmd|com|msi|scr|js|mjs|vbs|ps1|sh|jar|app|dll)$/i;
+const BLOCKED_EXT = /\.(exe|bat|cmd|com|msi|msp|scr|pif|cpl|hta|lnk|reg|scf|js|jse|mjs|vbs|vbe|wsf|ps1|sh|jar|app|dll)$/i;
 
 /** An upload waiting on disk until it's stored (or, for small generated files, already in memory). */
 export interface UploadedFile { filename: string; mime: string; size: number; sha256: string; path?: string; data?: Buffer }
@@ -57,10 +57,26 @@ export async function spool(req: FastifyRequest, part: MultipartFile, limitBytes
   return { filename: part.filename, mime: part.mimetype || 'application/octet-stream', path: tmp, size, sha256: hash.digest('hex') };
 }
 
+/**
+ * The name a file is stored and downloaded under: nothing that could break a header, no trailing dots
+ * or spaces (Windows drops them), and at most 200 characters with the extension kept, so a blocked type
+ * can't hide behind the cut ("…aaa.exe.pdf" must not become "…aaa.exe").
+ */
+export function storedFileName(name: string): string {
+  const clean = name.replace(/[\r\n"\\/]/g, '_').replace(/[.\s]+$/, '') || 'file';
+  if (clean.length <= 200) return clean;
+  const dot = clean.lastIndexOf('.');
+  const ext = dot > 0 && clean.length - dot <= 16 ? clean.slice(dot) : '';
+  return clean.slice(0, 200 - ext.length) + ext;
+}
+
+/** Whether a file of this name is refused (judged on the name it would be stored under). */
+export const isBlockedFile = (name: string) => BLOCKED_EXT.test(storedFileName(name));
+
 /** Saves an upload into the files table, piece by piece. Run it inside the caller's transaction. */
 export async function storeFile(t: Db, me: Me, file: UploadedFile): Promise<number> {
-  if (BLOCKED_EXT.test(file.filename)) throw new HttpError(400, 'That file type can’t be uploaded', { file: 'That file type can’t be uploaded' });
-  const safeName = file.filename.replace(/[\r\n"\\/]/g, '_').slice(0, 200) || 'file';
+  const safeName = storedFileName(file.filename);
+  if (BLOCKED_EXT.test(safeName)) throw new HttpError(400, 'That file type can’t be uploaded', { file: 'That file type can’t be uploaded' });
   const row = await t.one<{ id: number }>(
     `insert into files (filename, mime, size, sha256, data, uploaded_by) values ($1, $2, $3, $4, ''::bytea, $5) returning id`,
     [safeName, file.mime, file.size, file.sha256, me.id],
@@ -75,7 +91,6 @@ export async function storeFile(t: Db, me: Me, file: UploadedFile): Promise<numb
   return id;
 }
 
-export const isBlockedFile = (name: string) => BLOCKED_EXT.test(name);
 
 /** A stored file's contents as a stream, read from the database in small pieces. */
 export function fileStream(db: Db, id: number, size: number): Readable {

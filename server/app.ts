@@ -66,6 +66,8 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('Referrer-Policy', 'same-origin');
     reply.header('X-Frame-Options', 'DENY');
+    // production is always served over HTTPS (and its cookies are Secure): browsers should never try plain HTTP
+    if (ctx.secureCookies) reply.header('Strict-Transport-Security', 'max-age=31536000');
     if (isApiRequest(req)) {
       if (!reply.hasHeader('Cache-Control')) reply.header('Cache-Control', 'no-store');
     } else if (!reply.hasHeader('Content-Security-Policy')) {

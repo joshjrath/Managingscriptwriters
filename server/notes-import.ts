@@ -4,7 +4,7 @@
 // editable preview; nothing is saved until it's confirmed, and then it's all
 // saved in one go (or not at all).
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 // The Claude SDK is loaded the first time notes are read, not at startup, so it
 // takes no memory on a server that never uses Paste notes.
 import type Anthropic from '@anthropic-ai/sdk';
@@ -41,6 +41,9 @@ export interface NotesContext {
   clients: { name: string; status: string }[];
   team: { name: string; role: string }[];
 }
+
+/** PDFs go to Claude as documents; anything else is read as text. */
+const isPdf = (f: { name: string; mime: string }) => f.mime === 'application/pdf' || /\.pdf$/i.test(f.name);
 
 export interface NotesReader {
   read(input: NotesInput, context: NotesContext): Promise<Omit<ImportPlan, 'clients'> & { clients: Omit<ImportClient, 'existingClientId'>[] }>;
@@ -121,7 +124,7 @@ export function claudeNotesReader(given?: Anthropic): NotesReader {
       client ??= new SDK();
       const content: Anthropic.Beta.BetaContentBlockParam[] = [];
       for (const f of input.files) {
-        if (f.mime === 'application/pdf' || /\.pdf$/i.test(f.name)) {
+        if (isPdf(f)) {
           content.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: f.data.toString('base64') }, title: f.name });
         } else {
           content.push({ type: 'text', text: `File "${f.name}":\n${f.data.toString('utf8')}` });
@@ -212,9 +215,14 @@ async function finishPlan(db: Db, raw: Awaited<ReturnType<NotesReader['read']>>)
 export async function applyPlan(ctx: Ctx, me: Me, plan: z.infer<typeof planSchema>): Promise<ImportResult> {
   const settings = await loadSettings(ctx.db);
   const users = (await loadUsers(ctx.db)).filter((u) => u.active && !u.removed);
+  // a full name, or a first name only one person on the team has; otherwise nobody is guessed
+  // (the same rule as quick entry), and those scripts stay unassigned with a warning
   const findUser = (name: string) => {
     const n = name.trim().toLowerCase();
-    return users.find((u) => u.name.toLowerCase() === n) ?? users.filter((u) => u.name.toLowerCase().split(/\s+/)[0] === n).at(0);
+    const full = users.find((u) => u.name.toLowerCase() === n);
+    if (full) return { u: full, same: [] };
+    const same = users.filter((u) => u.name.toLowerCase().split(/\s+/)[0] === n);
+    return same.length === 1 ? { u: same[0], same } : { u: undefined, same };
   };
   const warnings: string[] = [];
   const result: ImportResult['clients'] = [];
@@ -258,8 +266,13 @@ export async function applyPlan(ctx: Ctx, me: Me, plan: z.infer<typeof planSchem
       const shootIds = new Map<string, number>();
       const withShoot = new Set<number>(); // batches already created together with their shoot
       const batchFor = (b: (typeof p.batches)[number]) => {
-        const writers = b.writerNames.map((n) => ({ n, u: findUser(n) }));
-        for (const w of writers) if (!w.u) warnings.push(`${p.name}: “${w.n}” isn’t on the team, so those scripts are unassigned.`);
+        const writers = b.writerNames.map((n) => ({ n, ...findUser(n) }));
+        for (const w of writers) {
+          if (w.u) continue;
+          warnings.push(w.same.length
+            ? `${p.name}: “${w.n}” could be ${w.same.map((u) => u.name).join(' or ')}, so those scripts are unassigned.`
+            : `${p.name}: “${w.n}” isn’t on the team, so those scripts are unassigned.`);
+        }
         const ids = [...new Set(writers.map((w) => w.u?.id).filter((x): x is number => !!x))];
         const counts = evenSplit(b.targetCount ?? 0, ids.length);
         return {
@@ -302,14 +315,39 @@ export async function applyPlan(ctx: Ctx, me: Me, plan: z.infer<typeof planSchem
 const FILE_LIMIT = 10 * 1024 * 1024;
 // files are held in memory while Claude reads them, so cap the total too
 const TOTAL_LIMIT = 20 * 1024 * 1024;
+/** pasted text and text files together (PDFs are read as documents); each read is billed by its length */
+const TEXT_LIMIT = 60_000;
+const ANSWERS_LIMIT = 10_000;
+/** each read costs money: one at a time per person, and at most this many an hour */
+const READS_PER_HOUR = 30;
 
 export function registerNotesImportRoutes(app: FastifyInstance, ctx: Ctx) {
+  const reading = new Set<number>();
+  const readsAt = new Map<number, number[]>();
+
   app.post('/api/import/read', async (req) => {
-    requireManager(req);
+    const me = requireManager(req);
     if (!ctx.notesReader) throw new HttpError(503, 'Reading notes with AI isn’t set up yet. Add ANTHROPIC_API_KEY to the server’s environment settings.', undefined, 'not_configured');
+    if (reading.has(me.id)) throw new HttpError(429, 'Your notes are still being read. Wait for that to finish.');
+    const hourAgo = Date.now() - 3_600_000;
+    const recent = (readsAt.get(me.id) ?? []).filter((t) => t > hourAgo);
+    if (recent.length >= READS_PER_HOUR) throw new HttpError(429, 'That’s a lot of notes read in an hour. Try again a little later.');
+    readsAt.set(me.id, [...recent, Date.now()]);
+    reading.add(me.id);
+    try {
+      return await readNotes(req, ctx.notesReader);
+    } finally {
+      reading.delete(me.id);
+    }
+  });
+
+  async function readNotes(req: FastifyRequest, reader: NotesReader) {
     const input: NotesInput = { text: '', files: [], answers: null };
     if (req.isMultipart()) {
-      for await (const part of req.parts({ limits: { fileSize: FILE_LIMIT, files: 5 } })) {
+      // A file over the limit comes back cut short (rather than as an error) so it gets its own message
+      // below. @fastify/multipart honours throwFileSizeLimit in parts() but its types only list it for files().
+      const options = { limits: { fileSize: FILE_LIMIT, files: 5 }, throwFileSizeLimit: false };
+      for await (const part of req.parts(options)) {
         if (part.type === 'file') {
           const data = await part.toBuffer();
           if (part.file.truncated) throw new HttpError(413, `“${part.filename}” is over 10 MB`);
@@ -320,24 +358,26 @@ export function registerNotesImportRoutes(app: FastifyInstance, ctx: Ctx) {
         else if (part.fieldname === 'answers') input.answers = String(part.value ?? '') || null;
       }
     } else {
-      const body = parse(z.object({ text: z.string().max(60000).default(''), answers: z.string().max(10000).nullable().default(null) }), req.body);
+      const body = parse(z.object({ text: z.string().max(TEXT_LIMIT).default(''), answers: z.string().max(ANSWERS_LIMIT).nullable().default(null) }), req.body);
       input.text = body.text;
       input.answers = body.answers;
     }
     input.text = input.text.trim();
     if (!input.text && !input.files.length) throw new HttpError(400, 'Paste your notes or add a file', { text: 'Paste your notes or add a file' });
-    if (input.text.length > 60000) throw new HttpError(400, 'That’s a lot of notes — paste up to about 60,000 characters at a time.');
+    const textFiles = input.files.filter((f) => !isPdf(f)).reduce((n, f) => n + f.data.toString('utf8').length, 0);
+    if (input.text.length + textFiles > TEXT_LIMIT) throw new HttpError(400, 'That’s a lot of notes — paste up to about 60,000 characters at a time.');
+    if ((input.answers?.length ?? 0) > ANSWERS_LIMIT) throw new HttpError(400, 'Keep your answers under 10,000 characters.');
     const settings = await loadSettings(ctx.db);
     const clock = await clockFor(ctx, settings);
     const rules = rulesOf(settings);
     const clients = await ctx.db.query<{ name: string; status: string }>(`select name, status from clients order by lower(name)`);
     const team = (await loadUsers(ctx.db)).filter((u) => u.active && !u.removed).map((u) => ({ name: u.name, role: u.role }));
-    const raw = await ctx.notesReader.read(input, {
+    const raw = await reader.read(input, {
       today: clock.today, weekday: new Date(`${clock.today}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' }), timezone: settings.timezone,
       draftOffsetDays: rules.draftOffsetDays, finalOffsetDays: rules.finalOffsetDays, dayMode: rules.dayMode, clients, team,
     });
     return { plan: await finishPlan(ctx.db, raw) };
-  });
+  }
 
   app.post('/api/import/apply', async (req) => {
     const me = requireManager(req);

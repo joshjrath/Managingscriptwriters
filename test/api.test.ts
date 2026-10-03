@@ -378,6 +378,48 @@ describe('permissions are enforced on the server', () => {
   });
 });
 
+describe('uploads, links and headers', () => {
+  const upload = (filename: string, type = 'application/octet-stream') => {
+    const boundary = '----smup';
+    const payload = [
+      `--${boundary}\r\nContent-Disposition: form-data; name="clientId"\r\n\r\n${acmeId}`,
+      `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${filename}"\r\nContent-Type: ${type}\r\n\r\nhello`,
+      `--${boundary}--\r\n`,
+    ].join('\r\n');
+    return app.inject({ method: 'POST', url: '/api/resources/upload', headers: { 'x-scale-media': '1', cookie: manager.cookie, 'content-type': `multipart/form-data; boundary=${boundary}` }, payload });
+  };
+
+  it('judges a file by the name it is stored under, so a blocked type can’t hide behind a long name', async () => {
+    expect((await upload('setup.exe')).statusCode).toBe(400);
+    expect((await upload('setup.exe.')).statusCode).toBe(400); // Windows drops the trailing dot
+    const long = await upload(`${'a'.repeat(196)}.exe.pdf`, 'application/pdf');
+    expect(long.statusCode).toBe(200);
+    const fileId = JSON.parse(long.body).resource.fileId;
+    const got = await app.inject({ method: 'GET', url: `/api/files/${fileId}`, headers: { cookie: manager.cookie } });
+    expect(String(got.headers['content-disposition'])).toMatch(/\.pdf"?$/);
+    expect(String(got.headers['content-disposition'])).not.toMatch(/\.exe"?$/);
+  });
+
+  it('accepts only http(s) links for past documents, like every other link', async () => {
+    for (const url of ['javascript:alert(1)', 'data:text/html,<script>1</script>']) {
+      const r = await manager.post('/api/script-bank/past', { clientId: acmeId, title: 'Bad link', url });
+      expect(r.status).toBe(400);
+      expect(r.body.error.fields.url).toMatch(/https:\/\//);
+    }
+    expect((await manager.post('/api/script-bank/past', { clientId: acmeId, title: 'Good link', url: 'https://docs.example/old-scripts' })).status).toBe(200);
+  });
+
+  it('tells browsers to use HTTPS only in production', async () => {
+    expect((await call('GET', '/api/auth/status')).headers['strict-transport-security']).toBeUndefined();
+    ctx.secureCookies = true;
+    try {
+      expect((await call('GET', '/api/auth/status')).headers['strict-transport-security']).toBe('max-age=31536000');
+    } finally {
+      ctx.secureCookies = false;
+    }
+  });
+});
+
 describe('bootstrap', () => {
   it('tells the page the server’s real upload limit, so its help text matches what is accepted', async () => {
     expect((await sarah.get('/api/bootstrap')).body.uploadLimitMb).toBe(5);
@@ -988,6 +1030,38 @@ describe('paste notes (AI import)', () => {
     expect(r.status).toBe(409);
     expect(r.body.error.message).toMatch(/archived/);
     expect((await manager.get('/api/clients?status=all')).body.clients.some((c: any) => c.name === 'Fresh Start Co')).toBe(false);
+  });
+
+  it('limits what a read can cost: text files count with the pasted text, and reads per person', async () => {
+    const form = (fields: Record<string, string>, file?: { name: string; type: string; body: string }) => {
+      const boundary = '----smnotes';
+      const parts = Object.entries(fields).map(([k, v]) => `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}`);
+      if (file) parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="${file.name}"\r\nContent-Type: ${file.type}\r\n\r\n${file.body}`);
+      return app.inject({ method: 'POST', url: '/api/import/read', headers: { 'x-scale-media': '1', cookie: manager.cookie, 'content-type': `multipart/form-data; boundary=${boundary}` }, payload: parts.join('\r\n') + `\r\n--${boundary}--\r\n` });
+    };
+    expect((await form({ text: 'notes' }, { name: 'export.txt', type: 'text/plain', body: 'x'.repeat(61_000) })).statusCode).toBe(400);
+    expect((await form({ text: 'notes', answers: 'y'.repeat(10_001) })).statusCode).toBe(400);
+    expect((await form({ text: 'notes' }, { name: 'call.txt', type: 'text/plain', body: 'Acme: 5 scripts' })).statusCode).toBe(200);
+    // each read is billed: at most 30 an hour per person
+    await manager.post('/api/users', { name: 'Ivy Reads', email: 'ivy@scale.test', role: 'manager', password: 'ivy-reads-pass' });
+    const ivy = as(await login('ivy@scale.test', 'ivy-reads-pass'));
+    for (let i = 0; i < 30; i++) expect((await ivy.post('/api/import/read', { text: `notes ${i}` })).status).toBe(200);
+    const over = await ivy.post('/api/import/read', { text: 'one more' });
+    expect(over.status).toBe(429);
+    expect((await manager.post('/api/import/read', { text: 'someone else' })).status).toBe(200);
+  });
+
+  it('never guesses between two people with the same first name', async () => {
+    const added = await manager.post('/api/users', { name: 'Sarah Diaz', email: 'sdiaz@scale.test', role: 'writer', password: 'sarah-diaz-pass' });
+    const diazId = added.body.users.find((u: any) => u.email === 'sdiaz@scale.test').id;
+    const plan = (await manager.post('/api/import/read', { text: 'notes' })).body.plan;
+    const twins = { ...plan, clients: [{ ...plan.clients.find((c: any) => c.name === 'Elon Layliev'), name: 'Twin Names Co', existingClientId: null }] };
+    const r = await manager.post('/api/import/apply', { plan: twins });
+    expect(r.status).toBe(200);
+    expect(r.body.warnings.join(' ')).toMatch(/“Sarah” could be Sarah Chen or Sarah Diaz/);
+    const client = (await manager.get('/api/clients?status=all')).body.clients.find((c: any) => c.name === 'Twin Names Co');
+    expect((await manager.get(`/api/clients/${client.id}`)).body.batches[0].progress.unassigned).toBe(45);
+    await manager.post(`/api/users/${diazId}/remove`, {});
   });
 });
 

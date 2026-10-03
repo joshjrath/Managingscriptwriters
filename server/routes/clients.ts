@@ -1,6 +1,6 @@
 // Clients, briefing/ideation-call records, resources and secure file access.
 
-import { fileStream, isBlockedFile, spool, storeFile, type UploadedFile } from '../files';
+import { fileStream, isBlockedFile, spool, storedFileName, storeFile, type UploadedFile } from '../files';
 import type { FastifyInstance } from 'fastify';
 import { isManager } from '../../shared/workflow';
 import { z } from 'zod';
@@ -339,10 +339,10 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     if (isBlockedFile(file.filename)) throw new HttpError(400, 'That file type can’t be uploaded', { file: 'That file type can’t be uploaded' });
     const input = parse(resourceCreate.omit({ url: true }).extend({ title: zs.text(200) }), {
       clientId: fields.clientId, briefingId: fields.briefingId || null, batchId: fields.batchId || null,
-      category: fields.category || 'document', title: fields.title || file.filename, notes: fields.notes,
+      category: fields.category || 'document', title: fields.title || storedFileName(file.filename), notes: fields.notes,
     });
     await checkResourceAccess(db, me, input.clientId, input.batchId, input.briefingId);
-    const safeName = file.filename.replace(/[\r\n"\\/]/g, '_').slice(0, 200) || 'file';
+    const safeName = storedFileName(file.filename);
     const id = await db.tx(async (t) => {
       const fileId = await storeFile(t, me, file!);
       const r = await t.one<{ id: number }>(

@@ -196,7 +196,8 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
     const input = parse(z.object({
       clientId: z.coerce.number().int().positive({ message: 'Choose a client' }),
       title: z.string().trim().max(200).optional(),
-      url: z.string().trim().url('Enter a full link, starting with https://').max(2000).optional().or(z.literal('')),
+      // the same link rule as everywhere else: http(s) only, never javascript: or data:
+      url: zs.url,
       writerName: z.string().trim().max(120).optional(),
       scriptCount: z.coerce.number().int().min(1).max(1000).optional().or(z.literal('').transform(() => undefined)),
       writtenOn: zs.date.optional().or(z.literal('').transform(() => undefined)),
