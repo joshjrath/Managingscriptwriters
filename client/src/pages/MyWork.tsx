@@ -177,7 +177,7 @@ function MyBatch({ e, writerId }: { e: Entry; writerId: number }) {
             ))}
           </div>
           {b.blocked && <div className="banner red"><div className="txt"><b>Blocked: {b.blockerNote}</b></div></div>}
-          {notSent.length + st.sentBack.length > 0 && <WrittenCounter batchId={b.id} writerId={writerId} forOther={writerId !== me.id} total={p.total} sent={p.draftReady} written={written} />}
+          {notSent.length + st.sentBack.length > 0 && <WrittenCounter key={`${b.id}:${writerId}`} batchId={b.id} writerId={writerId} forOther={writerId !== me.id} total={p.total} sent={p.draftReady} written={written} />}
 
           <CardList groups={sentBack}>{(g) => <SentBackCard group={g} showBatch={false} onResend={() => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id), resend: true })} />}</CardList>
 

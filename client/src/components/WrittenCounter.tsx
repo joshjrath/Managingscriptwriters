@@ -18,7 +18,10 @@ export function WrittenCounter({ batchId, writerId, forOther, total, sent, writt
   // the next visit shows the count the server has)
   useEffect(() => () => {
     window.clearTimeout(timer.current);
-    if (pending.current != null) send(pending.current).then(() => queryClient.invalidateQueries(), () => {});
+    // taken, so it's sent once and only to the batch it was tapped on
+    const n = pending.current;
+    pending.current = null;
+    if (n != null) send(n).then(() => queryClient.invalidateQueries(), () => {});
   }, [batchId, writerId, forOther]); // eslint-disable-line react-hooks/exhaustive-deps -- send reads only these
   const save = useSave(send, {
     onSuccess: (out) => { dirty.current = false; setValue(out.written); setState('saved'); },

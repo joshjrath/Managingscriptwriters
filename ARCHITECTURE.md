@@ -73,9 +73,9 @@ Roles are **Admin** (`owner` in code), **Manager** and **Writer**.
    - This sets `req.realUser` (who signed in) and `req.user` (who the request acts as). They differ only during View as.
    - **View as** is read-only on the real workspace. Writes are refused, except a few background writes that quietly do nothing.
    - **Recording mode** sends the session's requests to a cloned `rec_<12 hex>` schema through `AsyncLocalStorage`, so `ctx.db` is the practice copy and route code doesn't need to know.
-   - It **fails closed**: a write whose `x-scale-recording` header names a practice copy that no longer exists gets 409 `recording_ended`. It never falls through to the real data.
+   - It **fails closed**: a write whose `x-scale-recording` header names a practice copy that no longer exists gets 409 `recording_ended`. It never falls through to the real data. The same applies once an admin is demoted. Sign-in, `/api/admin/*` and Control Center clearance calls are exempt, because they only change the real sign-in.
    - `/api/auth/*` and `/api/admin/*` always use the real database.
-3. **Handler:** guard → `parse` → work. Anything that changes more than one row runs in `db.tx`, locking the batch first (`for no key update` or `for update`).
+3. **Handler:** guard → `parse` → work. A change to a batch or its scripts runs in `db.tx` and locks rows first: the batch row (`for no key update`) for batch-wide changes, then the script rows (`for update`) it touches. Other transactional changes lock their own row (a client, a shoot). Simple single-record edits (a team member, client, shoot or editor) write the row and its history line without a transaction.
 4. **Errors** (`app.ts`):
    - An `HttpError` becomes `{ error: { message, fields?, code? } }` with its status code.
    - A unique violation that slipped past the explicit checks becomes 409 `duplicate`.
@@ -95,7 +95,7 @@ Roles are **Admin** (`owner` in code), **Manager** and **Writer**.
 
   Role checks use `isManager` and `isAdmin` from `shared/workflow.ts`. Never compare role strings in routes.
 - **Script actions:** every status change goes through `applyScriptAction`. It locks the rows and checks each one with `checkAction` and `ACTION_RULES`. Writers can act only on their own scripts.
-- **Ownership checks** live in the route: the assignee on a script edit, `isAssignedTo` for blockers and resources. A personal view (My work, Today, to-dos, notifications) takes the user from the session, never from the request.
+- **Ownership checks** live in the route: the assignee on a script edit, `isAssignedTo` for blockers and resources. A personal view (My work, Today, to-dos) always gives a writer their own data, from the session. A manager may name someone with `?userId=`, and may ask for the whole team on Today (no `userId`) and to-dos (`?all=1`). Notifications always use the session user.
 - **Admin protection:** only an Admin can grant the Admin role, or change an Admin's password, access or role. The last Admin can't be removed or demoted. Temporary passwords are shown only to managers, and never an Admin's to a non-admin.
 - **Control Center:** an Admin re-enters their password, which sets `sessions.control_until` (12 hours). This is checked against `realUser`.
 - **Sign-in throttle:** 8 wrong passwords per address and account, and 30 per account from any address, in 15 minutes. The address comes from `X-Forwarded-For`, trusted as far as `TRUST_PROXY` allows.
@@ -108,7 +108,7 @@ Roles are **Admin** (`owner` in code), **Manager** and **Writer**.
 - **Migrations** run at start-up, in order, one transaction each, under `LOCKS.migrations`.
   - SQL migrations are split into statements on `;` at a line end. Anything that can't be split that way is written as a function migration.
   - Function migrations import `shared/dates.ts`. Changing those helpers changes what a fresh database's backfill produces.
-- **Optimistic concurrency:** scripts carry a `version`, and a stale edit gets 409 `stale`. Edit dialogs send only the fields the person changed, compared with a snapshot taken when the dialog opened.
+- **Optimistic concurrency:** scripts carry a `version`, and a stale edit gets 409 `stale` (the script dialog sends all its fields with the version it started from). Edit batch, Edit client and Script titles send only the fields the person changed, compared with a snapshot taken when the dialog opened. Other edit forms (deadline rules in Settings, team members, to-dos) still send the whole form, so a route must compare the input with the stored row before treating a field as changed, as `PATCH /api/users/:id` does.
 - **Files** are stored in Postgres, in the `files.data` column, appended 4 MB at a time and streamed back out in 512 KB pieces (`server/files.ts`). Each append rewrites the value, so big files get slow, which is why `UPLOAD_LIMIT_MB` caps them. Names are cleaned up by `storedFileName`, and executables are refused.
 - **Retention:** the reminders run deletes expired sessions. It also deletes `audit_log` page views, and anonymous sign-in records, after 400 days. Activity and everything else is kept.
 - **Single instance:** some state lives in the server's memory: the sign-in throttle, View-as and Recording-mode state, the Paste-notes rate limit, and the de-duplication of page views. A restart clears it, and it isn't shared between instances, so run one web instance. The reminders and migrations are safe with several, because they use advisory locks.

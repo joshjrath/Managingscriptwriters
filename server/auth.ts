@@ -124,10 +124,14 @@ const over = (map: Counters, key: string, limit: number) => {
 
 function count(map: Counters, key: string) {
   const now = Date.now();
-  if (map.size >= MAX_ENTRIES) {
+  // only a new key grows the table (and an existing count must never be the one that's evicted)
+  if (map.size >= MAX_ENTRIES && !map.has(key)) {
     for (const [k, v] of map) if (v.until < now) map.delete(k);
-    // still full: forget the oldest, never everything at once
-    for (const k of map.keys()) { if (map.size < MAX_ENTRIES) break; map.delete(k); }
+    // still full: forget the entries with the fewest failures first (oldest first among them), never
+    // everything at once, so a flood of one-off failures can't push out a count that's near its limit
+    for (let most = 1; map.size >= MAX_ENTRIES; most++) {
+      for (const [k, v] of map) { if (map.size < MAX_ENTRIES) break; if (v.count <= most) map.delete(k); }
+    }
   }
   const a = map.get(key);
   if (!a || a.until < now) map.set(key, { count: 1, until: now + WINDOW_MS });

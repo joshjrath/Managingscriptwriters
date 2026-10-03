@@ -4,7 +4,9 @@
 import { spawn } from 'node:child_process';
 
 const env = { ...process.env, API_PORT: process.env.API_PORT ?? '3001', STATIC_DIR: '' };
-if (env.DEMO === '1') {
+// the same "on" values the server accepts (flag() in server/config.ts)
+const demo = ['1', 'true', 'yes', 'on'].includes((env.DEMO ?? '').trim().toLowerCase());
+if (demo) {
   // the demo always gets its own embedded database: never seed sample data (and its published
   // password) into whatever DATABASE_URL this shell happens to have
   delete env.DATABASE_URL;

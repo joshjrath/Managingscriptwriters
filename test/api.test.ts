@@ -1243,6 +1243,36 @@ describe('view as and recording mode', () => {
     }
   });
 
+  it('an admin made a manager while recording can’t change the real workspace from the recording page', async () => {
+    const o2 = as(await login('o2@scale.test', 'owner-two-temp'));
+    const o2Id = (await o2.get('/api/bootstrap')).body.me.id;
+    const on = await o2.post('/api/admin/recording/start');
+    expect(on.status).toBe(200);
+    const marked = (body: unknown) => call('POST', '/api/clients', { cookie: o2.cookie, body, headers: { 'x-scale-recording': on.body.recording.startedAt } });
+    expect((await marked({ name: 'Practice Before Demotion' })).status).toBe(200);
+    expect((await manager.patch(`/api/users/${o2Id}`, { role: 'manager' })).status).toBe(200);
+    try {
+      const r = await marked({ name: 'Real After Demotion' });
+      expect(r.status).toBe(409);
+      expect(r.body.error.code).toBe('recording_ended');
+      expect(await db.one(`select id from clients where name in ('Practice Before Demotion', 'Real After Demotion')`)).toBeUndefined();
+      expect((await o2.get('/api/bootstrap')).body.mode).toBeNull();
+    } finally {
+      await manager.patch(`/api/users/${o2Id}`, { role: 'owner' });
+    }
+  });
+
+  it('locks the Control Center from a page whose practice copy is gone', async () => {
+    const on = await manager.post('/api/admin/recording/start');
+    const headers = { 'x-scale-recording': on.body.recording.startedAt };
+    const authorize = await call('POST', '/api/control/authorize', { cookie: manager.cookie, body: { password: 'correct-horse-battery' }, headers });
+    expect(authorize.status).toBe(200);
+    await manager.post('/api/admin/recording/stop');
+    // locking only changes the real sign-in, so the stale recording page can still do it
+    expect((await call('POST', '/api/control/lock', { cookie: manager.cookie, body: {}, headers })).status).toBe(200);
+    expect((await manager.get('/api/control/status')).body.cleared).toBe(false);
+  });
+
   it('cleans up only its own leftover practice copies, never other schemas', async () => {
     await db.query(`create schema records`);
     await db.query(`create table records.keep (id int)`);

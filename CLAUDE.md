@@ -21,13 +21,13 @@
 ## Rules that keep it safe
 
 - **Every API route** starts with `requireUser`, `requireManager` or `requireAdmin` (`server/auth.ts`), unless it is deliberately public. Check ownership in the route as well; hiding a button in the UI protects nothing. Add each new route to `ACCESS` in `test/access.test.ts`.
-- **Roles:** use `isManager` and `isAdmin` from `shared/workflow.ts`, never role strings. Only an Admin may grant the Admin role or touch an Admin's account.
+- **Roles:** use `isManager` and `isAdmin` from `shared/workflow.ts`, never role strings. Only an Admin may grant the Admin role, or change an Admin's role, password or access (deactivating or removing them); managers can still edit an Admin's other details.
 - **Script status** changes only through `applyScriptAction` in `server/routes/batches.ts`. Progress and counts are always computed from script rows; never store a total.
-- **Databases:** route code uses `ctx.db`, never `ctx.realDb`, so that Recording mode can't write to the real workspace. Multi-row changes run in `db.tx` and lock the batch row first.
+- **Databases:** route code uses `ctx.db`, never `ctx.realDb`, so that Recording mode can't write to the real workspace. Changes to a batch or its scripts run in `db.tx` and lock rows first: the batch row for batch-wide changes, then the script rows.
 - **Validate input** with zod through `parse()`, and throw `HttpError` (or `notFound`, `forbidden`, `conflict`) for anything the person should see.
 - **Configuration:** server code gets settings from `loadConfig` in `server/config.ts`, never straight from `process.env` (dev tooling and tests aside). Add every new variable there, with its default, and to `.env.example`. Never put real secrets in docs, tests or the client bundle.
 - **Schema changes:** add a new migration. Make it additive (new tables, nullable columns, indexes), never drop data, and do backfills as function migrations. Never assume a database is empty.
-- **Client:** call the server through `api()` and `useSave()` in `client/src/api.ts`, and handle promises (lint enforces this). An edit form sends only the fields the person changed.
+- **Client:** call the server through `api()` and `useSave()` in `client/src/api.ts`, and handle promises (lint enforces this). A new edit form sends only the fields the person changed (see Edit batch in `BatchDetail.tsx`).
 
 ## Tests
 

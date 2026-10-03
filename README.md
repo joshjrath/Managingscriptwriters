@@ -112,7 +112,7 @@ At the top of My work and the Overview. **Today's tasks** are the scripts due to
 
 ### Master log (admins only)
 
-**Master log**, next to your name in the sidebar, lists every change (from the activity history), every page or file someone opened, sign-ins and failed sign-ins, and anything someone tried that they weren't allowed to do. Filter by person or kind, or search. Repeat views of the same page by the same person within 10 minutes count once. Page views, and failed sign-ins for emails that aren't on the team, are kept for 400 days; changes and team members' sign-ins are kept indefinitely. Managers and writers can't open it.
+**Master log**, next to your name in the sidebar, lists every change (from the activity history), every page or file someone opened, sign-ins and failed sign-ins, and anything someone tried that they weren't allowed to do. Filter by person or kind, or search. Repeat views of the same page by the same person within 10 minutes count once. Page views, and failed sign-ins not tied to a team member's account (unknown emails, and Control Center attempts made while signed out), are kept for 400 days; changes and other sign-in records are kept indefinitely. Managers and writers can't open it.
 
 ### View as and Recording mode (admins only)
 
@@ -209,7 +209,7 @@ Any other Node 22 host with PostgreSQL works the same way (`railway.json` is kep
 
 ## Security
 
-- Passwords hashed with scrypt; sessions are random tokens (only their hash is stored) in an HTTP-only, SameSite=Lax cookie, `Secure` in production; sign-in is rate-limited per address and per account (the address comes from the proxy's `X-Forwarded-For`; set `TRUST_PROXY` to the number of proxies in front of the server to stop clients choosing it; check the number by signing in and comparing your address in the Master log with what a "what is my IP" site shows, because too low a number gives everyone the proxy's address).
+- Passwords hashed with scrypt; sessions are random tokens (only their hash is stored) in an HTTP-only, SameSite=Lax cookie, `Secure` in production; sign-in is rate-limited per address and per account (the address comes from the proxy's `X-Forwarded-For`; set `TRUST_PROXY` to the number of proxies in front of the server to stop clients choosing it; use the smallest number for which your address in the Master log, after you sign in, matches what a "what is my IP" site shows: too low a number gives everyone the proxy's address, and too high a number lets clients choose their address again).
 - Every permission is checked on the server; the UI only hides what you can't do.
 - State-changing requests need a custom header and a same-origin `Origin`, which blocks cross-site request forgery.
 - Recording mode fails closed: a page that's still recording when its practice copy is gone (a restart, or the copy was closed) gets an error instead of making the change on the real workspace.

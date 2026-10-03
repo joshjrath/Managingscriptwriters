@@ -216,6 +216,9 @@ export async function sendDocument(ctx: Ctx, me: Me, batchId: number, input: Sen
   const ids = [...new Set(input.scriptIds)];
   if (!ids.length) throw new HttpError(400, 'Choose which scripts this document covers', { scriptIds: 'Choose which scripts this document covers' });
   return ctx.db.tx(async (t) => {
+    // the upload first, before anything is locked, so other changes to this batch don't wait on a big
+    // file (as the review route does); a check below that fails rolls it back with everything else
+    const fileId = input.file ? await storeFile(t, me, input.file) : null;
     // the batch row before its scripts, as in applyScriptAction
     const b = await t.one<{ client_id: number; title: string; archived_at: string | null }>(`select client_id, title, archived_at from batches where id = $1 for no key update`, [batchId]);
     if (!b) throw notFound('Batch');
@@ -228,7 +231,6 @@ export async function sendDocument(ctx: Ctx, me: Me, batchId: number, input: Sen
     const done = rows.filter((r) => !canSendDocument(r.status));
     if (done.length) throw conflict(`Script${done.length > 1 ? 's' : ''} ${compressRanges(done.map((r) => r.number))} ${done.length > 1 ? 'are' : 'is'} already approved, so ${done.length > 1 ? 'they don’t' : 'it doesn’t'} need sending again.`);
 
-    const fileId = input.file ? await storeFile(t, me, input.file) : null;
     const p2: unknown[] = [];
     const prev = await t.one<{ id: number; version: number } | undefined>(
       `select s.id, s.version from submissions s where s.id = (select max(submission_id) from submission_scripts where script_id in (${inList(ids, p2)}))`, p2,

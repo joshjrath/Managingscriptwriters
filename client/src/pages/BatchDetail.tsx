@@ -1,7 +1,7 @@
 // Batch page: brief, assignments, the script checklist (the source of truth),
 // progress, deadlines, review notes, delivery records and activity history.
 
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import {
@@ -99,7 +99,7 @@ function BatchView({ b }: { b: BatchDetail }) {
             {b.progress.revisions > 0 && <div className="banner pink" style={{ marginTop: 12 }}><RotateCcw aria-hidden /><div className="txt"><b>{plural(b.progress.revisions, 'script')} returned for revisions</b><span>These don’t count as draft-ready until they’re resubmitted.</span></div></div>}
             {mine && (
               <div style={{ marginTop: 18 }}>
-                <WrittenCounter batchId={b.id} writerId={me.id} forOther={false} total={mine.count} sent={mine.draftReady} written={Math.max(mine.written, mine.draftReady)} />
+                <WrittenCounter key={b.id} batchId={b.id} writerId={me.id} forOther={false} total={mine.count} sent={mine.draftReady} written={Math.max(mine.written, mine.draftReady)} />
               </div>
             )}
             <div className="section-title" style={{ marginTop: 22 }}>Assignments</div>
@@ -123,7 +123,7 @@ function BatchView({ b }: { b: BatchDetail }) {
                     <span className="when num">{w.userId != null && w.written > w.draftReady + w.revisions ? `${w.written} / ${w.count} written` : `${w.draftReady} / ${w.count} drafts ready`}</span>
                     <span className="muted num" style={{ fontSize: 12 }}>{w.revisions > 0 ? `${w.revisions} sent back · ` : ''}{w.written > w.draftReady + w.revisions ? `${w.draftReady} sent · ` : ''}{w.delivered} delivered{w.writtenAt ? ` · updated ${fmtStamp(w.writtenAt, displayTz)}` : ''}</span>
                     {manager && w.userId != null && w.userId !== me.id && w.draftReady < w.count && (
-                      <WrittenCounter compact batchId={b.id} writerId={w.userId} forOther total={w.count} sent={w.draftReady} written={Math.max(w.written, w.draftReady)} />
+                      <WrittenCounter key={b.id} compact batchId={b.id} writerId={w.userId} forOther total={w.count} sent={w.draftReady} written={Math.max(w.written, w.draftReady)} />
                     )}
                   </div>
                 </div>
@@ -600,8 +600,11 @@ function ScriptDialog({ s, b, onClose }: { s: Script; b: BatchDetail; onClose: (
   // After such a refusal the script refreshes, and the fields show what it is now.
   const [base, setBase] = useState(s);
   const save = useSave(() => api(`/api/scripts/${s.id}`, { method: 'PATCH', body: { version: base.version, title, docUrl, timelinerUrl: tl, notes } }), { onSuccess: () => { toast(`Script ${s.number} saved`); onClose(); } });
+  // Each refusal refreshes the fields once; later updates to the script leave what's being typed alone.
+  const applied = useRef<ApiError | null>(null);
   useEffect(() => {
-    if (save.error?.code !== 'stale' || s.version === base.version) return;
+    if (save.error?.code !== 'stale' || applied.current === save.error || s.version === base.version) return;
+    applied.current = save.error;
     setBase(s); setTitle(s.title ?? ''); setDocUrl(s.docUrl ?? ''); setTl(s.timelinerUrl ?? ''); setNotes(s.notes ?? '');
   }, [s, base, save.error]);
   const history = b.revisions.filter((r) => r.scriptId === s.id);
