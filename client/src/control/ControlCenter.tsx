@@ -78,7 +78,7 @@ export default function ControlCenter() {
     // signing in at the portal also signed in to the site: let it notice
     qc.removeQueries({ queryKey: ['auth-status'] });
     qc.removeQueries({ queryKey: ['bootstrap'] });
-    setTimeout(() => returnToSite(() => nav('/')), 650);
+    setTimeout(() => returnToSite(() => { nav('/'); }), 650);
   };
   const lock = async () => {
     await api('/api/control/lock', { method: 'POST', body: {} }).catch(() => {});

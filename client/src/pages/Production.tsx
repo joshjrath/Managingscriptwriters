@@ -53,7 +53,7 @@ export function Production() {
     } as Record<string, number>;
   }, [all.data]);
 
-  const batches = q.data?.batches ?? [];
+  const batches = useMemo(() => q.data?.batches ?? [], [q.data]);
   const sorted = useMemo(() => {
     const val = (b: BatchSummary): string | number => sort.key === 'client' ? b.clientName.toLowerCase() : sort.key === 'progress' ? b.progress.pctDraft : sort.key === 'shoot' ? b.shootStart ?? '9999' : b.next?.date ?? '9999';
     return [...batches].sort((a, b) => { const x = val(a); const y = val(b); return (x < y ? -1 : x > y ? 1 : 0) * sort.dir; });

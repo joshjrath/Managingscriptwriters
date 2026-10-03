@@ -235,7 +235,7 @@ function ChatWindow({ userId, min, onMin, onClose }: { userId: number; min: bool
       atBottom.current = true;
       setMsgs((cur) => [...(cur ?? []).filter((x) => x.id !== r.message.id), r.message]);
       setText('');
-      queryClient.invalidateQueries({ queryKey: ['inbox'] });
+      void queryClient.invalidateQueries({ queryKey: ['inbox'] });
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'Not sent. Try again.');
     } finally { setSending(false); }
@@ -278,14 +278,14 @@ function ChatWindow({ userId, min, onMin, onClose }: { userId: number; min: bool
               );
             })}
           </div>
-          <form className="chat-compose" onSubmit={(e) => { e.preventDefault(); send(); }}>
+          <form className="chat-compose" onSubmit={(e) => { e.preventDefault(); void send(); }}>
             {err && <div className="chat-err" role="alert">{err}</div>}
             <div className="chat-compose-row">
               <textarea className="chat-input" rows={1} value={text} disabled={readOnly} maxLength={4000}
                 placeholder={readOnly ? 'Viewing only. Messages are off.' : `Message ${name.split(' ')[0]}…`}
                 aria-label={`Message ${name}`}
                 onChange={(e) => { setText(e.target.value); const t = e.target; t.style.height = 'auto'; t.style.height = `${Math.min(t.scrollHeight, 120)}px`; }}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send(); } }} />
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); } }} />
               <button type="submit" className="chat-send" disabled={!text.trim() || sending || readOnly} aria-label="Send"><Send aria-hidden /></button>
             </div>
           </form>

@@ -227,7 +227,7 @@ function UserMenu() {
           {mode && (
             <>
               <button role="menuitem" onClick={() => { setViewAs(true); setOpen(false); }}><Eye />View as…</button>
-              <button role="menuitemcheckbox" aria-checked={!!mode.recording} onClick={() => { setOpen(false); if (mode.recording) modeAct.stopRecording(); else setRecording(true); }}>
+              <button role="menuitemcheckbox" aria-checked={!!mode.recording} onClick={() => { setOpen(false); if (mode.recording) void modeAct.stopRecording(); else setRecording(true); }}>
                 <Circle />Recording mode<span className={`switch${mode.recording ? ' on' : ''}`} aria-hidden><i /></span>
               </button>
             </>

@@ -38,7 +38,7 @@ function Gate() {
   const status = useQuery({ queryKey: ['auth-status'], queryFn: () => api<AuthStatus>('/api/auth/status'), staleTime: Infinity });
   const boot = useQuery({ queryKey: ['bootstrap'], queryFn: () => api<Bootstrap>('/api/bootstrap'), enabled: !!status.data?.signedIn, refetchInterval: 60_000 });
   useEffect(() => {
-    const lost = () => { queryClient.clear(); status.refetch(); };
+    const lost = () => { queryClient.clear(); void status.refetch(); };
     window.addEventListener('auth:lost', lost);
     return () => window.removeEventListener('auth:lost', lost);
   }, [status]);
@@ -52,7 +52,7 @@ function Gate() {
     return <div className="loading-center" role="status"><span className="wordmark" style={{ fontSize: 28 }}>Scale&nbsp;<span>Media</span></span><span>Loading…</span></div>;
   }
   if (status.isError) return <main className="login"><ErrorState error={status.error} retry={() => status.refetch()} /></main>;
-  if (!status.data!.signedIn) return <Login status={status.data!} onDone={() => { queryClient.clear(); status.refetch(); }} />;
+  if (!status.data!.signedIn) return <Login status={status.data!} onDone={() => { queryClient.clear(); void status.refetch(); }} />;
   if (boot.isError || !boot.data) return <main className="login"><ErrorState error={boot.error} retry={() => boot.refetch()} /></main>;
   const home = isManager(boot.data.me.role) ? '/overview' : '/my-work';
   return (

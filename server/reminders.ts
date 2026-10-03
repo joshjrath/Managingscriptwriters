@@ -114,7 +114,7 @@ export function startReminderScheduler(ctx: Ctx, minutes: number, log: (msg: str
       running = false;
     }
   };
-  const first = setTimeout(tick, 5_000);
-  const every = setInterval(tick, minutes * 60_000);
+  const first = setTimeout(() => void tick(), 5_000);
+  const every = setInterval(() => void tick(), minutes * 60_000);
   return () => { clearTimeout(first); clearInterval(every); };
 }

@@ -52,11 +52,15 @@ async function main() {
   await app.listen({ port, host: env.HOST ?? '0.0.0.0' });
   console.log(`Scale Media scripts listening on :${port}`);
 
-  const shutdown = async () => {
+  let stopping = false;
+  const shutdown = () => {
+    if (stopping) return;
+    stopping = true;
     stopReminders();
-    await app.close();
-    await db.close();
-    process.exit(0);
+    app.close().then(() => db.close()).then(
+      () => process.exit(0),
+      (err: unknown) => { console.error('shutdown failed', err); process.exit(1); },
+    );
   };
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);

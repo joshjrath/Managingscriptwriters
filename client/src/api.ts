@@ -59,13 +59,16 @@ export const queryClient = new QueryClient({
  * A mutation that refreshes every screen after it succeeds, so counts,
  * dashboards and lists never disagree with each other.
  */
-export function useSave<TVars, TOut>(fn: (vars: TVars) => Promise<TOut>, opts: { onSuccess?: (out: TOut, vars: TVars) => void } = {}) {
+export function useSave<TVars, TOut>(fn: (vars: TVars) => Promise<TOut>, opts: { onSuccess?: (out: TOut, vars: TVars) => void | Promise<void> } = {}) {
   const qc = useQueryClient();
   return useMutation<TOut, ApiError, TVars>({
     mutationFn: fn,
     onSuccess: async (out, vars) => {
       await qc.invalidateQueries();
-      opts.onSuccess?.(out, vars);
+      // Not awaited: the save is already confirmed, so follow-up work (like
+      // uploading attachments) must never turn it into an error. Follow-ups
+      // report their own problems (as warnings on the confirmation).
+      void opts.onSuccess?.(out, vars);
     },
     onError: async (err) => {
       // stale data: refresh so the person sees the current state

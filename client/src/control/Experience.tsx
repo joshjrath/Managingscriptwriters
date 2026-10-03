@@ -76,6 +76,7 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
     setView(v);
     onReady();
     return () => { v?.dispose(); setView(null); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the renderer is built once (or again for the 2D fallback); world updates go through setWorld below
   }, [flat]);
 
   useEffect(() => { view?.setWorld(world); }, [view, world]);
@@ -107,6 +108,7 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
     return () => cancelAnimationFrame(raf);
   }, [playing]);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `now` is the tick: anomalies are read from the view once a second
   const anomalies = useMemo(() => view?.currentAnomalies ?? [], [view, now]);
 
   // ── moving the world ───────────────────────────────────────────────────

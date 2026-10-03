@@ -36,7 +36,7 @@ export function Login({ status, onDone }: { status: AuthStatus; onDone: () => vo
         {setup && !status.setupAllowed ? (
           <div className="form-error" role="alert"><span>{status.setupHint ?? 'Set MANAGER_EMAIL and MANAGER_PASSWORD in the server’s environment, then redeploy.'}</span></div>
         ) : (
-          <form className="form" onSubmit={(e) => { e.preventDefault(); submit(); }}>
+          <form className="form" onSubmit={(e) => { e.preventDefault(); void submit(); }}>
             <FormError error={error && !Object.keys(f).length ? error : null} />
             {setup && <Field label="Your name" htmlFor={ids.n} error={f.name}><input className="input" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} /></Field>}
             <Field label="Email" htmlFor={ids.e} error={f.email}><input className="input" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} {...inputProps(ids.e, f.email)} autoFocus /></Field>

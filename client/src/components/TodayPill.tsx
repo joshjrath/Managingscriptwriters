@@ -58,7 +58,7 @@ export function TodayPill({ userId }: { userId?: number }) {
       burst(r.right - 30, r.top + r.height / 2, { colors: ['#60D1BE', '#FFFFFF', '#9BE8C9'], count: 18, distance: 60 });
     }, 900);
     return () => clearTimeout(id);
-  }, [t, allDone, userId]);
+  }, [t, allDone, clear, userId]);
 
   if (!t) return <div className="today-pill skeleton" aria-hidden />;
   const who = t.scope === 'team' ? 'the team' : t.scope === 'person' ? 'them' : 'you';

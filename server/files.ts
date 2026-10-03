@@ -80,19 +80,19 @@ export const isBlockedFile = (name: string) => BLOCKED_EXT.test(name);
 /** A stored file's contents as a stream, read from the database in small pieces. */
 export function fileStream(db: Db, id: number, size: number): Readable {
   let pos = 0;
+  /** the next piece, or null at the end */
+  const next = async (): Promise<Buffer | null> => {
+    if (pos >= size) return null;
+    const row = await db.one<{ c: Uint8Array | null }>(`select substring(data from $2 for $3) as c from files where id = $1`, [id, pos + 1, READ_PIECE]);
+    const c = row?.c;
+    if (!c || !c.length) return null;
+    pos += c.length;
+    return Buffer.isBuffer(c) ? c : Buffer.from(c.buffer, c.byteOffset, c.byteLength);
+  };
   return new Readable({
     highWaterMark: READ_PIECE,
-    async read() {
-      try {
-        if (pos >= size) { this.push(null); return; }
-        const row = await db.one<{ c: Uint8Array | null }>(`select substring(data from $2 for $3) as c from files where id = $1`, [id, pos + 1, READ_PIECE]);
-        const c = row?.c;
-        if (!c || !c.length) { this.push(null); return; }
-        pos += c.length;
-        this.push(Buffer.isBuffer(c) ? c : Buffer.from(c.buffer, c.byteOffset, c.byteLength));
-      } catch (err) {
-        this.destroy(err as Error);
-      }
+    read() {
+      next().then((piece) => { this.push(piece); }, (err: Error) => { this.destroy(err); });
     },
   });
 }
