@@ -245,22 +245,6 @@ describe('progress, review and Timeliner delivery', () => {
     expect(r.body.error.message).toMatch(/approved/);
   });
 
-  it('the quick count control moves real script records and detects stale counts', async () => {
-    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Quick count', targetCount: 6, draftDue: '2026-10-20', finalDue: '2026-10-22', split: [{ writerId: ids.marcus, count: 6 }] });
-    const id = b.body.batchId;
-    const up = await marcus.post(`/api/batches/${id}/quick-progress`, { draftReady: 3, expected: 0 });
-    expect(up.status).toBe(200);
-    expect(up.body.batch.progress.draftReady).toBe(3);
-    expect(up.body.batch.scripts.filter((s: any) => s.status === 'ready_for_review').map((s: any) => s.number)).toEqual([1, 2, 3]);
-    const stale = await marcus.post(`/api/batches/${id}/quick-progress`, { draftReady: 4, expected: 0 });
-    expect(stale.status).toBe(409);
-    const down = await marcus.post(`/api/batches/${id}/quick-progress`, { draftReady: 2, expected: 3 });
-    expect(down.body.batch.progress.draftReady).toBe(2);
-    expect(down.body.batch.progress.approved).toBe(0);
-    const other = await sarah.post(`/api/batches/${id}/quick-progress`, { draftReady: 1, expected: 0 });
-    expect(other.status).toBe(403);
-  });
-
   it('rejects edits based on a stale version', async () => {
     const s = (await scriptsOf()).find((x) => x.number === 30)!;
     const ok = await marcus.patch(`/api/scripts/${s.id}`, { version: s.version, docUrl: 'https://docs.example/30' });
@@ -1103,6 +1087,61 @@ describe('view as and recording mode', () => {
     expect((await josh.get('/api/bootstrap')).body.mode.recording).not.toBeNull();
     expect((await josh.post('/api/auth/logout')).status).toBe(200);
     expect((await josh.get('/api/bootstrap')).status).toBe(401);
+  });
+});
+
+describe('batch integrity', () => {
+  const batchFor = async (title: string, writerId: number, count: number) => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title, targetCount: count, finalDue: '2026-11-20', split: [{ writerId, count }] });
+    expect(b.status).toBe(200);
+    return b.body.batchId as number;
+  };
+  const scriptIds = async (id: number) => ((await manager.get(`/api/batches/${id}`)).body as BatchDetail).scripts.map((s) => s.id);
+
+  it('a batch page shows only its own review notes, whatever resources are attached to it', async () => {
+    const a = await batchFor('Notes stay home A', ids.marcus, 1);
+    const [sid] = await scriptIds(a);
+    await marcus.post(`/api/batches/${a}/scripts/action`, { action: 'submit', scriptIds: [sid] });
+    // a revision request on batch A, and a client resource with the same id picked for batch B
+    // (both ids come from sequences starting at 1, so in real data they collide all the time)
+    const same = 900001;
+    await db.query(`update scripts set status = 'revisions_needed' where id = $1`, [sid]);
+    await db.query(`insert into revision_requests (id, script_id, batch_id, note, requested_by) overriding system value values ($1, $2, $3, 'Only for batch A', $4)`, [same, sid, a, ids.josh]);
+    await db.query(`insert into resources (id, client_id, kind, category, title, url, created_by) overriding system value values ($1, $2, 'link', 'example', 'Same id', 'https://example.com/same', $3)`, [same, acmeId, ids.josh]);
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Notes stay home B', targetCount: 1, resourceIds: [same] });
+    expect(b.status).toBe(200);
+    const detail = (await manager.get(`/api/batches/${b.body.batchId}`)).body as BatchDetail;
+    expect(detail.resources.some((r) => r.title === 'Same id')).toBe(true);
+    expect(detail.revisions).toEqual([]);
+    expect(((await manager.get(`/api/batches/${a}`)).body as BatchDetail).revisions.map((r) => r.note)).toEqual(['Only for batch A']);
+  });
+
+  it('an approval is for the version the reviewer read, not one replaced since', async () => {
+    const id = await batchFor('Replaced while in review', ids.marcus, 2);
+    const sids = await scriptIds(id);
+    const v1 = await marcus.post(`/api/batches/${id}/submissions`, { scriptIds: sids, url: 'https://docs.google.com/document/d/v1' });
+    const v2 = await marcus.post(`/api/batches/${id}/submissions`, { scriptIds: sids, url: 'https://docs.google.com/document/d/v2' });
+    expect([v1.status, v2.status]).toEqual([200, 200]);
+    const [first, second] = (v2.body.batch as BatchDetail).submissions;
+    const stale = await manager.post(`/api/batches/${id}/review`, { action: 'approve', scriptIds: sids, submissionId: first.id });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.code).toBe('stale');
+    const ok = await manager.post(`/api/batches/${id}/review`, { action: 'approve', scriptIds: sids, submissionId: second.id });
+    expect(ok.status).toBe(200);
+    expect(ok.body.batch.progress.approved).toBe(2);
+  });
+
+  it('lowering the count tells the writer, and raising it gives the scripts back to the writer chosen', async () => {
+    const id = await batchFor('Down and up again', ids.marcus, 3);
+    const removing = (await manager.get(`/api/batches/${id}/target-preview?count=2`)).body.defaultRemove;
+    expect((await manager.post(`/api/batches/${id}/target`, { targetCount: 2, removeScriptIds: removing })).status).toBe(200);
+    const told = (await marcus.get('/api/notifications')).body.notifications.find((n: any) => n.title === 'Scripts removed · Down and up again');
+    expect(told?.body).toMatch(/Scripts 3 were taken off/);
+    const up = await manager.post(`/api/batches/${id}/target`, { targetCount: 3, assigneeId: ids.sarah });
+    expect(up.status).toBe(200);
+    expect((up.body as BatchDetail).writers.map((w) => [w.name, w.ranges])).toEqual([['Marcus Webb', '1–2'], ['Sarah Chen', '3']]);
+    const given = (await sarah.get('/api/notifications')).body.notifications.find((n: any) => n.title === 'New scripts · Down and up again');
+    expect(given?.body).toMatch(/Scripts 3 were added/);
   });
 });
 

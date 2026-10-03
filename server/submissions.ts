@@ -149,8 +149,7 @@ export async function buildGroups(db: Db, summaries: BatchSummary[], opts: { ass
   const batchIds = summaries.map((b) => b.id);
   const data = await loadSubmissionData(db, batchIds);
   if (!batchIds.length) return { groups: [], data };
-  const scripts = (await loadScripts(db, { assigneeId: opts.assigneeId }))
-    .filter((s) => byId.has(s.batchId) && (s.status === 'ready_for_review' || s.status === 'revisions_needed'));
+  const scripts = await loadScripts(db, { batchIds, assigneeId: opts.assigneeId, statuses: ['ready_for_review', 'revisions_needed'] });
   const open = await loadRevisions(db, { openOnly: true, batchIds });
   const openByScript = new Map<number, (typeof open)[number]>();
   for (const r of open) if (!openByScript.has(r.scriptId)) openByScript.set(r.scriptId, r); // newest first
@@ -218,7 +217,8 @@ export async function sendDocument(ctx: Ctx, me: Me, batchId: number, input: Sen
   const ids = [...new Set(input.scriptIds)];
   if (!ids.length) throw new HttpError(400, 'Choose which scripts this document covers', { scriptIds: 'Choose which scripts this document covers' });
   return ctx.db.tx(async (t) => {
-    const b = await t.one<{ client_id: number; title: string; archived_at: string | null }>(`select client_id, title, archived_at from batches where id = $1`, [batchId]);
+    // the batch row before its scripts, as in applyScriptAction
+    const b = await t.one<{ client_id: number; title: string; archived_at: string | null }>(`select client_id, title, archived_at from batches where id = $1 for no key update`, [batchId]);
     if (!b) throw notFound('Batch');
     const p: unknown[] = [batchId];
     const rows = await t.query<{ id: number; number: number; status: ScriptStatus; assignee_id: number | null; title: string | null }>(

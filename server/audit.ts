@@ -41,7 +41,6 @@ const MUTATIONS: Record<string, string> = {
   '/api/batches/:id/target': 'change a script count',
   '/api/batches/:id/archive': 'archive a batch',
   '/api/batches/:id/blocker': 'flag a blocker',
-  '/api/batches/:id/quick-progress': 'update progress',
   '/api/batches/:id/written': 'update writing progress',
   '/api/scripts/:id': 'edit a script',
   '/api/shoots': 'schedule a shoot',

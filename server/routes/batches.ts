@@ -18,7 +18,7 @@ import {
 } from '../records';
 import { computeDeadlines, draftFromFinal, dueState, ruleText, type Clock, type ISODate } from '../../shared/dates';
 import {
-  ACTION_RULES, checkAction, compressRanges, isDraftReady, SCRIPT_ACTIONS, splitAssignments, STAGES, summarize,
+  ACTION_RULES, checkAction, compressRanges, isDraftReady, SCRIPT_ACTIONS, splitAssignments, STAGES,
   type ScriptAction, type ScriptStatus,
 } from '../../shared/workflow';
 import { fmtDate, plural } from '../../shared/format';
@@ -316,7 +316,7 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       const b = await t.one<{
         id: number; client_id: number; title: string; shoot_id: number | null; draft_due: ISODate | null; draft_due_mode: string;
         final_due: ISODate | null; final_due_mode: string; planned_start: ISODate | null; priority: string; next_action: string | null; brief: string | null;
-      }>(`select * from batches where id = $1 for update`, [id]);
+      }>(`select * from batches where id = $1 for no key update`, [id]);
       if (!b) throw notFound('Batch');
 
       const set: Record<string, unknown> = {};
@@ -420,9 +420,11 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post('/api/batches/:id/dates-reviewed', async (req) => {
     const me = requireManager(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
-    const b = await db.one<{ client_id: number }>(`update batches set needs_date_review = false, date_review_note = null, updated_at = now() where id = $1 returning client_id`, [id]);
-    if (!b) throw notFound('Batch');
-    await logActivity(db, { actor: me, action: 'batch.dates_reviewed', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id, summary: 'Confirmed deadlines after shoot change' });
+    await db.tx(async (t) => {
+      const b = await t.one<{ client_id: number }>(`update batches set needs_date_review = false, date_review_note = null, updated_at = now() where id = $1 returning client_id`, [id]);
+      if (!b) throw notFound('Batch');
+      await logActivity(t, { actor: me, action: 'batch.dates_reviewed', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id, summary: 'Confirmed deadlines after shoot change' });
+    });
     return loadBatchDetail(ctx, id, me);
   });
 
@@ -430,11 +432,13 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
     const me = requireManager(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const { archived } = parse(z.object({ archived: z.boolean() }), req.body);
-    const b = await db.one<{ client_id: number; title: string }>(
-      `update batches set archived_at = ${archived ? 'now()' : 'null'}, updated_at = now() where id = $1 returning client_id, title`, [id],
-    );
-    if (!b) throw notFound('Batch');
-    await logActivity(db, { actor: me, action: archived ? 'batch.archived' : 'batch.restored', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id, summary: archived ? 'Archived batch' : 'Restored batch from archive' });
+    await db.tx(async (t) => {
+      const b = await t.one<{ client_id: number; title: string }>(
+        `update batches set archived_at = ${archived ? 'now()' : 'null'}, updated_at = now() where id = $1 returning client_id, title`, [id],
+      );
+      if (!b) throw notFound('Batch');
+      await logActivity(t, { actor: me, action: archived ? 'batch.archived' : 'batch.restored', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id, summary: archived ? 'Archived batch' : 'Restored batch from archive' });
+    });
     return loadBatchDetail(ctx, id, me);
   });
 
@@ -445,23 +449,25 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
     const input = parse(z.object({ blocked: z.boolean(), note: zs.text(1000) }), req.body);
     if (input.blocked && !input.note) throw new HttpError(400, 'Say what is blocking the work', { note: 'Say what is blocking the work' });
     if (!isManager(me.role) && !(await isAssignedTo(db, id, me.id))) throw forbidden('Only writers on this batch can flag blockers');
-    const b = input.blocked
-      ? await db.one<{ client_id: number; title: string }>(
-        `update batches set blocked = true, blocker_note = $2, blocked_at = now(), blocked_by = $3, updated_at = now() where id = $1 returning client_id, title`,
-        [id, input.note, me.id])
-      : await db.one<{ client_id: number; title: string }>(
-        `update batches set blocked = false, blocker_note = null, blocked_at = null, blocked_by = null, updated_at = now() where id = $1 returning client_id, title`,
-        [id]);
-    if (!b) throw notFound('Batch');
-    await logActivity(db, {
-      actor: me, action: input.blocked ? 'batch.blocked' : 'batch.unblocked', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id,
-      summary: input.blocked ? `Flagged blocker: ${input.note}` : 'Cleared blocker',
+    await db.tx(async (t) => {
+      const b = input.blocked
+        ? await t.one<{ client_id: number; title: string }>(
+          `update batches set blocked = true, blocker_note = $2, blocked_at = now(), blocked_by = $3, updated_at = now() where id = $1 returning client_id, title`,
+          [id, input.note, me.id])
+        : await t.one<{ client_id: number; title: string }>(
+          `update batches set blocked = false, blocker_note = null, blocked_at = null, blocked_by = null, updated_at = now() where id = $1 returning client_id, title`,
+          [id]);
+      if (!b) throw notFound('Batch');
+      await logActivity(t, {
+        actor: me, action: input.blocked ? 'batch.blocked' : 'batch.unblocked', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id,
+        summary: input.blocked ? `Flagged blocker: ${input.note}` : 'Cleared blocker',
+      });
+      const recipients = [...(await managerIds(t)), ...(await assigneesOf(t, id))];
+      await notify(t, recipients, {
+        type: 'blocker', title: `${input.blocked ? 'Blocked' : 'Unblocked'} · ${b.title}`,
+        body: input.blocked ? `${me.name}: ${input.note}` : `${me.name} cleared the blocker.`, link: batchLink(id),
+      }, me.id);
     });
-    const recipients = [...(await managerIds(db)), ...(await assigneesOf(db, id))];
-    await notify(db, recipients, {
-      type: 'blocker', title: `${input.blocked ? 'Blocked' : 'Unblocked'} · ${b.title}`,
-      body: input.blocked ? `${me.name}: ${input.note}` : `${me.name} cleared the blocker.`, link: batchLink(id),
-    }, me.id);
     return loadBatchDetail(ctx, id, me);
   });
 
@@ -483,10 +489,10 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       assigneeId: zs.id.nullable().optional(),
     }), req.body);
     await db.tx(async (t) => {
-      const b = await t.one<{ client_id: number; target_count: number; title: string }>(`select client_id, target_count, title from batches where id = $1 for update`, [id]);
+      const b = await t.one<{ client_id: number; target_count: number; title: string }>(`select client_id, target_count, title from batches where id = $1 for no key update`, [id]);
       if (!b) throw notFound('Batch');
-      const active = await t.query<{ id: number; number: number; status: ScriptStatus }>(
-        `select id, number, status from scripts where batch_id = $1 and removed_at is null order by number for update`, [id],
+      const active = await t.query<{ id: number; number: number; status: ScriptStatus; assignee_id: number | null }>(
+        `select id, number, status, assignee_id from scripts where batch_id = $1 and removed_at is null order by number for update`, [id],
       );
       const current = active.length;
       if (input.targetCount === current) return;
@@ -496,11 +502,19 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
           const u = await t.one(`select 1 from users where id = $1 and active`, [input.assigneeId]);
           if (!u) throw new HttpError(400, 'Choose an active writer', { assigneeId: 'Choose an active writer' });
         }
-        // restore previously removed scripts first so their numbers and history return
+        // restore previously removed scripts first so their numbers and history return; they go to the
+        // writer chosen for the new scripts, or back to their old writer if that person is still on the team
         const removed = await t.query<{ id: number; number: number }>(
           `select id, number from scripts where batch_id = $1 and removed_at is not null order by number limit $2`, [id, need],
         );
-        for (const r of removed) await t.query(`update scripts set removed_at = null, removed_by = null, updated_at = now(), version = version + 1 where id = $1`, [r.id]);
+        for (const r of removed) {
+          await t.query(
+            `update scripts set removed_at = null, removed_by = null, updated_at = now(), version = version + 1,
+                    assignee_id = case when $2::bigint is not null then $2::bigint
+                                       when exists (select 1 from users u where u.id = scripts.assignee_id and u.active and u.removed_at is null) then assignee_id
+                                       else null end
+              where id = $1`, [r.id, input.assigneeId ?? null]);
+        }
         need -= removed.length;
         const max = await t.one<{ max: number | null }>(`select max(number) as max from scripts where batch_id = $1`, [id]);
         const start = (max?.max ?? 0) + 1;
@@ -512,8 +526,8 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
           actor: me, action: 'batch.target', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id,
           summary: `Target ${current} → ${input.targetCount}: added scripts ${compressRanges(added)}${removed.length ? ` (${removed.length} restored)` : ''}`,
         });
-        if (input.assigneeId && items.length) {
-          await notify(t, [input.assigneeId], { type: 'assignment', title: `New scripts · ${b.title}`, body: `Scripts ${compressRanges(items.map((i) => i.number))} were added and assigned to you.`, link: batchLink(id) }, me.id);
+        if (input.assigneeId && added.length) {
+          await notify(t, [input.assigneeId], { type: 'assignment', title: `New scripts · ${b.title}`, body: `Scripts ${compressRanges(added)} were added and assigned to you.`, link: batchLink(id) }, me.id);
         }
         return;
       }
@@ -532,6 +546,15 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
         actor: me, action: 'batch.target', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id,
         summary: `Target ${current} → ${input.targetCount}: removed scripts ${compressRanges(chosen.map((sid) => byId.get(sid)!.number))} (kept in history)`,
       });
+      // tell the writers whose scripts went, so nobody keeps writing them
+      const byWriter = new Map<number, number[]>();
+      for (const sid of chosen) {
+        const s = byId.get(sid)!;
+        if (s.assignee_id != null) byWriter.set(s.assignee_id, [...(byWriter.get(s.assignee_id) ?? []), s.number]);
+      }
+      for (const [uid, nums] of byWriter) {
+        await notify(t, [uid], { type: 'assignment', title: `Scripts removed · ${b.title}`, body: `Scripts ${compressRanges(nums)} were taken off this batch.`, link: batchLink(id) }, me.id);
+      }
     });
     return loadBatchDetail(ctx, id, me);
   });
@@ -625,7 +648,6 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
     return { script, batchId };
   });
 
-  // quick count control: moves the writer's own script records, never a separate counter
   /**
    * A writer's "written so far" count. Purely an update for managers: it never
    * submits, withdraws or changes any script. It can't go below what they've
@@ -664,43 +686,6 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       return { written, total: mine.length, sent };
     });
   });
-
-  app.post('/api/batches/:id/quick-progress', async (req) => {
-    const me = requireUser(req);
-    const { id } = parse(z.object({ id: zs.id }), req.params);
-    const input = parse(z.object({
-      draftReady: z.number().int().min(0).max(500),
-      expected: z.number().int().min(0),
-      writerId: zs.id.optional(),
-    }), req.body);
-    const writerId = input.writerId ?? me.id;
-    if (writerId !== me.id && !isManager(me.role)) throw forbidden('You can only update your own progress');
-    const mine = await db.query<{ id: number; number: number; status: ScriptStatus }>(
-      `select id, number, status from scripts where batch_id = $1 and assignee_id = $2 and removed_at is null order by number`, [id, writerId],
-    );
-    if (!mine.length) throw forbidden('No scripts in this batch are assigned to you');
-    const p = summarize(mine.map((s) => ({ status: s.status, assigneeId: writerId })));
-    if (p.draftReady !== input.expected) {
-      throw conflict(`Progress changed since you loaded it — it’s now ${p.draftReady} / ${p.total}. Check the new count and try again.`, 'stale');
-    }
-    const min = p.approved;
-    const max = p.total - p.revisions;
-    if (input.draftReady < min) throw new HttpError(400, `${plural(min, 'script is', 'scripts are')} already approved or delivered, so the count can’t go below ${min}.`);
-    if (input.draftReady > max) throw new HttpError(400, p.revisions ? `Scripts with revision requests need to be resubmitted individually. The most you can set here is ${max}.` : `You have ${p.total} scripts in this batch.`);
-    if (input.draftReady === p.draftReady) return { changed: [], batch: await loadBatchDetail(ctx, id, me) };
-    let result;
-    if (input.draftReady > p.draftReady) {
-      // submit the writer's next scripts in order, preferring ones already in progress
-      const candidates = [...mine.filter((s) => s.status === 'in_progress'), ...mine.filter((s) => s.status === 'not_started')];
-      const pick = candidates.slice(0, input.draftReady - p.draftReady).map((s) => s.id);
-      result = await applyScriptAction(ctx, me, id, 'submit', pick, { note: null, timelinerUrl: null, actingFor: writerId });
-    } else {
-      const inReview = mine.filter((s) => s.status === 'ready_for_review').reverse();
-      const pick = inReview.slice(0, p.draftReady - input.draftReady).map((s) => s.id);
-      result = await applyScriptAction(ctx, me, id, 'withdraw', pick, { note: null, timelinerUrl: null, actingFor: writerId });
-    }
-    return { ...result, batch: await loadBatchDetail(ctx, id, me) };
-  });
 }
 
 // ── the one place script status changes happen ───────────────────────────
@@ -721,8 +706,9 @@ export async function applyScriptAction(
   if (!ids.length) throw new HttpError(400, 'Select at least one script');
 
   return ctx.db.tx(async (t) => {
+    // the batch row first, then its scripts: every path that locks both does it in this order (no deadlocks)
     const b = await t.one<{ client_id: number; title: string; client_name: string; archived_at: string | null }>(
-      `select b.client_id, b.title, c.name as client_name, b.archived_at from batches b join clients c on c.id = b.client_id where b.id = $1`, [batchId],
+      `select b.client_id, b.title, c.name as client_name, b.archived_at from batches b join clients c on c.id = b.client_id where b.id = $1 for no key update of b`, [batchId],
     );
     if (!b) throw notFound('Batch');
     // a manager confirming delivery delivers the whole batch: every approved
@@ -764,8 +750,14 @@ export async function applyScriptAction(
     if (action === 'approve' || action === 'request_revisions') {
       // one review record per decision, tied to the document when there is one
       let submissionId = opts.review?.submissionId ?? null;
-      if (submissionId && !(await t.one(`select 1 from submissions where id = $1 and batch_id = $2`, [submissionId, batchId]))) {
-        throw new HttpError(400, 'That document isn’t part of this batch. Refresh and try again.');
+      if (submissionId) {
+        if (!(await t.one(`select 1 from submissions where id = $1 and batch_id = $2`, [submissionId, batchId]))) {
+          throw new HttpError(400, 'That document isn’t part of this batch. Refresh and try again.');
+        }
+        // the decision is on the version the reviewer read: a newer one sent since means look again
+        if (await t.one(`select 1 from submission_scripts where script_id in (${inIds}) and submission_id > $${idList.length + 1} limit 1`, [...idList, submissionId])) {
+          throw conflict('The writer has sent a newer version of this document since you opened it. Review that one instead.', 'stale');
+        }
       }
       if (!submissionId) {
         const cur = await t.query<{ script_id: number; submission_id: number }>(

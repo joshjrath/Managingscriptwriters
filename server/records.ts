@@ -17,10 +17,12 @@ interface ScriptRow {
   delivered_by_name: string | null; delivery_id: number | null; updated_at: string;
 }
 
-export async function loadScripts(db: Db, where: { batchId?: number; ids?: number[]; status?: ScriptStatus; assigneeId?: number }): Promise<Script[]> {
+export async function loadScripts(db: Db, where: { batchId?: number; batchIds?: number[]; ids?: number[]; status?: ScriptStatus; statuses?: ScriptStatus[]; assigneeId?: number }): Promise<Script[]> {
   const cond = ['s.removed_at is null'];
   const params: unknown[] = [];
   if (where.batchId) { params.push(where.batchId); cond.push(`s.batch_id = $${params.length}`); }
+  if (where.batchIds) { if (!where.batchIds.length) return []; cond.push(`s.batch_id in (${inList(where.batchIds, params)})`); }
+  if (where.statuses) { if (!where.statuses.length) return []; params.push(where.statuses); cond.push(`s.status = any($${params.length}::text[])`); }
   if (where.ids) { if (!where.ids.length) return []; cond.push(`s.id in (${inList(where.ids, params)})`); }
   if (where.status) { params.push(where.status); cond.push(`s.status = $${params.length}`); }
   if (where.assigneeId) { params.push(where.assigneeId); cond.push(`s.assignee_id = $${params.length}`); }
@@ -57,14 +59,7 @@ interface RevisionRow {
 export async function loadRevisions(db: Db, where: { batchId?: number; scriptIds?: number[]; openOnly?: boolean; batchIds?: number[] }): Promise<RevisionRequest[]> {
   const cond: string[] = [];
   const params: unknown[] = [];
-  // a batch's own resources plus the client resources picked for it
-  let attached = 'false';
-  if (where.batchId) {
-    params.push(where.batchId);
-    const p = `$${params.length}`;
-    attached = `exists (select 1 from batch_resources br where br.batch_id = ${p} and br.resource_id = r.id)`;
-    cond.push(`(r.batch_id = ${p} or ${attached})`);
-  }
+  if (where.batchId) { params.push(where.batchId); cond.push(`r.batch_id = $${params.length}`); }
   if (where.scriptIds) { if (!where.scriptIds.length) return []; cond.push(`r.script_id in (${inList(where.scriptIds, params)})`); }
   if (where.batchIds) { if (!where.batchIds.length) return []; cond.push(`r.batch_id in (${inList(where.batchIds, params)})`); }
   if (where.openOnly) cond.push(`r.resolved_at is null`);
