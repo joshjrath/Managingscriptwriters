@@ -26,7 +26,7 @@ const iso = (v: string) => new Date(v).toISOString();
 
 const SCHEMA_NAME = /^[a-z_][a-z0-9_]*$/;
 
-export async function openPostgres(url: string, opts: { schema?: string } = {}): Promise<Db> {
+export async function openPostgres(url: string, opts: { schema?: string; ssl?: boolean } = {}): Promise<Db> {
   const types = {
     getTypeParser(oid: number, format?: string) {
       if (oid === OID.int8) return (v: string) => Number(v);
@@ -36,7 +36,7 @@ export async function openPostgres(url: string, opts: { schema?: string } = {}):
       return pg.types.getTypeParser(oid, format as 'text');
     },
   };
-  const ssl = /sslmode=require/.test(url) || process.env.PGSSL === '1' ? { rejectUnauthorized: false } : undefined;
+  const ssl = /sslmode=require/.test(url) || opts.ssl ? { rejectUnauthorized: false } : undefined;
   if (opts.schema && !SCHEMA_NAME.test(opts.schema)) throw new Error('bad schema name');
   // Each open connection costs memory on the database server (a 256 MB plan on
   // Render), so keep pools small and let idle connections go.
@@ -76,7 +76,7 @@ export async function openPostgres(url: string, opts: { schema?: string } = {}):
       async close() {
         if (!inTx) await pool.end();
       },
-      withSchema: (schema) => openPostgres(url, { schema }),
+      withSchema: (schema) => openPostgres(url, { schema, ssl: opts.ssl }),
     };
     return db;
   };
@@ -134,9 +134,9 @@ export async function openPglite(dataDir?: string): Promise<Db> {
   return make(lite as unknown as Runner, false);
 }
 
-export async function openDb(opts: { databaseUrl?: string; dataDir?: string; memory?: boolean }): Promise<Db> {
+export async function openDb(opts: { databaseUrl?: string; dataDir?: string; memory?: boolean; ssl?: boolean }): Promise<Db> {
   const db = opts.databaseUrl
-    ? await openPostgres(opts.databaseUrl)
+    ? await openPostgres(opts.databaseUrl, { ssl: opts.ssl })
     : await openPglite(opts.memory ? undefined : opts.dataDir);
   await migrate(db);
   return db;

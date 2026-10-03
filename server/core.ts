@@ -24,8 +24,8 @@ export interface Ctx {
   realDb?: Db;
   /** the database this request is using right now (for work that outlives the handler, like streaming a file) */
   dbNow?: () => Db;
-  /** what the Control Center shows: the simulated network, the live workspace, or live once the team is placed (default) */
-  controlData?: import('./control/routes').ControlData;
+  /** what the Control Center shows: the live workspace (default) or, only when set on the server, the simulated network */
+  controlData?: import('./config').ControlData;
 }
 
 // ── settings ─────────────────────────────────────────────────────────────

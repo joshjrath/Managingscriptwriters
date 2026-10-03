@@ -24,9 +24,6 @@ import { workspaceWorld } from './workspace';
 
 export const CLEARANCE_HOURS = 12;
 
-/** Where the world comes from: the real workspace, or (only when set on the server) the simulated network. */
-export type ControlData = 'simulated' | 'workspace';
-
 const SIM_START = Date.now();
 
 export async function loadWorld(ctx: Ctx): Promise<ControlWorld> {

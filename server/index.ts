@@ -1,10 +1,11 @@
-// Entry point. Reads configuration from the environment, opens the database,
+// Entry point. Reads configuration (server/config.ts), opens the database,
 // creates the first manager if configured, and starts the web server and the
 // reminder scheduler.
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildApp } from './app';
+import { loadConfig, type Config } from './config';
 import { openDb } from './db';
 import { hashPassword, validatePassword } from './auth';
 import { startReminderScheduler } from './reminders';
@@ -12,21 +13,19 @@ import { seedDemo } from './seed-demo';
 import { claudeNotesReader } from './notes-import';
 import type { Ctx } from './core';
 
-const env = process.env;
-const production = env.NODE_ENV === 'production' || !!env.RENDER || !!env.RAILWAY_ENVIRONMENT;
 const here = path.dirname(fileURLToPath(import.meta.url));
+const config = loadConfig(process.env, { staticDir: path.resolve(here, '../client') });
 
 async function main() {
-  if (production && !env.DATABASE_URL && !env.DATA_DIR) {
+  if (config.production && !config.databaseUrl && !config.dataDirSet) {
     console.error('DATABASE_URL is not set. In production the app needs PostgreSQL (or DATA_DIR on a persistent volume). Refusing to start so no data is lost.');
     process.exit(1);
   }
-  const dataDir = env.DATA_DIR ?? 'data/pglite';
-  const db = await openDb({ databaseUrl: env.DATABASE_URL, dataDir });
-  console.log(env.DATABASE_URL ? 'database: PostgreSQL' : `database: embedded PGlite at ${dataDir}`);
+  const db = await openDb({ databaseUrl: config.databaseUrl, dataDir: config.dataDir, ssl: config.pgSsl });
+  console.log(config.databaseUrl ? 'database: PostgreSQL' : `database: embedded PGlite at ${config.dataDir}`);
 
-  const setupHint = await bootstrapManager(db);
-  if (env.DEMO === '1') {
+  const setupHint = await bootstrapManager(db, config.manager);
+  if (config.demo) {
     const seeded = await seedDemo(db);
     if (seeded) console.log('demo workspace seeded (sign in as josh@scalemedia.demo / scalemedia-demo)');
   }
@@ -34,23 +33,20 @@ async function main() {
   const ctx: Ctx = {
     db,
     now: () => new Date(),
-    secureCookies: production,
-    allowSetup: !production || env.ALLOW_SETUP === '1',
-    uploadLimitBytes: Number(env.UPLOAD_LIMIT_MB ?? 25) * 1024 * 1024,
+    secureCookies: config.production,
+    allowSetup: config.allowSetup,
+    uploadLimitBytes: config.uploadLimitBytes,
     setupHint,
     // paste-notes import reads notes with Claude when an API key is configured
-    notesReader: env.ANTHROPIC_API_KEY ? claudeNotesReader() : null,
-    controlData: env.CONTROL_CENTER_DATA === 'simulated' ? 'simulated' : 'workspace',
+    notesReader: config.anthropicApiKey ? claudeNotesReader() : null,
+    controlData: config.controlData,
   };
-  const staticDir = env.STATIC_DIR ?? path.resolve(here, '../client');
-  const app = await buildApp(ctx, { staticDir, logger: production });
+  const app = await buildApp(ctx, { staticDir: config.staticDir, logger: config.production });
 
-  const minutes = Number(env.REMINDER_INTERVAL_MINUTES ?? 10);
-  const stopReminders = env.REMINDERS === 'off' ? () => {} : startReminderScheduler(ctx, minutes, (m) => console.log(m));
+  const stopReminders = config.remindersEnabled ? startReminderScheduler(ctx, config.reminderIntervalMinutes, (m) => console.log(m)) : () => {};
 
-  const port = Number(env.PORT ?? 3001);
-  await app.listen({ port, host: env.HOST ?? '0.0.0.0' });
-  console.log(`Scale Media scripts listening on :${port}`);
+  await app.listen({ port: config.port, host: config.host });
+  console.log(`Scale Media scripts listening on :${config.port}`);
 
   let stopping = false;
   const shutdown = () => {
@@ -68,14 +64,9 @@ async function main() {
 
 // Creates the first manager from MANAGER_EMAIL / MANAGER_PASSWORD, or with
 // MANAGER_RESET_PASSWORD=1 resets that account's password (creating it if
-// missing). Values are trimmed: pasted variables often carry a trailing space
-// or newline. Problems are logged and returned for the sign-in page rather
+// missing). Problems are logged and returned for the sign-in page rather
 // than crashing the server.
-async function bootstrapManager(db: Awaited<ReturnType<typeof openDb>>): Promise<string | undefined> {
-  const email = env.MANAGER_EMAIL?.trim().toLowerCase() ?? '';
-  const password = env.MANAGER_PASSWORD?.trim() ?? '';
-  const name = env.MANAGER_NAME?.trim() || 'Manager';
-  const reset = env.MANAGER_RESET_PASSWORD === '1' || env.MANAGER_RESET_PASSWORD === 'true';
+async function bootstrapManager(db: Awaited<ReturnType<typeof openDb>>, { email, password, name, reset }: Config['manager']): Promise<string | undefined> {
   const users = await db.one<{ n: number }>(`select count(*) as n from users`);
   const empty = !users?.n;
   if (!empty && !reset) return undefined;
