@@ -13,8 +13,8 @@ import { requireManager, requireUser } from './auth';
 import { HttpError, notFound, parse, zs } from './http';
 import { readForm } from './submissions';
 import { storeFile } from './files';
-import { compressRanges, type ScriptStatus } from '../shared/workflow';
-import type { Deliverable, DeliverableState, ScriptBankPage } from '../shared/types';
+import { compressRanges, documentState, type ScriptStatus } from '../shared/workflow';
+import type { Deliverable, ScriptBankPage } from '../shared/types';
 
 interface SubRow {
   id: number; previous_id: number | null; version: number; url: string | null; file_id: number | null; file_name: string | null; note: string | null;
@@ -31,14 +31,6 @@ interface LooseRow {
   id: number; number: number; title: string | null; status: ScriptStatus; doc_url: string; timeliner_url: string | null; updated_at: string;
   writer_id: number | null; writer_name: string | null;
   batch_id: number; batch_title: string; batch_archived: boolean; client_id: number; client_name: string; shoot_date: string | null;
-}
-
-export function stateOf(statuses: ScriptStatus[]): DeliverableState {
-  if (statuses.length && statuses.every((s) => s === 'delivered')) return 'delivered';
-  if (statuses.length && statuses.every((s) => s === 'approved' || s === 'delivered')) return 'approved';
-  if (statuses.some((s) => s === 'revisions_needed')) return 'revisions';
-  if (statuses.some((s) => s === 'ready_for_review')) return 'in_review';
-  return 'in_progress';
 }
 
 export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
@@ -110,7 +102,7 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
         clientId: s.client_id, clientName: s.client_name, shootDate: s.shoot_date,
         scripts: list.map((x) => ({ id: x.id, number: x.number, title: x.title, status: x.status })),
         ranges: compressRanges(list.map((x) => x.number)),
-        state: stateOf(list.map((x) => x.status)),
+        state: documentState(list.map((x) => x.status)),
         edited: e ? { kind: e.file_id ? 'file' : 'link', href: e.file_id ? `/api/files/${e.file_id}` : e.url!, name: e.file_name, at: e.created_at } : null,
         timelinerUrl: list.find((x) => x.timeliner_url)?.timeliner_url ?? null,
         past: null,
@@ -140,7 +132,7 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
         clientId: r.client_id, clientName: r.client_name, shootDate: r.shoot_date,
         scripts: list.map((x) => ({ id: x.id, number: x.number, title: x.title, status: x.status })),
         ranges: compressRanges(list.map((x) => x.number)),
-        state: stateOf(list.map((x) => x.status)),
+        state: documentState(list.map((x) => x.status)),
         edited: null,
         timelinerUrl: list.find((x) => x.timeliner_url)?.timeliner_url ?? null,
         past: null,

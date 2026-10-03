@@ -296,6 +296,7 @@ async function saveAttachments(clientId: number, batchId: number | null, a: Atta
 
 function AttachmentsSection({ value, onChange, errors: shown }: { value: Attach; onChange: (a: Attach) => void; errors: Record<string, string> }) {
   const ids = { r: useFieldId('ar'), d: useFieldId('ad'), f: useFieldId('af') };
+  const { uploadLimitMb } = useBoot();
   // an error disappears as soon as the link is fixed
   const live = attachErrors(value);
   const errors = { recordingUrl: live.recordingUrl && shown.recordingUrl, documentUrl: live.documentUrl && shown.documentUrl };
@@ -307,7 +308,7 @@ function AttachmentsSection({ value, onChange, errors: shown }: { value: Attach;
       <Field label="Document link" optional htmlFor={ids.d} error={errors.documentUrl} help="Google Doc, Notion page, Drive folder…">
         <input className="input" type="url" placeholder="https://" value={value.documentUrl} onChange={(e) => onChange({ ...value, documentUrl: e.target.value })} {...inputProps(ids.d, errors.documentUrl)} />
       </Field>
-      <Field label="Upload PDFs or files" optional htmlFor={ids.f} className="full" help="Choose one or several, up to 25 MB each. Only signed-in team members can open them.">
+      <Field label="Upload PDFs or files" optional htmlFor={ids.f} className="full" help={`Choose one or several, up to ${uploadLimitMb} MB each. Only signed-in team members can open them.`}>
         <input className="input" type="file" multiple id={ids.f} accept=".pdf,.doc,.docx,.txt,.rtf,.png,.jpg,.jpeg,.webp,.key,.ppt,.pptx,.xls,.xlsx,.csv"
           onChange={(e) => { onChange({ ...value, files: [...value.files, ...Array.from(e.target.files ?? [])] }); e.target.value = ''; }} />
       </Field>
@@ -576,7 +577,7 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
 // ── new client ───────────────────────────────────────────────────────────
 
 function ClientForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (c: Created) => void }) {
-  const { me, users } = useBoot();
+  const { me, users, uploadLimitMb } = useBoot();
   const [prospect, setProspect] = useState(!!preset?.prospect);
   const toast = useToast();
   const managers = users.filter((u) => u.active && isManager(u.role));
@@ -660,7 +661,7 @@ function ClientForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: 
           <Field label="Call date" optional htmlFor={ids.cdate}><input className="input" type="date" id={ids.cdate} value={call.callDate} onChange={(e) => setCall({ ...call, callDate: e.target.value })} /></Field>
           <Field label="Recording link" optional htmlFor={ids.rec} error={f['briefing.recordingUrl']} help="e.g. the Phantom recording URL"><input className="input" type="url" placeholder="https://" value={call.recordingUrl} onChange={(e) => setCall({ ...call, recordingUrl: e.target.value })} {...inputProps(ids.rec, f['briefing.recordingUrl'])} /></Field>
           <Field label="Document link" optional htmlFor={ids.doc} error={f['briefing.documentUrl']}><input className="input" type="url" placeholder="https://" value={call.documentUrl} onChange={(e) => setCall({ ...call, documentUrl: e.target.value })} {...inputProps(ids.doc, f['briefing.documentUrl'])} /></Field>
-          <Field label="Or upload the document" optional htmlFor={ids.file} className="full" help="PDF, Word, text or images, up to 25 MB. Stored privately; only signed-in team members can open it."><input className="input" type="file" id={ids.file} onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></Field>
+          <Field label="Or upload the document" optional htmlFor={ids.file} className="full" help={`PDF, Word, text or images, up to ${uploadLimitMb} MB. Stored privately; only signed-in team members can open it.`}><input className="input" type="file" id={ids.file} onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></Field>
           <Field label="Summary" optional htmlFor={ids.sum} className="full"><textarea className="textarea" id={ids.sum} value={call.summary} onChange={(e) => setCall({ ...call, summary: e.target.value })} /></Field>
           <Field label="Writing instructions" optional htmlFor={ids.ins} className="full"><textarea className="textarea" id={ids.ins} value={call.instructions} onChange={(e) => setCall({ ...call, instructions: e.target.value })} /></Field>
         </div>

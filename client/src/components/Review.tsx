@@ -154,6 +154,7 @@ export function TitlesDialog({ batchId, scripts, onClose }: { batchId: number; s
  */
 export function SendDialog({ batchId, batchTitle, candidates, preselect, resend, onClose }: { batchId: number; batchTitle: string; candidates: Script[]; preselect: number[]; resend?: boolean; onClose: () => void }) {
   const toast = useToast();
+  const { uploadLimitMb } = useBoot();
   const pre = candidates.filter((s) => preselect.includes(s.id));
   const [scope, setScope] = useState<'all' | 'some'>('all');
   const [range, setRange] = useState(compressRanges(pre.map((s) => s.number)));
@@ -191,7 +192,7 @@ export function SendDialog({ batchId, batchTitle, candidates, preselect, resend,
         <div className="field">
           <span className="lbl">Your document</span>
           <AttachInput value={att} onChange={setAtt} error={errs.document ?? server?.fields.document}
-            fileHelp="A PDF with all the scripts is ideal. Up to 25 MB."
+            fileHelp={`A PDF with all the scripts is ideal. Up to ${uploadLimitMb} MB.`}
             linkHelp="Google Docs or Drive: set sharing so the team can open it (and edit, if you want changes made in the doc)." />
         </div>
         <div className="field">

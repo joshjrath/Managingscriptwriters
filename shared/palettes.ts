@@ -100,7 +100,10 @@ export function themeVars(t: WorkspaceTheme | null | undefined): Record<string, 
 
 export const surfaceSwatch = (tone: SurfaceTone) => SURFACE_SETS[tone];
 
-/** Contrast of dark text (#111113) on a colour: accents need about 7:1 to read well. */
+/** The least contrast dark text needs on an accent (WCAG AA for normal text); the server refuses anything lower. The presets aim higher, about 7:1. */
+export const MIN_ACCENT_CONTRAST = 4.5;
+
+/** Contrast of dark text (#111113) on a colour. */
 export function darkTextContrast(hex: string): number {
   const ch = (i: number) => {
     const c = parseInt(hex.slice(i, i + 2), 16) / 255;

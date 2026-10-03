@@ -9,7 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, Camera, CheckCheck, FileText, PenLine, PlayCircle, Plus, Send, Type } from 'lucide-react';
 import { api, useSave } from '../api';
 import type { MyWork, Script } from '../../../shared/types';
-import { compressRanges, isApproved, isManager, type Milestone } from '../../../shared/workflow';
+import { canSendDocument, compressRanges, isManager, type Milestone } from '../../../shared/workflow';
 import { fmtDate, fmtLong, fmtRange, fmtStamp, fmtWeekday, plural } from '../../../shared/format';
 import { TodayPill } from '../components/TodayPill';
 import { TodoPanel } from '../components/Todos';
@@ -140,7 +140,7 @@ function MyBatch({ e, writerId }: { e: Entry; writerId: number }) {
   const p = e.myProgress;
   const st = split(e.mine);
   const notSent = [...st.notStarted, ...st.writing];
-  const sendable = e.mine.filter((s) => !isApproved(s.status));
+  const sendable = e.mine.filter((s) => canSendDocument(s.status));
   const written = writtenOf(e, writerId);
   const [dialog, setDialog] = useState<null | { kind: 'send'; preselect: number[]; resend?: boolean } | { kind: 'titles' } | { kind: 'deliver' }>(null);
   const deliver = useSave((v: { url: string | null; note: string | null }) => api<{ changed: number[] }>(`/api/batches/${b.id}/scripts/action`, {

@@ -10,7 +10,7 @@ import type { Editor, Settings, UserSummary } from '../../../shared/types';
 import { computeDeadlines, DEFAULT_RULES, isValidTimeZone } from '../../../shared/dates';
 import { fmtCutoff, fmtLong, fmtStamp, plural } from '../../../shared/format';
 import { CITIES, cityLabel, findCity, shiftLength, shiftOf, timeZoneList, zoneOffset } from '../../../shared/cities';
-import { ACCENT_LABEL, ACCENTS, darkTextContrast, DEFAULT_PALETTE, HEX, PALETTES, resolveTheme, SURFACE_LABEL, SURFACES, surfaceSwatch, type Accent, type WorkspaceTheme } from '../../../shared/palettes';
+import { ACCENT_LABEL, ACCENTS, darkTextContrast, DEFAULT_PALETTE, HEX, MIN_ACCENT_CONTRAST, PALETTES, resolveTheme, SURFACE_LABEL, SURFACES, surfaceSwatch, type Accent, type WorkspaceTheme } from '../../../shared/palettes';
 import { applyTheme, restoreTheme } from '../theme';
 import { PageHeader, useBoot } from '../components/Shell';
 import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, useFieldId, useToast } from '../components/ui';
@@ -57,7 +57,7 @@ function PalettePanel() {
   const save = useSave(() => api<{ settings: Settings }>('/api/settings/theme', { method: 'PUT', body: { ...draft } }), {
     onSuccess: (out) => { applyTheme(out.settings.theme); toast(`Colour palette saved: ${resolveTheme(out.settings.theme).palette.name}. Everyone sees it now.`); },
   });
-  const weak = ACCENTS.filter((k) => darkTextContrast(r.colors[k]) < 4.5);
+  const weak = ACCENTS.filter((k) => darkTextContrast(r.colors[k]) < MIN_ACCENT_CONTRAST);
   const pick = (id: string) => setDraft({ preset: id });
   const setColor = (k: Accent, v: string) => setDraft({ ...draft, colors: { ...draft.colors, [k]: v.toUpperCase() } });
   return (
@@ -100,7 +100,7 @@ function PalettePanel() {
           <div className="pal-colors">
             {ACCENTS.map((k) => {
               const v = r.colors[k];
-              const low = darkTextContrast(v) < 4.5;
+              const low = darkTextContrast(v) < MIN_ACCENT_CONTRAST;
               return (
                 <label key={k} className={`pal-color${low ? ' low' : ''}`}>
                   <input type="color" value={v.toLowerCase()} onChange={(e) => setColor(k, e.target.value)} aria-label={`${ACCENT_LABEL[k].name} colour`} />

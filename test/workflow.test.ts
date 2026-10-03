@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  checkAction, compressRanges, deriveStage, evenSplit, isAdmin, isManager, milestone, parseRanges, parseTitleLines, progressLabel, splitAssignments, summarize,
+  allowedFrom, canSendDocument, checkAction, compressRanges, deriveStage, documentState, evenSplit, isAdmin, isManager, milestone, parseRanges, parseTitleLines, progressLabel, splitAssignments, summarize,
   type ScriptStatus,
 } from '../shared/workflow';
 import { makeClock } from '../shared/dates';
@@ -68,6 +68,17 @@ describe('workflow permissions', () => {
     expect(checkAction('deliver', { status: 'in_progress', assigneeId: 7 }, manager)).toMatch(/Not possible/);
     expect(checkAction('deliver', { status: 'approved', assigneeId: 7 }, writer)).toBeNull();
   });
+  it('one rule for what can be sent, sent back, and where a document stands', () => {
+    expect(['not_started', 'in_progress', 'ready_for_review', 'revisions_needed', 'approved', 'delivered'].map((s) => canSendDocument(s as ScriptStatus))).toEqual([true, true, true, true, false, false]);
+    expect(allowedFrom('request_revisions', 'approved')).toBe(true);
+    expect(allowedFrom('request_revisions', 'delivered')).toBe(false);
+    expect(documentState(['ready_for_review', 'revisions_needed'])).toBe('revisions'); // the writer has something to do
+    expect(documentState(['ready_for_review', 'approved'])).toBe('in_review');
+    expect(documentState(['approved', 'delivered'])).toBe('approved');
+    expect(documentState(['delivered', 'delivered'])).toBe('delivered');
+    expect(documentState(['in_progress', 'approved'])).toBe('in_progress');
+    expect(documentState([])).toBe('in_progress');
+  });
   it('admins (stored as owner) can do everything managers can; only they get admin-only features', () => {
     expect([isManager('owner'), isManager('manager'), isManager('writer')]).toEqual([true, true, false]);
     expect([isAdmin('owner'), isAdmin('manager'), isAdmin('writer')]).toEqual([true, false, false]);
@@ -89,6 +100,8 @@ describe('assignments', () => {
     expect(evenSplit(45, 2)).toEqual([23, 22]);
     expect(parseRanges('1-3, 5, 8–10', 45)).toEqual([1, 2, 3, 5, 8, 9, 10]);
     expect(parseRanges('40-50', 45)).toBeNull();
+    expect(parseRanges('1 - 3, 5', 45)).toEqual([1, 2, 3, 5]);
+    expect(parseRanges('1 – 3', 45)).toEqual([1, 2, 3]);
     expect(compressRanges([1, 2, 3, 5, 7, 8])).toBe('1–3, 5, 7–8');
   });
 });
@@ -119,8 +132,23 @@ describe('quick entry parser', () => {
     const two = parseEntry('Sarah writes 5 scripts for Acme on October 20, 2026', { ...ctx, users: [...ctx.users, { id: 9, name: 'Sarah Diaz', active: true }] });
     expect(two.writers[0].kind).toBe('ambiguous');
   });
-  it('asks when a numeric date could be read two ways', () => {
+  it('asks when a numeric date could be read two ways, and only then', () => {
     expect(parseEntry('Acme 10/12/2026 5 scripts', ctx).dates.kind).toBe('ambiguous');
+    // there's no 25th month, so this can only be Dec 25
+    expect(parseEntry('Acme 25/12/2026 5 scripts', ctx).dates).toMatchObject({ kind: 'ok', start: '2026-12-25' });
+    expect(parseEntry('Acme 12/31/2026 5 scripts', ctx).dates).toMatchObject({ kind: 'ok', start: '2026-12-31' });
+    expect(parseEntry('Acme 31/31/2026 5 scripts', ctx).dates.kind).toBe('invalid');
+  });
+  it('matches names with accents and hyphens, written either way', () => {
+    const team = { ...ctx, users: [...ctx.users, { id: 4, name: 'José Álvarez', active: true }, { id: 5, name: 'Anne-Marie Roy', active: true }, { id: 6, name: 'Zoe Park', active: true }] };
+    expect(parseEntry('Acme 2026-10-20, 10 scripts, and José is writing them.', team).writers).toEqual([{ kind: 'matched', text: 'José', id: 4, name: 'José Álvarez' }]);
+    expect(parseEntry('Acme 2026-10-20, 10 scripts, written by Jose Alvarez.', team).writers).toEqual([{ kind: 'matched', text: 'José Álvarez', id: 4, name: 'José Álvarez' }]);
+    expect(parseEntry('Acme 2026-10-20, 10 scripts, Anne-Marie is writing.', team).writers).toEqual([{ kind: 'matched', text: 'Anne-Marie', id: 5, name: 'Anne-Marie Roy' }]);
+    const both = parseEntry('Acme 2026-10-20, 10 scripts, Zoë and Sarah are writing.', team);
+    expect(both.writers.map((w) => w.kind === 'matched' && w.id)).toEqual([6, 2]);
+    expect(both.questions).toEqual([]);
+    // someone not on the team is still reported, accents and all
+    expect(parseEntry('Acme 2026-10-20, 10 scripts, Élodie is writing.', team).questions).toEqual(['There’s no team member called “Élodie”.']);
   });
   it('reports missing information', () => {
     const r = parseEntry('shoot next week', ctx);

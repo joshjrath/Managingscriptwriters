@@ -2,6 +2,7 @@
 
 import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { isISODate } from '../shared/dates';
 
 /**
  * The request's path, decoded and without its query string: what the router
@@ -51,7 +52,8 @@ export const zs = {
   id: z.coerce.number().int().positive(),
   name: (label = 'Name', max = 160) => trimmed(max).min(1, `${label} is required`),
   text: (max = 20000) => trimmed(max).transform((v) => v || null).nullable().optional(),
-  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a valid date').refine((v) => !Number.isNaN(Date.parse(v + 'T00:00:00Z')) && new Date(v + 'T00:00:00Z').toISOString().startsWith(v), 'Use a valid date'),
+  // a real calendar date (shared rule) in a sane range: a year typed as "26" arrives as 0026, which date maths reads as 1926
+  date: z.string().refine((v) => isISODate(v) && v >= '1900-01-01' && v <= '2999-12-31', 'Use a valid date'),
   url: z
     .string()
     .trim()

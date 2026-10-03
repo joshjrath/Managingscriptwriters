@@ -16,8 +16,13 @@ import { conflict, forbidden, HttpError, notFound, parse, zs } from './http';
 import { loadRevisions, loadScripts } from './records';
 import { spool, storeFile, type UploadedFile } from './files';
 import { applyScriptAction, loadBatchDetail } from './routes/batches';
-import { compressRanges, isManager, type ScriptStatus } from '../shared/workflow';
+import { canSendDocument, compressRanges, documentState, isManager, type DocumentState, type ScriptStatus } from '../shared/workflow';
 import type { BatchSummary, Me, ReviewGroup, ReviewQueue, ReviewRecord, Submission, SubmissionState } from '../shared/types';
+
+/** A document's state in the batch payload's words (the Script bank uses documentState's own). */
+const SUBMISSION_STATE: Record<DocumentState, SubmissionState> = {
+  in_review: 'in_review', revisions: 'revisions_requested', approved: 'approved', delivered: 'delivered', in_progress: 'withdrawn',
+};
 
 const inList = (ids: number[], params: unknown[]) => ids.map((id) => { params.push(id); return `$${params.length}`; }).join(',');
 
@@ -119,13 +124,7 @@ export async function loadSubmissionData(db: Db, batchIds: number[]): Promise<Su
       else if (st === 'revisions_needed') counts.revisions++;
       else counts.notSubmitted++;
     }
-    const n = currentIds.length;
-    const state: SubmissionState = !n ? 'superseded'
-      : counts.inReview ? 'in_review'
-        : counts.revisions ? 'revisions_requested'
-          : counts.delivered === n ? 'delivered'
-            : counts.approved + counts.delivered === n ? 'approved'
-              : 'withdrawn';
+    const state: SubmissionState = !currentIds.length ? 'superseded' : SUBMISSION_STATE[documentState(currentIds.map((id) => numbers.get(id)!.status))];
     const num = (ids: number[]) => ids.map((id) => numbers.get(id)!.number).sort((a, b) => a - b);
     return {
       id: s.id, batchId: s.batch_id, writerId: s.writer_id, writerName: s.writer_name, submittedByName: s.submitted_by_name, version: s.version,
@@ -226,7 +225,7 @@ export async function sendDocument(ctx: Ctx, me: Me, batchId: number, input: Sen
     );
     if (rows.length !== ids.length) throw conflict('Some of those scripts are no longer in this batch. Refresh and try again.');
     if (!isManager(me.role) && rows.some((r) => r.assignee_id !== me.id)) throw forbidden('You can only send scripts assigned to you');
-    const done = rows.filter((r) => r.status === 'approved' || r.status === 'delivered');
+    const done = rows.filter((r) => !canSendDocument(r.status));
     if (done.length) throw conflict(`Script${done.length > 1 ? 's' : ''} ${compressRanges(done.map((r) => r.number))} ${done.length > 1 ? 'are' : 'is'} already approved, so ${done.length > 1 ? 'they don’t' : 'it doesn’t'} need sending again.`);
 
     const fileId = input.file ? await storeFile(t, me, input.file) : null;

@@ -11,7 +11,7 @@ import {
 import { api, useSave, type ApiError } from '../api';
 import type { BatchDetail, ClientDetail, Priority, ReschedulePreview, Resource, ResourceCategory, Script } from '../../../shared/types';
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
-import { ACTION_RULES, checkAction, compressRanges, parseRanges, STATUS_LABEL, type ScriptAction, type ScriptStatus, isManager } from '../../../shared/workflow';
+import { ACTION_RULES, allowedFrom, canSendDocument, checkAction, compressRanges, parseRanges, STATUS_LABEL, type ScriptAction, type ScriptStatus, isManager } from '../../../shared/workflow';
 import { addDays, computeDeadlines, diffDays, draftFromFinal, isISODate, suggestStart, type ISODate } from '../../../shared/dates';
 import { cutoffIn, fmtBytes, fmtCutoff, fmtDate, fmtLong, fmtRange, fmtStamp, fmtTimeZoneAbbr, plural } from '../../../shared/format';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
@@ -113,7 +113,7 @@ function BatchView({ b }: { b: BatchDetail }) {
                     {manager && w.userId != null && (
                       <div className="row-flex s2" style={{ marginTop: 10 }}>
                         <Button variant="sm ghost" icon={<ListTodo aria-hidden />} onClick={() => setTodoFor(w.userId)}>Add to-do</Button>
-                        {b.scripts.some((s) => s.assigneeId === w.userId && (s.status === 'approved' || s.status === 'ready_for_review')) && (
+                        {b.scripts.some((s) => s.assigneeId === w.userId && allowedFrom('request_revisions', s.status)) && (
                           <Button variant="sm ghost" icon={<RotateCcw aria-hidden />} onClick={() => setSendBack(w.userId)}>Send back for revisions…</Button>
                         )}
                       </div>
@@ -206,8 +206,8 @@ function BatchView({ b }: { b: BatchDetail }) {
 }
 
 // ── drafts & documents ───────────────────────────────────────────────────
+// Scripts go back and forth as documents: one PDF or link per writer, reviewed in one go.
 
-/** Scripts go back and forth as documents: one PDF or link per writer, reviewed in one go. */
 /** Approved scripts waiting for Timeliner. Writers confirm their own; a
  *  manager's confirmation delivers every approved script in the batch. */
 function ReadyToDeliver({ b }: { b: BatchDetail }) {
@@ -215,7 +215,7 @@ function ReadyToDeliver({ b }: { b: BatchDetail }) {
   const manager = isManager(me.role);
   const toast = useToast();
   const [open, setOpen] = useState(false);
-  const ready = b.scripts.filter((s) => s.status === 'approved' && (manager || s.assigneeId === me.id));
+  const ready = b.scripts.filter((s) => !checkAction('deliver', s, me));
   const run = useSave((v: { url: string | null; note: string | null }) => api<{ changed: number[] }>(`/api/batches/${b.id}/scripts/action`, {
     body: { action: 'deliver', scriptIds: ready.map((s) => s.id), timelinerUrl: v.url, note: v.note, versions: Object.fromEntries(ready.map((s) => [s.id, s.version])) },
   }), { onSuccess: (o) => { toast(`Marked ${plural(o.changed.length, 'script')} delivered`); setOpen(false); } });
@@ -256,7 +256,7 @@ function DocumentsPanel({ b }: { b: BatchDetail }) {
   useEffect(() => { if (window.location.hash === '#documents') document.getElementById('documents')?.scrollIntoView(); }, []);
   const mine = b.scripts.filter((s) => s.assigneeId === me.id);
   // writers send their own scripts; managers can send any on a writer's behalf
-  const sendable = (manager ? b.scripts : mine).filter((s) => s.status !== 'approved' && s.status !== 'delivered');
+  const sendable = (manager ? b.scripts : mine).filter((s) => canSendDocument(s.status));
   const notSent = (manager && !mine.length ? b.scripts : mine).filter((s) => s.status === 'not_started' || s.status === 'in_progress');
   const waiting = b.groups.filter((g) => g.kind === 'waiting');
   const sentBack = b.groups.filter((g) => g.kind === 'sent_back');
@@ -310,7 +310,7 @@ function ScriptChecklist({ b }: { b: BatchDetail }) {
   const [rangeErr, setRangeErr] = useState('');
   const [filter, setFilter] = useState<'all' | 'mine' | ScriptStatus | 'unassigned'>(manager ? 'all' : b.isAssigned ? 'mine' : 'all');
   const [dialog, setDialog] = useState<null | { action: ScriptAction | 'assign'; ids: number[] }>(null);
-  const sendable = b.scripts.filter((s) => (manager || s.assigneeId === me.id) && s.status !== 'approved' && s.status !== 'delivered');
+  const sendable = b.scripts.filter((s) => (manager || s.assigneeId === me.id) && canSendDocument(s.status));
   const [open, setOpen] = useState<Script | null>(null);
   const actions = manager ? MANAGER_ACTIONS : WRITER_ACTIONS;
   // long checklists start folded; documents are the main way work moves now
@@ -489,7 +489,7 @@ function ScriptLinks({ s }: { s: Script }) {
 /** Send a writer's approved (or in-review) scripts back for revisions, all or some of them. */
 function SendBackDialog({ b, writerId, onClose }: { b: BatchDetail; writerId: number; onClose: () => void }) {
   const toast = useToast();
-  const eligible = b.scripts.filter((s) => s.assigneeId === writerId && (s.status === 'approved' || s.status === 'ready_for_review'));
+  const eligible = b.scripts.filter((s) => s.assigneeId === writerId && allowedFrom('request_revisions', s.status));
   const name = b.writers.find((w) => w.userId === writerId)?.name ?? 'the writer';
   const [range, setRange] = useState(compressRanges(eligible.map((s) => s.number)));
   const [note, setNote] = useState('');
@@ -1022,6 +1022,7 @@ function BlockerDialog({ b, open, onClose }: { b: BatchDetail; open: boolean; on
 
 export function ResourceDialog({ open, onClose, clientId, batchId, briefingId }: { open: boolean; onClose: () => void; clientId: number; batchId?: number; briefingId?: number }) {
   const toast = useToast();
+  const { uploadLimitMb } = useBoot();
   const [mode, setMode] = useState<'link' | 'file'>('link');
   const [title, setTitle] = useState('');
   const [url, setUrl] = useState('');
@@ -1062,7 +1063,7 @@ export function ResourceDialog({ open, onClose, clientId, batchId, briefingId }:
         <Field label="Title" optional={mode === 'file'} htmlFor={ids.t} error={f.title}><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} {...inputProps(ids.t, f.title)} /></Field>
         {mode === 'link'
           ? <Field label="Link" htmlFor={ids.u} error={f.url}><input className="input" type="url" placeholder="https://" value={url} onChange={(e) => setUrl(e.target.value)} {...inputProps(ids.u, f.url)} /></Field>
-          : <Field label="File" htmlFor={ids.f} error={f.file} help="Up to 25 MB. Only signed-in team members can open it."><input className="input" type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} {...inputProps(ids.f, f.file)} /></Field>}
+          : <Field label="File" htmlFor={ids.f} error={f.file} help={`Up to ${uploadLimitMb} MB. Only signed-in team members can open it.`}><input className="input" type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} {...inputProps(ids.f, f.file)} /></Field>}
         <Field label="Type" htmlFor={ids.c}><select className="select" id={ids.c} value={category} onChange={(e) => setCategory(e.target.value as ResourceCategory)}>{RESOURCE_CATEGORIES.map((c) => <option key={c} value={c}>{RESOURCE_LABEL[c]}</option>)}</select></Field>
       </div>
     </Dialog>

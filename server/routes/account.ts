@@ -16,7 +16,7 @@ import { computeDeadlines, isValidTimeZone } from '../../shared/dates';
 import { findCity, shiftOf, zoneFor } from '../../shared/cities';
 import { fmtDate } from '../../shared/format';
 import type { Notification } from '../../shared/types';
-import { ACCENTS, darkTextContrast, HEX, PALETTES, resolveTheme, SURFACES, type Accent, type WorkspaceTheme } from '../../shared/palettes';
+import { ACCENTS, darkTextContrast, HEX, MIN_ACCENT_CONTRAST, PALETTES, resolveTheme, SURFACES, type Accent, type WorkspaceTheme } from '../../shared/palettes';
 
 const PLACE_KEYS = new Set(['city', 'city_code', 'country', 'lat', 'lon', 'timezone']);
 const email = z.string().trim().toLowerCase().email('Enter a valid email').max(200);
@@ -325,7 +325,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
   // the colour palette: the admin's choice, applied to the whole site for everyone
   app.put('/api/settings/theme', async (req) => {
     const me = requireAdmin(req, 'Only the admin can change the colour palette');
-    const hex = z.string().regex(HEX, 'Use a colour like #F2A599').refine((v) => darkTextContrast(v) >= 4.5, 'Too dark: dark text on this colour would be hard to read. Pick a lighter shade.');
+    const hex = z.string().regex(HEX, 'Use a colour like #F2A599').refine((v) => darkTextContrast(v) >= MIN_ACCENT_CONTRAST, 'Too dark: dark text on this colour would be hard to read. Pick a lighter shade.');
     const input = parse(z.object({
       preset: z.enum(PALETTES.map((p) => p.id) as [string, ...string[]], { message: 'Choose one of the palettes' }),
       surfaces: z.enum(SURFACES).optional(),

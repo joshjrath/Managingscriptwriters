@@ -203,6 +203,26 @@ export interface Actor {
   role: Role;
 }
 
+/** Whether `action` is possible from `status` at all (who may take it is checkAction's question). */
+export const allowedFrom = (action: ScriptAction, status: ScriptStatus) => ACTION_RULES[action].from.includes(status);
+
+/** Scripts that can go in a document sent for review: anything not yet approved (sending one already in review replaces its document). */
+export const canSendDocument = (status: ScriptStatus) => !isApproved(status);
+
+export type DocumentState = 'in_progress' | 'in_review' | 'revisions' | 'approved' | 'delivered';
+
+/**
+ * Where a document sent for review stands, from the scripts it still covers.
+ * A send-back outranks scripts still waiting: the writer has something to do.
+ */
+export function documentState(statuses: ScriptStatus[]): DocumentState {
+  if (statuses.length && statuses.every((s) => s === 'delivered')) return 'delivered';
+  if (statuses.length && statuses.every(isApproved)) return 'approved';
+  if (statuses.some((s) => s === 'revisions_needed')) return 'revisions';
+  if (statuses.some((s) => s === 'ready_for_review')) return 'in_review';
+  return 'in_progress';
+}
+
 export function checkAction(action: ScriptAction, script: Pick<ScriptLite, 'status' | 'assigneeId'>, actor: Actor): string | null {
   const rule = ACTION_RULES[action];
   if (rule.who === 'manager' && !isManager(actor.role)) return 'Only managers can do this';
@@ -234,7 +254,7 @@ export function compressRanges(numbers: number[]): string {
 /** "1-20, 25" → [1..20, 25]; returns null if the text isn't a valid range list. */
 export function parseRanges(text: string, max: number): number[] | null {
   const out = new Set<number>();
-  const cleaned = text.replace(/[–—]/g, '-').trim();
+  const cleaned = text.replace(/[–—]/g, '-').replace(/\s*-\s*/g, '-').trim();
   if (!cleaned) return null;
   for (const part of cleaned.split(/[,\s]+/).filter(Boolean)) {
     const m = /^(\d+)(?:-(\d+))?$/.exec(part);

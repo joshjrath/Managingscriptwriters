@@ -2,7 +2,7 @@
 
 import type { Clock, DayMode, ISODate } from './dates';
 import type { WorkspaceTheme } from './palettes';
-import type { Milestone, Progress, Role, ScriptStatus, Stage } from './workflow';
+import type { DocumentState, Milestone, Progress, Role, ScriptStatus, Stage } from './workflow';
 
 /** Every change request carries `x-scale-media: 1`; a page can't send it cross-site without a CORS preflight, which the server never grants. */
 export const CSRF_HEADER = 'x-scale-media';
@@ -80,7 +80,7 @@ export interface Counts {
 }
 
 /** approved = every script in it approved or delivered; delivered = all delivered to Timeliner */
-export type DeliverableState = 'in_progress' | 'in_review' | 'revisions' | 'approved' | 'delivered';
+export type DeliverableState = DocumentState;
 
 /** One document (a PDF or a link) covering a writer's scripts for a batch: one entry in the Script bank. */
 export interface Deliverable {
@@ -150,6 +150,8 @@ export interface Bootstrap {
   mode: SessionMode | null;
   /** reading pasted notes with AI is set up on the server (ANTHROPIC_API_KEY) */
   notesImport: boolean;
+  /** the largest file the server accepts, in MB (UPLOAD_LIMIT_MB) */
+  uploadLimitMb: number;
   /** the newest What's new entry this person has opened */
   whatsNewSeen: string | null;
   /** this person's own time zone (times across the site show in it) and whether they've confirmed it */

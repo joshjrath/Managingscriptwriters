@@ -378,6 +378,12 @@ describe('permissions are enforced on the server', () => {
   });
 });
 
+describe('bootstrap', () => {
+  it('tells the page the server’s real upload limit, so its help text matches what is accepted', async () => {
+    expect((await sarah.get('/api/bootstrap')).body.uploadLimitMb).toBe(5);
+  });
+});
+
 describe('client owners', () => {
   it('must be active team members, and an owner who has left can stay', async () => {
     expect((await manager.patch(`/api/clients/${acmeId}`, { ownerId: 999999 })).status).toBe(400);
@@ -1149,6 +1155,13 @@ describe('batch integrity', () => {
     expect(ok.body.batch.progress.approved).toBe(2);
   });
 
+  it('refuses a date whose year was typed short (0026 would become 1926 in the deadline maths)', async () => {
+    const r = await manager.post('/api/batches', { clientId: acmeId, title: 'Year typo', targetCount: 1, finalDue: '0026-11-20' });
+    expect(r.status).toBe(400);
+    expect(r.body.error.fields.finalDue).toBe('Use a valid date');
+    expect((await manager.post('/api/batches', { clientId: acmeId, title: 'No such day', targetCount: 1, finalDue: '2026-02-30' })).status).toBe(400);
+  });
+
   it('an edit changes only the fields it sends (the Edit batch form sends only what was changed)', async () => {
     const id = await batchFor('Two managers', ids.marcus, 1);
     // another manager moves final delivery, and a shoot move has flagged the dates
@@ -1260,6 +1273,17 @@ describe('today pill', () => {
     expect(one.total).toBe(t1.total);
     // writers can't peek at someone else's day
     expect((await sarah.get(`/api/today?userId=${ids.marcus}`)).body.scope).toBe('me');
+    // past the daily cutoff, today's drafts are overdue here just as on the batch page
+    const noon = NOW;
+    await db.query(`update settings set cutoff = '17:00'`);
+    NOW = new Date('2026-09-28T22:00:00Z'); // 6 PM in New York, after a 5 PM cutoff
+    try {
+      expect((await sarah.get('/api/today')).body.items.find((i: any) => i.batchId === batchId)).toMatchObject({ overdue: true });
+      expect(((await sarah.get(`/api/batches/${batchId}`)).body as BatchDetail).draft.overdue).toBe(true);
+    } finally {
+      NOW = noon;
+      await db.query(`update settings set cutoff = '23:59'`);
+    }
 
     const detail = (await sarah.get(`/api/batches/${batchId}`)).body;
     const sent = await sarah.post(`/api/batches/${batchId}/submissions`, { scriptIds: detail.scripts.map((s: any) => s.id), url: 'https://docs.example/today' });
@@ -1267,6 +1291,14 @@ describe('today pill', () => {
     const t2 = (await sarah.get('/api/today')).body;
     expect(t2.items.find((i: any) => i.batchId === batchId)).toMatchObject({ total: 3, done: 3 });
     expect(t2.done).toBe(t1.done + 3);
+  });
+
+  it('keeps an archived client’s unfinished work, as My work and the Overview do', async () => {
+    const c = await manager.post('/api/clients', { name: 'Wind Down Co', initialBatch: { title: 'Last batch', targetCount: 2, draftDue: '2026-09-28', finalDue: '2026-10-09', split: [{ writerId: ids.sarah, count: 2 }] } });
+    const batchId = c.body.batch.batchId;
+    expect((await manager.post(`/api/clients/${c.body.clientId}/archive`, { archived: true })).status).toBe(200);
+    expect((await sarah.get('/api/today')).body.items.some((i: any) => i.batchId === batchId)).toBe(true);
+    expect((await sarah.get('/api/my-work')).body.batches.some((e: any) => e.batch.id === batchId)).toBe(true);
   });
 });
 

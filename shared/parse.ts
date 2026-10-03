@@ -46,6 +46,8 @@ const ORD = '(?:st|nd|rd|th)?';
 const monthNum = (m: string) => MONTHS.indexOf(m.slice(0, 3).toLowerCase()) + 1;
 
 function build(y: number, m: number, d: number, em: number | null, ed: number | null): { start: ISODate; end: ISODate | null } | null {
+  // a 13th month would roll into next year rather than fail
+  if (m < 1 || m > 12 || (em != null && (em < 1 || em > 12))) return null;
   const start = makeDate(y, m, d);
   if (!isISODate(start) || Number(start.slice(8)) !== d) return null;
   if (ed == null) return { start, end: null };
@@ -111,9 +113,15 @@ export function parseCount(text: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/** Lower case without accents, so "José" in the notes matches "Jose" on the team and the other way round. */
+const plain = (s: string) => s.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+
 const norm = (s: string) =>
-  s.toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9 ]+/g, ' ')
+  plain(s).replace(/&/g, ' and ').replace(/[^\p{L}\p{N} ]+/gu, ' ')
     .replace(/\b(the|co|inc|llc|ltd|company|corp|group)\b/g, ' ').replace(/\s+/g, ' ').trim();
+
+/** For people's names: letters and apostrophes only, so "Anne-Marie" and "anne marie" compare equal. */
+const fold = (s: string) => plain(s).replace(/[^\p{L}' ]+/gu, ' ').replace(/\s+/g, ' ').trim();
 
 const wordIn = (hay: string, needle: string) => needle.length > 0 && new RegExp(`(^|\\s)${needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`).test(hay);
 
@@ -134,7 +142,7 @@ export function matchClient(text: string, clients: ParseContext['clients']): Cli
   }
   if (hits.length === 1) return { kind: 'matched', id: hits[0].id, name: hits[0].name, archived: hits[0].status === 'archived' };
   if (hits.length > 1) return { kind: 'ambiguous', text: hits.map((h) => h.name).join(' / '), options: hits.map((h) => ({ id: h.id, name: h.name })) };
-  const lead = /^\s*([A-Z][\w&'’.-]*(?:\s+(?:[A-Z][\w&'’.-]*|&|and|of))*)/.exec(text);
+  const lead = /^\s*(\p{Lu}[\p{L}\p{N}_&'’.-]*(?:\s+(?:\p{Lu}[\p{L}\p{N}_&'’.-]*|&|and|of))*)/u.exec(text);
   const name = lead?.[1]?.replace(/\s+(and|of|&)$/i, '').trim();
   if (name && !/^(new|a|an|we|i|our|next|the)$/i.test(name)) return { kind: 'new', name };
   return { kind: 'missing' };
@@ -144,34 +152,36 @@ export function matchWriters(text: string, users: ParseContext['users'], exclude
   let t = text;
   for (const e of exclude) t = t.replace(new RegExp(e.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi'), ' ');
   const active = users.filter((u) => u.active);
-  const lower = ` ${t.toLowerCase().replace(/[^a-z' ]+/g, ' ')} `;
+  const lower = ` ${fold(t)} `;
   const found: WriterMatch[] = [];
   const used = new Set<number>();
   // full names first, then first names
   for (const u of active) {
-    if (lower.includes(` ${u.name.toLowerCase()} `)) { found.push({ kind: 'matched', text: u.name, id: u.id, name: u.name }); used.add(u.id); }
+    if (lower.includes(` ${fold(u.name)} `)) { found.push({ kind: 'matched', text: u.name, id: u.id, name: u.name }); used.add(u.id); }
   }
   const byFirst = new Map<string, typeof active>();
   for (const u of active) {
-    const f = u.name.split(/\s+/)[0].toLowerCase();
+    const f = fold(u.name.split(/\s+/)[0]);
     byFirst.set(f, [...(byFirst.get(f) ?? []), u]);
   }
   for (const [first, list] of byFirst) {
     if (!lower.includes(` ${first} `) && !lower.includes(` ${first}'s `)) continue;
     const remaining = list.filter((u) => !used.has(u.id));
     if (!remaining.length || list.some((u) => used.has(u.id))) continue;
-    const label = first[0].toUpperCase() + first.slice(1);
+    const given = list[0].name.split(/\s+/)[0];
+    const label = given[0].toUpperCase() + given.slice(1);
     if (remaining.length === 1) { found.push({ kind: 'matched', text: label, id: remaining[0].id, name: remaining[0].name }); used.add(remaining[0].id); }
     else found.push({ kind: 'ambiguous', text: label, options: remaining.map((u) => ({ id: u.id, name: u.name })) });
   }
   // names in writer phrases that match nobody on the team
-  const phrase = /\b([A-Z][a-z]+)\s+(?:is|will be|are)\s+writing\b|\b(?:written by|assigned to|writer:?)\s+([A-Z][a-z]+)/g;
+  const name = String.raw`\p{Lu}\p{Ll}+(?:[-'’]\p{Lu}?\p{Ll}+)*`;
+  const phrase = new RegExp(String.raw`(?<!\p{L})(${name})\s+(?:is|will be|are)\s+writing\b|\b(?:written by|assigned to|writer:?)\s+(${name})`, 'gu');
   for (const m of t.matchAll(phrase)) {
     const n = (m[1] ?? m[2])!;
-    const known = active.some((u) => u.name.toLowerCase().split(/\s+/).includes(n.toLowerCase()));
-    if (!known && !found.some((f) => f.text.toLowerCase() === n.toLowerCase())) found.push({ kind: 'unknown', text: n });
+    const known = active.some((u) => ` ${fold(u.name)} `.includes(` ${fold(n)} `));
+    if (!known && !found.some((f) => fold(f.text) === fold(n))) found.push({ kind: 'unknown', text: n });
   }
-  const pos = (w: WriterMatch) => { const i = lower.indexOf(` ${w.text.toLowerCase()}`); return i < 0 ? Infinity : i; };
+  const pos = (w: WriterMatch) => { const i = lower.indexOf(` ${fold(w.text)}`); return i < 0 ? Infinity : i; };
   return found.sort((a, b) => pos(a) - pos(b));
 }
 
