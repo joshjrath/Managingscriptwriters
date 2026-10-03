@@ -9,6 +9,7 @@ import {
 } from '../../../shared/control';
 import type { Filter, Focus, Mode, Target } from './engine/Engine';
 import type { WorldView } from './engine/view';
+import type { SyncInfo } from './Experience';
 
 export const ViewCtx = createContext<WorldView | null>(null);
 
@@ -208,7 +209,7 @@ export function Statement({ mode, world, now, anomalies, onPeople }: { mode: Mod
 
 // ── micro information ────────────────────────────────────────────────────
 
-export function Micro({ world, now, geo, sync }: { world: ControlWorld; now: Date; geo: { lat: number; lon: number } | null; sync: { at: number; skew: number; ok: number; total: number; packets: number } }) {
+export function Micro({ world, now, geo, sync }: { world: ControlWorld; now: Date; geo: { lat: number; lon: number } | null; sync: SyncInfo }) {
   const m = metricsOf(world, now);
   const recent = world.handoffs.filter((h) => now.getTime() - new Date(h.timestamp).getTime() < 3_600_000).length;
   const skew = sync.skew / 1000;

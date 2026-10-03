@@ -68,7 +68,11 @@ export async function workspaceWorld(db: Db, at: Date): Promise<ControlWorld> {
   const cols = `b.id, b.client_id, c.name as client_name, b.title, b.priority, b.draft_due, b.final_due, b.blocked, b.blocker_note,
             b.archived_at, b.created_by, c.owner_id`;
   const batches = [
-    ...await db.query<BatchRow>(`select ${cols} from batches b join clients c on c.id = b.client_id where b.archived_at is null order by b.id desc limit 200`),
+    // batches with work still open come first, so a team that doesn't archive finished batches never loses old open work past the limit
+    ...await db.query<BatchRow>(
+      `select ${cols} from batches b join clients c on c.id = b.client_id where b.archived_at is null
+        order by exists (select 1 from scripts s where s.batch_id = b.id and s.removed_at is null and s.status <> 'delivered') desc, b.id desc limit 200`,
+    ),
     ...await db.query<BatchRow>(`select ${cols} from batches b join clients c on c.id = b.client_id where b.archived_at is not null order by b.archived_at desc limit 60`),
   ];
   const scriptRows = batches.length
@@ -103,9 +107,9 @@ export async function workspaceWorld(db: Db, at: Date): Promise<ControlWorld> {
   });
 
   // who reviews each batch: whoever reviewed it last, else the client's owner, else whoever created it
-  const lastReviewer = new Map((await db.query<{ batch_id: number; reviewed_by: number }>(
-    `select distinct on (batch_id) batch_id, reviewed_by from reviews order by batch_id, created_at desc`,
-  )).map((r) => [r.batch_id, r.reviewed_by]));
+  const lastReviewer = new Map((kept.length ? await db.query<{ batch_id: number; reviewed_by: number }>(
+    `select distinct on (batch_id) batch_id, reviewed_by from reviews where batch_id = any($1::bigint[]) order by batch_id, created_at desc`, [kept.map((b) => b.id)],
+  ) : []).map((r) => [r.batch_id, r.reviewed_by]));
   const firstLead = placed.find((u) => u.role !== 'writer')?.id ?? null;
   const reviewerOf = (b: BatchRow) => nid(lastReviewer.get(b.id)) ?? nid(b.owner_id) ?? nid(b.created_by) ?? nid(firstLead);
 
@@ -149,10 +153,11 @@ export async function workspaceWorld(db: Db, at: Date): Promise<ControlWorld> {
     `select assignee_id, count(*) as n from scripts where removed_at is null and submitted_at > $1 and assignee_id is not null group by assignee_id`,
     [new Date(now - 7 * D).toISOString()],
   )).map((r) => [r.assignee_id, Number(r.n)]));
-  const last = new Map((await db.query<{ id: number; at: string }>(
-    `select actor_id as id, max(created_at) as at from activity where actor_id is not null group by actor_id
-     union all select user_id as id, max(updated_at) as at from writer_progress group by user_id`,
-  )).reduce((m, r) => { if (!m.has(r.id) || r.at > m.get(r.id)!) m.set(r.id, r.at); return m; }, new Map<number, string>()));
+  // only for the people on the map (one index lookup each), not a scan of all history every refresh
+  const last = new Map((placed.length ? await db.query<{ id: number; at: string }>(
+    `select u.id, greatest((select max(a.created_at) from activity a where a.actor_id = u.id), (select max(w.updated_at) from writer_progress w where w.user_id = u.id)) as at
+       from users u where u.id = any($1::bigint[])`, [placed.map((u) => u.id)],
+  ) : []).filter((r) => r.at).map((r) => [r.id, r.at]));
   const awaitingReview = scriptRows.some((s) => s.status === 'ready_for_review');
 
   const writers: CcWriter[] = placed.map((u) => {

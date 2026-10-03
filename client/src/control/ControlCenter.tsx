@@ -25,7 +25,7 @@ export default function ControlCenter() {
   const [leaving, setLeaving] = useState(false);
   const [engineReady, setEngineReady] = useState(false);
   const [bootGone, setBootGone] = useState(false);
-  const sync = useRef<SyncInfo>({ at: Date.now(), skew: 0, ok: 0, total: 0, packets: 0 });
+  const sync = useRef<SyncInfo>({ at: Date.now(), skew: 0, ok: 0, total: 0, packets: 0, lastOk: true });
 
   useEffect(() => {
     // the public site has drained away; this black is ours now
@@ -34,6 +34,19 @@ export default function ControlCenter() {
     document.title = 'Control Center';
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#010206');
     return () => { clearTimeout(t); document.title = title; document.querySelector('meta[name="theme-color"]')?.setAttribute('content', '#0B0B0D'); };
+  }, []);
+
+  // Sound that was left on comes back with the first touch or key here (browsers only start audio
+  // from a gesture), and stops however the Control Center is left, the browser's Back button included.
+  useEffect(() => {
+    const wake = () => sound.wake();
+    window.addEventListener('pointerdown', wake, { once: true });
+    window.addEventListener('keydown', wake, { once: true });
+    return () => {
+      window.removeEventListener('pointerdown', wake);
+      window.removeEventListener('keydown', wake);
+      sound.sleep();
+    };
   }, []);
 
   const status = useQuery({
@@ -51,10 +64,15 @@ export default function ControlCenter() {
     queryKey: ['control-world'],
     queryFn: async () => {
       const sent = Date.now();
-      sync.current.total++;
-      const w = await api<ControlWorld>('/api/control/world');
+      let w: ControlWorld;
+      try {
+        w = await api<ControlWorld>('/api/control/world');
+      } catch (err) {
+        sync.current = { ...sync.current, total: sync.current.total + 1, lastOk: false };
+        throw err;
+      }
       const got = Date.now();
-      sync.current = { at: got, skew: new Date(w.generatedAt).getTime() - (sent + got) / 2, ok: sync.current.ok + 1, total: sync.current.total, packets: sync.current.packets + 1 };
+      sync.current = { at: got, skew: new Date(w.generatedAt).getTime() - (sent + got) / 2, ok: sync.current.ok + 1, total: sync.current.total + 1, packets: sync.current.packets + 1, lastOk: true };
       return w;
     },
     enabled: stage === 'init' || stage === 'live',

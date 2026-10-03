@@ -169,7 +169,7 @@ export interface ControlWorld {
 
 export interface ControlStatus {
   signedIn: boolean;
-  /** a signed-in admin or manager: only they can be cleared */
+  /** a signed-in admin: only admins can be cleared */
   eligible: boolean;
   cleared: boolean;
   clearedUntil: string | null;

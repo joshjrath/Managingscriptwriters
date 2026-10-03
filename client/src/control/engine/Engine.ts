@@ -39,6 +39,8 @@ export interface EngineOptions {
   onReveal?: (progress: number) => void;
   onStats?: (s: EngineStats) => void;
   onOverscroll?: (dir: 'in' | 'out') => void;
+  /** the GPU dropped the WebGL context (a driver reset, too many WebGL tabs, sleep): the view should be built again on a new canvas */
+  onContextLost?: () => void;
 }
 
 // ── how each mode arranges the world ─────────────────────────────────────
@@ -150,7 +152,8 @@ export class Engine implements WorldView {
   private core = buildCore();
   private atmo = buildAtmosphere();
   private stars: ReturnType<typeof buildStars>;
-  private nodes = new NodesLayer(48);
+  // room for every person and editor a team is likely to place (instanced buffers: cheap); beyond it the rest aren't drawn
+  private nodes = new NodesLayer(128);
   private arcs = new ArcsLayer();
   private swarm = new SwarmLayer();
   private objects = new ObjectsLayer();
@@ -1345,6 +1348,9 @@ export class Engine implements WorldView {
   private onContextLost = (e: Event) => {
     e.preventDefault();
     this.stop();
+    // static buffers have let go of their CPU copies, so this engine can't redraw on a restored
+    // context: the owner rebuilds the view instead
+    this.opts.onContextLost?.();
   };
 
   private get portrait() {

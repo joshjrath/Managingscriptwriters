@@ -464,8 +464,9 @@ alter table users add column timezone_confirmed_at timestamptz;
 `,
   // 18 · batches with only drafts due or only final delivery get the other date
   fillMissingDeadlines,
-  // 19 · the Master log and the Control Center read the newest changes across the whole workspace
+  // 19 · the Master log and the Control Center read the newest changes across the whole workspace, and each person's latest
   `
 create index if not exists activity_created_idx on activity (created_at desc);
+create index if not exists activity_actor_idx on activity (actor_id, created_at desc);
 `,
 ];

@@ -15,7 +15,8 @@ import { Palette, type Command } from './Palette';
 import { People } from './People';
 import { sound } from './sound';
 
-export interface SyncInfo { at: number; skew: number; ok: number; total: number; packets: number }
+/** World refreshes: when the last good one landed, clock skew, how many succeeded of how many tried, and whether the latest did. */
+export interface SyncInfo { at: number; skew: number; ok: number; total: number; packets: number; lastOk: boolean }
 
 const GEO_MODES: Mode[] = ['world', 'missions', 'deadlines', 'timezones', 'signals', 'system'];
 const SPACE_MODES: Mode[] = ['constellation', 'galaxy', 'archive'];
@@ -47,6 +48,8 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
 
   // ── the view: WebGL, or the flat 2D globe if the device can't ────────────
   const [flat, setFlat] = useState(false);
+  // bumped when the GPU drops the WebGL context: a new canvas and engine take over
+  const [gen, setGen] = useState(0);
   useEffect(() => {
     const el = canvas.current!;
     const common = {
@@ -67,7 +70,7 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
       const tier = q === 'high' || q === 'medium' || q === 'low' ? q : undefined;
       v = flat
         ? new FlatView(el, common)
-        : new Engine(el, { ...common, tier, onPointerGeo: throttle((g: { lat: number; lon: number } | null) => setGeo(g), 80), onOverscroll: (d) => handlers.current.overscroll(d) });
+        : new Engine(el, { ...common, tier, onPointerGeo: throttle((g: { lat: number; lon: number } | null) => setGeo(g), 80), onOverscroll: (d) => handlers.current.overscroll(d), onContextLost: () => setGen((n) => n + 1) });
     } catch {
       if (!flat) setFlat(true);
       return;
@@ -76,8 +79,8 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
     setView(v);
     onReady();
     return () => { v?.dispose(); setView(null); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- the renderer is built once (or again for the 2D fallback); world updates go through setWorld below
-  }, [flat]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the renderer is built once (again for the 2D fallback, or after a lost context); world updates go through setWorld below
+  }, [flat, gen]);
 
   useEffect(() => { view?.setWorld(world); }, [view, world]);
   useEffect(() => { if (live && view) view.reveal(returning); }, [live, view, returning]);
@@ -276,7 +279,7 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
 
   return (
     <ViewCtx.Provider value={view}>
-      <div className="cc-stage"><canvas key={flat ? '2d' : 'gl'} ref={canvas} aria-label="The Scale Media network on a globe" /></div>
+      <div className="cc-stage"><canvas key={flat ? '2d' : `gl${gen}`} ref={canvas} aria-label="The Scale Media network on a globe" /></div>
       <div className="cc-vignette" aria-hidden />
       <div className="cc-grain" aria-hidden />
       <div className="cc-dim-layer" aria-hidden />

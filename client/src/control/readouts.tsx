@@ -10,6 +10,7 @@ import {
 } from '../../../shared/control';
 import { Anchor } from './overlay';
 import type { EngineStats } from './engine/Engine';
+import type { SyncInfo } from './Experience';
 
 const pad = (n: number, w = 2) => String(n).padStart(w, '0');
 
@@ -276,14 +277,14 @@ export function TimezonePanel({ world, now, offset, playing, onScrub, onPlay, on
 }
 
 export function SystemPanel({ world, stats, sync, anomalies, onLock, onPeople }: {
-  world: ControlWorld; stats: EngineStats; sync: { at: number; ok: number; total: number; packets: number }; anomalies: Anomaly[]; onLock: () => void; onPeople: () => void;
+  world: ControlWorld; stats: EngineStats; sync: SyncInfo; anomalies: Anomaly[]; onLock: () => void; onPeople: () => void;
 }) {
   const [, force] = useState(0);
   useEffect(() => { const t = setInterval(() => force((n) => n + 1), 1000); return () => clearInterval(t); }, []);
   const since = Math.floor((Date.now() - sync.at) / 1000);
   const zones = new Set(world.writers.map((w) => w.timezone)).size;
   const rows: [string, string, string?][] = [
-    ['NETWORK', sync.total && sync.ok < sync.total ? 'DEGRADED' : 'ONLINE', sync.total && sync.ok < sync.total ? 'warn' : 'ok'],
+    ['NETWORK', sync.lastOk ? 'ONLINE' : 'DEGRADED', sync.lastOk ? 'ok' : 'warn'],
     ['WRITER NODES', `${pad(world.writers.length)} / ${pad(world.writers.length + world.source.unplaced)}`],
     ['TIMEZONE SYNC', `STABLE · ${pad(zones)} ZONES`, 'ok'],
     ['LAST DATA REFRESH', `00:00:${pad(Math.min(59, since))}`],
