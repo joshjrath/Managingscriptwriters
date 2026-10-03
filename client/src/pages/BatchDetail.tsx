@@ -801,11 +801,26 @@ function EditBatchDialog({ b, open, onClose }: { b: BatchDetail; open: boolean; 
   const remaining = w ? w.count - w.draftReady : 0;
   const est = effDraft && wu?.capacityPerDay && remaining > 0 ? suggestStart(effDraft as ISODate, remaining, wu.capacityPerDay, settings.workingDays) : null;
   const ids = { t: useFieldId('et'), p: useFieldId('ep'), ps: useFieldId('eps'), s: useFieldId('es'), d: useFieldId('ed'), f: useFieldId('ef'), br: useFieldId('ebr'), na: useFieldId('ena') };
-  const submit = () => save.mutate({
-    title, priority, plannedStart: planned || null, shootId: shootId || null, brief: brief || null, nextAction: nextAction || null, briefingIds,
-    draftDue: { mode: shootId ? draftMode : 'manual', date: draftMode === 'manual' || !shootId ? draft || null : null },
-    finalDue: { mode: shootId ? finalMode : 'manual', date: finalMode === 'manual' || !shootId ? final || null : null },
-  });
+  // Only what was changed here is sent, so saving can't put back something another manager changed
+  // meanwhile. Dates go too when the shoot changes (automatic dates follow it) and while the batch's
+  // deadlines need a check (saving the form is then confirming the dates on screen).
+  const submit = () => {
+    const draftDue = { mode: shootId ? draftMode : 'manual', date: draftMode === 'manual' || !shootId ? draft || null : null };
+    const finalDue = { mode: shootId ? finalMode : 'manual', date: finalMode === 'manual' || !shootId ? final || null : null };
+    const dateChanged = (d: { mode: string; date: string | null }, mode: string, date: string | null) => d.mode !== mode || (d.mode === 'manual' && d.date !== date);
+    const shootChanged = (shootId || null) !== b.shootId;
+    const body: Record<string, unknown> = {};
+    if (title !== b.title) body.title = title;
+    if (priority !== b.priority) body.priority = priority;
+    if ((planned || null) !== b.plannedStart) body.plannedStart = planned || null;
+    if (shootChanged) body.shootId = shootId || null;
+    if ((brief || null) !== (b.brief ?? null)) body.brief = brief || null;
+    if ((nextAction || null) !== b.nextAction) body.nextAction = nextAction || null;
+    if (briefingIds.join() !== b.briefings.map((x) => x.id).join()) body.briefingIds = briefingIds;
+    if (shootChanged || b.needsDateReview || dateChanged(draftDue, b.draftDueMode, b.draftDue)) body.draftDue = draftDue;
+    if (shootChanged || b.needsDateReview || dateChanged(finalDue, b.finalDueMode, b.finalDue)) body.finalDue = finalDue;
+    save.mutate(body);
+  };
   return (
     <Dialog open={open} onClose={onClose} kind="drawer" title="Edit batch" sub={b.clientName}
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={save.isPending} onClick={submit}>Save changes</Button></div>}>

@@ -1131,6 +1131,15 @@ describe('batch integrity', () => {
     expect(ok.body.batch.progress.approved).toBe(2);
   });
 
+  it('an edit changes only the fields it sends (the Edit batch form sends only what was changed)', async () => {
+    const id = await batchFor('Two managers', ids.marcus, 1);
+    // another manager moves final delivery, and a shoot move has flagged the dates
+    expect((await manager.patch(`/api/batches/${id}`, { finalDue: { mode: 'manual', date: '2026-11-25' } })).status).toBe(200);
+    await db.query(`update batches set needs_date_review = true, date_review_note = 'Shoot moved' where id = $1`, [id]);
+    const r = await manager.patch(`/api/batches/${id}`, { title: 'Two managers, renamed' });
+    expect(r.body).toMatchObject({ title: 'Two managers, renamed', finalDue: '2026-11-25', needsDateReview: true });
+  });
+
   it('lowering the count tells the writer, and raising it gives the scripts back to the writer chosen', async () => {
     const id = await batchFor('Down and up again', ids.marcus, 3);
     const removing = (await manager.get(`/api/batches/${id}/target-preview?count=2`)).body.defaultRemove;
