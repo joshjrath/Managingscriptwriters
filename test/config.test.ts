@@ -58,10 +58,25 @@ describe('configuration', () => {
     expect(typo.warnings).toHaveLength(1);
   });
 
-  it('trims pasted manager values and accepts 1 or true for a password reset', () => {
+  it('trims pasted manager values', () => {
     const { config } = load({ MANAGER_EMAIL: ' Josh@Scale.Test\n', MANAGER_PASSWORD: 'long-enough-pw \n', MANAGER_NAME: '  ', MANAGER_RESET_PASSWORD: 'true' });
     expect(config.manager).toEqual({ email: 'josh@scale.test', password: 'long-enough-pw', name: 'Manager', reset: true });
-    expect(load({ MANAGER_RESET_PASSWORD: 'yes' }).config.manager.reset).toBe(false);
+  });
+
+  it('reads on/off settings the same way everywhere, and says when one makes no sense', () => {
+    expect(load({ PGSSL: 'true', DEMO: '1', REMINDERS: 'OFF', MANAGER_RESET_PASSWORD: 'yes' }).config).toMatchObject({ pgSsl: true, demo: true, remindersEnabled: false, manager: { reset: true } });
+    expect(load({ REMINDERS: 'false' }).config.remindersEnabled).toBe(false);
+    expect(load({ NODE_ENV: 'production', ALLOW_SETUP: 'on' }).config.allowSetup).toBe(true);
+    const odd = load({ REMINDERS: 'sometimes' });
+    expect(odd.config.remindersEnabled).toBe(true);
+    expect(odd.warnings).toHaveLength(1);
+  });
+
+  it('caps uploads at what the database storage handles, without resetting a big value to the default', () => {
+    const big = load({ UPLOAD_LIMIT_MB: '500' });
+    expect(big.config.uploadLimitBytes).toBe(100 * 1024 * 1024);
+    expect(big.warnings).toHaveLength(1);
+    expect(load({ PORT: '3001.5' }).config.port).toBe(3001);
   });
 
   it('refuses an embedded database on a host unless DATA_DIR says where it lives', () => {

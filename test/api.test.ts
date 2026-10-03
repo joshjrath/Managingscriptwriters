@@ -1042,6 +1042,14 @@ describe('paste notes (AI import)', () => {
     expect((await form({ text: 'notes' }, { name: 'export.txt', type: 'text/plain', body: 'x'.repeat(61_000) })).statusCode).toBe(400);
     expect((await form({ text: 'notes', answers: 'y'.repeat(10_001) })).statusCode).toBe(400);
     expect((await form({ text: 'notes' }, { name: 'call.txt', type: 'text/plain', body: 'Acme: 5 scripts' })).statusCode).toBe(200);
+    // a file over this route's own 10 MB limit says so (not the general upload limit)
+    const huge = await form({ text: 'notes' }, { name: 'huge.txt', type: 'text/plain', body: 'z'.repeat(11 * 1024 * 1024) });
+    expect(huge.statusCode).toBe(413);
+    expect(JSON.parse(huge.body).error.message).toBe('“huge.txt” is over 10 MB');
+    // and a request body that's simply too big isn't described as a file
+    const tooBig = await manager.post('/api/import/read', { text: 'q'.repeat(1_100_000) });
+    expect(tooBig.status).toBe(413);
+    expect(tooBig.body.error.message).toBe('That’s too much to send at once.');
     // each read is billed: at most 30 an hour per person
     await manager.post('/api/users', { name: 'Ivy Reads', email: 'ivy@scale.test', role: 'manager', password: 'ivy-reads-pass' });
     const ivy = as(await login('ivy@scale.test', 'ivy-reads-pass'));

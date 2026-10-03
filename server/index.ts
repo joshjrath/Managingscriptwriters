@@ -74,6 +74,11 @@ async function bootstrapManager(db: Awaited<ReturnType<typeof openDb>>, { email,
   if (!email || !password) {
     return empty ? 'Set MANAGER_EMAIL and MANAGER_PASSWORD in the server’s environment, then redeploy.' : undefined;
   }
+  // the example .env.example once shipped with: public, so never an admin's password
+  if (password === 'choose-a-long-password') {
+    console.error('MANAGER_PASSWORD is still the example value from .env.example; choose your own');
+    return empty ? 'MANAGER_PASSWORD is still the example from .env.example. Choose your own in the server’s environment, then redeploy.' : undefined;
+  }
   const pwErr = validatePassword(password);
   if (pwErr) {
     console.error(`manager account not ${empty ? 'created' : 'reset'}: MANAGER_PASSWORD ${pwErr.toLowerCase()}`);

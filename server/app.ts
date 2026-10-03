@@ -80,9 +80,11 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
     if (err instanceof HttpError) {
       return reply.status(err.status).send({ error: { message: err.message, fields: err.fields, code: err.code } });
     }
-    if (err.code === 'FST_REQ_FILE_TOO_LARGE' || err.statusCode === 413) {
+    if (err.code === 'FST_REQ_FILE_TOO_LARGE') {
       return reply.status(413).send({ error: { message: `Files can be up to ${Math.round(ctx.uploadLimitBytes / 1024 / 1024)} MB` } });
     }
+    if (err.code === 'FST_FILES_LIMIT') return reply.status(413).send({ error: { message: 'That’s more files than can be sent at once.' } });
+    if (err.statusCode === 413) return reply.status(413).send({ error: { message: 'That’s too much to send at once.' } });
     if (err.statusCode && err.statusCode >= 400 && err.statusCode < 500) {
       return reply.status(err.statusCode).send({ error: { message: err.message } });
     }

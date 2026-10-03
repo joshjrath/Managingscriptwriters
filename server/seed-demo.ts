@@ -19,7 +19,15 @@ import { findCity } from '../shared/cities';
 
 export const DEMO_PASSWORD = 'scalemedia-demo';
 
+/**
+ * Fills an empty database with the sample workspace, all or nothing: seeding is skipped once there are
+ * users, so a half-finished seed would otherwise never be completed.
+ */
 export async function seedDemo(db: Db, now = new Date()): Promise<boolean> {
+  return db.tx((t) => seed(t, now));
+}
+
+async function seed(db: Db, now: Date): Promise<boolean> {
   const existing = await db.one<{ n: number }>(`select count(*) as n from users`);
   if (existing?.n) return false;
 

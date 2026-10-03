@@ -143,7 +143,10 @@ export function claudeNotesReader(given?: Anthropic): NotesReader {
           messages: [{ role: 'user', content }],
         });
       } catch (err) {
+        // the person sees a plain message; the log keeps the cause and the request id to look it up
+        if (err instanceof SDK.APIError) console.warn(`paste notes: Claude API error ${err.status ?? ''} (request ${err.requestID ?? 'n/a'}): ${err.message}`);
         if (err instanceof SDK.AuthenticationError) throw new HttpError(503, 'The AI key on the server isn’t valid. Check ANTHROPIC_API_KEY in your hosting settings.');
+        if (err instanceof SDK.NotFoundError || err instanceof SDK.PermissionDeniedError) throw new HttpError(503, 'Reading notes with AI isn’t set up correctly on the server (the model or a feature it needs isn’t available to this key). The server log has the details.');
         if (err instanceof SDK.RateLimitError) throw new HttpError(429, 'Too many notes are being read right now. Try again in a minute.');
         if (err instanceof SDK.BadRequestError) throw new HttpError(400, `Couldn’t read those notes: ${err.message}`);
         if (err instanceof SDK.APIError) throw new HttpError(502, 'The AI service didn’t answer. Try again in a moment — nothing was saved.');
@@ -329,19 +332,23 @@ export function registerNotesImportRoutes(app: FastifyInstance, ctx: Ctx) {
     const me = requireManager(req);
     if (!ctx.notesReader) throw new HttpError(503, 'Reading notes with AI isn’t set up yet. Add ANTHROPIC_API_KEY to the server’s environment settings.', undefined, 'not_configured');
     if (reading.has(me.id)) throw new HttpError(429, 'Your notes are still being read. Wait for that to finish.');
-    const hourAgo = Date.now() - 3_600_000;
-    const recent = (readsAt.get(me.id) ?? []).filter((t) => t > hourAgo);
-    if (recent.length >= READS_PER_HOUR) throw new HttpError(429, 'That’s a lot of notes read in an hour. Try again a little later.');
-    readsAt.set(me.id, [...recent, Date.now()]);
     reading.add(me.id);
     try {
-      return await readNotes(req, ctx.notesReader);
+      return await readNotes(req, ctx.notesReader, me.id);
     } finally {
       reading.delete(me.id);
     }
   });
 
-  async function readNotes(req: FastifyRequest, reader: NotesReader) {
+  /** Counts a read that's about to be sent to the AI (only those cost anything). */
+  function allowRead(userId: number) {
+    const hourAgo = Date.now() - 3_600_000;
+    const recent = (readsAt.get(userId) ?? []).filter((t) => t > hourAgo);
+    if (recent.length >= READS_PER_HOUR) throw new HttpError(429, 'That’s a lot of notes read in an hour. Try again a little later.');
+    readsAt.set(userId, [...recent, Date.now()]);
+  }
+
+  async function readNotes(req: FastifyRequest, reader: NotesReader, userId: number) {
     const input: NotesInput = { text: '', files: [], answers: null };
     if (req.isMultipart()) {
       // A file over the limit comes back cut short (rather than as an error) so it gets its own message
@@ -372,6 +379,7 @@ export function registerNotesImportRoutes(app: FastifyInstance, ctx: Ctx) {
     const rules = rulesOf(settings);
     const clients = await ctx.db.query<{ name: string; status: string }>(`select name, status from clients order by lower(name)`);
     const team = (await loadUsers(ctx.db)).filter((u) => u.active && !u.removed).map((u) => ({ name: u.name, role: u.role }));
+    allowRead(userId);
     const raw = await reader.read(input, {
       today: clock.today, weekday: new Date(`${clock.today}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' }), timezone: settings.timezone,
       draftOffsetDays: rules.draftOffsetDays, finalOffsetDays: rules.finalOffsetDays, dayMode: rules.dayMode, clients, team,

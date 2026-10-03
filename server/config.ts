@@ -50,8 +50,9 @@ export function databaseProblem(config: Config): string | null {
     : null;
 }
 
-const truthy = (v: string | undefined) => v === '1' || v === 'true';
 const set = (v: string | undefined) => (v?.trim() ? v.trim() : undefined);
+const ON = new Set(['1', 'true', 'yes', 'on']);
+const OFF = new Set(['0', 'false', 'no', 'off']);
 
 /**
  * Reads the configuration. `defaults.dataDir` lets the command-line tools keep
@@ -62,12 +63,25 @@ export function loadConfig(
   defaults: { dataDir?: string; staticDir?: string } = {},
   warn: (msg: string) => void = (m) => console.warn(m),
 ): Config {
-  const number = (name: string, fallback: number, min: number, max: number): number => {
+  const number = (name: string, fallback: number, min: number, max: number, opts: { integer?: boolean; clamp?: boolean } = {}): number => {
     const raw = set(env[name]);
     if (raw === undefined) return fallback;
     const n = Number(raw);
-    if (Number.isFinite(n) && n >= min && n <= max) return n;
-    warn(`${name}=${JSON.stringify(raw)} is not a number between ${min} and ${max}; using ${fallback}`);
+    if (Number.isFinite(n) && (!opts.integer || Number.isInteger(n))) {
+      if (n >= min && n <= max) return n;
+      // a value that's too big for what the server can handle is brought down to the most it can, rather than reset
+      if (opts.clamp && n > max) { warn(`${name}=${raw} is more than ${max}; using ${max}`); return max; }
+    }
+    warn(`${name}=${JSON.stringify(raw)} is not ${opts.integer ? 'a whole number' : 'a number'} between ${min} and ${max}; using ${fallback}`);
+    return fallback;
+  };
+  /** on/off settings: 1, true, yes or on, and 0, false, no or off (any case) */
+  const flag = (name: string, fallback: boolean): boolean => {
+    const raw = set(env[name])?.toLowerCase();
+    if (raw === undefined) return fallback;
+    if (ON.has(raw)) return true;
+    if (OFF.has(raw)) return false;
+    warn(`${name}=${JSON.stringify(env[name])} is not on or off (1/0, true/false); using ${fallback ? 'on' : 'off'}`);
     return fallback;
   };
 
@@ -82,16 +96,17 @@ export function loadConfig(
     databaseUrl: set(env.DATABASE_URL),
     dataDirSet: !!env.DATA_DIR,
     dataDir: env.DATA_DIR || defaults.dataDir || 'data/pglite',
-    pgSsl: env.PGSSL === '1',
-    demo: env.DEMO === '1',
-    allowSetup: !production || env.ALLOW_SETUP === '1',
-    uploadLimitBytes: number('UPLOAD_LIMIT_MB', 25, 1, 1024) * 1024 * 1024,
+    pgSsl: flag('PGSSL', false),
+    demo: flag('DEMO', false),
+    allowSetup: !production || flag('ALLOW_SETUP', false),
+    // files are stored in the database in pieces appended together, which gets slow and heavy for very large files
+    uploadLimitBytes: number('UPLOAD_LIMIT_MB', 25, 1, 100, { clamp: true }) * 1024 * 1024,
     anthropicApiKey: set(env.ANTHROPIC_API_KEY),
     controlData: control === 'simulated' ? 'simulated' : 'workspace',
     staticDir: env.STATIC_DIR !== undefined ? env.STATIC_DIR || undefined : defaults.staticDir,
-    remindersEnabled: env.REMINDERS !== 'off',
+    remindersEnabled: flag('REMINDERS', true),
     reminderIntervalMinutes: number('REMINDER_INTERVAL_MINUTES', 10, 1, 24 * 60),
-    port: number('PORT', 3001, 1, 65535),
+    port: number('PORT', 3001, 1, 65535, { integer: true }),
     host: set(env.HOST) ?? '0.0.0.0',
     trustProxy: trustProxy(set(env.TRUST_PROXY), warn),
     // pasted values often carry a trailing space or newline
@@ -99,7 +114,7 @@ export function loadConfig(
       email: env.MANAGER_EMAIL?.trim().toLowerCase() ?? '',
       password: env.MANAGER_PASSWORD?.trim() ?? '',
       name: env.MANAGER_NAME?.trim() || 'Manager',
-      reset: truthy(env.MANAGER_RESET_PASSWORD),
+      reset: flag('MANAGER_RESET_PASSWORD', false),
     },
   };
 }
