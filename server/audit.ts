@@ -9,8 +9,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Db } from './db';
 import type { Ctx } from './core';
-import { requireUser } from './auth';
-import { HttpError, parse, zs } from './http';
+import { requireAdmin } from './auth';
+import { parse, zs } from './http';
 import type { AuditEntry, Me } from '../shared/types';
 
 const VIEW_WINDOW_MS = 10 * 60_000;
@@ -109,12 +109,6 @@ export async function auditEvent(db: Db, e: { userId: number | null; kind: 'view
   await db.query(`insert into audit_log (user_id, kind, summary, link, ip) values ($1, $2, $3, $4, $5)`, [e.userId, e.kind, e.summary, e.link ?? null, e.ip ?? null]);
 }
 
-export function requireOwner(req: Parameters<typeof requireUser>[0]): Me {
-  const me = requireUser(req);
-  if (me.role !== 'owner') throw new HttpError(403, 'Only admins can see the master log');
-  return me;
-}
-
 export function registerAudit(app: FastifyInstance, ctx: Ctx) {
   app.addHook('onResponse', async (req, reply) => {
     try {
@@ -148,7 +142,7 @@ export function registerAudit(app: FastifyInstance, ctx: Ctx) {
   });
 
   app.get('/api/audit', async (req) => {
-    requireOwner(req);
+    requireAdmin(req, 'Only admins can see the master log');
     const q = parse(z.object({
       before: z.string().datetime({ offset: true }).optional(),
       limit: z.coerce.number().int().min(10).max(300).default(120),

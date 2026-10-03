@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  checkAction, compressRanges, deriveStage, evenSplit, milestone, parseRanges, parseTitleLines, progressLabel, splitAssignments, summarize,
+  checkAction, compressRanges, deriveStage, evenSplit, isAdmin, isManager, milestone, parseRanges, parseTitleLines, progressLabel, splitAssignments, summarize,
   type ScriptStatus,
 } from '../shared/workflow';
 import { makeClock } from '../shared/dates';
@@ -67,6 +67,10 @@ describe('workflow permissions', () => {
     expect(checkAction('deliver', { status: 'ready_for_review', assigneeId: 7 }, writer)).toMatch(/Not possible/);
     expect(checkAction('deliver', { status: 'in_progress', assigneeId: 7 }, manager)).toMatch(/Not possible/);
     expect(checkAction('deliver', { status: 'approved', assigneeId: 7 }, writer)).toBeNull();
+  });
+  it('admins (stored as owner) can do everything managers can; only they get admin-only features', () => {
+    expect([isManager('owner'), isManager('manager'), isManager('writer')]).toEqual([true, true, false]);
+    expect([isAdmin('owner'), isAdmin('manager'), isAdmin('writer')]).toEqual([true, false, false]);
   });
 });
 

@@ -3,20 +3,19 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
-  checkThrottle, clearFailures, createSession, destroySession, hashPassword, recordFailure, requireManager, requireUser,
+  checkThrottle, clearFailures, createSession, destroySession, hashPassword, recordFailure, requireAdmin, requireManager, requireUser,
   SESSION_COOKIE, setSessionCookie, sha, validatePassword, verifyPassword,
 } from '../auth';
 import { assigneesOf, batchLink, loadSettings, loadUsers, logActivity, notify, rulesOf, type Ctx } from '../core';
 import { compressRanges, isManager } from '../../shared/workflow';
 import { auditEvent } from '../audit';
 import type { Me, UserSummary } from '../../shared/types';
-import { conflict, forbidden, HttpError, notFound, parse, zs } from '../http';
+import { conflict, HttpError, notFound, parse, zs } from '../http';
 import { computeDeadlines, isValidTimeZone } from '../../shared/dates';
 import { findCity, shiftOf, zoneFor } from '../../shared/cities';
 import { fmtDate } from '../../shared/format';
 import type { Notification } from '../../shared/types';
 import { ACCENTS, darkTextContrast, HEX, PALETTES, resolveTheme, SURFACES, type Accent, type WorkspaceTheme } from '../../shared/palettes';
-import { isAdmin } from '../control/access';
 
 const PLACE_KEYS = new Set(['city', 'city_code', 'country', 'lat', 'lon', 'timezone']);
 const email = z.string().trim().toLowerCase().email('Enter a valid email').max(200);
@@ -299,8 +298,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
 
   // the colour palette: the admin's choice, applied to the whole site for everyone
   app.put('/api/settings/theme', async (req) => {
-    const me = requireUser(req);
-    if (!isAdmin(me.role)) throw forbidden('Only the admin can change the colour palette');
+    const me = requireAdmin(req, 'Only the admin can change the colour palette');
     const hex = z.string().regex(HEX, 'Use a colour like #F2A599').refine((v) => darkTextContrast(v) >= 4.5, 'Too dark: dark text on this colour would be hard to read. Pick a lighter shade.');
     const input = parse(z.object({
       preset: z.enum(PALETTES.map((p) => p.id) as [string, ...string[]], { message: 'Choose one of the palettes' }),

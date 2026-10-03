@@ -7,7 +7,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Db } from './db';
 import type { Me } from '../shared/types';
 import { HttpError } from './http';
-import { isManager } from '../shared/workflow';
+import { isAdmin, isManager } from '../shared/workflow';
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
 
@@ -89,6 +89,12 @@ export function requireUser(req: FastifyRequest): Me {
 export function requireManager(req: FastifyRequest): Me {
   const me = requireUser(req);
   if (!isManager(me.role)) throw new HttpError(403, 'Only managers can do this');
+  return me;
+}
+
+export function requireAdmin(req: FastifyRequest, message = 'Only admins can do this'): Me {
+  const me = requireUser(req);
+  if (!isAdmin(me.role)) throw new HttpError(403, message);
   return me;
 }
 

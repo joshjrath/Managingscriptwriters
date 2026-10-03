@@ -170,6 +170,8 @@ export type Role = 'owner' | 'manager' | 'writer';
 
 /** Admins (stored as 'owner') can do everything managers can. */
 export const isManager = (role: Role) => role === 'manager' || role === 'owner';
+/** Admin-only features: Master log, View as, Recording mode, the Control Center and its editors, the colour palette. */
+export const isAdmin = (role: Role) => role === 'owner';
 export const ROLE_LABEL: Record<Role, string> = { owner: 'Admin', manager: 'Manager', writer: 'Writer' };
 
 export const SCRIPT_ACTIONS = [

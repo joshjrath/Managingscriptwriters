@@ -23,7 +23,7 @@ import { auditEvent } from './audit';
 import { HttpError, parse, zs } from './http';
 import type { Ctx } from './core';
 import type { Me, SessionMode } from '../shared/types';
-import { ROLE_LABEL } from '../shared/workflow';
+import { isAdmin, ROLE_LABEL } from '../shared/workflow';
 
 const IDLE_MS = 6 * 3600_000;
 const MAX_SANDBOXES = 2;
@@ -187,7 +187,7 @@ export function registerRecording(app: FastifyInstance, ctx: Ctx, realDb: Db, al
     const key = sha(token);
     const m = modes.get(key);
     if (!m) return;
-    if (real.role !== 'owner') { await closeSandbox(m); modes.delete(key); return; }
+    if (!isAdmin(real.role)) { await closeSandbox(m); modes.delete(key); return; }
     if (m.sandbox) {
       m.sandbox.lastUsed = Date.now();
       req.recording = { startedAt: m.sandbox.startedAt };
@@ -223,7 +223,7 @@ export function registerRecording(app: FastifyInstance, ctx: Ctx, realDb: Db, al
   const requireAdmin = (req: FastifyRequest): { me: Me; key: string; mode: Mode } => {
     const me = req.realUser;
     if (!me) throw new HttpError(401, 'Please sign in');
-    if (me.role !== 'owner') throw new HttpError(403, 'Only admins can do this');
+    if (!isAdmin(me.role)) throw new HttpError(403, 'Only admins can do this');
     const key = sha(req.cookies[SESSION_COOKIE] ?? '');
     let mode = modes.get(key);
     if (!mode) { mode = { viewAs: null, sandbox: null }; modes.set(key, mode); }
@@ -314,6 +314,6 @@ export function modeFor(real: Me, viewingAs: Me | null, recording: { startedAt: 
 /** The bootstrap's view of the above, or null for anyone who isn't an admin. */
 export function sessionMode(req: FastifyRequest): SessionMode | null {
   const real = req.realUser ?? requireUser(req);
-  if (real.role !== 'owner') return null;
+  if (!isAdmin(real.role)) return null;
   return modeFor(real, req.viewingAs, req.recording);
 }

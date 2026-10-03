@@ -7,7 +7,7 @@ import { useEffect, useState } from 'react';
 import { AnimatePresence, m } from 'framer-motion';
 import { Eye, Minimize2, Undo2, Users } from 'lucide-react';
 import { api, ApiError, queryClient } from '../api';
-import { isManager, ROLE_LABEL } from '../../../shared/workflow';
+import { isAdmin, isManager, ROLE_LABEL } from '../../../shared/workflow';
 import type { SessionMode } from '../../../shared/types';
 import type { Role } from '../../../shared/workflow';
 import { Avatar, Button, Dialog, FormError } from './ui';
@@ -18,7 +18,7 @@ import { useBoot } from './Shell';
 function reloadAs(role: Role) {
   queryClient.clear();
   const path = window.location.pathname;
-  const blocked = (path.startsWith('/log') && role !== 'owner') || (path.startsWith('/settings') && !isManager(role));
+  const blocked = (path.startsWith('/log') && !isAdmin(role)) || (path.startsWith('/settings') && !isManager(role));
   if (blocked) window.location.assign(isManager(role) ? '/overview' : '/my-work');
   else window.location.reload();
 }

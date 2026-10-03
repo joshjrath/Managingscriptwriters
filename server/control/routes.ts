@@ -19,7 +19,7 @@ import { auditEvent } from '../audit';
 import { HttpError, parse } from '../http';
 import { callsignOf, type ControlStatus, type ControlWorld } from '../../shared/control';
 import { simulatedWorld } from './simulated';
-import { isAdmin } from './access';
+import { isAdmin } from '../../shared/workflow';
 import { workspaceWorld } from './workspace';
 
 export const CLEARANCE_HOURS = 12;

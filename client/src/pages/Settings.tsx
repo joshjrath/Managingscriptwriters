@@ -2,7 +2,7 @@
 // the admin also picks the site's colour palette.
 
 import { useEffect, useMemo, useState } from 'react';
-import { isManager, ROLE_LABEL, type Role } from '../../../shared/workflow';
+import { isAdmin, isManager, ROLE_LABEL, type Role } from '../../../shared/workflow';
 import { AlertTriangle, CalendarClock, Check, Copy, KeyRound, Plus, RefreshCw, UserPlus } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api, useSave } from '../api';
@@ -28,12 +28,12 @@ export function SettingsPage() {
   return (
     <>
       <PageHeader title="Settings" hideNewWork />
-      {me.role === 'owner' && <div style={{ marginBottom: 'var(--gap)' }}><PalettePanel /></div>}
+      {isAdmin(me.role) && <div style={{ marginBottom: 'var(--gap)' }}><PalettePanel /></div>}
       <div className="grid g-2" style={{ alignItems: 'start' }}>
         <RulesPanel />
         <div className="grid" style={{ alignContent: 'start' }}>
           <TeamPanel />
-          {me.role === 'owner' && <EditorsPanel />}
+          {isAdmin(me.role) && <EditorsPanel />}
         </div>
       </div>
     </>

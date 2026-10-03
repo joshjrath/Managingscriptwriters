@@ -7,6 +7,7 @@ import { useInfiniteQuery } from '@tanstack/react-query';
 import { Ban, Eye, KeyRound, Lock, Pencil, ScrollText } from 'lucide-react';
 import { api, qs } from '../api';
 import type { AuditEntry } from '../../../shared/types';
+import { isAdmin } from '../../../shared/workflow';
 import { fmtWeekday } from '../../../shared/format';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import { Button, Chip, Empty, ErrorState, Loading, Panel, Seg } from '../components/ui';
@@ -37,7 +38,7 @@ export function MasterLogPage() {
   const [text, setText] = useState('');
   const [q, setQ] = useState('');
   useEffect(() => { const t = setTimeout(() => setQ(text.trim()), 250); return () => clearTimeout(t); }, [text]);
-  const owner = me.role === 'owner';
+  const owner = isAdmin(me.role);
   const log = useInfiniteQuery({
     queryKey: ['audit', kind, userId, q],
     enabled: owner,

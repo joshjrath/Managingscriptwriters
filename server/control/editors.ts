@@ -8,12 +8,11 @@ import { z } from 'zod';
 import type { Ctx } from '../core';
 import type { Db } from '../db';
 import { logActivity } from '../core';
-import { requireUser } from '../auth';
+import { requireAdmin } from '../auth';
 import { HttpError, notFound, parse, zs } from '../http';
 import { cityLabel, findCity, shiftOf, zoneFor } from '../../shared/cities';
 import { isValidTimeZone } from '../../shared/dates';
 import type { Editor } from '../../shared/types';
-import { isAdmin } from './access';
 
 interface EditorRow {
   id: number; name: string; city: string; city_code: string; country: string; lat: number; lon: number;
@@ -30,11 +29,6 @@ const toEditor = (r: EditorRow): Editor => ({ id: r.id, name: r.name, city: city
 
 export function registerEditorRoutes(app: FastifyInstance, ctx: Ctx) {
   const { db } = ctx;
-  const requireAdmin = (req: Parameters<typeof requireUser>[0]) => {
-    const me = requireUser(req);
-    if (!isAdmin(me.role)) throw new HttpError(403, 'Only admins can manage editors');
-    return me;
-  };
   const input = z.object({
     name: zs.name('Name', 120),
     city: z.string().trim().min(1, 'Pick a city from the list').max(120),
@@ -53,12 +47,12 @@ export function registerEditorRoutes(app: FastifyInstance, ctx: Ctx) {
   const list = async () => ({ editors: (await loadEditorRows(db)).map(toEditor) });
 
   app.get('/api/editors', async (req) => {
-    requireAdmin(req);
+    requireAdmin(req, 'Only admins can manage editors');
     return list();
   });
 
   app.post('/api/editors', async (req) => {
-    const me = requireAdmin(req);
+    const me = requireAdmin(req, 'Only admins can manage editors');
     const v = parse(input, req.body);
     const row = await db.one<{ id: number }>(
       `insert into editors (name, city, city_code, country, lat, lon, timezone, work_start, work_end, created_by)
@@ -69,7 +63,7 @@ export function registerEditorRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   app.patch('/api/editors/:id', async (req) => {
-    const me = requireAdmin(req);
+    const me = requireAdmin(req, 'Only admins can manage editors');
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const v = parse(input, req.body);
     const current = await db.one<EditorRow>(`select * from editors where id = $1 and removed_at is null`, [id]);
@@ -84,7 +78,7 @@ export function registerEditorRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   app.delete('/api/editors/:id', async (req) => {
-    const me = requireAdmin(req);
+    const me = requireAdmin(req, 'Only admins can manage editors');
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const r = await db.one<{ name: string }>(`update editors set removed_at = now() where id = $1 and removed_at is null returning name`, [id]);
     if (!r) throw notFound('Editor');

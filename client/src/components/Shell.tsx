@@ -2,7 +2,7 @@
 // mobile drawer, and the context that holds the signed-in bootstrap payload.
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { isManager, ROLE_LABEL } from '../../../shared/workflow';
+import { isAdmin, isManager, ROLE_LABEL } from '../../../shared/workflow';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -139,7 +139,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
         <span className="full">&nbsp;</span>
         <span>{collapsed && !mobile ? 'S' : 'Media'}</span>
       </NavLink>
-      {me.role === 'owner' && !mode?.viewingAs && !mobile && <ControlCenterLink />}
+      {isAdmin(me.role) && !mode?.viewingAs && !mobile && <ControlCenterLink />}
       <SearchBox />
       <LayoutGroup id={mobile ? 'nav-mobile' : 'nav'}>
         <nav className="nav">
@@ -158,7 +158,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
         </nav>
         <div className="side-foot">
           {settings.isDemo && <div className="demo-flag"><b>Demo workspace.</b> Sample data only — separate from your real workspace.</div>}
-          {me.role === 'owner' && (
+          {isAdmin(me.role) && (
             <nav className="nav" aria-label="Admin">
               <NavItem to="/log" icon={<ScrollText />} label="Master log" collapsed={collapsed} />
             </nav>
