@@ -336,7 +336,12 @@ export function Dialog({ open, onClose, title, sub, children, footer, kind = 'mo
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
-    if (open && !d.open) d.showModal();
+    if (open && !d.open) {
+      d.showModal();
+      // React focuses autoFocus fields before the dialog opens, when they can't take focus; opening
+      // then focuses the close button. So fields to start in are marked data-autofocus instead.
+      d.querySelector<HTMLElement>('[data-autofocus]')?.focus();
+    }
     if (!open && d.open) d.close();
   }, [open]);
   return (

@@ -2,7 +2,7 @@
 // recordings and documents. Each result links back to the record it belongs
 // to — nothing is duplicated.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { ExternalLink, FileText, FolderOpen, Image, Link2, PlayCircle } from 'lucide-react';
@@ -25,7 +25,15 @@ export function ResourcesPage() {
   const q = params.get('q') ?? '';
   const clientId = params.get('clientId') ?? '';
   const category = params.get('category') ?? '';
-  useEffect(() => { const t = setTimeout(() => { const p = new URLSearchParams(params); if (text) p.set('q', text); else p.delete('q'); setParams(p, { replace: true }); }, 250); return () => clearTimeout(t); }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the search box writes to the address a moment after typing stops (on top of whatever filters
+  // it has by then); when the address changes from elsewhere (the sidebar search), the box follows
+  const wrote = useRef(q);
+  useEffect(() => {
+    // from the address as it is now (setParams' own "current" value is from when this timer started)
+    const t = setTimeout(() => { wrote.current = text; const p = new URLSearchParams(window.location.search); if (text) p.set('q', text); else p.delete('q'); setParams(p, { replace: true }); }, 250);
+    return () => clearTimeout(t);
+  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps -- setParams changes with the address, which this effect itself changes
+  useEffect(() => { if (q !== wrote.current) { wrote.current = q; setText(q); } }, [q]);
   const set = (k: string, v: string) => { const p = new URLSearchParams(params); if (v) p.set(k, v); else p.delete(k); setParams(p, { replace: true }); };
   const res = useQuery({ queryKey: ['resources', q, clientId, category], queryFn: () => api<{ resources: Resource[]; briefingLinks: BriefingLink[] }>(`/api/resources${qs({ q, clientId, category })}`) });
   const count = (res.data?.resources.length ?? 0) + (res.data?.briefingLinks.length ?? 0);

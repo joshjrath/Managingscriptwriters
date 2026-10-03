@@ -1,7 +1,7 @@
 // What's new: every change to the platform, newest first, since day one.
 // Opening it clears the "new" dot in the sidebar for this person.
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { m } from 'framer-motion';
 import { Sparkles } from 'lucide-react';
 import { api, queryClient } from '../api';
@@ -19,8 +19,9 @@ const TAG: Record<ChangeTag, { label: string; color: string }> = {
 
 export function WhatsNewPage() {
   const { whatsNewSeen } = useBoot();
-  // what was new before this visit, so the highlight survives the dot clearing
-  const firstUnseen = whatsNewSeen ? CHANGELOG.findIndex((e) => e.id === whatsNewSeen) : CHANGELOG.length;
+  // what was new before this visit (taken once, as the page opens), so the highlight survives the dot clearing
+  const [seenBefore] = useState(whatsNewSeen);
+  const firstUnseen = seenBefore ? CHANGELOG.findIndex((e) => e.id === seenBefore) : CHANGELOG.length;
   useEffect(() => {
     if (whatsNewSeen === LATEST_CHANGE) return;
     api('/api/me/whats-new', { body: { seen: LATEST_CHANGE } })

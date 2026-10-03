@@ -38,14 +38,17 @@ function Gate() {
   const status = useQuery({ queryKey: ['auth-status'], queryFn: () => api<AuthStatus>('/api/auth/status'), staleTime: Infinity });
   const boot = useQuery({ queryKey: ['bootstrap'], queryFn: () => api<Bootstrap>('/api/bootstrap'), enabled: !!status.data?.signedIn, refetchInterval: 60_000 });
   useEffect(() => {
-    const lost = () => { queryClient.clear(); void status.refetch(); };
+    const lost = () => { setRecordingMode(null); queryClient.clear(); void status.refetch(); };
     window.addEventListener('auth:lost', lost);
     return () => window.removeEventListener('auth:lost', lost);
   }, [status]);
 
-  // while recording, every request names its practice copy, so nothing reaches the real workspace once it's gone
+  // While recording, every request names its practice copy, so nothing reaches the real workspace once
+  // it's gone. The name is kept for the life of the page, even after the bootstrap stops reporting a
+  // recording (that's exactly when the copy is gone): turning recording off reloads the page, and a
+  // new sign-in starts without one.
   const recordingSince = boot.data?.mode?.recording?.startedAt ?? null;
-  useEffect(() => { setRecordingMode(recordingSince); }, [recordingSince]);
+  useEffect(() => { if (recordingSince) setRecordingMode(recordingSince); }, [recordingSince]);
 
   // the admin's colour palette, for everyone (the sign-in page included)
   const theme = boot.data ? boot.data.settings.theme : status.data?.theme;
@@ -56,7 +59,7 @@ function Gate() {
     return <div className="loading-center" role="status"><span className="wordmark" style={{ fontSize: 28 }}>Scale&nbsp;<span>Media</span></span><span>Loading…</span></div>;
   }
   if (status.isError) return <main className="login"><ErrorState error={status.error} retry={() => status.refetch()} /></main>;
-  if (!status.data!.signedIn) return <Login status={status.data!} onDone={() => { queryClient.clear(); void status.refetch(); }} />;
+  if (!status.data!.signedIn) return <Login status={status.data!} onDone={() => { setRecordingMode(null); queryClient.clear(); void status.refetch(); }} />;
   if (boot.isError || !boot.data) return <main className="login"><ErrorState error={boot.error} retry={() => boot.refetch()} /></main>;
   const home = isManager(boot.data.me.role) ? '/overview' : '/my-work';
   return (

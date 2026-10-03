@@ -1,7 +1,7 @@
 // Clients list and client detail: guidance, briefings, resources, shoots,
 // batches and history in one place.
 
-import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { useRef, useState, type DragEvent } from 'react';
 import { LayoutGroup, m } from 'framer-motion';
 import { isManager } from '../../../shared/workflow';
 import { Link, useParams } from 'react-router-dom';
@@ -12,6 +12,7 @@ import { confetti } from '../fx';
 import { SOFT } from '../motion';
 import type { Briefing, ClientDetail, ClientSummary } from '../../../shared/types';
 import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
+import { nowInZone } from '../../../shared/dates';
 import { PageHeader, useBoot, useNewWork, useDisplayTz } from '../components/Shell';
 import { BatchItem } from '../components/BatchBits';
 import { Button, Chip, DateTile, Dialog, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel, Seg, useFieldId, useToast } from '../components/ui';
@@ -19,6 +20,7 @@ import { RescheduleDialog, ResourceDialog, ResourceRow } from './BatchDetail';
 
 export function ClientsPage() {
   const { me } = useBoot();
+  const displayTz = useDisplayTz();
   const manager = isManager(me.role);
   const openNew = useNewWork();
   const toast = useToast();
@@ -120,9 +122,9 @@ export function ClientsPage() {
                         <div className="pbody">
                           <Link to={`/clients/${c.id}`} className="pname" draggable={false}>{c.name}</Link>
                           {c.description && <p className="desc">{c.description}</p>}
-                          <span className="meta">{c.ownerName ?? 'No owner'} · added {fmtDate(c.createdAt.slice(0, 10))}</span>
+                          <span className="meta">{c.ownerName ?? 'No owner'} · added {fmtDate(nowInZone(displayTz, new Date(c.createdAt)).date)}</span>
                         </div>
-                        {manager && <Button variant="sm mint" onClick={(x) => { const r = (x.currentTarget as HTMLElement).getBoundingClientRect(); move.mutate({ id: c.id, to: 'active', at: { x: r.left + r.width / 2, y: r.top } }); }}>Mark as client</Button>}
+                        {manager && <Button variant="sm mint" busy={move.isPending && move.variables?.id === c.id} onClick={(x) => { if (move.isPending) return; const r = (x.currentTarget as HTMLElement).getBoundingClientRect(); move.mutate({ id: c.id, to: 'active', at: { x: r.left + r.width / 2, y: r.top } }); }}>Mark as client</Button>}
                       </div>
                       </m.div>
                     ))}
@@ -259,7 +261,7 @@ export function ClientPage() {
           )}
         </div>
       </div>
-      {manager && <EditClientDialog c={c} open={edit} onClose={() => setEdit(false)} managers={users.filter((u) => isManager(u.role) && u.active)} />}
+      {manager && edit && <EditClientDialog c={c} open onClose={() => setEdit(false)} managers={users.filter((u) => isManager(u.role) && u.active)} />}
       {manager && brief && <BriefingDialog clientId={c.id} briefing={brief === 'new' ? null : brief} batches={c.batches.filter((b) => !b.archivedAt)} onClose={() => setBrief(null)} />}
       <ResourceDialog open={!!res} onClose={() => setRes(null)} clientId={c.id} briefingId={res?.briefingId} />
       {resched && <RescheduleDialog shootId={resched.id} start={resched.start} end={resched.end} onClose={() => setResched(null)} />}
@@ -274,8 +276,18 @@ function EditClientDialog({ c, open, onClose, managers }: { c: ClientDetail; ope
   const [description, setDescription] = useState(c.description ?? '');
   const [brandVoice, setBrandVoice] = useState(c.brandVoice ?? '');
   const [guidance, setGuidance] = useState(c.guidance ?? '');
-  useEffect(() => { if (open) { setName(c.name); setOwnerId(c.ownerId ?? ''); setDescription(c.description ?? ''); setBrandVoice(c.brandVoice ?? ''); setGuidance(c.guidance ?? ''); } }, [open, c]);
-  const save = useSave(() => api(`/api/clients/${c.id}`, { method: 'PATCH', body: { name, ownerId: ownerId || null, description, brandVoice, guidance } }), { onSuccess: () => { toast('Client updated'); onClose(); } });
+  // Mounted only while open, so the form starts from the client as it was then and a refetch never
+  // wipes what's being typed. Saving sends only what was changed here, so it can't undo someone else's edit.
+  const [base] = useState(c);
+  const save = useSave(() => {
+    const body: Record<string, unknown> = {};
+    if (name !== base.name) body.name = name;
+    if ((ownerId || null) !== base.ownerId) body.ownerId = ownerId || null;
+    if (description !== (base.description ?? '')) body.description = description;
+    if (brandVoice !== (base.brandVoice ?? '')) body.brandVoice = brandVoice;
+    if (guidance !== (base.guidance ?? '')) body.guidance = guidance;
+    return api(`/api/clients/${c.id}`, { method: 'PATCH', body });
+  }, { onSuccess: () => { toast('Client updated'); onClose(); } });
   const f = save.error?.fields ?? {};
   const ids = { n: useFieldId('n'), o: useFieldId('o'), d: useFieldId('d'), v: useFieldId('v'), g: useFieldId('g') };
   return (

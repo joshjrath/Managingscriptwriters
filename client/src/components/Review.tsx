@@ -134,8 +134,11 @@ function TitlesField({ id, scripts, value, onChange }: { id: string; scripts: Sc
 export function TitlesDialog({ batchId, scripts, onClose }: { batchId: number; scripts: Script[]; onClose: () => void }) {
   const toast = useToast();
   const [text, setText] = useState(titleLines(scripts));
+  // only titles changed here are sent, so this can't put back a title someone else changed meanwhile
+  const [base] = useState(scripts);
   const id = useFieldId('titles');
-  const save = useSave(() => api<{ changed: number }>(`/api/batches/${batchId}/titles`, { body: { titles: parseTitleLines(text, scripts.map((s) => s.number)) } }), {
+  const changed = () => parseTitleLines(text, base.map((s) => s.number)).filter((t) => (base.find((s) => s.number === t.number)?.title ?? null) !== (t.title ?? null));
+  const save = useSave(() => api<{ changed: number }>(`/api/batches/${batchId}/titles`, { body: { titles: changed() } }), {
     onSuccess: (out) => { toast(out.changed ? `Updated ${plural(out.changed, 'title')}` : 'No titles changed'); onClose(); },
   });
   return (
@@ -255,7 +258,7 @@ export function DecisionDialog({ batchId, scripts, submissionId, mode, groupKey,
       <div className="form">
         <FormError error={save.error} />
         <Field label={mode === 'revisions' ? 'What needs to change?' : 'Note'} optional={mode !== 'revisions'} htmlFor={nid} error={errs.note}>
-          <textarea className="textarea" autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder={mode === 'revisions' ? 'e.g. Tighten every opening line. See my comments in the PDF.' : 'Optional'} {...inputProps(nid, errs.note)} />
+          <textarea className="textarea" data-autofocus value={note} onChange={(e) => setNote(e.target.value)} placeholder={mode === 'revisions' ? 'e.g. Tighten every opening line. See my comments in the PDF.' : 'Optional'} {...inputProps(nid, errs.note)} />
         </Field>
         <div className="field">
           <span className="lbl">{mode === 'revisions' ? 'Attach your changes' : 'Your edited version'}{mode === 'revisions' && <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional</span>}</span>
@@ -309,7 +312,8 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
       setPicked(new Set());
     },
   });
-  const approveNow = (scripts: Script[], el: EventTarget) => { from.current = centerOf(el as Element); approve.mutate(scripts); };
+  // one decision at a time: a double click mustn't send the same approval twice
+  const approveNow = (scripts: Script[], el: EventTarget) => { if (approve.isPending) return; from.current = centerOf(el as Element); approve.mutate(scripts); };
   const pickedScripts = group.scripts.filter((s) => picked.has(s.id));
   return (
     <section className="review-card edge-lavender" aria-label={`${group.writerName}: scripts ${nums}`}>
@@ -348,7 +352,7 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
                 </label>
               ))}
               <div className="row-flex s2">
-                <Button variant="sm mint" disabled={!pickedScripts.length} onClick={(e) => approveNow(pickedScripts, e.currentTarget)}>Approve {pickedScripts.length || ''} selected</Button>
+                <Button variant="sm mint" disabled={!pickedScripts.length} busy={approve.isPending && approve.variables?.length !== n} onClick={(e) => approveNow(pickedScripts, e.currentTarget)}>Approve {pickedScripts.length || ''} selected</Button>
                 <Button variant="sm danger" disabled={!pickedScripts.length} onClick={() => setDialog({ mode: 'revisions', scripts: pickedScripts })}>Send selected back</Button>
               </div>
             </div>

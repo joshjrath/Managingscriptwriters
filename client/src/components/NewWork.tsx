@@ -688,7 +688,7 @@ function ClientForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: 
       {withBatch && (
         <div className="form-grid">
           <Field label="Batch name" htmlFor={ids.bt} error={f['initialBatch.title']}><input className="input" value={batch.title} onChange={(e) => setBatch({ ...batch, title: e.target.value })} {...inputProps(ids.bt, f['initialBatch.title'])} /></Field>
-          <Field label="Scripts" htmlFor={ids.bn} error={f['initialBatch.targetCount']}><input className="input num" type="number" min={1} value={batch.targetCount} onChange={(e) => setBatch({ ...batch, targetCount: e.target.value === '' ? '' : Number(e.target.value) })} {...inputProps(ids.bn, f['initialBatch.targetCount'])} /></Field>
+          <Field label="Scripts" htmlFor={ids.bn} error={f['initialBatch.targetCount']}><input className="input num" type="number" min={1} max={500} value={batch.targetCount} onChange={(e) => setBatch({ ...batch, targetCount: e.target.value === '' ? '' : Number(e.target.value) })} {...inputProps(ids.bn, f['initialBatch.targetCount'])} /></Field>
           <Field label="Drafts due" optional htmlFor={ids.bd}><input className="input" type="date" id={ids.bd} value={batch.draftDue} onChange={(e) => setBatch({ ...batch, draftDue: e.target.value })} /></Field>
           <Field label="Final delivery" optional htmlFor={ids.bf} error={f['initialBatch.draftDue'] ?? f.draftDue}><input className="input" type="date" id={ids.bf} value={batch.finalDue} onChange={(e) => setBatch({ ...batch, finalDue: e.target.value })} /></Field>
           <div className="field full"><span className="lbl">Writers</span><SplitEditor total={Number(batch.targetCount) || 0} parts={parts} onChange={setParts} /></div>
@@ -708,6 +708,8 @@ function QuickEntry({ preset, onCreated, onOpenForm }: { preset?: NewWorkPreset;
   const [parsed, setParsed] = useState<ParsedEntry | null>(null);
   // resolutions for whatever the parser couldn't decide
   const [clientChoice, setClientChoice] = useState<number | 'new' | ''>('');
+  // a new client made on an earlier try whose shoot then failed: used again rather than made twice
+  const [madeClient, setMadeClient] = useState<{ id: number; name: string } | null>(null);
   const [dateChoice, setDateChoice] = useState<number>(-1);
   const [manualStart, setManualStart] = useState('');
   const [count, setCount] = useState<number | ''>('');
@@ -754,8 +756,8 @@ function QuickEntry({ preset, onCreated, onOpenForm }: { preset?: NewWorkPreset;
     try {
       let clientId = clientChoice as number;
       if (clientChoice === 'new') {
-        const c = await api<{ clientId: number }>('/api/clients', { body: { name: newName, links: [] } });
-        clientId = c.clientId;
+        clientId = madeClient?.name === newName ? madeClient.id : (await api<{ clientId: number }>('/api/clients', { body: { name: newName, links: [] } })).clientId;
+        setMadeClient({ id: clientId, name: newName });
       }
       const out = await api<{ batchId: number; warnings: string[]; batch: BatchSummary }>('/api/shoots', {
         body: { clientId, startDate: resolved.start, endDate: resolved.end, batch: { targetCount: Number(count), split, briefingIds: [], priority: 'normal' } },
@@ -828,7 +830,7 @@ function QuickEntry({ preset, onCreated, onOpenForm }: { preset?: NewWorkPreset;
               )}
             </dd>
             <dt>Scripts</dt>
-            <dd><input className="input num" type="number" min={1} aria-label="Script count" style={{ maxWidth: 140 }} value={count} onChange={(e) => setCount(e.target.value === '' ? '' : Number(e.target.value))} />{!parsed.count && <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>No script count found — enter it here.</div>}</dd>
+            <dd><input className="input num" type="number" min={1} max={500} aria-label="Script count" style={{ maxWidth: 140 }} value={count} onChange={(e) => setCount(e.target.value === '' ? '' : Number(e.target.value))} />{!parsed.count && <div className="muted" style={{ fontSize: 12.5, marginTop: 4 }}>No script count found — enter it here.</div>}</dd>
             <dt>Writers</dt>
             <dd>
               {!parsed.writers.length && <span className="muted">No writer found — scripts will be unassigned. You can assign them after saving.</span>}

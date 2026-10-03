@@ -32,7 +32,7 @@ function localParts(iso: string, timeZone: string) {
 
 export function MasterLogPage() {
   const displayTz = useDisplayTz();
-  const { me, users, clock } = useBoot();
+  const { me, users } = useBoot();
   const [kind, setKind] = useState<Kind>('all');
   const [userId, setUserId] = useState('');
   const [text, setText] = useState('');
@@ -53,6 +53,8 @@ export function MasterLogPage() {
   const entries = log.data?.pages.flatMap((p) => p.entries) ?? [];
   const seen = new Set<string>();
   const unique = entries.filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)));
+  // entries are grouped by day in the viewer's own time zone, so "Today" is theirs too (not HQ's)
+  const today = localParts(new Date().toISOString(), displayTz).day;
   let lastDay = '';
   return (
     <>
@@ -75,7 +77,7 @@ export function MasterLogPage() {
           <div className="stack s2">
             {unique.map((e) => {
               const { day, time } = localParts(e.at, displayTz);
-              const header = day !== lastDay ? (day === clock.today ? 'Today' : fmtWeekday(day)) : null;
+              const header = day !== lastDay ? (day === today ? 'Today' : fmtWeekday(day)) : null;
               lastDay = day;
               const chip = KIND_CHIP[e.kind];
               return (

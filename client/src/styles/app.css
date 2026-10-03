@@ -796,6 +796,8 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0 6px; font-
 .titles-preview { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--text-2); }
 .titles-preview b { color: var(--text); font-weight: 650; }
 .linkbtn { border: 0; background: none; padding: 4px 0; color: var(--salmon); font: 600 13px/1.3 var(--font-ui); cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+/* a button that looks like the text it wraps (for things that open on click, so keyboards reach them too) */
+.bare-btn { border: 0; background: none; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .linkbtn:hover { color: var(--text); }
 .state-tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .state-tiles > div { background: var(--row); border-radius: var(--r-row); padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }

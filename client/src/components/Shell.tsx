@@ -17,7 +17,7 @@ import { nowInZone } from '../../../shared/dates';
 import { Avatar, Button, Dialog, Field, FormError, inputProps, useFieldId, useToast } from './ui';
 import { NewWorkDialog, type NewWorkTab, type NewWorkPreset } from './NewWork';
 import { MomentsHost } from './Moments';
-import { ModeBar, RecordingDialog, ViewAsDialog, useModeActions } from './ModeBar';
+import { ModeBar, RecordingDialog, RecordingOffDialog, ViewAsDialog } from './ModeBar';
 import { SPRING, setMotionEnabled, useMotionSetting } from '../motion';
 import { LATEST_CHANGE } from '../../../shared/changelog';
 import { ControlCenterLink } from '../control/Link';
@@ -205,7 +205,7 @@ function UserMenu() {
   const [pw, setPw] = useState(false);
   const [viewAs, setViewAs] = useState(false);
   const [recording, setRecording] = useState(false);
-  const modeAct = useModeActions();
+  const [recordingOff, setRecordingOff] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useOutside(ref, () => setOpen(false), open);
   const logout = async () => {
@@ -227,7 +227,7 @@ function UserMenu() {
           {mode && (
             <>
               <button role="menuitem" onClick={() => { setViewAs(true); setOpen(false); }}><Eye />View as…</button>
-              <button role="menuitemcheckbox" aria-checked={!!mode.recording} onClick={() => { setOpen(false); if (mode.recording) void modeAct.stopRecording(); else setRecording(true); }}>
+              <button role="menuitemcheckbox" aria-checked={!!mode.recording} onClick={() => { setOpen(false); if (mode.recording) setRecordingOff(true); else setRecording(true); }}>
                 <Circle />Recording mode<span className={`switch${mode.recording ? ' on' : ''}`} aria-hidden><i /></span>
               </button>
             </>
@@ -241,6 +241,7 @@ function UserMenu() {
       <PasswordDialog open={pw} onClose={() => setPw(false)} />
       {mode && <ViewAsDialog open={viewAs} onClose={() => setViewAs(false)} />}
       {mode && <RecordingDialog open={recording} onClose={() => setRecording(false)} />}
+      {mode && <RecordingOffDialog open={recordingOff} onClose={() => setRecordingOff(false)} />}
     </div>
   );
 }

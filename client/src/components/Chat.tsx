@@ -168,6 +168,13 @@ function dayLabel(ts: string, tz: string) {
 }
 const timeOf = (ts: string, tz: string) => new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(new Date(ts));
 
+/** Messages oldest first, each once: polls, sends and older pages can overlap or arrive out of order. */
+function mergeMessages(cur: ChatMessage[] | null, incoming: ChatMessage[]): ChatMessage[] {
+  const byId = new Map((cur ?? []).map((x) => [x.id, x]));
+  for (const x of incoming) byId.set(x.id, x);
+  return [...byId.values()].sort((a, b) => a.id - b.id);
+}
+
 function ChatWindow({ userId, min, onMin, onClose }: { userId: number; min: boolean; onMin: () => void; onClose: () => void }) {
   const displayTz = useDisplayTz();
   const { me, users, mode } = useBoot();
@@ -197,7 +204,7 @@ function ChatWindow({ userId, min, onMin, onClose }: { userId: number; min: bool
     if (!msgs || min || !visible) return;
     const t = setInterval(() => {
       api<{ messages: ChatMessage[] }>(`/api/messages/${userId}?after=${lastId}`).then((r) => {
-        if (r.messages.length) setMsgs((cur) => [...(cur ?? []), ...r.messages.filter((x) => !(cur ?? []).some((c) => c.id === x.id))]);
+        if (r.messages.length) setMsgs((cur) => mergeMessages(cur, r.messages));
       }, () => {});
     }, 3000);
     return () => clearInterval(t);
@@ -216,14 +223,22 @@ function ChatWindow({ userId, min, onMin, onClose }: { userId: number; min: bool
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
   }, [msgs?.length, min]);
 
+  const loadingOlder = useRef(false);
   const loadOlder = async () => {
-    if (!msgs?.length) return;
+    if (!msgs?.length || loadingOlder.current) return;
+    loadingOlder.current = true;
     const el = list.current;
     const h = el?.scrollHeight ?? 0;
-    const r = await api<{ messages: ChatMessage[]; more: boolean }>(`/api/messages/${userId}?before=${msgs[0].id}`);
-    setMsgs((cur) => [...r.messages, ...(cur ?? [])]);
-    setMore(r.more);
-    requestAnimationFrame(() => { if (el) el.scrollTop = el.scrollHeight - h; });
+    try {
+      const r = await api<{ messages: ChatMessage[]; more: boolean }>(`/api/messages/${userId}?before=${msgs[0].id}`);
+      setMsgs((cur) => mergeMessages(cur, r.messages));
+      setMore(r.more);
+      requestAnimationFrame(() => { if (el) el.scrollTop = el.scrollHeight - h; });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Couldn’t load earlier messages. Try again.');
+    } finally {
+      loadingOlder.current = false;
+    }
   };
 
   const send = async () => {
@@ -233,7 +248,7 @@ function ChatWindow({ userId, min, onMin, onClose }: { userId: number; min: bool
     try {
       const r = await api<{ message: ChatMessage }>(`/api/messages/${userId}`, { body: { body } });
       atBottom.current = true;
-      setMsgs((cur) => [...(cur ?? []).filter((x) => x.id !== r.message.id), r.message]);
+      setMsgs((cur) => mergeMessages(cur, [r.message]));
       setText('');
       void queryClient.invalidateQueries({ queryKey: ['inbox'] });
     } catch (e) {

@@ -3,7 +3,7 @@
 
 import { useEffect, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle, Archive, ArchiveRestore, Ban, CalendarClock, Camera, Check, CheckCheck, ChevronDown, ExternalLink, FileText,
   Flag, Link2, ListTodo, OctagonAlert, Plus, Pencil, PlayCircle, RotateCcw, Send, SlidersHorizontal, Trash2, Upload, UserPlus,
@@ -196,7 +196,7 @@ function BatchView({ b }: { b: BatchDetail }) {
 
       {todoFor != null && <TodoDialog userId={todoFor} batchId={b.id} onClose={() => setTodoFor(null)} />}
       {sendBack != null && <SendBackDialog b={b} writerId={sendBack} onClose={() => setSendBack(null)} />}
-      {manager && <EditBatchDialog b={b} open={edit} onClose={() => setEdit(false)} />}
+      {manager && edit && <EditBatchDialog b={b} open onClose={() => setEdit(false)} />}
       {manager && target && <TargetDialog b={b} onClose={() => setTarget(false)} />}
       {manager && resched && b.shootId && <RescheduleDialog shootId={b.shootId} start={b.shootStart!} end={b.shootEnd} onClose={() => setResched(false)} />}
       <BlockerDialog b={b} open={blocker} onClose={() => setBlocker(false)} />
@@ -438,7 +438,7 @@ function ScriptChecklist({ b }: { b: BatchDetail }) {
                   <tr key={s.id} className={`clickable${sel.has(s.id) ? ' selected' : ''}`} onClick={(e) => { if ((e.target as HTMLElement).closest('input,a,button')) return; setOpen(s); }}>
                     <td className="chk"><input type="checkbox" aria-label={`Select script ${s.number}`} checked={sel.has(s.id)} onClick={(e) => toggle(s, e.shiftKey)} onChange={() => {}} /></td>
                     <td className="num strong">{s.number}</td>
-                    <td style={{ maxWidth: 260 }}><span className={s.title ? 'strong' : 'muted'}>{s.title ?? `Script ${s.number}`}</span></td>
+                    <td style={{ maxWidth: 260 }}><button type="button" className="bare-btn" onClick={() => setOpen(s)} aria-label={`Open script ${s.number}${s.title ? `: ${s.title}` : ''}`}><span className={s.title ? 'strong' : 'muted'}>{s.title ?? `Script ${s.number}`}</span></button></td>
                     <td className="nowrap">{s.assigneeName ?? <Chip color="pink" icon={<UserPlus aria-hidden />}>Unassigned</Chip>}</td>
                     <td><StatusChip status={s.status} />{s.status === 'delivered' && s.deliveredByName && <div className="sub" style={{ marginTop: 4 }}>by {s.deliveredByName}</div>}</td>
                     <td><ScriptLinks s={s} /></td>
@@ -517,7 +517,7 @@ function SendBackDialog({ b, writerId, onClose }: { b: BatchDetail; writerId: nu
         <Field label="Scripts" htmlFor={ids.r} error={err.range} help={`Approved or waiting for review: ${compressRanges(eligible.map((s) => s.number))}`}>
           <input className="input num" value={range} onChange={(e) => setRange(e.target.value)} {...inputProps(ids.r, err.range)} />
         </Field>
-        <Field label="What to change" htmlFor={ids.n} error={err.note}><textarea className="textarea" autoFocus value={note} onChange={(e) => setNote(e.target.value)} {...inputProps(ids.n, err.note)} /></Field>
+        <Field label="What to change" htmlFor={ids.n} error={err.note}><textarea className="textarea" data-autofocus value={note} onChange={(e) => setNote(e.target.value)} {...inputProps(ids.n, err.note)} /></Field>
       </form>
     </Dialog>
   );
@@ -533,7 +533,7 @@ export function NoteDialog({ title, label, required, busy, error, confirm, varia
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant={variant} busy={busy} onClick={submit}>{confirm}</Button></div>}>
       <div className="form">
         <FormError error={error} />
-        <Field label={label} optional={!required} htmlFor={id} error={err || error?.fields.note}><textarea className="textarea" autoFocus value={note} onChange={(e) => setNote(e.target.value)} {...inputProps(id, err)} /></Field>
+        <Field label={label} optional={!required} htmlFor={id} error={err || error?.fields.note}><textarea className="textarea" data-autofocus value={note} onChange={(e) => setNote(e.target.value)} {...inputProps(id, err)} /></Field>
       </div>
     </Dialog>
   );
@@ -596,7 +596,14 @@ function ScriptDialog({ s, b, onClose }: { s: Script; b: BatchDetail; onClose: (
   const [docUrl, setDocUrl] = useState(s.docUrl ?? '');
   const [tl, setTl] = useState(s.timelinerUrl ?? '');
   const [notes, setNotes] = useState(s.notes ?? '');
-  const save = useSave(() => api(`/api/scripts/${s.id}`, { method: 'PATCH', body: { version: s.version, title, docUrl, timelinerUrl: tl, notes } }), { onSuccess: () => { toast(`Script ${s.number} saved`); onClose(); } });
+  // The version the fields came from: the server refuses the save if the script has changed since.
+  // After such a refusal the script refreshes, and the fields show what it is now.
+  const [base, setBase] = useState(s);
+  const save = useSave(() => api(`/api/scripts/${s.id}`, { method: 'PATCH', body: { version: base.version, title, docUrl, timelinerUrl: tl, notes } }), { onSuccess: () => { toast(`Script ${s.number} saved`); onClose(); } });
+  useEffect(() => {
+    if (save.error?.code !== 'stale' || s.version === base.version) return;
+    setBase(s); setTitle(s.title ?? ''); setDocUrl(s.docUrl ?? ''); setTl(s.timelinerUrl ?? ''); setNotes(s.notes ?? '');
+  }, [s, base, save.error]);
   const history = b.revisions.filter((r) => r.scriptId === s.id);
   const ids = { t: useFieldId('t'), d: useFieldId('d'), l: useFieldId('l'), n: useFieldId('n') };
   const f = save.error?.fields ?? {};
@@ -785,11 +792,9 @@ function EditBatchDialog({ b, open, onClose }: { b: BatchDetail; open: boolean; 
   const [brief, setBrief] = useState(b.brief ?? '');
   const [nextAction, setNextAction] = useState(b.nextAction ?? '');
   const [briefingIds, setBriefingIds] = useState<number[]>(b.briefings.map((x) => x.id));
-  useEffect(() => {
-    if (!open) return;
-    setTitle(b.title); setPriority(b.priority); setPlanned(b.plannedStart ?? ''); setShootId(b.shootId ?? ''); setDraftMode(b.draftDueMode); setDraft(b.draftDue ?? '');
-    setFinalMode(b.finalDueMode); setFinal(b.finalDue ?? ''); setDraftTouched(false); setBrief(b.brief ?? ''); setNextAction(b.nextAction ?? ''); setBriefingIds(b.briefings.map((x) => x.id));
-  }, [open, b]);
+  // Mounted only while open, so the form starts from the batch as it was then and a refetch never
+  // wipes what's being typed; saving compares against that same snapshot.
+  const [base] = useState(b);
   const shoot = client.data?.shoots.find((s) => s.id === shootId);
   const auto = shoot ? computeDeadlines(shoot.startDate, settings) : null;
   const save = useSave((body: Record<string, unknown>) => api(`/api/batches/${b.id}`, { method: 'PATCH', body }), { onSuccess: () => { toast('Batch updated'); onClose(); } });
@@ -808,17 +813,17 @@ function EditBatchDialog({ b, open, onClose }: { b: BatchDetail; open: boolean; 
     const draftDue = { mode: shootId ? draftMode : 'manual', date: draftMode === 'manual' || !shootId ? draft || null : null };
     const finalDue = { mode: shootId ? finalMode : 'manual', date: finalMode === 'manual' || !shootId ? final || null : null };
     const dateChanged = (d: { mode: string; date: string | null }, mode: string, date: string | null) => d.mode !== mode || (d.mode === 'manual' && d.date !== date);
-    const shootChanged = (shootId || null) !== b.shootId;
+    const shootChanged = (shootId || null) !== base.shootId;
     const body: Record<string, unknown> = {};
-    if (title !== b.title) body.title = title;
-    if (priority !== b.priority) body.priority = priority;
-    if ((planned || null) !== b.plannedStart) body.plannedStart = planned || null;
+    if (title !== base.title) body.title = title;
+    if (priority !== base.priority) body.priority = priority;
+    if ((planned || null) !== base.plannedStart) body.plannedStart = planned || null;
     if (shootChanged) body.shootId = shootId || null;
-    if ((brief || null) !== (b.brief ?? null)) body.brief = brief || null;
-    if ((nextAction || null) !== b.nextAction) body.nextAction = nextAction || null;
-    if (briefingIds.join() !== b.briefings.map((x) => x.id).join()) body.briefingIds = briefingIds;
-    if (shootChanged || b.needsDateReview || dateChanged(draftDue, b.draftDueMode, b.draftDue)) body.draftDue = draftDue;
-    if (shootChanged || b.needsDateReview || dateChanged(finalDue, b.finalDueMode, b.finalDue)) body.finalDue = finalDue;
+    if ((brief || null) !== (base.brief ?? null)) body.brief = brief || null;
+    if ((nextAction || null) !== base.nextAction) body.nextAction = nextAction || null;
+    if (briefingIds.join() !== base.briefings.map((x) => x.id).join()) body.briefingIds = briefingIds;
+    if (shootChanged || base.needsDateReview || dateChanged(draftDue, base.draftDueMode, base.draftDue)) body.draftDue = draftDue;
+    if (shootChanged || base.needsDateReview || dateChanged(finalDue, base.finalDueMode, base.finalDue)) body.finalDue = finalDue;
     save.mutate(body);
   };
   return (
@@ -932,13 +937,20 @@ export function RescheduleDialog({ shootId, start, end, initialStart, initialEnd
   const [e, setE] = useState((initialStart ? initialEnd : end) ?? '');
   const [shiftManual, setShiftManual] = useState(false);
   const [preview, setPreview] = useState<ReschedulePreview | null>(null);
-  const load = useSave((v: { s: string; e: string; shiftManual: boolean }) => api<ReschedulePreview>(`/api/shoots/${shootId}/reschedule-preview`, { body: { startDate: v.s, endDate: v.e || null, shiftManual: v.shiftManual } }), { onSuccess: (p) => setPreview(p) });
+  // A preview changes nothing, so it doesn't refresh the rest of the page (useSave would). Its result
+  // is taken in mutate's own onSuccess, which only runs for the latest request: an older preview
+  // arriving late can't replace a newer one.
+  type Dates = { s: string; e: string; shiftManual: boolean };
+  const load = useMutation<ReschedulePreview, ApiError, Dates>({
+    mutationFn: (v) => api<ReschedulePreview>(`/api/shoots/${shootId}/reschedule-preview`, { body: { startDate: v.s, endDate: v.e || null, shiftManual: v.shiftManual } }),
+  });
+  const loadPreview = (v: Dates) => load.mutate(v, { onSuccess: setPreview });
   const apply = useSave(() => api(`/api/shoots/${shootId}/reschedule`, { body: { startDate: s, endDate: e || null, shiftManual } }), { onSuccess: () => { toast(`Shoot moved to ${fmtRange(s, e || null)} — everything updated`); onClose(); } });
   // dragged on the calendar: show what will change straight away
-  useEffect(() => { if (initialStart) load.mutate({ s, e, shiftManual }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (initialStart) loadPreview({ s, e, shiftManual }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const reload = (next: Partial<{ s: string; e: string; shiftManual: boolean }>) => {
     const v = { s, e, shiftManual, ...next };
-    if (preview && v.s && isISODate(v.s)) load.mutate(v);
+    if (preview && v.s && isISODate(v.s)) loadPreview(v);
   };
   const f = load.error?.fields ?? {};
   const unchanged = s === start && (e || null) === (end ?? null);
@@ -947,7 +959,7 @@ export function RescheduleDialog({ shootId, start, end, initialStart, initialEnd
     <Dialog open onClose={onClose} title="Change shoot dates" sub={`Currently ${fmtRange(start, end)}${preview && !unchanged ? ` → ${fmtRange(preview.newStart, preview.newEnd)}${moved ? ` (${moved})` : ''}` : ''}`} size="wide"
       footer={<div className="form-actions">
         <Button variant="ghost" onClick={onClose}>Cancel</Button>
-        {!preview ? <Button variant="salmon pill" busy={load.isPending} disabled={!s} onClick={() => load.mutate({ s, e, shiftManual })}>Preview changes</Button>
+        {!preview ? <Button variant="salmon pill" busy={load.isPending} disabled={!s} onClick={() => loadPreview({ s, e, shiftManual })}>Preview changes</Button>
           : <Button variant="primary pill" busy={apply.isPending} disabled={unchanged || load.isPending} onClick={() => apply.mutate(undefined)}>Move shoot & update everything</Button>}
       </div>}>
       <div className="form">
@@ -1014,7 +1026,7 @@ function BlockerDialog({ b, open, onClose }: { b: BatchDetail; open: boolean; on
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="danger" busy={save.isPending} onClick={() => { if (!note.trim()) { setErr('Say what is blocking the work'); return; } setErr(''); save.mutate(undefined); }}>Flag blocker</Button></div>}>
       <div className="form">
         <FormError error={save.error} />
-        <Field label="What’s blocking the work?" htmlFor={id} error={err || save.error?.fields.note}><textarea className="textarea" autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Waiting on the client’s product claims sheet" {...inputProps(id, err)} /></Field>
+        <Field label="What’s blocking the work?" htmlFor={id} error={err || save.error?.fields.note}><textarea className="textarea" data-autofocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Waiting on the client’s product claims sheet" {...inputProps(id, err)} /></Field>
       </div>
     </Dialog>
   );

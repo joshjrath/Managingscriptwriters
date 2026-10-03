@@ -36,10 +36,15 @@ export function ScriptBankPage() {
   const writerId = params.get('writerId') ?? '';
   const status = params.get('status') ?? '';
   const sort = params.get('sort') ?? 'recent';
+  // the search box writes to the address a moment after typing stops (on top of whatever filters
+  // it has by then); when the address changes from elsewhere, the box follows
+  const wrote = useRef(q);
   useEffect(() => {
-    const t = setTimeout(() => { const p = new URLSearchParams(params); if (text.trim()) p.set('q', text.trim()); else p.delete('q'); setParams(p, { replace: true }); }, 220);
+    // from the address as it is now (setParams' own "current" value is from when this timer started)
+    const t = setTimeout(() => { wrote.current = text.trim(); const p = new URLSearchParams(window.location.search); if (text.trim()) p.set('q', text.trim()); else p.delete('q'); setParams(p, { replace: true }); }, 220);
     return () => clearTimeout(t);
-  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps -- setParams changes with the address, which this effect itself changes
+  useEffect(() => { if (q !== wrote.current) { wrote.current = q; setText(q); } }, [q]);
   // "/" jumps to the search box from anywhere on the page
   useEffect(() => {
     const k = (e: KeyboardEvent) => {

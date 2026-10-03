@@ -102,6 +102,7 @@ function MomentDialog({ moments, onClose }: { moments: Moment[]; onClose: () => 
   const t = tell(hero);
   useEffect(() => {
     ref.current?.showModal();
+    ref.current?.querySelector<HTMLElement>('[data-autofocus]')?.focus();
     const timer = setTimeout(() => {
       if (t.big) celebrate();
       else if (t.happy) confetti({ y: innerHeight * 0.36, count: 80, spread: 110, power: 13 });
@@ -135,7 +136,7 @@ function MomentDialog({ moments, onClose }: { moments: Moment[]; onClose: () => 
         )}
         <div className="moment-actions">
           <Button variant="ghost" onClick={onClose}>{t.happy ? 'Nice!' : 'Got it'}</Button>
-          <Button variant="primary pill" autoFocus onClick={() => { onClose(); nav(t.cta.to); }}>{t.cta.label}</Button>
+          <Button variant="primary pill" data-autofocus onClick={() => { onClose(); nav(t.cta.to); }}>{t.cta.label}</Button>
         </div>
       </m.div>
     </dialog>

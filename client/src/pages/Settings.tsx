@@ -1,7 +1,7 @@
 // Settings (managers): deadline rules, timezone and cutoff, reminders, team;
 // the admin also picks the site's colour palette.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { isAdmin, isManager, ROLE_LABEL, type Role } from '../../../shared/workflow';
 import { AlertTriangle, CalendarClock, Check, Copy, KeyRound, Plus, RefreshCw, UserPlus } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
@@ -120,16 +120,27 @@ function PalettePanel() {
   );
 }
 
+/** The fields RulesPanel edits. */
+const sameRules = (a: Settings, b: Settings) =>
+  a.orgName === b.orgName && a.timezone === b.timezone && a.cutoff === b.cutoff && a.draftOffsetDays === b.draftOffsetDays && a.finalOffsetDays === b.finalOffsetDays
+  && a.dayMode === b.dayMode && a.workingDays.join() === b.workingDays.join() && a.reminderLeadDays === b.reminderLeadDays && a.planReminderDays === b.planReminderDays;
+
 function RulesPanel() {
   const { settings } = useBoot();
   const toast = useToast();
   const [v, setV] = useState<Settings>(settings);
   const [recalc, setRecalc] = useState(false);
-  useEffect(() => setV(settings), [settings]);
+  // Take the server's values when they change (they do every few minutes: the reminders run is
+  // recorded here), but never over something being edited in this form.
+  const synced = useRef(settings);
+  useEffect(() => {
+    setV((cur) => (sameRules(cur, synced.current) ? settings : cur));
+    synced.current = settings;
+  }, [settings]);
   const save = useSave(() => api<{ settings: Settings; recalculated: number }>('/api/settings', {
     method: 'PATCH',
     body: { orgName: v.orgName, timezone: v.timezone, cutoff: v.cutoff, draftOffsetDays: v.draftOffsetDays, finalOffsetDays: v.finalOffsetDays, dayMode: v.dayMode, workingDays: v.workingDays, reminderLeadDays: v.reminderLeadDays, planReminderDays: v.planReminderDays, recalculate: recalc },
-  }), { onSuccess: (out) => { toast(`Settings saved${recalc ? ` · ${plural(out.recalculated, 'batch', 'batches')} recalculated` : ''}`); setRecalc(false); } });
+  }), { onSuccess: (out) => { setV(out.settings); synced.current = out.settings; toast(`Settings saved${recalc ? ` · ${plural(out.recalculated, 'batch', 'batches')} recalculated` : ''}`); setRecalc(false); } });
   const f = save.error?.fields ?? {};
   const ids = { tz: useFieldId('tz'), cut: useFieldId('cut'), d: useFieldId('d'), fo: useFieldId('fo'), lead: useFieldId('lead'), plan: useFieldId('plan'), org: useFieldId('org') };
   const example = computeDeadlines('2026-10-12', { ...DEFAULT_RULES, draftOffsetDays: v.draftOffsetDays, finalOffsetDays: v.finalOffsetDays, dayMode: v.dayMode, workingDays: v.workingDays.length ? v.workingDays : [1] });
@@ -440,7 +451,7 @@ function EditorDialog({ editor, onClose }: { editor?: Editor; onClose: () => voi
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={save.isPending} onClick={() => save.mutate(undefined)}>{editor ? 'Save' : 'Add editor'}</Button></div>}>
       <form className="form" onSubmit={(e) => { e.preventDefault(); save.mutate(undefined); }}>
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
-        <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} autoFocus /></Field>
+        <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} data-autofocus /></Field>
         <PlaceFields city={city} tz={tz} hours={hours} f={f}
           onChange={(v) => { if (save.error) save.reset(); if (v.city !== undefined) setCity(v.city); if (v.tz !== undefined) setTz(v.tz); if (v.hours) setHours(v.hours); }} />
         <button type="submit" hidden />

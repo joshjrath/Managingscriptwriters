@@ -164,7 +164,7 @@ function ClientEditor({ c, include, onInclude, onChange, settings }: { c: Import
             <div key={`b${k}`} className="ic-item">
               <div className="ic-item-head"><FileText aria-hidden /><b>Brief</b><input className="input sm" value={b.title} onChange={(e) => onChange({ briefings: c.briefings.map((x, y) => (y === k ? { ...x, title: e.target.value } : x)) })} aria-label="Brief title" />
                 <button type="button" className="icon-btn sm" aria-label="Remove brief" onClick={() => onChange({ briefings: c.briefings.filter((_, y) => y !== k) })}><Trash2 size={15} /></button></div>
-              <textarea className="textarea" rows={2} value={[b.summary, b.instructions].filter(Boolean).join('\n\n')} onChange={(e) => { const [summary, ...rest] = e.target.value.split('\n\n'); onChange({ briefings: c.briefings.map((x, y) => (y === k ? { ...x, summary: summary || null, instructions: rest.join('\n\n') || null } : x)) }); }} aria-label="Brief details" />
+              <BriefText summary={b.summary} instructions={b.instructions} onChange={(v) => onChange({ briefings: c.briefings.map((x, y) => (y === k ? { ...x, ...v } : x)) })} />
             </div>
           ))}
           {c.shoots.map((s, k) => (
@@ -213,5 +213,29 @@ function SetupHelp() {
       </ol>
       <p className="muted" style={{ fontSize: 13 }}>Each import costs roughly 5–10 cents. Only the notes you paste are sent to Claude.</p>
     </div>
+  );
+}
+
+type BriefParts = { summary: string | null; instructions: string | null };
+const joinBrief = (b: BriefParts) => [b.summary, b.instructions].filter(Boolean).join('\n\n');
+
+/**
+ * A brief's text in one box: the first paragraph is its summary, the rest its instructions. The box
+ * keeps what's typed as typed (a new paragraph can be started at the end), and takes the brief's text
+ * again only when it changes from outside (a brief above it removed).
+ */
+function BriefText({ summary, instructions, onChange }: BriefParts & { onChange: (v: BriefParts) => void }) {
+  const joined = joinBrief({ summary, instructions });
+  const [text, setText] = useState(joined);
+  const [known, setKnown] = useState(joined);
+  if (joined !== known) { setKnown(joined); setText(joined); }
+  return (
+    <textarea className="textarea" rows={2} value={text} aria-label="Brief details" onChange={(e) => {
+      const [first, ...rest] = e.target.value.split('\n\n');
+      const next = { summary: first || null, instructions: rest.join('\n\n') || null };
+      setText(e.target.value);
+      setKnown(joinBrief(next));
+      onChange(next);
+    }} />
   );
 }

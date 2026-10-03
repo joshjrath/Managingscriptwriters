@@ -116,7 +116,7 @@ export function TodoDialog({ todo, userId, batchId, pickPerson, onClose }: { tod
             </select>
           </Field>
         )}
-        <Field label="To-do" htmlFor={ids.t} error={f.text}><input className="input" autoFocus value={text} maxLength={500} onChange={(e) => setText(e.target.value)} placeholder="e.g. Rewrite the hooks on scripts 3 and 7" {...inputProps(ids.t, f.text)} /></Field>
+        <Field label="To-do" htmlFor={ids.t} error={f.text}><input className="input" data-autofocus value={text} maxLength={500} onChange={(e) => setText(e.target.value)} placeholder="e.g. Rewrite the hooks on scripts 3 and 7" {...inputProps(ids.t, f.text)} /></Field>
         <Field label="Due" optional htmlFor={ids.d} error={f.due}><input className="input" type="date" value={due} onChange={(e) => setDue(e.target.value)} {...inputProps(ids.d, f.due)} /></Field>
       </form>
     </Dialog>

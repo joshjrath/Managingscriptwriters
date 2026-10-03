@@ -3,16 +3,24 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Check, Minus, Plus } from 'lucide-react';
-import { api, useSave } from '../api';
+import { api, queryClient, useSave } from '../api';
 
 export function WrittenCounter({ batchId, writerId, forOther, total, sent, written, compact }: { batchId: number; writerId: number; forOther: boolean; total: number; sent: number; written: number; compact?: boolean }) {
   const [value, setValue] = useState(written);
   const [state, setState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const timer = useRef<number | undefined>(undefined);
   const dirty = useRef(false);
+  /** a count tapped in but not sent yet (taps are sent together, a moment after the last one) */
+  const pending = useRef<number | null>(null);
   useEffect(() => { if (!dirty.current) setValue(written); }, [written]);
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-  const save = useSave((n: number) => api<{ written: number }>(`/api/batches/${batchId}/written`, { body: { written: n, writerId: forOther ? writerId : undefined } }), {
+  const send = (n: number) => api<{ written: number }>(`/api/batches/${batchId}/written`, { body: { written: n, writerId: forOther ? writerId : undefined } });
+  // leaving the page right after tapping still sends it (nothing is left on screen to report a failure;
+  // the next visit shows the count the server has)
+  useEffect(() => () => {
+    window.clearTimeout(timer.current);
+    if (pending.current != null) send(pending.current).then(() => queryClient.invalidateQueries(), () => {});
+  }, [batchId, writerId, forOther]); // eslint-disable-line react-hooks/exhaustive-deps -- send reads only these
+  const save = useSave(send, {
     onSuccess: (out) => { dirty.current = false; setValue(out.written); setState('saved'); },
   });
   const change = (n: number) => {
@@ -21,8 +29,9 @@ export function WrittenCounter({ batchId, writerId, forOther, total, sent, writt
     setValue(v);
     dirty.current = true;
     setState('saving');
+    pending.current = v;
     window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => save.mutate(v), 650);
+    timer.current = window.setTimeout(() => { pending.current = null; save.mutate(v); }, 650);
   };
   const stepper = (
     <div className="stepper">
