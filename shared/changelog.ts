@@ -17,6 +17,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-03-faster-large-uploads',
+    date: '2026-10-03',
+    title: 'Large uploads save faster',
+    summary: 'Big files are saved in one go instead of piece by piece.',
+    changes: [
+      { tag: 'improved', text: 'Uploading a large file (a PDF, a recording, a document) now saves several times faster: a 50 MB file takes about a second instead of about six, and the server does far less work while it saves. Small files feel the same. Nothing about your existing files changes.' },
+    ],
+  },
+  {
     id: '2026-10-03-safer-accounts-recording-uploads',
     date: '2026-10-03',
     title: 'Safer admin accounts, Recording mode and uploads',

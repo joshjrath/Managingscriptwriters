@@ -85,9 +85,17 @@ export async function storeFile(t: Db, me: Me, file: UploadedFile): Promise<numb
   const pieces: AsyncIterable<Buffer> | Buffer[] = file.path
     ? createReadStream(file.path, { highWaterMark: WRITE_PIECE })
     : [file.data ?? Buffer.alloc(0)];
+  // The pieces go into a scratch table first and become the file in one write. Appending each
+  // piece to the file instead (data = data || piece) rewrites everything stored so far every
+  // time, so the work grows with the square of the file's size. The scratch table is private
+  // to this connection (pg_temp, whatever schema is in use) and disappears at commit.
+  await t.query(`create temp table if not exists upload_pieces (n int primary key, data bytea not null) on commit drop`);
+  await t.query(`delete from pg_temp.upload_pieces`);
+  let n = 0;
   for await (const piece of pieces) {
-    await t.query(`update files set data = data || $2 where id = $1`, [id, piece]);
+    await t.query(`insert into pg_temp.upload_pieces (n, data) values ($1, $2)`, [n++, piece]);
   }
+  await t.query(`update files set data = coalesce((select string_agg(data, ''::bytea order by n) from pg_temp.upload_pieces), ''::bytea) where id = $1`, [id]);
   return id;
 }
 
