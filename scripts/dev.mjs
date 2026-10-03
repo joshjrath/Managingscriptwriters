@@ -4,7 +4,12 @@
 import { spawn } from 'node:child_process';
 
 const env = { ...process.env, API_PORT: process.env.API_PORT ?? '3001', STATIC_DIR: '' };
-if (env.DEMO === '1') env.DATA_DIR = env.DATA_DIR ?? 'data/demo';
+if (env.DEMO === '1') {
+  // the demo always gets its own embedded database: never seed sample data (and its published
+  // password) into whatever DATABASE_URL this shell happens to have
+  delete env.DATABASE_URL;
+  env.DATA_DIR = env.DATA_DIR ?? 'data/demo';
+}
 
 const procs = [
   spawn('npx', ['tsx', 'watch', '--clear-screen=false', 'server/index.ts'], { stdio: 'inherit', env: { ...env, PORT: env.API_PORT } }),

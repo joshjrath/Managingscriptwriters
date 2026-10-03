@@ -2,15 +2,21 @@
 // (PGlite) by default, or on a real PostgreSQL when TEST_DATABASE_URL is set:
 //   TEST_DATABASE_URL=postgres://… npm test
 // Each test file gets a clean database and a fixed clock.
+//
+// This file is one long scenario: later tests build on what earlier ones
+// created, so run it whole (a single test with -t won't have its setup).
+// Add new tests at the end of the relevant describe, tidy up any shared state
+// you change (and put clock changes in try/finally), or give an isolated
+// feature its own file with its own buildApp (see test/workspace.test.ts).
 
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import pg from 'pg';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../server/app';
 import { openDb, type Db } from '../server/db';
+import { freshDb } from './db';
 import { MIGRATIONS } from '../server/schema';
 import { runReminders } from '../server/reminders';
 import { dropLeftoverSandboxes } from '../server/recording';
@@ -19,16 +25,6 @@ import type { BatchDetail, Dashboard, Moment } from '../shared/types';
 
 // Monday Sep 28, 2026, noon in New York
 let NOW = new Date('2026-09-28T16:00:00Z');
-
-async function freshDb(): Promise<Db> {
-  const url = process.env.TEST_DATABASE_URL;
-  if (!url) return openDb({ memory: true });
-  const c = new pg.Client({ connectionString: url });
-  await c.connect();
-  await c.query('drop schema public cascade; create schema public;');
-  await c.end();
-  return openDb({ databaseUrl: url });
-}
 
 let db: Db;
 let app: FastifyInstance;
@@ -400,6 +396,21 @@ describe('uploads, links and headers', () => {
     expect(String(got.headers['content-disposition'])).not.toMatch(/\.exe"?$/);
   });
 
+  it('never serves an uploaded page or script inline, and stops serving a file once its resource is removed', async () => {
+    const up = await upload('page.html', 'text/html');
+    expect(up.statusCode).toBe(200);
+    const { id, fileId } = JSON.parse(up.body).resource;
+    const got = await app.inject({ method: 'GET', url: `/api/files/${fileId}`, headers: { cookie: manager.cookie } });
+    expect(got.headers['content-type']).toBe('application/octet-stream');
+    expect(String(got.headers['content-disposition'])).toMatch(/^attachment;/);
+    expect(String(got.headers['content-security-policy'])).toMatch(/sandbox/);
+    expect(got.headers['x-content-type-options']).toBe('nosniff');
+    // only whoever added it (or a manager) can take it off
+    expect((await sarah.del(`/api/resources/${id}`)).status).toBe(403);
+    expect((await manager.del(`/api/resources/${id}`)).status).toBe(200);
+    expect((await app.inject({ method: 'GET', url: `/api/files/${fileId}`, headers: { cookie: manager.cookie } })).statusCode).toBe(404);
+  });
+
   it('accepts only http(s) links for past documents, like every other link', async () => {
     for (const url of ['javascript:alert(1)', 'data:text/html,<script>1</script>']) {
       const r = await manager.post('/api/script-bank/past', { clientId: acmeId, title: 'Bad link', url });
@@ -467,11 +478,14 @@ describe('reminders', () => {
     const second = await runReminders(ctx);
     expect(second.created).toBe(0);
     NOW = new Date('2026-10-12T16:00:00Z');
-    const later = await runReminders(ctx);
-    expect(later.created).toBeGreaterThan(0);
-    const notes = (await marcus.get('/api/notifications')).body.notifications;
-    expect(notes.some((n: any) => n.type === 'overdue')).toBe(true);
-    NOW = new Date('2026-09-28T16:00:00Z');
+    try {
+      const later = await runReminders(ctx);
+      expect(later.created).toBeGreaterThan(0);
+      const notes = (await marcus.get('/api/notifications')).body.notifications;
+      expect(notes.some((n: any) => n.type === 'overdue')).toBe(true);
+    } finally {
+      NOW = new Date('2026-09-28T16:00:00Z');
+    }
   });
 });
 
@@ -1174,6 +1188,59 @@ describe('view as and recording mode', () => {
     expect((await josh.get('/api/bootstrap')).status).toBe(401);
     const latest = (await manager.get('/api/audit?kind=auth')).body.entries.find((e: any) => e.summary === 'Signed out');
     expect(latest).toMatchObject({ userId: ids.josh });
+  });
+
+  it('viewing as someone leaves their messages and notifications unread', async () => {
+    await marcus.post(`/api/messages/${ids.sarah}`, { body: 'Ping from Marcus' });
+    const before = (await sarah.get('/api/messages')).body.unread;
+    const unreadNotes = async () => (await sarah.get('/api/notifications')).body.notifications.filter((n: any) => !n.readAt).length;
+    const notesBefore = await unreadNotes();
+    expect(before).toBeGreaterThan(0);
+    await manager.post('/api/admin/view-as', { userId: ids.sarah });
+    try {
+      expect((await manager.post(`/api/messages/${ids.marcus}/read`)).status).toBe(200);
+      expect((await manager.post('/api/notifications/read', { all: true })).status).toBe(200);
+    } finally {
+      await manager.post('/api/admin/view-as/stop');
+    }
+    expect((await sarah.get('/api/messages')).body.unread).toBe(before);
+    expect(await unreadNotes()).toBe(notesBefore);
+    await sarah.post(`/api/messages/${ids.marcus}/read`); // tidy up for the messages tests further down
+  });
+
+  it('keeps uploads made in Recording mode in the practice copy', async () => {
+    const real = async () => (await db.one<{ f: number; p: number }>(`select (select count(*) from files) as f, (select count(*) from past_documents) as p`))!;
+    const before = await real();
+    await manager.post('/api/admin/recording/start');
+    try {
+      const boundary = '----smrec';
+      const payload = [
+        `--${boundary}\r\nContent-Disposition: form-data; name="clientId"\r\n\r\n${acmeId}`,
+        `--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="practice.pdf"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4 practice`,
+        `--${boundary}--\r\n`,
+      ].join('\r\n');
+      const r = await app.inject({ method: 'POST', url: '/api/script-bank/past', headers: { 'x-scale-media': '1', cookie: manager.cookie, 'content-type': `multipart/form-data; boundary=${boundary}` }, payload });
+      expect(r.statusCode).toBe(200);
+    } finally {
+      await manager.post('/api/admin/recording/stop');
+    }
+    expect(await real()).toEqual(before);
+  });
+
+  it('an admin who is made a manager while viewing as someone is back to being themselves', async () => {
+    const o2 = as(await login('o2@scale.test', 'owner-two-temp'));
+    const o2Id = (await o2.get('/api/bootstrap')).body.me.id;
+    expect((await o2.post('/api/admin/view-as', { userId: ids.sarah })).status).toBe(200);
+    expect((await o2.get('/api/bootstrap')).body.me.id).toBe(ids.sarah);
+    expect((await manager.patch(`/api/users/${o2Id}`, { role: 'manager' })).status).toBe(200);
+    try {
+      const boot = (await o2.get('/api/bootstrap')).body;
+      expect(boot.me.id).toBe(o2Id);
+      expect(boot.mode).toBeNull();
+      expect((await o2.post('/api/admin/view-as', { userId: ids.sarah })).status).toBe(403);
+    } finally {
+      await manager.patch(`/api/users/${o2Id}`, { role: 'owner' });
+    }
   });
 
   it('cleans up only its own leftover practice copies, never other schemas', async () => {

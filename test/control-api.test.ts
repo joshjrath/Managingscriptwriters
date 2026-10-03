@@ -5,7 +5,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../server/app';
-import { openDb, type Db } from '../server/db';
+import type { Db } from '../server/db';
+import { freshDb } from './db';
 import type { Ctx } from '../server/core';
 import { loadWorld } from '../server/control/routes';
 import type { ControlStatus, ControlWorld } from '../shared/control';
@@ -33,7 +34,7 @@ let lead = '';
 const ids: Record<string, number> = {};
 
 beforeAll(async () => {
-  db = await openDb({ memory: true });
+  db = await freshDb();
   ctx = { db, now: () => NOW, secureCookies: false, allowSetup: true, uploadLimitBytes: 1024 * 1024 };
   app = await buildApp(ctx);
   const setup = await call('POST', '/api/auth/setup', { body: { name: 'Josh Rath', email: 'josh@scale.test', password: 'correct-horse-battery' } });
@@ -129,8 +130,11 @@ describe('clearance', () => {
     expect((await call('GET', '/api/control/world', { cookie })).status).toBe(200);
     const was = NOW;
     NOW = new Date(NOW.getTime() + 13 * 3_600_000);
-    expect((await call('GET', '/api/control/world', { cookie })).status).toBe(403);
-    NOW = was;
+    try {
+      expect((await call('GET', '/api/control/world', { cookie })).status).toBe(403);
+    } finally {
+      NOW = was;
+    }
   });
 
   it('records clearances in the master log', async () => {
