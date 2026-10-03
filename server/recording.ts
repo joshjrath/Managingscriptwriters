@@ -99,6 +99,8 @@ export async function cloneDb(src: Db): Promise<Db> {
     );
     for (const f of fks) await d.query(`alter table ${f.tbl} alter constraint "${f.con}" deferrable initially deferred`);
     await d.tx(async (t) => {
+      // one snapshot for every table, so a batch created mid-copy can't leave scripts pointing at nothing
+      await t.query(`set transaction isolation level repeatable read`);
       for (const name of tables) await t.query(`delete from "${name}"`);
       for (const name of tables) {
         const list = cols.filter((c) => c.tbl === name).map((c) => c.col);

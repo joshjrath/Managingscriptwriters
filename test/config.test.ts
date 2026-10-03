@@ -2,7 +2,7 @@
 // defaults and how it treats values that don't parse.
 
 import { describe, expect, it } from 'vitest';
-import { loadConfig } from '../server/config';
+import { databaseProblem, loadConfig } from '../server/config';
 
 const load = (env: Record<string, string>, defaults = {}) => {
   const warnings: string[] = [];
@@ -62,6 +62,13 @@ describe('configuration', () => {
     const { config } = load({ MANAGER_EMAIL: ' Josh@Scale.Test\n', MANAGER_PASSWORD: 'long-enough-pw \n', MANAGER_NAME: '  ', MANAGER_RESET_PASSWORD: 'true' });
     expect(config.manager).toEqual({ email: 'josh@scale.test', password: 'long-enough-pw', name: 'Manager', reset: true });
     expect(load({ MANAGER_RESET_PASSWORD: 'yes' }).config.manager.reset).toBe(false);
+  });
+
+  it('refuses an embedded database on a host unless DATA_DIR says where it lives', () => {
+    expect(databaseProblem(load({ RENDER: 'true' }).config)).toMatch(/DATABASE_URL is not set/);
+    expect(databaseProblem(load({ RENDER: 'true', DATABASE_URL: 'postgres://x/db' }).config)).toBeNull();
+    expect(databaseProblem(load({ RENDER: 'true', DATA_DIR: '/var/data' }).config)).toBeNull();
+    expect(databaseProblem(load({}).config)).toBeNull();
   });
 
   it('keeps the database settings the command-line tools rely on', () => {

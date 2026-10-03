@@ -14,6 +14,8 @@ import { parse, zs } from './http';
 import type { AuditEntry, Me } from '../shared/types';
 
 const VIEW_WINDOW_MS = 10 * 60_000;
+/** A row's exact time as a fixed-width UTC string (microseconds), for paging: it sorts as text and round-trips exactly. */
+const CURSOR = (t: string) => `to_char(${t}.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')`;
 const recentViews = new Map<string, number>();
 
 const STATIC_VIEWS: Record<string, string> = {
@@ -151,22 +153,27 @@ export function registerAudit(app: FastifyInstance, ctx: Ctx) {
     }), req.query);
     const before = q.before ?? new Date(Date.now() + 60_000).toISOString();
     const like = q.q ? `%${q.q.toLowerCase()}%` : null;
-    const entries: AuditEntry[] = [];
+    // Paged by an exact (microsecond) cursor, and each page takes every row that shares its oldest
+    // timestamp (WITH TIES): everything one transaction writes has the same time, and a page boundary
+    // inside such a group must not skip the rest of it.
+    const entries: (AuditEntry & { cursor: string })[] = [];
 
     if (q.kind === 'all' || q.kind === 'change') {
       const p: unknown[] = [before, q.limit];
       let where = `a.created_at < $1`;
       if (q.userId) { p.push(q.userId); where += ` and a.actor_id = $${p.length}`; }
       if (like) { p.push(like); where += ` and (lower(a.summary) like $${p.length} or lower(coalesce(u.name, '')) like $${p.length} or lower(coalesce(b.title, '')) like $${p.length} or lower(coalesce(c.name, '')) like $${p.length})`; }
-      const rows = await ctx.db.query<{ id: number; created_at: string; actor_id: number | null; name: string | null; summary: string; batch_id: number | null; client_id: number | null; batch_title: string | null; client_name: string | null }>(
-        `select a.id, a.created_at, a.actor_id, u.name, a.summary, a.batch_id, a.client_id, b.title as batch_title, c.name as client_name
-           from activity a left join users u on u.id = a.actor_id left join batches b on b.id = a.batch_id left join clients c on c.id = a.client_id
-          where ${where} order by a.created_at desc, a.id desc limit $2`, p,
+      const rows = await ctx.db.query<{ id: number; created_at: string; cursor: string; actor_id: number | null; name: string | null; summary: string; batch_id: number | null; client_id: number | null; batch_title: string | null; client_name: string | null }>(
+        `select * from (
+           select a.id, a.created_at, ${CURSOR('a')} as cursor, a.actor_id, u.name, a.summary, a.batch_id, a.client_id, b.title as batch_title, c.name as client_name
+             from activity a left join users u on u.id = a.actor_id left join batches b on b.id = a.batch_id left join clients c on c.id = a.client_id
+            where ${where} order by a.created_at desc fetch first $2 rows with ties
+         ) s order by created_at desc, id desc`, p,
       );
       for (const r of rows) {
         const where2 = r.batch_title ? ` · ${r.client_name ? `${r.client_name} · ` : ''}${r.batch_title}` : r.client_name ? ` · ${r.client_name}` : '';
         entries.push({
-          id: `a${r.id}`, at: r.created_at, userId: r.actor_id, userName: r.name, kind: 'change', summary: `${r.summary}${where2}`,
+          id: `a${r.id}`, at: r.created_at, cursor: r.cursor, userId: r.actor_id, userName: r.name, kind: 'change', summary: `${r.summary}${where2}`,
           link: r.batch_id ? `/batches/${r.batch_id}` : r.client_id ? `/clients/${r.client_id}` : null, ip: null,
         });
       }
@@ -177,20 +184,26 @@ export function registerAudit(app: FastifyInstance, ctx: Ctx) {
       if (q.kind !== 'all') { p.push(q.kind); where += ` and l.kind = $${p.length}`; }
       if (q.userId) { p.push(q.userId); where += ` and l.user_id = $${p.length}`; }
       if (like) { p.push(like); where += ` and (lower(l.summary) like $${p.length} or lower(coalesce(u.name, '')) like $${p.length})`; }
-      const rows = await ctx.db.query<{ id: number; created_at: string; user_id: number | null; name: string | null; kind: 'view' | 'auth' | 'denied'; summary: string; link: string | null; ip: string | null }>(
-        `select l.id, l.created_at, l.user_id, u.name, l.kind, l.summary, l.link, l.ip from audit_log l left join users u on u.id = l.user_id
-          where ${where} order by l.created_at desc, l.id desc limit $2`, p,
+      const rows = await ctx.db.query<{ id: number; created_at: string; cursor: string; user_id: number | null; name: string | null; kind: 'view' | 'auth' | 'denied'; summary: string; link: string | null; ip: string | null }>(
+        `select * from (
+           select l.id, l.created_at, ${CURSOR('l')} as cursor, l.user_id, u.name, l.kind, l.summary, l.link, l.ip from audit_log l left join users u on u.id = l.user_id
+            where ${where} order by l.created_at desc fetch first $2 rows with ties
+         ) s order by created_at desc, id desc`, p,
       );
-      for (const r of rows) entries.push({ id: `l${r.id}`, at: r.created_at, userId: r.user_id, userName: r.name, kind: r.kind, summary: r.summary, link: r.link, ip: r.ip });
+      for (const r of rows) entries.push({ id: `l${r.id}`, at: r.created_at, cursor: r.cursor, userId: r.user_id, userName: r.name, kind: r.kind, summary: r.summary, link: r.link, ip: r.ip });
     }
-    entries.sort((a, b) => b.at.localeCompare(a.at));
+    entries.sort((a, b) => b.cursor.localeCompare(a.cursor));
     let page = entries.slice(0, q.limit);
     // never split entries that share a timestamp across pages
     if (entries.length > q.limit) {
-      const edge = page[page.length - 1].at;
-      page = entries.filter((e) => e.at > edge || e.at === edge);
+      const edge = page[page.length - 1].cursor;
+      page = entries.filter((e) => e.cursor >= edge);
     }
     const more = entries.length > page.length;
-    return { entries: page, nextBefore: more || page.length >= q.limit ? page[page.length - 1]?.at ?? null : null };
+    const last = page[page.length - 1];
+    return {
+      entries: page.map(({ cursor: _cursor, ...e }): AuditEntry => e),
+      nextBefore: (more || page.length >= q.limit) && last ? last.cursor : null,
+    };
   });
 }

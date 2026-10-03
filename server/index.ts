@@ -5,7 +5,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildApp } from './app';
-import { loadConfig, type Config } from './config';
+import { databaseProblem, loadConfig, type Config } from './config';
 import { openDb } from './db';
 import { hashPassword, validatePassword } from './auth';
 import { startReminderScheduler } from './reminders';
@@ -17,8 +17,9 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const config = loadConfig(process.env, { staticDir: path.resolve(here, '../client') });
 
 async function main() {
-  if (config.production && !config.databaseUrl && !config.dataDirSet) {
-    console.error('DATABASE_URL is not set. In production the app needs PostgreSQL (or DATA_DIR on a persistent volume). Refusing to start so no data is lost.');
+  const problem = databaseProblem(config);
+  if (problem) {
+    console.error(problem);
     process.exit(1);
   }
   const db = await openDb({ databaseUrl: config.databaseUrl, dataDir: config.dataDir, ssl: config.pgSsl });

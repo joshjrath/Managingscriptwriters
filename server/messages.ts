@@ -28,13 +28,18 @@ export function registerMessageRoutes(app: FastifyInstance, ctx: Ctx) {
   /** Your conversations, newest first, with unread counts. */
   app.get('/api/messages', async (req): Promise<ChatInbox> => {
     const me = requireUser(req);
+    // polled every few seconds by every open tab: one index lookup per teammate (the newest message
+    // of each pair), never a scan of everyone's message history
     const rows = await db.query<Row & { other_id: number; name: string; role: Role; unread: number }>(
-      `select distinct on (o.other_id) ${COLS}, o.other_id, u.name, u.role,
-              (select count(*) from messages x where x.recipient_id = $1 and x.sender_id = o.other_id and x.read_at is null)::int as unread
-         from (select id, case when sender_id = $1 then recipient_id else sender_id end as other_id from messages where sender_id = $1 or recipient_id = $1) o
-         join messages m on m.id = o.id join users u on u.id = o.other_id
-        where u.active and u.removed_at is null
-        order by o.other_id, m.id desc`, [me.id],
+      `select ${COLS}, u.id as other_id, u.name, u.role,
+              (select count(*) from messages x where x.recipient_id = $1 and x.sender_id = u.id and x.read_at is null)::int as unread
+         from users u
+         cross join lateral (
+           select * from messages p
+            where least(p.sender_id, p.recipient_id) = least($1::bigint, u.id) and greatest(p.sender_id, p.recipient_id) = greatest($1::bigint, u.id)
+            order by least(p.sender_id, p.recipient_id), greatest(p.sender_id, p.recipient_id), p.id desc limit 1
+         ) m
+        where u.id <> $1 and u.active and u.removed_at is null`, [me.id],
     );
     const threads = rows
       .map((r) => ({ userId: Number(r.other_id), name: r.name, role: r.role, last: toMsg(r), unread: Number(r.unread) }))

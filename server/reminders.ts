@@ -9,6 +9,7 @@
 // repeated runs (or several instances) never send the same reminder twice.
 // A moved deadline gets a new key, so it is reminded about again.
 
+import { LOCKS } from './db';
 import { batchLink, clockFor, loadBatches, loadSettings, managerIds, notify, rulesOf, type Ctx, type ScriptLiteRow } from './core';
 import { addDays, computeDeadlines, diffDays, type ISODate } from '../shared/dates';
 import { isDraftReady } from '../shared/workflow';
@@ -17,7 +18,7 @@ import { fmtDate, fmtRange, plural } from '../shared/format';
 export async function runReminders(ctx: Ctx): Promise<{ created: number; skipped?: boolean }> {
   return ctx.db.tx(async (t) => {
     // one runner at a time across instances (released at commit)
-    const lock = await t.one<{ ok: boolean }>(`select pg_try_advisory_xact_lock(724001) as ok`);
+    const lock = await t.one<{ ok: boolean }>(`select pg_try_advisory_xact_lock(${LOCKS.reminders}) as ok`);
     if (!lock?.ok) return { created: 0, skipped: true };
 
     const c: Ctx = { ...ctx, db: t };
@@ -94,8 +95,10 @@ export async function runReminders(ctx: Ctx): Promise<{ created: number; skipped
     }
 
     await t.query(`update settings set reminders_last_run_at = now() where id = 1`);
-    // keep a year of page views in the master log; changes and sign-ins are kept
-    await t.query(`delete from audit_log where kind = 'view' and created_at < now() - interval '400 days'`);
+    // keep a year of page views (and of failed sign-ins for emails that aren't on the team) in the
+    // master log; changes and team members' sign-ins are kept. Expired sessions are no use to anyone.
+    await t.query(`delete from audit_log where (kind = 'view' or (kind = 'auth' and user_id is null)) and created_at < now() - interval '400 days'`);
+    await t.query(`delete from sessions where expires_at < now()`);
     return { created };
   });
 }

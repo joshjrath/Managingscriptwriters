@@ -1,5 +1,13 @@
 // Ordered migrations. Never edit a shipped migration; append a new one.
 // Most are SQL; a function is a one-time data fix that needs app logic.
+//
+// - SQL is run statement by statement, split on a `;` at the end of a line, so
+//   it can't hold a function body, or a string or comment with `;` at a line's
+//   end. Use a function migration for anything like that.
+// - Migrations run in order, each in its own transaction, under an advisory lock
+//   (see migrate() in db.ts). Recording mode also runs them all in each practice copy.
+// - Existing databases have real data: prefer additive changes (new tables,
+//   nullable columns, indexes), and backfill in a separate function migration.
 
 import type { Db } from './db';
 import { fillMissingDeadlines } from './backfill';
@@ -456,4 +464,8 @@ alter table users add column timezone_confirmed_at timestamptz;
 `,
   // 18 · batches with only drafts due or only final delivery get the other date
   fillMissingDeadlines,
+  // 19 · the Master log and the Control Center read the newest changes across the whole workspace
+  `
+create index if not exists activity_created_idx on activity (created_at desc);
+`,
 ];

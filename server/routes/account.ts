@@ -9,6 +9,7 @@ import {
 import { assigneesOf, batchLink, loadSettings, loadUsers, logActivity, notify, rulesOf, type Ctx } from '../core';
 import { compressRanges, isAdmin, isManager } from '../../shared/workflow';
 import { auditEvent } from '../audit';
+import { LOCKS } from '../db';
 import type { Me, UserSummary } from '../../shared/types';
 import { conflict, forbidden, HttpError, notFound, parse, zs } from '../http';
 import { computeDeadlines, isValidTimeZone } from '../../shared/dates';
@@ -73,7 +74,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     if (pwErr) throw new HttpError(400, pwErr, { password: pwErr });
     const id = await db.tx(async (t) => {
       // one setup at a time: two at once would both see no users and both create an admin
-      await t.query(`select pg_advisory_xact_lock(724002)`);
+      await t.query(`select pg_advisory_xact_lock(${LOCKS.setup})`);
       const n = await t.one<{ n: number }>(`select count(*) as n from users`);
       if ((n?.n ?? 0) > 0) throw conflict('Setup has already been completed');
       const row = await t.one<{ id: number }>(

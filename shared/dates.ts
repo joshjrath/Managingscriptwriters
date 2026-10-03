@@ -6,6 +6,9 @@
 //
 // "Now" is the only thing that needs a timezone: the organisation's timezone
 // and daily cutoff decide what "today" is and when a deadline has passed.
+//
+// computeDeadlines, draftFromFinal and finalFromDraft are also used by a shipped
+// migration (server/backfill.ts): read the note there before changing them.
 
 export type ISODate = string; // YYYY-MM-DD
 

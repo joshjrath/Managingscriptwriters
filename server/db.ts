@@ -36,7 +36,9 @@ export async function openPostgres(url: string, opts: { schema?: string; ssl?: b
       return pg.types.getTypeParser(oid, format as 'text');
     },
   };
-  const ssl = /sslmode=require/.test(url) || opts.ssl ? { rejectUnauthorized: false } : undefined;
+  // TLS: an sslmode in DATABASE_URL takes precedence over this option in pg (and, with pg 8, means a
+  // verified certificate); PGSSL=1 without one turns TLS on without checking the certificate.
+  const ssl = opts.ssl ? { rejectUnauthorized: false } : undefined;
   if (opts.schema && !SCHEMA_NAME.test(opts.schema)) throw new Error('bad schema name');
   // Each open connection costs memory on the database server (a 256 MB plan on
   // Render), so keep pools small and let idle connections go.
@@ -46,6 +48,10 @@ export async function openPostgres(url: string, opts: { schema?: string; ssl?: b
       ? { max: 2, idleTimeoutMillis: 5_000, options: `-c search_path=${opts.schema}` }
       : { max: 6, idleTimeoutMillis: 30_000 }),
   });
+  // A connection dropped by the database (a restart, a failover, a proxy timing out idle
+  // connections) is reported here; without a listener Node treats it as fatal and exits.
+  // The pool discards the broken connection and opens a new one when needed.
+  pool.on('error', (err) => console.warn(`postgres: idle connection lost: ${err.message}`));
 
   const make = (runner: { query: pg.Pool['query'] }, inTx: boolean): Db => {
     const db: Db = {
@@ -61,6 +67,9 @@ export async function openPostgres(url: string, opts: { schema?: string; ssl?: b
       async tx(fn) {
         if (inTx) return fn(db);
         const client = await pool.connect();
+        // a connection lost mid-transaction fails the pending query (so the transaction fails as usual); this keeps it from also crashing the process
+        const lost = (err: Error) => console.warn(`postgres: connection lost in a transaction: ${err.message}`);
+        client.on('error', lost);
         try {
           await client.query('BEGIN');
           const out = await fn(make(client as unknown as { query: pg.Pool['query'] }, true));
@@ -70,6 +79,7 @@ export async function openPostgres(url: string, opts: { schema?: string; ssl?: b
           await client.query('ROLLBACK').catch(() => {});
           throw err;
         } finally {
+          client.removeListener('error', lost);
           client.release();
         }
       },
@@ -142,6 +152,16 @@ export async function openDb(opts: { databaseUrl?: string; dataDir?: string; mem
   return db;
 }
 
+/** Advisory lock ids (pg_advisory_xact_lock), one per job that must never run twice at once. Keep them unique. */
+export const LOCKS = {
+  /** a reminders run (in-process scheduler or the cron), across every instance */
+  reminders: 724001,
+  /** first-run setup, so two people can't both create the first admin */
+  setup: 724002,
+  /** applying a migration, so processes starting together (web replicas, the web server and the cron) take turns */
+  migrations: 724003,
+} as const;
+
 export async function migrate(db: Db): Promise<void> {
   await db.query(`create table if not exists schema_migrations (version int primary key, applied_at timestamptz not null default now())`);
   const done = new Set((await db.query<{ version: number }>(`select version from schema_migrations`)).map((r) => r.version));
@@ -149,6 +169,9 @@ export async function migrate(db: Db): Promise<void> {
     const version = i + 1;
     if (done.has(version)) continue;
     await db.tx(async (t) => {
+      await t.query(`select pg_advisory_xact_lock(${LOCKS.migrations})`);
+      // another process may have applied it while this one waited for the lock
+      if (await t.one(`select 1 from schema_migrations where version = $1`, [version])) return;
       if (typeof sql === 'function') await sql(t);
       else for (const stmt of splitStatements(sql)) await t.query(stmt);
       await t.query(`insert into schema_migrations (version) values ($1)`, [version]);

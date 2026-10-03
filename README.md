@@ -112,7 +112,7 @@ At the top of My work and the Overview. **Today's tasks** are the scripts due to
 
 ### Master log (admins only)
 
-**Master log**, next to your name in the sidebar, lists every change (from the activity history), every page or file someone opened, sign-ins and failed sign-ins, and anything someone tried that they weren't allowed to do. Filter by person or kind, or search. Repeat views of the same page by the same person within 10 minutes count once. Page views are kept for 400 days; changes and sign-ins are kept indefinitely. Managers and writers can't open it.
+**Master log**, next to your name in the sidebar, lists every change (from the activity history), every page or file someone opened, sign-ins and failed sign-ins, and anything someone tried that they weren't allowed to do. Filter by person or kind, or search. Repeat views of the same page by the same person within 10 minutes count once. Page views, and failed sign-ins for emails that aren't on the team, are kept for 400 days; changes and team members' sign-ins are kept indefinitely. Managers and writers can't open it.
 
 ### View as and Recording mode (admins only)
 

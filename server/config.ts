@@ -40,6 +40,16 @@ export interface Config {
   manager: { email: string; password: string; name: string; reset: boolean };
 }
 
+/**
+ * Why this process must not open a database, or null if it may: on a host, without DATABASE_URL (or a
+ * DATA_DIR on a persistent volume), the embedded database would live on a temporary disk and be lost.
+ */
+export function databaseProblem(config: Config): string | null {
+  return config.production && !config.databaseUrl && !config.dataDirSet
+    ? 'DATABASE_URL is not set. In production the app needs PostgreSQL (or DATA_DIR on a persistent volume). Refusing to start so no data is lost.'
+    : null;
+}
+
 const truthy = (v: string | undefined) => v === '1' || v === 'true';
 const set = (v: string | undefined) => (v?.trim() ? v.trim() : undefined);
 

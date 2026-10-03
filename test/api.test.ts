@@ -619,6 +619,24 @@ describe('scripts sent as one document', () => {
 });
 
 describe('master log', () => {
+  it('pages through everything, even many changes made at the same moment', async () => {
+    // 25 changes in one statement share one timestamp; pages of 10 must not skip any of them
+    await db.query(`insert into activity (entity_type, action, summary) select 'batch', 'test.bulk', 'Bulk change ' || n from generate_series(1, 25) n`);
+    await db.query(`insert into activity (entity_type, action, summary, created_at) values ('batch', 'test.bulk', 'Bulk change earlier', now() - interval '1 hour')`);
+    const seen: string[] = [];
+    let before: string | null = null;
+    for (let i = 0; i < 10; i++) {
+      const r: Res = await manager.get(`/api/audit?kind=change&limit=10&q=bulk%20change${before ? `&before=${encodeURIComponent(before)}` : ''}`);
+      expect(r.status).toBe(200);
+      seen.push(...r.body.entries.map((e: any) => e.summary));
+      before = r.body.nextBefore;
+      if (!before) break;
+    }
+    expect(new Set(seen).size).toBe(26);
+    expect(seen).toHaveLength(26);
+    expect(seen.at(-1)).toBe('Bulk change earlier');
+  });
+
   it('records views once per 10 minutes, changes, sign-ins and blocked attempts; only owners can read it', async () => {
     const tessish = await login('sarah@scale.test', 'writer-password-1');
     await as(tessish).get(`/api/batches/${batchId}`);

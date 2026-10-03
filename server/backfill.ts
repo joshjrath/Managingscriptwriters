@@ -1,5 +1,11 @@
 // One-time data fixes that need app logic, run as migrations (see MIGRATIONS
 // in schema.ts). Each runs once, inside the migration's transaction.
+//
+// These are shipped migrations: databases that haven't run them yet (a fresh
+// install, a restored backup) run them with today's code. So they may only use
+// columns that existed when they shipped, and changing what a helper they call
+// does (the deadline maths in shared/dates.ts, for example) changes what they
+// do. If such a helper has to change, copy its current version in here first.
 
 import type { Db } from './db';
 import { computeDeadlines, draftFromFinal, finalFromDraft, type DeadlineRules, type ISODate } from '../shared/dates';
