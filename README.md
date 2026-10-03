@@ -196,7 +196,7 @@ Responsive: full sidebar on wide screens, collapsible icon rail on smaller deskt
 
 The server creates its tables on first start and refuses to start without `DATABASE_URL`, so nothing is ever written to Render's temporary disk. Uploaded files are stored in Postgres, so no Render disk is needed. Pick a database plan with backups; check Render's current terms, because free databases are time-limited.
 
-To set it up by hand instead of using the blueprint: create a PostgreSQL database, then a Node web service with build command `npm ci && npm run build`, start command `node --max-old-space-size=200 --max-semi-space-size=2 dist/server/index.mjs`, health check path `/healthz`, and environment variables `NODE_VERSION=22`, `DATABASE_URL` (the database's internal connection string) and the three `MANAGER_*` values.
+To set it up by hand instead of using the blueprint: create a PostgreSQL database, then a Node web service with build command `npm ci && npm run build`, start command `node --max-old-space-size=200 --max-semi-space-size=2 dist/server/index.mjs`, health check path `/healthz`, and environment variables `NODE_VERSION=22`, `DATABASE_URL` (the database's internal connection string), the three `MANAGER_*` values and, recommended, `TRUST_PROXY` (see Security).
 
 **Memory.** The server runs in about 90–130 MB on the Starter plan's 512 MB, including during 25 MB uploads and in Recording mode:
 - Start it with `node` directly, as above, not `npm start`: npm stays running next to the server and costs about 60 MB on its own. If your service was set up by hand, change its start command in Render → Settings.
@@ -209,7 +209,7 @@ Any other Node 22 host with PostgreSQL works the same way (`railway.json` is kep
 
 ## Security
 
-- Passwords hashed with scrypt; sessions are random tokens (only their hash is stored) in an HTTP-only, SameSite=Lax cookie, `Secure` in production; sign-in is rate-limited per address and per account (the address comes from the proxy's `X-Forwarded-For`; set `TRUST_PROXY` to the number of proxies in front of the server to stop clients choosing it).
+- Passwords hashed with scrypt; sessions are random tokens (only their hash is stored) in an HTTP-only, SameSite=Lax cookie, `Secure` in production; sign-in is rate-limited per address and per account (the address comes from the proxy's `X-Forwarded-For`; set `TRUST_PROXY` to the number of proxies in front of the server to stop clients choosing it; check the number by signing in and comparing your address in the Master log with what a "what is my IP" site shows, because too low a number gives everyone the proxy's address).
 - Every permission is checked on the server; the UI only hides what you can't do.
 - State-changing requests need a custom header and a same-origin `Origin`, which blocks cross-site request forgery.
 - Recording mode fails closed: a page that's still recording when its practice copy is gone (a restart, or the copy was closed) gets an error instead of making the change on the real workspace.
@@ -222,22 +222,28 @@ Any other Node 22 host with PostgreSQL works the same way (`railway.json` is kep
 npm test                                              # embedded Postgres (PGlite)
 TEST_DATABASE_URL=postgres://user@host/db npm test    # a real PostgreSQL (the schema is wiped first)
 npm run typecheck
+npm run lint                                          # ESLint, zero warnings allowed
+npm run verify                                        # typecheck, lint, tests and build: what CI runs on every push
 ```
 
-They cover: deadline maths across month and year boundaries, leap days, DST, multi-day shoots, business-day mode, timezones and the daily cutoff; progress (20 / 45 · 44%), stages and partial delivery; workflow permissions; the quick-entry parser; and through the real API — creating a client with a recording, document and uploaded file (and denying anonymous file access), both example shoots, the 20 / 25 split without double counting, draft completion not delivering, partial review and delivery, delivery records, moving a shoot with a manual override, batches without shoots, the dashboard's overdue / blocked / unassigned lists, writers being refused on every manager action sent directly to the API, CSRF, stale-edit rejection, target changes that protect work, reminder deduplication, sending ten scripts as one PDF and getting one review card and one revision request back, versioned resubmissions, script titles, the admin-only master log (views, sign-ins, blocked attempts), celebration moments (once each, never for your own decisions, milestones never twice), the "written so far" counter never touching script statuses, moving a shoot shifting writing starts, batch names and (optionally) manual dates, the changelog staying complete and ordered, and data persisting across restarts.
+CI (`.github/workflows/ci.yml`) runs `npm run verify` and, alongside it, the API suites on PostgreSQL 16.
+
+They cover: deadline maths across month and year boundaries, leap days, DST, multi-day shoots, business-day mode, timezones and the daily cutoff; progress (20 / 45 · 44%), stages and partial delivery; workflow permissions; the quick-entry parser; and through the real API — creating a client with a recording, document and uploaded file (and denying anonymous file access), both example shoots, the 20 / 25 split without double counting, draft completion not delivering, partial review and delivery, delivery records, moving a shoot with a manual override, batches without shoots, the dashboard's overdue / blocked / unassigned lists, writers being refused on every manager action sent directly to the API, CSRF, stale-edit rejection, target changes that protect work, reminder deduplication, sending ten scripts as one PDF and getting one review card and one revision request back, versioned resubmissions, script titles, the admin-only master log (views, sign-ins, blocked attempts), celebration moments (once each, never for your own decisions, milestones never twice), the "written so far" counter never touching script statuses, moving a shoot shifting writing starts, batch names and (optionally) manual dates, the changelog staying ordered with unique ids, and data persisting across restarts. `test/access.test.ts` lists who may call every API route and checks it against the running server, so a new route fails the tests until it's added there.
 
 ## Layout
 
 ```
 shared/         date & deadline maths, workflow rules, quick-entry parser, API types (used by server and client)
                 control.ts: the Control Center's world model, clocks, sun, coverage and anomalies; cities.ts
-server/         Fastify API: auth, routes/, reminders, migrations, demo seed
+server/         Fastify API: auth, routes/ and the feature modules beside it (submissions, script bank, today…), reminders, migrations, demo seed
                 control/: Control Center clearance and world sources (live workspace, simulated network)
 client/         React app (Vite): styles/tokens.css holds every colour, radius, spacing and type token
                 src/control/: the Control Center (its own styles, overlay typography, engine/ for three.js)
 scripts/        dev runner; gen-landmask.mjs regenerates the globe's land mask from Natural Earth
 test/           vitest suites
 ```
+
+`ARCHITECTURE.md` explains how the code fits together (requests, access, data, invariants) and where new code goes; `CLAUDE.md` has the rules for changing it.
 
 ## Limitations
 

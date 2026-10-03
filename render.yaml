@@ -31,6 +31,12 @@ services:
       # Optional: turns on New work → Paste notes (Claude reads pasted notes). From console.anthropic.com → API keys.
       - key: ANTHROPIC_API_KEY
         sync: false
+      # Recommended: how many proxies sit in front of the app, so sign-in limits and the Master log
+      # see each person's real address. Blank trusts X-Forwarded-For entirely, which clients can forge.
+      # To check a number: sign in, then your own address in the Master log should be the one
+      # a "what is my IP" site shows you. Too low a number gives everyone the proxy's address.
+      - key: TRUST_PROXY
+        sync: false
 
 databases:
   - name: scale-media-db

@@ -17,6 +17,43 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-03-safer-accounts-recording-uploads',
+    date: '2026-10-03',
+    title: 'Safer admin accounts, Recording mode and uploads',
+    summary: 'Admin powers stay with admins, Recording mode can never touch real work, and uploads and Paste notes have firmer limits.',
+    changes: [
+      { tag: 'improved', text: 'Only an admin can make someone an admin, or change an admin’s role, password or access. There’s always at least one active admin, and an admin’s temporary password is shown only to admins. Managers keep every other team power.' },
+      { tag: 'fixed', text: 'If the server restarts, or a practice copy is closed, while a page is still in Recording mode, changes from that page are refused with “Recording mode has ended… nothing was saved” instead of going to the real workspace. Reload to carry on.' },
+      { tag: 'improved', text: 'Wrong passwords are now limited per account as well (30 in 15 minutes), not only per connection.' },
+      { tag: 'fixed', text: 'A very long file name ending in something like “.exe.pdf” could be shortened into a blocked program type. Names are now shortened without losing their type, and a few more program types are refused.' },
+      { tag: 'improved', text: 'Paste notes: text files count toward the same 60,000-character limit as pasted text, each person runs one read at a time (up to 30 an hour), and when two teammates share the first name in the notes, those scripts are left unassigned with a warning naming both instead of guessing.' },
+      { tag: 'fixed', text: 'Past-document links must be web links (https://), like every other link.' },
+      { tag: 'improved', text: 'Control Center (admins): old batches with open work stay on the globe, up to 128 people show, the view recovers by itself if the graphics stop, the sound stops when you leave, and NETWORK reflects the latest refresh.' },
+      { tag: 'improved', text: 'Behind the scenes: the server keeps running if its database connection drops for a moment, two copies starting at once no longer clash, and expired sign-ins are cleared out.' },
+    ],
+  },
+  {
+    id: '2026-10-03-batches-reviews-forms',
+    date: '2026-10-03',
+    title: 'Fixes for batches, reviews and forms',
+    summary: 'Review notes stay on their own batch, decisions apply to the latest document, and edit forms keep what you type.',
+    changes: [
+      { tag: 'fixed', text: 'A batch page could list revision notes from a different batch. It now shows only its own.' },
+      { tag: 'fixed', text: 'Approving or sending back a document the writer has replaced since you opened it now asks you to look again, so a decision always applies to the latest version.' },
+      { tag: 'fixed', text: 'Raising a batch’s script count brings back removed scripts to the writer you pick in “Assign the new scripts to” (or to their old writer if still on the team), never to someone who has left.' },
+      { tag: 'improved', text: 'Lowering a batch’s script count tells the writers whose scripts were taken off.' },
+      { tag: 'fixed', text: 'Edit batch and Edit client keep what you’re typing when the page refreshes in the background, and save only the fields you changed, so they can’t undo a date someone else just moved. Settings no longer resets a form you’re editing.' },
+      { tag: 'fixed', text: 'A year typed as “26” is no longer read as 1926, which made a batch look decades overdue.' },
+      { tag: 'improved', text: 'Quick entry reads dates like 25/12/2026 correctly, refuses impossible ones, and matches names with accents or hyphens (José, Anne-Marie). Script ranges accept “1 - 20” as well as “1-20”.' },
+      { tag: 'fixed', text: 'The Today pill counts a script as overdue once the daily cutoff passes, like everywhere else, and keeps an archived client’s unfinished batches.' },
+      { tag: 'fixed', text: 'A double click can’t send “Approve selected” or “Mark as client” twice, and a “written so far” tap isn’t lost when you change page.' },
+      { tag: 'improved', text: 'Dialogs put the cursor in their first field when they open, and script titles in a batch’s checklist open from the keyboard.' },
+      { tag: 'fixed', text: 'What’s new keeps its “New for you” highlight while you’re on the page, chat’s “Earlier messages” can’t load the same messages twice, and the search boxes on Resources and Script bank keep a filter picked while typing.' },
+      { tag: 'fixed', text: 'The Master log no longer skips entries saved at the same moment, and its “Today” uses your time zone.' },
+      { tag: 'improved', text: 'Upload help shows the server’s real file size limit, and something too big to send now says what was too big.' },
+    ],
+  },
+  {
     id: '2026-10-02-fill-missing-deadlines',
     date: '2026-10-02',
     title: 'Existing batches got their missing deadline',
