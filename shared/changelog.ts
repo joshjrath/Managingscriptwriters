@@ -17,6 +17,23 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-03-control-center-lighter',
+    date: '2026-10-03',
+    title: 'The Control Center is lighter on battery and memory',
+    summary: 'It looks the same, does far less work while you watch, and rests while the tab is in the background.',
+    changes: [
+      { tag: 'improved', text: 'It no longer rebuilds the whole scene once a minute. On a big team that caused a brief stutter, and the constellation’s lines blinked.' },
+      { tag: 'improved', text: 'Each frame takes much less work: labels fade more cheaply, people and the planet’s surface cost less to draw, and rings or layers that have faded out aren’t drawn at all.' },
+      { tag: 'improved', text: 'Follow the sun redraws half as often while it plays, and works out who is under pressure a few times a second instead of on every frame.' },
+      { tag: 'improved', text: 'Moving the pointer over the globe updates only the LAT/LON readout, not the whole screen. The breathing dot and the pressure marks keep pace with the globe instead of keeping the screen busy on their own.' },
+      { tag: 'improved', text: 'While the tab is in the background, the clock, the replayed transfers and the hum all pause, and pick up when you come back.' },
+      { tag: 'improved', text: 'Turning sound off, or leaving the Control Center, now fully releases the audio. Switching sound off and straight back on keeps the hum playing (it used to stop).' },
+      { tag: 'improved', text: 'It uses less memory: the globe’s three spheres share one shape, and the land map is let go when you leave.' },
+      { tag: 'fixed', text: 'A transfer’s label no longer gets stuck and rides along on later transfers between the same two people.' },
+      { tag: 'improved', text: 'The flat 2D globe, for devices without 3D graphics, draws several times faster.' },
+    ],
+  },
+  {
     id: '2026-10-03-faster-large-uploads',
     date: '2026-10-03',
     title: 'Large uploads save faster',

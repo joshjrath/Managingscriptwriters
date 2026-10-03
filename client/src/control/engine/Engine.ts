@@ -8,16 +8,16 @@ import {
 } from 'three';
 import {
   anomaliesOf, coverageOf, presenceOf, SLOTS, SLOT_MIN, subsolarPoint,
-  type Anomaly, type CcHandoff, type CcWriter, type ControlWorld, type Presence,
+  type Anomaly, type CcHandoff, type CcProject, type CcWriter, type ControlWorld, type Presence,
 } from '../../../../shared/control';
-import { buildAtmosphere, buildCore, buildStars, buildSurfacePoints, MAX_BUMPS } from './globe';
+import { buildAtmosphere, buildCore, buildShell, buildStars, buildSurfacePoints, MAX_BUMPS } from './globe';
 import { ArcsLayer, type ArcDef } from './arcs';
-import { computeLayouts, deadlineOrbit, type Layouts } from './layout';
+import { computeLayouts, deadlineOrbit, projectOrbit, type Layouts } from './layout';
 import { clamp01, damp, dampAngle, DEG, easeInOutCubic, easeOutCubic, geoToVec3, smoothstep, vec3ToGeo, wrapAngle } from './math';
 import { NodesLayer, RING } from './nodes';
 import { ObjectsLayer, type Edge, type EndRef, type SpaceObject } from './objects';
 import { lower, pickTier, TIERS, type Tier } from './quality';
-import { buildBandField, buildDial, DIAL, MAX_LANES, Orbit } from './rings';
+import { buildBandField, buildDial, DIAL, MAX_LANES, Orbit, orbitExtent, orbitReaches } from './rings';
 import { SwarmLayer, type ScriptBody } from './swarm';
 import type { WorldView } from './view';
 
@@ -35,6 +35,10 @@ export interface EngineOptions {
   onHover?: (t: Target | null) => void;
   onSelect?: (t: Target | null) => void;
   onArrive?: (h: CcHandoff) => void;
+  /** after each drawn frame, with its time (for anything that should move in step with the view) */
+  onFrame?: (ms: number) => void;
+  /** a handoff's packet was dropped before it landed: another took its arc, or the arc went away */
+  onCancel?: (h: CcHandoff) => void;
   onPointerGeo?: (g: { lat: number; lon: number } | null) => void;
   onReveal?: (progress: number) => void;
   onStats?: (s: EngineStats) => void;
@@ -124,8 +128,14 @@ interface RigTarget { yaw: number; pitch: number; dist: number; shiftX: number; 
 interface Binding {
   el: HTMLElement;
   key: string;
+  /** the key's parts ("w:12" → "w" and "12"), read once */
+  kind: string;
+  id: string;
   vis?: string;
 }
+
+/** below this a label is hidden (and not placed) */
+const LABEL_SHOWN = 0.04;
 
 export class Engine implements WorldView {
   readonly flat = false;
@@ -142,6 +152,7 @@ export class Engine implements WorldView {
   private geo: Vector3[] = [];
   private presence: Presence[] = [];
   private anomalies: Anomaly[] = [];
+  private anomalyById = new Map<string, Anomaly>();
   private layouts: Layouts | null = null;
 
   // scene graph
@@ -149,8 +160,10 @@ export class Engine implements WorldView {
   private space = new Group();
   private graphGroup = new Group();
   private surface: ReturnType<typeof buildSurfacePoints>;
-  private core = buildCore();
-  private atmo = buildAtmosphere();
+  /** one sphere for the core, halo and rim (declared first: the two below use it) */
+  private shell = buildShell();
+  private core = buildCore(this.shell);
+  private atmo = buildAtmosphere(this.shell);
   private stars: ReturnType<typeof buildStars>;
   // room for every person and editor a team is likely to place (instanced buffers: cheap); beyond it the rest aren't drawn
   private nodes = new NodesLayer(128);
@@ -186,12 +199,30 @@ export class Engine implements WorldView {
   private revealDuration = 3.6;
   private revealFrom = { yaw: 0, dist: 1 };
   private presenceAt = 0;
+  /** the clock is being played forward, and the moment pressure was last worked out for */
+  private clockRunning = false;
+  private anomaliesFor = NaN;
   private dataAt = 0;
   private builtAt = 0;
   private bindings = new Set<Binding>();
   private handoffArc = new Map<string, { arc: number; dest: number }>();
   private missionIndex = new Map<string, number>();
   private objIndex = new Map<string, number>();
+  /** the world's projects by id (kept with the world: an unchanged refresh keeps the same projects) */
+  private projectById = new Map<string, CcProject>();
+  // read every frame but changed only by a refresh (or, for pressure, once a second): worked out then
+  /** per writer: their deadline in ms (NaN for none), and whether a script of theirs is in internal review */
+  private writerDeadlineMs: number[] = [];
+  private writerInReview: boolean[] = [];
+  /** per writer: the worst pressure on them; and the pairs of people under pressure together */
+  private writerSeverity: number[] = [];
+  private pressurePairs = new Set<string>();
+  /** per arc: its two people, the relationship between them, and the pair key pressure uses */
+  private arcEnds: { a: string; b: string; link: ControlWorld['links'][number] | undefined; pair: string }[] = [];
+  /** project id → its object, for the script swarm */
+  private projectObj = new Map<string, number>();
+  /** who the focus lights up, worked out once a frame */
+  private lit: Set<string> | null = null;
 
   // loop & input
   private raf = 0;
@@ -222,6 +253,7 @@ export class Engine implements WorldView {
   private tmp2 = new Vector3();
   private tmp3 = new Vector3();
   private tmp4 = new Vector3();
+  private anchorP = new Vector3();
   private nrm = new Vector3();
   private tmpE = new Euler();
   private tmpM = new Matrix4();
@@ -285,8 +317,9 @@ export class Engine implements WorldView {
     return new Date(Date.now() + this.clockOffset);
   }
 
-  setTimeOffset(ms: number) {
+  setTimeOffset(ms: number, running = false) {
     this.clockOffset = ms;
+    this.clockRunning = running;
     this.presenceAt = 0;
   }
 
@@ -296,13 +329,15 @@ export class Engine implements WorldView {
 
   setWorld(world: ControlWorld) {
     const prev = this.world;
-    // a refresh with nothing new on the map (unchanged parts keep their identity
-    // across refreshes): keep every buffer and layout as it is, but rebuild at
-    // least once a minute so project orbits keep tightening as deadlines near
-    if (prev && prev.writers === world.writers && prev.scripts === world.scripts && prev.projects === world.projects
-      && prev.clients === world.clients && prev.links === world.links && prev.handoffs === world.handoffs
-      && performance.now() - this.builtAt < 60_000) {
+    // the layouts read only these lists and come out the same for the same lists
+    // (unchanged parts keep their identity across refreshes)
+    const sameLayout = !!prev && prev.writers === world.writers && prev.scripts === world.scripts && prev.projects === world.projects
+      && prev.clients === world.clients && prev.links === world.links;
+    // a refresh with nothing new on the map: keep every buffer and layout as it is, and
+    // once a minute move project orbits in as deadlines near (script orbits follow in refreshPresence)
+    if (sameLayout && prev.handoffs === world.handoffs) {
       this.world = world;
+      if (performance.now() - this.builtAt >= 60_000) { this.builtAt = performance.now(); this.retimeProjects(); }
       return;
     }
     this.builtAt = performance.now();
@@ -315,8 +350,13 @@ export class Engine implements WorldView {
     while (this.nodeW.length < this.writers.length) this.nodeW.push(Float32Array.from([1, 0, 0]));
     this.nodeW.length = this.writers.length;
     while (this.nodeIntensity.length < this.writers.length) this.nodeIntensity.push(0);
-    this.layouts = computeLayouts(world);
+    this.writerDeadlineMs = this.writers.map((w) => (w.deadline ? new Date(w.deadline).getTime() : NaN));
+    const reviewing = new Set<string>();
+    for (const s of world.scripts) if (s.state === 'internal_review' && s.writerId) reviewing.add(s.writerId);
+    this.writerInReview = this.writers.map((w) => reviewing.has(w.id));
+    if (!sameLayout || !this.layouts) this.layouts = computeLayouts(world);
     this.presenceAt = 0;
+    this.anomaliesFor = NaN;
     this.refreshPresence();
 
     // arcs: relationships, plus every pair a handoff has travelled
@@ -334,6 +374,11 @@ export class Engine implements WorldView {
     for (const h of world.handoffs) pair(h.originNode, h.destinationNode, 'handoff');
     const list = [...defs.values()];
     this.arcs.setArcs(list);
+    this.arcEnds = this.arcs.keys().map((key) => {
+      const [a, b] = key.split('|');
+      // the pair key is sorted by id (the arc key is ordered by writer index), as pressure's pairs are
+      return { a, b, link: world.links.find((l) => (l.from === a && l.to === b) || (l.from === b && l.to === a)), pair: [a, b].sort().join('|') };
+    });
     this.handoffArc.clear();
     for (const h of world.handoffs) {
       const ia = this.writerIndex.get(h.originNode), ib = this.writerIndex.get(h.destinationNode);
@@ -349,12 +394,10 @@ export class Engine implements WorldView {
     const at = this.now();
     for (const p of world.projects) {
       const g = this.layouts.graph.index.get(`p:${p.id}`);
-      const d = deadlineOrbit(p.deadline, at);
       objs.push({
         kind: 'project', id: p.id, color: p.archived ? new Color(1, 0.88, 0.7) : PROJECT_COLOR.clone(), size: p.archived ? 0.9 : 1.6,
         graphPos: g != null ? this.layouts.graph.nodes[g].pos : null, spacePos: this.layouts.space.projects.get(p.id) ?? null,
-        orbitR: d.radius, orbitW: 0.05 / Math.pow(d.radius, 1.5) * (d.hours < 24 ? 2 : 1), missionIndex: this.missionIndex.get(p.id) ?? -1,
-        urgent: !p.archived && d.hours < 24,
+        missionIndex: this.missionIndex.get(p.id) ?? -1, ...projectOrbit(p, at),
       });
     }
     for (const c of world.clients) {
@@ -363,6 +406,10 @@ export class Engine implements WorldView {
       objs.push({ kind: 'client', id: c.id, color: CLIENT_COLOR.clone(), size: 1.1, graphPos: this.layouts.graph.nodes[g].pos, spacePos: null, orbitR: 3, orbitW: 0, missionIndex: -1, urgent: false });
     }
     this.objIndex = new Map(objs.map((o, i) => [`${o.kind}:${o.id}`, i]));
+    this.projectObj = new Map();
+    objs.forEach((o, i) => { if (o.kind === 'project' && !this.projectObj.has(o.id)) this.projectObj.set(o.id, i); });
+    this.projectById = new Map();
+    for (const p of world.projects) if (!this.projectById.has(p.id)) this.projectById.set(p.id, p);
     const edges: Omit<Edge, 'alpha'>[] = [];
     for (const e of this.layouts.graph.edges) {
       const a = this.layouts.graph.nodes[e.a], b = this.layouts.graph.nodes[e.b];
@@ -386,6 +433,15 @@ export class Engine implements WorldView {
     }
   }
 
+  /** Move project orbits in as their deadlines near, without rebuilding anything. */
+  private retimeProjects() {
+    const at = this.now();
+    for (const p of this.world?.projects ?? []) {
+      const i = this.objIndex.get(`project:${p.id}`);
+      if (i != null) Object.assign(this.objects.objects[i], projectOrbit(p, at));
+    }
+  }
+
   /** Recompute script orbits: deadlines keep approaching, so orbits tighten over time. */
   private refreshOrbits() {
     const world = this.world;
@@ -406,6 +462,8 @@ export class Engine implements WorldView {
     if (mode === this.mode) return;
     this.mode = mode;
     this.spec = MODES[mode];
+    // the dial fades in fresh, not with the lanes and hour it had when last seen
+    if (mode === 'timezones' && this.world) this.updateDial(this.now());
     if (mode !== 'missions' && this.focus?.kind === 'project') this.focus = null;
     this.retarget(1.6);
   }
@@ -450,7 +508,8 @@ export class Engine implements WorldView {
 
   /** Pin a DOM element to something in space (several elements may share a key). */
   bind(key: string, el: HTMLElement): () => void {
-    const b: Binding = { el, key };
+    const c = key.indexOf(':');
+    const b: Binding = { el, key, kind: c < 0 ? key : key.slice(0, c), id: c < 0 ? '' : key.slice(c + 1) };
     this.bindings.add(b);
     return () => { this.bindings.delete(b); };
   }
@@ -464,7 +523,7 @@ export class Engine implements WorldView {
     this.arcs.launch(route.arc, reverse, this.time, duration, () => {
       this.flashes.set(route.dest, 1);
       this.opts.onArrive?.(h);
-    });
+    }, () => this.opts.onCancel?.(h));
     return true;
   }
 
@@ -544,8 +603,8 @@ export class Engine implements WorldView {
     if (geo) {
       face(geo.lat, geo.lon);
       t.dist = spec.dist * 0.72;
-    } else if (f?.kind === 'writer' || (f?.kind === 'anomaly' && this.anomalies.find((a) => a.id === f.id)?.writerId)) {
-      const id = f.kind === 'writer' ? f.id : this.anomalies.find((a) => a.id === f.id)!.writerId!;
+    } else if (f?.kind === 'writer' || (f?.kind === 'anomaly' && this.anomalyById.get(f.id)?.writerId)) {
+      const id = f.kind === 'writer' ? f.id : this.anomalyById.get(f.id)!.writerId!;
       const w = this.writers[this.writerIndex.get(id) ?? -1];
       if (w && this.spec.nodes === 'geo') {
         face(w.lat, w.lon);
@@ -557,10 +616,10 @@ export class Engine implements WorldView {
         t.dist = spec.dist * 0.8;
       }
     } else if (f?.kind === 'anomaly') {
-      const a = this.anomalies.find((x) => x.id === f.id);
+      const a = this.anomalyById.get(f.id);
       if (a?.at) { face(a.at.lat, a.at.lon); t.dist = spec.dist * 0.7; t.shiftX = -0.1; }
     } else if (f?.kind === 'project' && this.world) {
-      const p = this.world.projects.find((x) => x.id === f.id);
+      const p = this.projectById.get(f.id);
       const ws = (p?.writers ?? []).map((id) => this.writers[this.writerIndex.get(id) ?? -1]).filter(Boolean);
       if (ws.length && this.spec.nodes === 'geo') {
         let sx = 0, sy = 0, sz = 0;
@@ -623,6 +682,7 @@ export class Engine implements WorldView {
       this.step(dt);
       this.renderer.render(this.scene, this.camera);
       this.writeAnchors();
+      this.opts.onFrame?.(ms);
     } catch (err) {
       console.error(err);
       this.stop();
@@ -755,6 +815,7 @@ export class Engine implements WorldView {
     this.graphGroup.rotation.set(this.spaceRot.pitch * 0.8, this.spaceRot.yaw, 0, 'XYZ');
     this.graphGroup.updateMatrixWorld();
 
+    this.lit = this.focusedWriters();
     this.updateNodes(dt, reveal);
     this.updateArcs(dt);
     this.updateOrbits(dt, reveal);
@@ -778,8 +839,24 @@ export class Engine implements WorldView {
     this.presenceAt = performance.now();
     this.presence = this.writers.map((w) => presenceOf(w, now));
     if (this.world) {
-      this.anomalies = anomaliesOf(this.world, now);
-      this.updateDial(now);
+      // while the sun is followed (an hour a second) pressure is worked out every quarter hour of
+      // that clock rather than every frame; exact again as soon as the clock stops or jumps
+      if (!this.clockRunning || this.focus || !(Math.abs(now.getTime() - this.anomaliesFor) < 15 * 60_000)) {
+        this.anomaliesFor = now.getTime();
+        this.anomalies = anomaliesOf(this.world, now);
+        this.anomalyById = new Map();
+        for (const a of this.anomalies) if (!this.anomalyById.has(a.id)) this.anomalyById.set(a.id, a);
+        this.writerSeverity = this.writers.map(() => 0);
+        this.pressurePairs = new Set();
+        for (const a of this.anomalies) {
+          if (!a.writerId) continue;
+          const i = this.writerIndex.get(a.writerId);
+          if (i != null && i < this.writerSeverity.length) this.writerSeverity[i] = Math.max(this.writerSeverity[i], a.severity);
+          for (const s of a.sources) this.pressurePairs.add([a.writerId, s].sort().join('|'));
+        }
+      }
+      // the 24-hour dial is only seen in the time zones view (and while it fades out of it)
+      if (this.mode === 'timezones' || this.dial.mesh.visible) this.updateDial(now);
     }
     // deadlines approach: every half minute, orbits tighten
     if (this.world && performance.now() - this.dataAt > 30_000) {
@@ -812,8 +889,10 @@ export class Engine implements WorldView {
   private updateNodes(dt: number, reveal: number) {
     const camPos = this.camera.position;
     const reduced = this.opts.reducedMotion;
-    const focusWriter = this.focusedWriters();
+    const focusWriter = this.lit;
     const want = this.spec.nodes;
+    const target = [want === 'geo' ? 1 : 0, want === 'graph' ? 1 : 0, want === 'space' ? 1 : 0];
+    const nowMs = this.now().getTime();
     const bumps = this.surface.material.uniforms.uBumps.value as { set: (x: number, y: number, z: number, w: number) => void }[];
     let bump = 0;
     const g = this.layouts?.graph;
@@ -821,7 +900,6 @@ export class Engine implements WorldView {
       const v = this.nodes.vis[i];
       const p = this.presence[i];
       const W = this.nodeW[i];
-      const target = [want === 'geo' ? 1 : 0, want === 'graph' ? 1 : 0, want === 'space' ? 1 : 0];
       const k = 1 - Math.exp(-dt * (reduced ? 8 : 1.4 + (i % 5) * 0.35));
       for (let j = 0; j < 3; j++) W[j] += (target[j] - W[j]) * k;
       // geography
@@ -850,7 +928,7 @@ export class Engine implements WorldView {
       // rhythm by status and time of day
       const phase = p?.phase ?? 'off';
       const status = p?.status ?? 'offline';
-      const soon = w.deadline ? new Date(w.deadline).getTime() - this.now().getTime() : Infinity;
+      const soon = w.deadline ? this.writerDeadlineMs[i] - nowMs : Infinity;
       const pressing = soon > 0 && soon < 12 * 3_600_000;
       v.ring = phase === 'off' ? RING.none : phase === 'waking' ? RING.waking : phase === 'late' ? RING.late
         : status === 'reviewing' ? RING.orbit : status === 'deep_work' ? RING.heartbeat : RING.pulse;
@@ -860,8 +938,8 @@ export class Engine implements WorldView {
       let inten = phase === 'on' ? (night ? 1.15 : 0.95) : phase === 'late' ? 1.05 : phase === 'waking' ? 0.5 : 0.22;
       if (focusWriter) inten = focusWriter.has(w.id) ? 1.25 : 0.1;
       if (this.filter === 'online' && phase !== 'on' && phase !== 'late') inten *= 0.2;
-      if (this.filter === 'reviews' && status !== 'reviewing' && !this.world?.scripts.some((s) => s.writerId === w.id && s.state === 'internal_review')) inten *= 0.25;
-      const anomaly = Math.max(0, ...this.anomalies.filter((a) => a.writerId === w.id).map((a) => a.severity));
+      if (this.filter === 'reviews' && status !== 'reviewing' && !this.writerInReview[i]) inten *= 0.25;
+      const anomaly = this.writerSeverity[i] ?? 0;
       if (this.filter === 'pressure' && !anomaly) inten *= 0.2;
       if (this.mode === 'missions' && !this.focus) inten *= 0.45;
       if (this.mode === 'deadlines') inten *= 0.6;
@@ -873,7 +951,7 @@ export class Engine implements WorldView {
       v.intensity = this.nodeIntensity[i] * appear;
       v.anomaly = anomaly * (this.mode === 'world' || this.mode === 'signals' || this.mode === 'system' || this.filter === 'pressure' ? 1 : 0.4);
       v.dusk = Math.abs(p?.sun ?? 1) < 0.12 && phase !== 'off' ? 1 - Math.abs(p!.sun) / 0.12 : 0;
-      const isFocus = (this.focus?.kind === 'writer' && this.focus.id === w.id) || (this.focus?.kind === 'anomaly' && this.anomalies.find((a) => a.id === this.focus!.id)?.writerId === w.id);
+      const isFocus = (this.focus?.kind === 'writer' && this.focus.id === w.id) || (this.focus?.kind === 'anomaly' && this.anomalyById.get(this.focus.id)?.writerId === w.id);
       v.focus = damp(v.focus, isFocus ? 1 : hovered ? 0.35 : 0, 3, dt);
       const fl = this.flashes.get(i) ?? 0;
       v.flash = fl;
@@ -902,10 +980,10 @@ export class Engine implements WorldView {
       }
       return ids;
     }
-    if (f.kind === 'project') return new Set(this.world.projects.find((p) => p.id === f.id)?.writers ?? []);
+    if (f.kind === 'project') return new Set(this.projectById.get(f.id)?.writers ?? []);
     if (f.kind === 'client') return new Set(this.world.projects.filter((p) => p.clientId === f.id && !p.archived).flatMap((p) => p.writers));
     if (f.kind === 'anomaly') {
-      const a = this.anomalies.find((x) => x.id === f.id);
+      const a = this.anomalyById.get(f.id);
       return a ? new Set([...(a.writerId ? [a.writerId] : []), ...a.sources]) : null;
     }
     if (f.kind === 'city') {
@@ -918,19 +996,15 @@ export class Engine implements WorldView {
   private updateArcs(dt: number) {
     const world = this.world;
     if (!world) return;
-    const keys = this.arcs.keys();
-    const lit = this.focusedWriters();
-    const pressure = new Set<string>();
-    for (const a of this.anomalies) if (a.writerId) for (const s of a.sources) pressure.add([a.writerId, s].sort().join('|'));
-    keys.forEach((key, i) => {
-      const [a, b] = key.split('|');
-      const link = world.links.find((l) => (l.from === a && l.to === b) || (l.from === b && l.to === a));
+    const lit = this.lit;
+    const pressure = this.pressurePairs;
+    this.arcEnds.forEach(({ a, b, link, pair }, i) => {
       let base = link ? (link.active ? 0.2 : 0.06) : 0.03;
       let flow = link?.active ? 1 : 0;
       if (this.mode === 'signals') base = Math.max(base, 0.16);
       if (lit) { const on = lit.has(a) && lit.has(b) || (this.focus?.kind === 'writer' && (a === this.focus.id || b === this.focus.id)); base = on ? Math.max(base * 2.2, 0.26) : base * 0.12; flow = on ? 1 : 0; }
       if (this.filter === 'reviews') { const rev = link?.kind === 'review'; base = rev ? 0.3 : 0.02; flow = rev ? 1 : 0; }
-      if (this.filter === 'pressure' || this.focus?.kind === 'anomaly') { const on = pressure.has([a, b].sort().join('|')); if (on) { base = 0.32; flow = 1; } }
+      if (this.filter === 'pressure' || this.focus?.kind === 'anomaly') { const on = pressure.has(pair); if (on) { base = 0.32; flow = 1; } }
       this.arcs.target[i] = base;
       this.arcs.flow[i] = flow;
     });
@@ -945,6 +1019,7 @@ export class Engine implements WorldView {
       const [r, tilt, alpha, dash, ticks] = specs[i];
       const u = o.u;
       u.uRadius.value = damp(u.uRadius.value, r, reduced ? 10 : 1.8, dt);
+      u.uExtent.value = orbitExtent(u.uRadius.value);
       u.uOpacity.value = damp(u.uOpacity.value, alpha * on * (this.focus && this.spec.nodes === 'geo' ? 0.5 : 1), 2.5, dt);
       u.uDash.value = dash;
       u.uTicks.value = ticks;
@@ -952,7 +1027,7 @@ export class Engine implements WorldView {
       u.uSpin.value = 0.1 + i * 0.04;
       this.tmpQ.setFromEuler(this.tmpE.set(...tilt));
       o.mesh.quaternion.slerp(this.tmpQ, 1 - Math.exp(-dt * (reduced ? 10 : 1.6)));
-      o.mesh.visible = u.uOpacity.value > 0.002;
+      o.mesh.visible = u.uOpacity.value > 0.002 && orbitReaches(u.uRadius.value, u.uExtent.value);
     });
     // the deadline bands and the dial
     this.bandField.material.uniforms.uOpacity.value = this.fx.bands * on;
@@ -969,7 +1044,7 @@ export class Engine implements WorldView {
     pa.uFrom.value = PHASE_FROM;
     pa.uTo.value = PHASE_TO;
     pa.uTicks.value = 0;
-    const proj = this.focus?.kind === 'project' ? this.world?.projects.find((p) => p.id === this.focus!.id) : null;
+    const proj = this.focus?.kind === 'project' ? this.projectById.get(this.focus.id) : null;
     if (proj) {
       const idx = phaseIndex(proj.stage);
       pa.uMark.value = phaseAngle((idx + 0.5) / 6);
@@ -996,7 +1071,7 @@ export class Engine implements WorldView {
       missionCount: live, bandQuat: this.bandQuat, bandScale: 1, space: this.space.matrixWorld, graph: this.graphGroup.matrixWorld,
       writerPos: (i) => this.nodes.vis[i]?.pos ?? null, reduced: this.opts.reducedMotion,
     }, (o: SpaceObject) => {
-      const project = o.kind === 'project' ? this.world!.projects.find((p) => p.id === o.id) : null;
+      const project = o.kind === 'project' ? this.projectById.get(o.id) : null;
       const archived = !!project?.archived;
       let a = 0;
       if (this.mode === 'missions') a = o.kind === 'project' && !archived ? 0.9 : 0;
@@ -1018,8 +1093,8 @@ export class Engine implements WorldView {
       if (a && f) {
         const ends = [e.a, e.b].map((r) => ('writer' in r ? { kind: 'writer', id: this.writers[r.writer]?.id } : { kind: this.objects.objects[r.obj]?.kind, id: this.objects.objects[r.obj]?.id }));
         const touches = ends.some((x) => x.kind === f.kind && x.id === f.id);
-        const clientProject = f.kind === 'client' && ends.some((x) => x.kind === 'project' && this.world!.projects.find((p) => p.id === x.id)?.clientId === f.id);
-        const writerProject = f.kind === 'writer' && ends.some((x) => x.kind === 'project' && this.world!.projects.find((p) => p.id === x.id)?.writers.includes(f.id));
+        const clientProject = f.kind === 'client' && ends.some((x) => x.kind === 'project' && this.projectById.get(x.id ?? '')?.clientId === f.id);
+        const writerProject = f.kind === 'writer' && ends.some((x) => x.kind === 'project' && this.projectById.get(x.id ?? '')?.writers.includes(f.id));
         a = touches || clientProject || (writerProject && e.kind !== 'works') ? Math.max(0.45, a * 3) : a * 0.12;
         if (this.mode === 'missions' && f.kind === 'project') a = touches ? 0.4 : 0;
       }
@@ -1030,16 +1105,16 @@ export class Engine implements WorldView {
   private updateSwarm(dt: number, reveal: number) {
     if (!this.world) return;
     const f = this.focus;
-    const lit = this.focusedWriters();
+    const lit = this.lit;
     const phaseOpen = this.focus?.kind === 'project' && this.mode === 'missions' ? this.focus.id : null;
     const on = smoothstep(0.88, 1, reveal);
     this.swarm.archiveOpacity = this.fx.archive * 0.14 * on;
     this.swarm.update({
       time: this.time, dt, dpr: this.dpr * this.pxScale, weights: this.spec.scripts,
-      node: (i) => { const v = this.nodes.vis[i]; return v ? { pos: v.pos, normal: v.normal } : null; },
-      mission: (id, out) => { const i = this.objIndex.get(`project:${id}`); const o = i != null ? this.objects.objects[i] : null; return o && o.missionIndex >= 0 ? out.copy(o.pos) : null; },
+      node: (i) => this.nodes.vis[i] ?? null,
+      mission: (id, out) => { const i = this.projectObj.get(id); const o = i != null ? this.objects.objects[i] : null; return o && o.missionIndex >= 0 ? out.copy(o.pos) : null; },
       phase: (id, u, out) => (phaseOpen === id ? this.phasePoint(u, out) : null),
-      graph: (id, out) => { const i = this.objIndex.get(`project:${id}`); const o = i != null ? this.objects.objects[i] : null; return o?.graphPos ? out.copy(o.pos) : null; },
+      graph: (id, out) => { const i = this.projectObj.get(id); const o = i != null ? this.objects.objects[i] : null; return o?.graphPos ? out.copy(o.pos) : null; },
       bandQuat: this.bandQuat, bandScale: 1, space: this.space.matrixWorld, reduced: this.opts.reducedMotion,
     }, (b: ScriptBody) => {
       const st = b.script.state;
@@ -1070,9 +1145,7 @@ export class Engine implements WorldView {
 
   // ── anchors: DOM labels pinned to places in space ─────────────────────
 
-  private anchorPos(key: string, out: Vector3): number | null {
-    const [kind, ...rest] = key.split(':');
-    const id = rest.join(':');
+  private anchorPos(kind: string, id: string, out: Vector3): number | null {
     switch (kind) {
       case 'w': {
         const i = this.writerIndex.get(id);
@@ -1089,9 +1162,9 @@ export class Engine implements WorldView {
         return Math.min(1, o.alpha * 1.3);
       }
       case 'a': {
-        const a = this.anomalies.find((x) => x.id === id);
+        const a = this.anomalyById.get(id);
         if (!a) return null;
-        if (a.writerId) return this.anchorPos(`w:${a.writerId}`, out);
+        if (a.writerId) return this.anchorPos('w', a.writerId, out);
         if (a.at) return this.geoAnchor(a.at.lat, a.at.lon, out);
         return null;
       }
@@ -1127,7 +1200,7 @@ export class Engine implements WorldView {
         return this.fx.arcs > 0.05 ? 1 : 0;
       }
       case 's': {
-        const b = this.swarm.bodies.find((x) => x.script.id === id);
+        const b = this.swarm.byId.get(id);
         if (!b) return null;
         out.copy(b.pos);
         return b.alpha;
@@ -1165,17 +1238,20 @@ export class Engine implements WorldView {
   }
 
   private writeAnchors() {
-    const p = new Vector3();
+    const p = this.anchorP;
     for (const b of this.bindings) {
-      let vis = this.anchorPos(b.key, p);
-      if (vis != null && !b.key.startsWith('w:') && !b.key.startsWith('geo:') && !(b.key.startsWith('a:') && this.anomalies.find((x) => `a:${x.id}` === b.key)?.writerId)) vis *= this.occlusion(p);
+      let vis = this.anchorPos(b.kind, b.id, p);
+      if (vis != null && b.kind !== 'w' && b.kind !== 'geo' && !(b.kind === 'a' && this.anomalyById.get(b.id)?.writerId)) vis *= this.occlusion(p);
       if (vis == null) { this.setVis(b, 0); continue; }
       p.project(this.camera);
-      const x = (p.x * 0.5 + 0.5) * this.width;
-      const y = (-p.y * 0.5 + 0.5) * this.height;
-      const behind = p.z > 1;
-      b.el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
-      this.setVis(b, behind ? 0 : Math.max(0, Math.min(1, vis)));
+      const v = p.z > 1 ? 0 : Math.max(0, Math.min(1, vis));
+      // a hidden label isn't drawn: it's placed again the frame it shows
+      if (v >= LABEL_SHOWN) {
+        const x = (p.x * 0.5 + 0.5) * this.width;
+        const y = (-p.y * 0.5 + 0.5) * this.height;
+        b.el.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
+      }
+      this.setVis(b, v);
     }
   }
 
@@ -1183,8 +1259,9 @@ export class Engine implements WorldView {
     const s = v.toFixed(3);
     if (b.vis === s) return;
     b.vis = s;
-    b.el.style.setProperty('--vis', s);
-    const off = v < 0.04 ? '1' : '';
+    // opacity, not an inherited custom property: changing one restyles the label itself, not everything inside it
+    b.el.style.opacity = s;
+    const off = v < LABEL_SHOWN ? '1' : '';
     if (b.el.dataset.off !== off) b.el.dataset.off = off;
   }
 

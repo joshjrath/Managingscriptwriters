@@ -38,13 +38,17 @@ export default function ControlCenter() {
 
   // Sound that was left on comes back with the first touch or key here (browsers only start audio
   // from a gesture), and stops however the Control Center is left, the browser's Back button included.
+  // While the tab is hidden nothing is drawn, so the hum rests too, and comes back with the tab.
   useEffect(() => {
     const wake = () => sound.wake();
+    const shown = () => { if (document.hidden) sound.sleep(); else sound.wake(); };
     window.addEventListener('pointerdown', wake, { once: true });
     window.addEventListener('keydown', wake, { once: true });
+    document.addEventListener('visibilitychange', shown);
     return () => {
       window.removeEventListener('pointerdown', wake);
       window.removeEventListener('keydown', wake);
+      document.removeEventListener('visibilitychange', shown);
       sound.sleep();
     };
   }, []);

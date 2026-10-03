@@ -153,6 +153,7 @@ export class ObjectsLayer {
   update(f: ObjectsFrame, emphasis: (o: SpaceObject) => number, edgeEmphasis: (e: Edge) => number) {
     this.material.uniforms.uDpr.value = f.dpr;
     const P = this.pos.array as Float32Array, C = this.col.array as Float32Array, I = this.info.array as Float32Array;
+    let maxAlpha = 0, maxEdge = 0;
     this.objects.forEach((o, i) => {
       const k = 1 - Math.exp(-f.dt * (f.reduced ? 6 : 1.6 + o.seed * 1.8));
       for (let l = 0; l < 4; l++) o.w[l] += (f.weights[l] - o.w[l]) * k;
@@ -181,6 +182,7 @@ export class ObjectsLayer {
       if (ws > 1e-4) o.pos.copy(this.tmp.multiplyScalar(1 / ws));
       const target = emphasis(o) * Math.min(1, (ws / Math.max(1e-4, total)) * 1.2);
       o.alpha += (target - o.alpha) * (1 - Math.exp(-f.dt * 4));
+      if (o.alpha > maxAlpha) maxAlpha = o.alpha;
       P[i * 3] = o.pos.x; P[i * 3 + 1] = o.pos.y; P[i * 3 + 2] = o.pos.z;
       const pulse = o.urgent ? 0.8 + 0.2 * Math.sin(f.time * 4 + o.seed * 6) : 1;
       C[i * 4] = o.color.r; C[i * 4 + 1] = o.color.g; C[i * 4 + 2] = o.color.b; C[i * 4 + 3] = o.alpha * pulse;
@@ -191,6 +193,7 @@ export class ObjectsLayer {
     this.edges.forEach((e, i) => {
       const a = end(e.a), b = end(e.b);
       e.alpha += (edgeEmphasis(e) - e.alpha) * (1 - Math.exp(-f.dt * 4));
+      if (e.alpha > maxEdge) maxEdge = e.alpha;
       if (!a || !b) { LC.fill(0, i * 8, i * 8 + 8); return; }
       L[i * 6] = a.x; L[i * 6 + 1] = a.y; L[i * 6 + 2] = a.z; L[i * 6 + 3] = b.x; L[i * 6 + 4] = b.y; L[i * 6 + 5] = b.z;
       const c = EDGE_COLOR[e.kind] ?? EDGE_COLOR.other;
@@ -198,6 +201,10 @@ export class ObjectsLayer {
       LC[o] = LC[o + 4] = c[0]; LC[o + 1] = LC[o + 5] = c[1]; LC[o + 2] = LC[o + 6] = c[2];
       LC[o + 3] = e.alpha; LC[o + 7] = e.alpha * 0.55;
     });
+    // fully faded layers aren't drawn: a point's shader alpha is at most about 2.2 × alpha and a line's
+    // equals it, and both discard anything under 0.003
+    this.points.visible = maxAlpha >= 0.001;
+    this.lines.visible = maxEdge >= 0.003;
     const n = this.objects.length, m = this.edges.length * 2;
     markUsed(this.pos, n); markUsed(this.col, n); markUsed(this.info, n);
     markUsed(this.lpos, m); markUsed(this.lcol, m);

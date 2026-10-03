@@ -215,7 +215,20 @@ export interface LocalClock {
 
 const MONTHS = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC'];
 
+// A clock depends only on the zone and the whole second, and the overlay and the engine ask for
+// the same few zones many times a second: keep the latest one per zone (one entry per zone in use).
+const lastClock = new Map<string, { sec: number; clock: LocalClock }>();
+
 export function localClock(tz: string, at: Date): LocalClock {
+  const sec = Math.floor(at.getTime() / 1000);
+  const hit = lastClock.get(tz);
+  if (hit && hit.sec === sec) return hit.clock;
+  const clock = readClock(tz, at);
+  lastClock.set(tz, { sec, clock });
+  return clock;
+}
+
+function readClock(tz: string, at: Date): LocalClock {
   const parts = fmtFor(tz).formatToParts(at);
   const get = (t: string) => parts.find((p) => p.type === t)?.value ?? '0';
   const [y, mo, d, h, mi, s] = ['year', 'month', 'day', 'hour', 'minute', 'second'].map((k) => Number(get(k)));
@@ -432,12 +445,23 @@ export function anomaliesOf(world: ControlWorld, at: Date): Anomaly[] {
   const out: Anomaly[] = [];
   const now = at.getTime();
   const byWriter = new Map(world.writers.map((w) => [w.id, w]));
-  const live = world.scripts.filter((s) => inMotion(s.state) && !world.projects.find((p) => p.id === s.projectId)?.archived);
+  const archived = new Set(world.projects.filter((p) => p.archived).map((p) => p.id));
+  const live = world.scripts.filter((s) => inMotion(s.state) && !archived.has(s.projectId));
+  // each person's live scripts as writer, and those with a deadline as writer or reviewer
+  // (built once, in `live` order, rather than scanning every script for every person)
+  const written = new Map<string, CcScript[]>();
+  const due = new Map<string, CcScript[]>();
+  const add = (m: Map<string, CcScript[]>, id: string, s: CcScript) => { const l = m.get(id); if (l) l.push(s); else m.set(id, [s]); };
+  for (const s of live) {
+    if (s.writerId) add(written, s.writerId, s);
+    if (!s.deadline) continue;
+    if (s.writerId) add(due, s.writerId, s);
+    if (s.reviewerId && s.reviewerId !== s.writerId && (s.state === 'internal_review' || s.state === 'approved')) add(due, s.reviewerId, s);
+  }
 
   // deadlines converging on one person: three or more deliverables due within the same three hours, in the next two days
   for (const w of world.writers) {
-    const mine = live
-      .filter((s) => s.deadline && (s.writerId === w.id || (s.reviewerId === w.id && (s.state === 'internal_review' || s.state === 'approved'))))
+    const mine = (due.get(w.id) ?? [])
       .map((s) => ({ s, t: new Date(s.deadline!).getTime() }))
       .filter((x) => x.t > now && x.t - now < 48 * HOUR)
       .sort((a, b) => a.t - b.t);
@@ -467,7 +491,7 @@ export function anomaliesOf(world: ControlWorld, at: Date): Anomaly[] {
   // carrying too much
   for (const w of world.writers) {
     if (w.workload <= 1.2) continue;
-    const mine = live.filter((s) => s.writerId === w.id && isOpen(s.state));
+    const mine = (written.get(w.id) ?? []).filter((s) => isOpen(s.state));
     const soon = mine.filter((s) => s.deadline && new Date(s.deadline).getTime() - now < 12 * HOUR && new Date(s.deadline).getTime() > now);
     out.push({
       id: `overload:${w.id}`, kind: 'overload', title: 'NETWORK LOAD',
@@ -482,7 +506,7 @@ export function anomaliesOf(world: ControlWorld, at: Date): Anomaly[] {
 
   // revisions piling up on one writer
   for (const w of world.writers) {
-    const back = live.filter((s) => s.writerId === w.id && s.state === 'revision');
+    const back = (written.get(w.id) ?? []).filter((s) => s.state === 'revision');
     if (back.length < 3) continue;
     out.push({
       id: `revisions:${w.id}`, kind: 'revision_pileup', title: 'REVISION PILEUP',
@@ -494,7 +518,7 @@ export function anomaliesOf(world: ControlWorld, at: Date): Anomaly[] {
 
   // scripts waiting on internal review too long, and too many landing on one reviewer
   const waiting = new Map<string, CcScript[]>();
-  for (const s of live) if (s.state === 'internal_review' && s.reviewerId) waiting.set(s.reviewerId, [...(waiting.get(s.reviewerId) ?? []), s]);
+  for (const s of live) if (s.state === 'internal_review' && s.reviewerId) add(waiting, s.reviewerId, s);
   for (const [rid, list] of waiting) {
     if (!byWriter.has(rid)) continue;
     const stale = list.filter((s) => now - new Date(s.updatedAt).getTime() > 48 * HOUR);
@@ -588,8 +612,7 @@ export interface WorldMetrics {
   coveredMinutes: number;
 }
 
-export function metricsOf(world: ControlWorld, at: Date): WorldMetrics {
-  const cov = coverageOf(world.writers, at);
+export function metricsOf(world: ControlWorld, at: Date, cov: Coverage = coverageOf(world.writers, at)): WorldMetrics {
   const liveProjects = world.projects.filter((p) => !p.archived);
   const liveIds = new Set(liveProjects.map((p) => p.id));
   const live = world.scripts.filter((s) => liveIds.has(s.projectId));

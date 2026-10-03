@@ -74,6 +74,8 @@ const PHASE_OF: Record<ScriptState, number> = {
 
 export class SwarmLayer {
   bodies: ScriptBody[] = [];
+  /** the same bodies by script id */
+  byId = new Map<string, ScriptBody>();
   points: Points;
   archiveLines: LineSegments;
   private material: ShaderMaterial;
@@ -150,6 +152,7 @@ export class SwarmLayer {
         updatedMs: new Date(x.script.updatedAt).getTime(),
       };
     });
+    this.byId = new Map(this.bodies.map((b) => [b.script.id, b]));
     // buffers are kept between refreshes and only grow when the data outgrows them
     const a = fitGeometry(this.points, this.bodies.length, { position: 3, aColor: 4, aSize: 1 });
     this.pos = a.position; this.col = a.aColor; this.size = a.aSize;

@@ -8,6 +8,7 @@ import {
   AdditiveBlending, BufferAttribute, BufferGeometry, Color, DoubleSide, DynamicDrawUsage, InstancedBufferAttribute,
   InstancedMesh, LineSegments, Matrix4, PlaneGeometry, Points, Quaternion, ShaderMaterial, Vector3,
 } from 'three';
+import { markUsed } from './buffers';
 
 export const RING = { none: 0, pulse: 1, heartbeat: 2, orbit: 3, waking: 4, late: 5 } as const;
 
@@ -261,20 +262,25 @@ export class NodesLayer {
       this.s.set(v.size, v.size, v.size);
       this.m.compose(this.at.copy(v.pos).addScaledVector(v.normal, (1 - v.billboard) * 0.004), this.q, this.s);
       this.glyphs.setMatrixAt(i, this.m);
-      A.set([v.ring, v.period, v.phase, inten], i * 4);
-      B.set([v.color.r, v.color.g, v.color.b, v.anomaly], i * 4);
-      C.set([v.dusk, v.focus, v.flash, 0], i * 4);
-      P.set([v.pos.x + v.normal.x * 0.006, v.pos.y + v.normal.y * 0.006, v.pos.z + v.normal.z * 0.006], i * 3);
-      K.set([v.color.r, v.color.g, v.color.b, Math.min(1.2, inten * (0.8 + v.flash))], i * 4);
-      S.set([(0.9 + v.focus * 0.5 + v.flash * 0.8) * (0.7 + 0.3 * Math.min(1.2, v.intensity))], i);
+      // written in place (no arrays made per person per frame)
+      const { r, g, b } = v.color, { x, y, z } = v.pos, nx = v.normal.x, ny = v.normal.y, nz = v.normal.z;
+      const i4 = i * 4, i3 = i * 3, i6 = i * 6, i8 = i * 8;
+      A[i4] = v.ring; A[i4 + 1] = v.period; A[i4 + 2] = v.phase; A[i4 + 3] = inten;
+      B[i4] = r; B[i4 + 1] = g; B[i4 + 2] = b; B[i4 + 3] = v.anomaly;
+      C[i4] = v.dusk; C[i4 + 1] = v.focus; C[i4 + 2] = v.flash; C[i4 + 3] = 0;
+      P[i3] = x + nx * 0.006; P[i3 + 1] = y + ny * 0.006; P[i3 + 2] = z + nz * 0.006;
+      K[i4] = r; K[i4 + 1] = g; K[i4 + 2] = b; K[i4 + 3] = Math.min(1.2, inten * (0.8 + v.flash));
+      S[i] = (0.9 + v.focus * 0.5 + v.flash * 0.8) * (0.7 + 0.3 * Math.min(1.2, v.intensity));
       const h = v.beam * (1 - v.billboard);
-      BP.set([v.pos.x, v.pos.y, v.pos.z, v.pos.x + v.normal.x * h, v.pos.y + v.normal.y * h, v.pos.z + v.normal.z * h], i * 6);
-      BC.set([v.color.r, v.color.g, v.color.b, inten * 0.8, v.color.r, v.color.g, v.color.b, 0], i * 8);
+      BP[i6] = x; BP[i6 + 1] = y; BP[i6 + 2] = z; BP[i6 + 3] = x + nx * h; BP[i6 + 4] = y + ny * h; BP[i6 + 5] = z + nz * h;
+      BC[i8] = r; BC[i8 + 1] = g; BC[i8 + 2] = b; BC[i8 + 3] = inten * 0.8; BC[i8 + 4] = r; BC[i8 + 5] = g; BC[i8 + 6] = b; BC[i8 + 7] = 0;
     });
-    this.glyphs.instanceMatrix.needsUpdate = true;
-    this.aA.needsUpdate = this.aB.needsUpdate = this.aC.needsUpdate = true;
-    this.corePos.needsUpdate = this.coreCol.needsUpdate = this.coreSize.needsUpdate = true;
-    this.beamPos.needsUpdate = this.beamCol.needsUpdate = true;
+    // only the slots in use go to the GPU, not all of them
+    const n = this.vis.length;
+    markUsed(this.glyphs.instanceMatrix, n);
+    markUsed(this.aA, n); markUsed(this.aB, n); markUsed(this.aC, n);
+    markUsed(this.corePos, n); markUsed(this.coreCol, n); markUsed(this.coreSize, n);
+    markUsed(this.beamPos, n * 2); markUsed(this.beamCol, n * 2);
   }
 
   dispose() {

@@ -21,11 +21,23 @@ void main() {
 
 // ── a single orbit ───────────────────────────────────────────────────────
 
+/** The biggest square an orbit ring is ever drawn on (bigger rings are cut off at its corners, by design). */
+export const ORBIT_EXTENT = 3.4;
+
+/**
+ * How big a square an orbit ring of this radius needs: the line, its ticks and glint all sit within
+ * about 0.1 of the ring, so just past it is enough; a full-size square would mostly be thrown away.
+ */
+export const orbitExtent = (radius: number) => Math.min(ORBIT_EXTENT, radius + 0.2);
+
+/** Whether a ring of this radius reaches into a square of this size at all (beyond its corners it draws nothing). */
+export const orbitReaches = (radius: number, extent: number) => radius < extent * Math.SQRT2 + 0.1;
+
 export class Orbit {
   mesh: Mesh;
   material: ShaderMaterial;
 
-  constructor(extent = 3.4) {
+  constructor(extent = ORBIT_EXTENT) {
     this.material = new ShaderMaterial({
       uniforms: {
         uExtent: { value: extent }, uRadius: { value: 1.3 }, uOpacity: { value: 0 }, uColor: { value: new Color(0.62, 0.78, 1) },

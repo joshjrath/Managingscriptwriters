@@ -123,7 +123,9 @@ void main() {
   for (int i = 0; i < ${MAX_BUMPS}; i++) {
     vec4 b = uBumps[i];
     if (b.w <= 0.0) continue;
-    float d = acos(clamp(dot(n, b.xyz), -1.0, 1.0));
+    float c = dot(n, b.xyz);
+    if (c < 0.99) continue; // beyond acos(0.99) the bump is under 1e-13: nothing to add
+    float d = acos(clamp(c, -1.0, 1.0));
     bump += b.w * exp(-d * d * 1600.0) * (0.6 + 0.4 * sin(uTime * 1.7 - d * 110.0));
   }
   float pd = distance(n, uPointer);
@@ -208,7 +210,15 @@ void main() {
   gl_Position = projectionMatrix * mv;
 }`;
 
-export function buildCore() {
+/** One unit sphere shared by the core, halo and rim (each scales it): their shaders read only position and normal. */
+export function buildShell(): SphereGeometry {
+  const geometry = new SphereGeometry(1, 96, 64);
+  geometry.deleteAttribute('uv');
+  releaseAfterUpload(geometry);
+  return geometry;
+}
+
+export function buildCore(shell: SphereGeometry) {
   const material = new ShaderMaterial({
     uniforms: { uSun: { value: new Vector3(1, 0, 0) }, uSunView: { value: new Vector3(1, 0, 0) }, uOpacity: { value: 0 }, uDim: { value: 0 } },
     vertexShader: SHELL_VERT,
@@ -235,8 +245,8 @@ export function buildCore() {
     depthWrite: true,
     blending: NormalBlending,
   });
-  const mesh = new Mesh(new SphereGeometry(0.994, 96, 64), material);
-  releaseAfterUpload(mesh.geometry);
+  const mesh = new Mesh(shell, material);
+  mesh.scale.setScalar(0.994);
   mesh.renderOrder = 0;
   return { mesh, material };
 }
@@ -245,7 +255,7 @@ export function buildCore() {
 
 const ATMO_K = 1.2;
 
-export function buildAtmosphere() {
+export function buildAtmosphere(shell: SphereGeometry) {
   const halo = new ShaderMaterial({
     uniforms: { uSun: { value: new Vector3(1, 0, 0) }, uIntensity: { value: 0 } },
     vertexShader: SHELL_VERT,
@@ -272,8 +282,7 @@ export function buildAtmosphere() {
     depthWrite: false,
     blending: AdditiveBlending,
   });
-  const haloMesh = new Mesh(new SphereGeometry(1, 96, 64), halo);
-  releaseAfterUpload(haloMesh.geometry);
+  const haloMesh = new Mesh(shell, halo);
   haloMesh.scale.setScalar(ATMO_K);
   haloMesh.renderOrder = 1;
 
@@ -298,8 +307,8 @@ export function buildAtmosphere() {
     depthWrite: false,
     blending: AdditiveBlending,
   });
-  const rimMesh = new Mesh(new SphereGeometry(1.006, 96, 64), rim);
-  releaseAfterUpload(rimMesh.geometry);
+  const rimMesh = new Mesh(shell, rim);
+  rimMesh.scale.setScalar(1.006);
   rimMesh.renderOrder = 3;
   return { haloMesh, rimMesh, halo, rim };
 }

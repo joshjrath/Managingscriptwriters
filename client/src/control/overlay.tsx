@@ -2,14 +2,15 @@
 // editorial statement for each view, micro details, the signal feed, and the
 // labels pinned to places in space (moved every frame by the view, not React).
 
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
   bandOf, coverageOf, fmtAgo, fmtCountdown, fmtHoursMinutes, localClock, metricsOf, PHASES, phaseOf, presenceOf,
-  STATE_LABEL, utcClock, type Anomaly, type CcHandoff, type ControlWorld,
+  STATE_LABEL, utcClock, type Anomaly, type CcHandoff, type ControlWorld, type Coverage, type WorldMetrics,
 } from '../../../shared/control';
 import type { Filter, Focus, Mode, Target } from './engine/Engine';
 import type { WorldView } from './engine/view';
 import type { SyncInfo } from './Experience';
+import type { GeoStore } from './geo';
 
 export const ViewCtx = createContext<WorldView | null>(null);
 
@@ -110,9 +111,21 @@ function Metric({ v, l, warn }: { v: ReactNode; l: string; warn?: boolean }) {
   return <div className={warn ? 'warn' : ''}><b>{v}</b><span>{l}</span></div>;
 }
 
+// Statement and Micro show the same numbers: work them out once a tick, not once per component and
+// render. Kept per world, so nothing is held once the world is replaced.
+const headlines = new WeakMap<ControlWorld, { t: number; m: WorldMetrics; cov: Coverage }>();
+function headline(world: ControlWorld, now: Date) {
+  let h = headlines.get(world);
+  if (h?.t !== now.getTime()) {
+    const cov = coverageOf(world.writers, now);
+    h = { t: now.getTime(), cov, m: metricsOf(world, now, cov) };
+    headlines.set(world, h);
+  }
+  return h;
+}
+
 export function Statement({ mode, world, now, anomalies, onPeople }: { mode: Mode; world: ControlWorld; now: Date; anomalies: Anomaly[]; onPeople: () => void }) {
-  const m = metricsOf(world, now);
-  const cov = coverageOf(world.writers, now);
+  const { m, cov } = headline(world, now);
   const live = world.projects.filter((p) => !p.archived);
   const liveIds = new Set(live.map((p) => p.id));
   const writerName = (id: string | undefined) => world.writers.find((w) => w.id === id);
@@ -209,8 +222,8 @@ export function Statement({ mode, world, now, anomalies, onPeople }: { mode: Mod
 
 // ── micro information ────────────────────────────────────────────────────
 
-export function Micro({ world, now, geo, sync }: { world: ControlWorld; now: Date; geo: { lat: number; lon: number } | null; sync: SyncInfo }) {
-  const m = metricsOf(world, now);
+export function Micro({ world, now, geo, sync }: { world: ControlWorld; now: Date; geo: GeoStore; sync: SyncInfo }) {
+  const { m } = headline(world, now);
   const recent = world.handoffs.filter((h) => now.getTime() - new Date(h.timestamp).getTime() < 3_600_000).length;
   const skew = sync.skew / 1000;
   return (
@@ -225,9 +238,19 @@ export function Micro({ world, now, geo, sync }: { world: ControlWorld; now: Dat
       <div>TRANSFER PATH <b>{recent > 2 ? 'BUSY' : 'STABLE'}</b></div>
       <div>LAST SYNC <b>{fmtAgo(Date.now() - sync.at)}</b></div>
       <hr />
+      <GeoReadout geo={geo} />
+    </aside>
+  );
+}
+
+/** The pointer's place on the planet: the only part that redraws as the pointer moves. */
+function GeoReadout({ geo: store }: { geo: GeoStore }) {
+  const geo = useSyncExternalStore(store.subscribe, store.get);
+  return (
+    <>
       <div className="geo">LAT <b>{geo ? geo.lat.toFixed(4) : '——.————'}</b></div>
       <div className="geo">LON <b>{geo ? geo.lon.toFixed(4) : '——.————'}</b></div>
-    </aside>
+    </>
   );
 }
 

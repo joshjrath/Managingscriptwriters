@@ -20,7 +20,8 @@ export interface WorldView {
   bind(key: string, el: HTMLElement): () => void;
   playHandoff(h: CcHandoff): boolean;
   reveal(fast?: boolean): void;
-  setTimeOffset(ms: number): void;
+  /** `running`: the clock is being played forward (Follow the sun), so slow-changing readings can lag a moment */
+  setTimeOffset(ms: number, running?: boolean): void;
   zoomBy(factor: number): void;
   nudge(yaw: number, pitch: number): void;
   now(): Date;

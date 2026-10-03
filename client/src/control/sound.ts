@@ -8,6 +8,9 @@ class Sound {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private hum: { stop: () => void } | null = null;
+  /** the pending end of a fade-out, and whether the audio has been put to sleep (suspended) */
+  private sleepTimer: ReturnType<typeof setTimeout> | null = null;
+  private asleep = false;
   enabled = false;
 
   constructor() {
@@ -37,6 +40,8 @@ class Sound {
     if (!this.enabled) return;
     const ctx = this.ensure();
     if (!ctx || !this.master) return;
+    if (this.sleepTimer) { clearTimeout(this.sleepTimer); this.sleepTimer = null; }
+    this.asleep = false;
     void ctx.resume();
     this.master.gain.cancelScheduledValues(ctx.currentTime);
     this.master.gain.setTargetAtTime(0.5, ctx.currentTime, 0.6);
@@ -47,7 +52,9 @@ class Sound {
     const ctx = this.ctx;
     if (!ctx || !this.master) return;
     this.master.gain.setTargetAtTime(0, ctx.currentTime, 0.25);
-    setTimeout(() => { this.hum?.stop(); this.hum = null; }, 900);
+    // once faded out, stop the hum and suspend the audio so the device can rest
+    // (kept from the first call if sleep comes twice, so a later wake can always cancel it)
+    this.sleepTimer ??= setTimeout(() => { this.sleepTimer = null; this.asleep = true; this.hum?.stop(); this.hum = null; void ctx.suspend(); }, 900);
   }
 
   private startHum(ctx: AudioContext, out: GainNode) {
@@ -70,7 +77,8 @@ class Sound {
   }
 
   private tone(freq: number, dur: number, gain: number, type: OscillatorType = 'sine', glide?: number) {
-    if (!this.enabled) return;
+    // asleep the output is silent and the clock stopped: a tone would only queue up for the next wake
+    if (!this.enabled || this.asleep) return;
     const ctx = this.ensure();
     if (!ctx || !this.master) return;
     const t = ctx.currentTime;

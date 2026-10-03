@@ -113,7 +113,14 @@ export async function workspaceWorld(db: Db, at: Date): Promise<ControlWorld> {
   const firstLead = placed.find((u) => u.role !== 'writer')?.id ?? null;
   const reviewerOf = (b: BatchRow) => nid(lastReviewer.get(b.id)) ?? nid(b.owner_id) ?? nid(b.created_by) ?? nid(firstLead);
 
-  const due = (date: string | null) => (date ? deadlineInstant(date, settings.timezone, settings.cutoff) : null);
+  // every script in a batch shares its batch's dates: convert each date once per refresh
+  const dueAt = new Map<string, string>();
+  const due = (date: string | null) => {
+    if (!date) return null;
+    let v = dueAt.get(date);
+    if (v === undefined) { v = deadlineInstant(date, settings.timezone, settings.cutoff); dueAt.set(date, v); }
+    return v;
+  };
   const projects: CcProject[] = [];
   const scripts: CcScript[] = [];
   const clients = new Map<string, CcClient>();

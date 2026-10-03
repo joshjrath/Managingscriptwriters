@@ -6,6 +6,7 @@ import {
   AdditiveBlending, BufferAttribute, BufferGeometry, Color, DynamicDrawUsage, Group, LineSegments, Points, ShaderMaterial,
   Vector3, Vector4,
 } from 'three';
+import { markUsed } from './buffers';
 import { arcHeight, arcPoint, easeInOutCubic } from './math';
 
 export const MAX_ARCS = 64;
@@ -20,11 +21,15 @@ export interface ArcDef {
 
 interface Packet {
   arc: number;
+  /** the arc's key, so the packet keeps to its arc when the arcs are rebuilt */
+  key: string;
   reverse: boolean;
   start: number;
   duration: number;
   done: boolean;
   onArrive?: () => void;
+  /** dropped before it landed */
+  onCancel?: () => void;
 }
 
 export class ArcsLayer {
@@ -178,7 +183,13 @@ export class ArcsLayer {
     g.computeBoundingSphere();
     this.lines.geometry = g;
     old.dispose();
-    this.packets = this.packets.filter((p) => p.arc < this.defs.length);
+    // a packet in flight keeps to its arc wherever that now sits; one whose arc has gone is dropped
+    this.packets = this.packets.filter((p) => {
+      const i = this.index.get(p.key);
+      if (i === undefined) { p.onCancel?.(); return false; }
+      p.arc = i;
+      return true;
+    });
   }
 
   /** Whether a handoff is travelling right now (the view draws more often while one is). */
@@ -194,17 +205,24 @@ export class ArcsLayer {
     return this.defs.map((d) => d.key);
   }
 
-  /** Send a packet along an arc; calls back when it lands. */
-  launch(arc: number, reverse: boolean, now: number, duration = 2.6, onArrive?: () => void) {
-    if (arc < 0) return;
-    this.packets = this.packets.filter((p) => !(p.arc === arc && !p.done));
-    this.packets.push({ arc, reverse, start: now, duration, done: false, onArrive });
+  /** Send a packet along an arc; calls back when it lands, or when it's dropped first. */
+  launch(arc: number, reverse: boolean, now: number, duration = 2.6, onArrive?: () => void, onCancel?: () => void) {
+    if (arc < 0 || arc >= this.defs.length) return;
+    // one packet to an arc: a new one takes the place of any still travelling it
+    this.packets = this.packets.filter((p) => {
+      if (p.arc !== arc || p.done) return true;
+      p.onCancel?.();
+      return false;
+    });
+    this.packets.push({ arc, key: this.defs[arc].key, reverse, start: now, duration, done: false, onArrive, onCancel });
   }
 
   update(time: number, dt: number, dpr: number, opacity: number) {
     const u = this.material.uniforms;
     u.uTime.value = time;
     u.uOpacity.value = opacity;
+    // the brightest fragment is about 3.4 × opacity and anything under 0.003 is discarded: below this nothing shows
+    this.group.visible = opacity > 0.0005;
     (this.packetPoints.material as ShaderMaterial).uniforms.uDpr.value = dpr;
     const arcs = u.uArcs.value as Vector4[];
     const k = 1 - Math.exp(-dt * 3);
@@ -237,7 +255,9 @@ export class ArcsLayer {
     }
     this.packets = this.packets.filter((p) => !p.done);
     this.packetPoints.geometry.setDrawRange(0, n);
-    this.packetPos.needsUpdate = this.packetCol.needsUpdate = true;
+    // nothing in flight: no draw call, and no buffers to send
+    this.packetPoints.visible = n > 0;
+    if (n > 0) { markUsed(this.packetPos, n); markUsed(this.packetCol, n); }
   }
 
   /** Where a packet on this arc is right now (globe space), for its label. */
@@ -254,6 +274,8 @@ export class ArcsLayer {
   }
 
   dispose() {
+    for (const p of this.packets) if (!p.done) p.onCancel?.();
+    this.packets = [];
     this.lines.geometry.dispose();
     this.material.dispose();
     this.packetPoints.geometry.dispose();

@@ -15,6 +15,8 @@ interface Opts {
   onHover?: (t: Target | null) => void;
   onArrive?: (h: CcHandoff) => void;
   onReveal?: (p: number) => void;
+  /** after each drawn frame, with its time (for anything that should move in step with the view) */
+  onFrame?: (ms: number) => void;
 }
 
 type V3 = [number, number, number];
@@ -39,7 +41,12 @@ export class FlatView implements WorldView {
   private t0 = performance.now();
   private last = 0;
   private revealStart = -1;
-  private bindings = new Set<{ key: string; el: HTMLElement }>();
+  private bindings = new Set<{ key: string; el: HTMLElement; vis?: string }>();
+  /** land colours by their rounded channels: the same few hundred strings every frame */
+  private rgb = new Map<number, string>();
+  /** who is on shift, worked out once a second like the WebGL view does */
+  private presence: boolean[] = [];
+  private presenceAt = -Infinity;
   private packets: { from: number; to: number; start: number; h: CcHandoff }[] = [];
   private offset = 0;
   private anomalies: Anomaly[] = [];
@@ -77,7 +84,7 @@ export class FlatView implements WorldView {
   get currentAnomalies() { return this.anomalies; }
   get timeOffset() { return this.offset; }
   now() { return new Date(Date.now() + this.offset); }
-  setTimeOffset(ms: number) { this.offset = ms; }
+  setTimeOffset(ms: number) { this.offset = ms; this.presenceAt = -Infinity; }
   setFilter(f: Filter) { this.filter = f; }
   zoomBy(f: number) { this.zoom = Math.min(1.5, Math.max(0.7, this.zoom / f)); }
   nudge(yaw: number, pitch: number) { this.yaw += yaw; this.pitch = Math.max(-1, Math.min(1, this.pitch + pitch)); }
@@ -85,6 +92,7 @@ export class FlatView implements WorldView {
   setWorld(world: ControlWorld) {
     const first = !this.world;
     this.world = world;
+    this.presenceAt = -Infinity;
     this.anomalies = anomaliesOf(world, this.now());
     if (first && world.writers.length) {
       const lon = Math.atan2(world.writers.reduce((a, w) => a + Math.sin(w.lon * DEG), 0), world.writers.reduce((a, w) => a + Math.cos(w.lon * DEG), 0));
@@ -196,13 +204,24 @@ export class FlatView implements WorldView {
     // land, lit by the real sun
     const sv = geo(sun.lat, sun.lon);
     const dot = Math.max(1.2, R / 260);
+    // (the rotation is rot() inlined, and the colour is cached and its alpha set separately:
+    // building and parsing a fresh rgba() string for every dot on every frame was most of the cost)
+    const cyaw = Math.cos(this.yaw), syaw = Math.sin(this.yaw), cpit = Math.cos(this.pitch), spit = Math.sin(this.pitch);
     for (const p of this.land) {
-      const q = this.rot(p);
-      if (q[2] <= 0) continue;
+      const z1 = -p[0] * syaw + p[2] * cyaw;
+      const qz = p[1] * spit + z1 * cpit;
+      if (qz <= 0) continue;
+      const qx = p[0] * cyaw + p[2] * syaw, qy = p[1] * cpit - z1 * spit;
       const day = clamp01((p[0] * sv[0] + p[1] * sv[1] + p[2] * sv[2] + 0.1) / 0.4);
-      ctx.fillStyle = `rgba(${Math.round(92 + 118 * day)},${Math.round(110 + 115 * day)},${Math.round(225 + 30 * day)},${(0.42 + 0.5 * day) * (0.45 + 0.55 * q[2])})`;
-      ctx.fillRect(cx + q[0] * R - dot / 2, cy - q[1] * R - dot / 2, dot, dot);
+      const r = Math.round(92 + 118 * day), g = Math.round(110 + 115 * day), b = Math.round(225 + 30 * day);
+      const key = (r << 16) | (g << 8) | b;
+      let rgb = this.rgb.get(key);
+      if (!rgb) { rgb = `rgb(${r},${g},${b})`; this.rgb.set(key, rgb); }
+      ctx.globalAlpha = reveal * (0.42 + 0.5 * day) * (0.45 + 0.55 * qz);
+      ctx.fillStyle = rgb;
+      ctx.fillRect(cx + qx * R - dot / 2, cy - qy * R - dot / 2, dot, dot);
     }
+    ctx.globalAlpha = reveal;
 
     // arcs and packets
     const ws = this.world?.writers ?? [];
@@ -241,10 +260,14 @@ export class FlatView implements WorldView {
 
     // people
     this.screen.clear();
+    if (ms - this.presenceAt > 1000 || this.presence.length !== ws.length) {
+      const now = this.now();
+      this.presence = ws.map((w) => { const ph = presenceOf(w, now).phase; return ph === 'on' || ph === 'late'; });
+      this.presenceAt = ms;
+    }
     ws.forEach((w, i) => {
       const q = pts[i];
-      const pres = presenceOf(w, this.now());
-      const on = pres.phase === 'on' || pres.phase === 'late';
+      const on = this.presence[i];
       const vis = clamp01((q[2] - 0.05) / 0.2);
       const x = cx + q[0] * R, y = cy - q[1] * R;
       this.screen.set(`w:${w.id}`, { x, y, vis: vis * (on ? 1 : 0.5) });
@@ -267,14 +290,20 @@ export class FlatView implements WorldView {
       }
     }
     ctx.globalAlpha = 1;
-    for (const { key, el } of this.bindings) {
-      const p = this.screen.get(key);
-      if (!p) { el.style.setProperty('--vis', '0'); el.dataset.off = '1'; continue; }
-      el.style.transform = `translate3d(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px, 0)`;
-      el.style.setProperty('--vis', (p.vis * reveal).toFixed(3));
-      el.dataset.off = p.vis * reveal < 0.05 ? '1' : '';
+    for (const b of this.bindings) {
+      const p = this.screen.get(b.key);
+      if (!p) { this.setVis(b, '0', '1'); continue; }
+      b.el.style.transform = `translate3d(${p.x.toFixed(1)}px, ${p.y.toFixed(1)}px, 0)`;
+      this.setVis(b, (p.vis * reveal).toFixed(3), p.vis * reveal < 0.05 ? '1' : '');
     }
+    this.opts.onFrame?.(ms);
   };
+
+  /** A label's fade, written only when it changes (as opacity: it restyles the label alone, not all inside it). */
+  private setVis(b: { el: HTMLElement; vis?: string }, vis: string, off: string) {
+    if (b.vis !== vis) { b.vis = vis; b.el.style.opacity = vis; }
+    if (b.el.dataset.off !== off) b.el.dataset.off = off;
+  }
 
   private pick(x: number, y: number): Target | null {
     const r = this.canvas.getBoundingClientRect();

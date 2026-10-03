@@ -13,6 +13,8 @@ import {
 import { AnomalyReadout, CityStatement, ClientStatement, ProjectStatement, SystemPanel, TimezonePanel, WriterReadout, WriterReadoutMobile } from './readouts';
 import { Palette, type Command } from './Palette';
 import { People } from './People';
+import { geoStore } from './geo';
+import { blinkDim, breathe } from './pulse';
 import { sound } from './sound';
 
 /** World refreshes: when the last good one landed, clock skew, how many succeeded of how many tried, and whether the latest did. */
@@ -35,7 +37,7 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
   const [hover, setHover] = useState<Target | null>(null);
   const [palette, setPalette] = useState(false);
   const [people, setPeople] = useState(false);
-  const [geo, setGeo] = useState<{ lat: number; lon: number } | null>(null);
+  const [geo] = useState(geoStore);
   const [now, setNow] = useState(() => new Date());
   const [offset, setOffset] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -44,16 +46,34 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
   const [transmissions, setTransmissions] = useState<Transmission[]>([]);
   const reduced = useMemo(() => window.matchMedia('(prefers-reduced-motion: reduce)').matches, []);
   const narrow = useMedia('(max-width: 760px)');
-  const handlers = useRef({ select: (_t: Target | null) => {}, arrive: (_h: CcHandoff) => {}, overscroll: (_d: 'in' | 'out') => {} });
+  const handlers = useRef({ select: (_t: Target | null) => {}, arrive: (_h: CcHandoff) => {}, cancel: (_h: CcHandoff) => {}, overscroll: (_d: 'in' | 'out') => {} });
 
   // ── the view: WebGL, or the flat 2D globe if the device can't ────────────
   const [flat, setFlat] = useState(false);
   // bumped when the GPU drops the WebGL context: a new canvas and engine take over
   const [gen, setGen] = useState(0);
+  // the brand dot breathes and pressure marks blink in step with the view's frames (see pulse.ts);
+  // with reduced motion they stay still
+  const brandDot = useRef<{ el: HTMLElement | null; v: string }>({ el: null, v: '' });
+  const markStart = useRef(new WeakMap<Element, number>());
+  const onFrame = useCallback((ms: number) => {
+    const b = brandDot.current;
+    if (!b.el?.isConnected) { b.el = document.querySelector<HTMLElement>('.cc-brand .mark i'); b.v = ''; }
+    const v = breathe(ms).toFixed(3);
+    if (b.el && v !== b.v) { b.v = v; b.el.style.setProperty('--breathe', v); }
+    for (const el of document.querySelectorAll<HTMLElement>('.anomaly-mark i')) {
+      let start = markStart.current.get(el);
+      if (start === undefined) { start = ms; markStart.current.set(el, ms); }
+      const dim = blinkDim(ms - start) ? '1' : '';
+      if ((el.dataset.dim ?? '') !== dim) { if (dim) el.dataset.dim = dim; else delete el.dataset.dim; }
+    }
+  }, []);
+
   useEffect(() => {
     const el = canvas.current!;
     const common = {
       reducedMotion: reduced,
+      onFrame: reduced ? undefined : onFrame,
       onSelect: (t: Target | null) => handlers.current.select(t),
       onHover: (t: Target | null) => { setHover(t); if (t) sound.hover(); },
       onArrive: (h: CcHandoff) => handlers.current.arrive(h),
@@ -70,7 +90,10 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
       const tier = q === 'high' || q === 'medium' || q === 'low' ? q : undefined;
       v = flat
         ? new FlatView(el, common)
-        : new Engine(el, { ...common, tier, onPointerGeo: throttle((g: { lat: number; lon: number } | null) => setGeo(g), 80), onOverscroll: (d) => handlers.current.overscroll(d), onContextLost: () => setGen((n) => n + 1) });
+        : new Engine(el, {
+          ...common, tier, onPointerGeo: throttle(geo.set, 80), onCancel: (h) => handlers.current.cancel(h),
+          onOverscroll: (d) => handlers.current.overscroll(d), onContextLost: () => setGen((n) => n + 1),
+        });
     } catch {
       if (!flat) setFlat(true);
       return;
@@ -89,22 +112,41 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
   const focusIn = focus?.kind === 'writer' ? world.writers.some((w) => w.id === focus.id) : true;
   useEffect(() => { view?.setFocus(focus); }, [view, focus, focusIn]);
   useEffect(() => { view?.setFilter(filter); }, [view, filter]);
-  useEffect(() => { view?.setTimeOffset(offset); }, [view, offset]);
+  useEffect(() => { view?.setTimeOffset(offset, playing); }, [view, offset, playing]);
 
-  // the clock: once a second, or smoothly while the sun is being followed
+  // the clock: once a second, and not while the tab is hidden (nothing is drawn; it catches up
+  // the moment the tab is back). While the sun is being followed, the play loop below moves it.
+  const restOffset = playing ? null : offset;
   useEffect(() => {
-    const t = setInterval(() => setNow(new Date(Date.now() + offset)), playing ? 100 : 1000);
-    setNow(new Date(Date.now() + offset));
-    return () => clearInterval(t);
-  }, [offset, playing]);
+    if (restOffset === null) return;
+    let t: ReturnType<typeof setInterval> | undefined;
+    const tick = () => setNow(new Date(Date.now() + restOffset));
+    const sync = () => {
+      clearInterval(t);
+      t = undefined;
+      if (document.hidden) return;
+      tick();
+      t = setInterval(tick, 1000);
+    };
+    sync();
+    document.addEventListener('visibilitychange', sync);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', sync); };
+  }, [restOffset]);
+  // following the sun: the offset and the clock move together, one render a frame
+  // (every other change to the offset also stops the play, so this never overwrites one)
+  const offsetRef = useRef(offset);
+  useEffect(() => { offsetRef.current = offset; }, [offset]);
   useEffect(() => {
     if (!playing) return;
     let last = performance.now();
+    let o = offsetRef.current;
     let raf = 0;
     const step = (t: number) => {
-      const dt = t - last;
+      o += (t - last) * 3600;
       last = t;
-      setOffset((o) => { const n = o + dt * 3600; return n > 12 * 3_600_000 ? -12 * 3_600_000 : n; });
+      if (o > 12 * 3_600_000) o = -12 * 3_600_000;
+      setOffset(o);
+      setNow(new Date(Date.now() + o));
       raf = requestAnimationFrame(step);
     };
     raf = requestAnimationFrame(step);
@@ -150,6 +192,13 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
       return ts.map((x) => (x === t ? { ...x, phase: 'arrived' } : x));
     });
   };
+  // a packet dropped before it landed (another took its arc, or the arc went): its label goes with it
+  handlers.current.cancel = (h) => {
+    setTransmissions((ts) => {
+      const t = [...ts].reverse().find((x) => x.h.id === h.id && x.phase === 'transit');
+      return t ? ts.filter((x) => x !== t) : ts;
+    });
+  };
   handlers.current.overscroll = (d) => {
     if (d === 'in' && hover?.kind === 'writer') select(hover);
     else if (d === 'out') {
@@ -185,7 +234,8 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
     // carry on through the list across refreshes, starting near the most recent
     if (replayAt.current < 0) replayAt.current = Math.max(0, list.length - 3);
     const replay = world.source.kind === 'workspace';
-    const run = () => { play(list[replayAt.current % list.length], replay); replayAt.current++; };
+    // a hidden tab's view is stopped: replays would only queue up and land all at once on return
+    const run = () => { if (document.hidden) return; play(list[replayAt.current % list.length], replay); replayAt.current++; };
     const first = setTimeout(run, mode === 'signals' ? 600 : 2400);
     const every = setInterval(run, mode === 'signals' ? 3800 : 12500);
     return () => { clearTimeout(first); clearInterval(every); };

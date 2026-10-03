@@ -4,7 +4,7 @@
 // the mission orbit, and the deadline orbits.
 
 import { Vector3 } from 'three';
-import { bandOf, type ControlWorld } from '../../../../shared/control';
+import { bandOf, type CcProject, type ControlWorld } from '../../../../shared/control';
 import { geoToVec3, hashString, mulberry } from './math';
 
 export interface GraphNode {
@@ -170,4 +170,10 @@ export function deadlineOrbit(deadline: string | null, at: Date): { radius: numb
   const b = bandOf(deadline, at);
   const [lo, hi] = BAND_RADII[b.band];
   return { radius: lo + (hi - lo) * Math.min(1, Math.max(0, b.t)), band: b.band, hours: b.hours };
+}
+
+/** A project on the deadline orbits at a moment: closer, and twice as fast, in its last day. */
+export function projectOrbit(p: Pick<CcProject, 'deadline' | 'archived'>, at: Date): { orbitR: number; orbitW: number; urgent: boolean } {
+  const d = deadlineOrbit(p.deadline, at);
+  return { orbitR: d.radius, orbitW: 0.05 / Math.pow(d.radius, 1.5) * (d.hours < 24 ? 2 : 1), urgent: !p.archived && d.hours < 24 };
 }
