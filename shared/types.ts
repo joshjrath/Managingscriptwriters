@@ -4,6 +4,11 @@ import type { Clock, DayMode, ISODate } from './dates';
 import type { WorkspaceTheme } from './palettes';
 import type { Milestone, Progress, Role, ScriptStatus, Stage } from './workflow';
 
+/** Every change request carries `x-scale-media: 1`; a page can't send it cross-site without a CORS preflight, which the server never grants. */
+export const CSRF_HEADER = 'x-scale-media';
+/** Sent while the page is in Recording mode (its `startedAt`), so a change never lands on the real workspace once the practice copy is gone. */
+export const RECORDING_HEADER = 'x-scale-recording';
+
 export type Priority = 'low' | 'normal' | 'high' | 'urgent';
 export const PRIORITIES: Priority[] = ['low', 'normal', 'high', 'urgent'];
 export const PRIORITY_LABEL: Record<Priority, string> = { low: 'Low', normal: 'Normal', high: 'High', urgent: 'Urgent' };
@@ -135,6 +140,9 @@ export interface SessionMode {
   /** a practice copy of the workspace: anything goes, and it's all thrown away when turned off */
   recording: { startedAt: string } | null;
 }
+
+/** The error code when a page in Recording mode tries a change after its practice copy is gone (a restart, or the copy was closed). */
+export const RECORDING_ENDED = 'recording_ended';
 
 export interface Bootstrap {
   /** who the site is showing (the viewed person while viewing as someone) */

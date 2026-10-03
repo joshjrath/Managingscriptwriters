@@ -30,7 +30,7 @@ A batch reads e.g. **"20 / 45 drafts ready · 44%"**, with approved and delivere
 ### Workflow rules (enforced on the server)
 
 - Writers move their own scripts: start, submit for review, withdraw, and confirm delivery.
-- **Admins and managers have exactly the same permissions** (Admin is a label; the first account is the admin). Only they approve, request revisions (a note is required), assign/reassign, change deadlines or script counts, move shoots, and manage clients, briefings, the team and settings.
+- **Admins and managers have the same permissions for the work** (the first account is the admin). Only they approve, request revisions (a note is required), assign/reassign, change deadlines or script counts, move shoots, and manage clients, briefings, the team and settings. The admin-only tools (Master log, View as, Recording mode, the Control Center and its editors, the colour palette) are the exception, and so that they stay admin-only, **only an admin can make someone an admin or change an admin’s role, password or access** (a manager can’t promote themselves or reset the admin’s password), and there is always at least one active admin.
 - **A script must be approved before it can be marked delivered** — no action, bulk selection or quick control can skip review.
 - **A manager's delivery covers the whole batch:** when an admin or manager confirms delivery (from My work, the batch page's “Mark delivered” block or the checklist), every approved script in the batch is delivered, whoever wrote it. The other writers are notified and the history says it was on their behalf. A writer's confirmation covers only their own scripts.
 - Partial review is normal: approve ten scripts while the rest are still being written.
@@ -209,9 +209,10 @@ Any other Node 22 host with PostgreSQL works the same way (`railway.json` is kep
 
 ## Security
 
-- Passwords hashed with scrypt; sessions are random tokens (only their hash is stored) in an HTTP-only, SameSite=Lax cookie, `Secure` in production; sign-in is rate-limited.
+- Passwords hashed with scrypt; sessions are random tokens (only their hash is stored) in an HTTP-only, SameSite=Lax cookie, `Secure` in production; sign-in is rate-limited per address and per account (the address comes from the proxy's `X-Forwarded-For`; set `TRUST_PROXY` to the number of proxies in front of the server to stop clients choosing it).
 - Every permission is checked on the server; the UI only hides what you can't do.
 - State-changing requests need a custom header and a same-origin `Origin`, which blocks cross-site request forgery.
+- Recording mode fails closed: a page that's still recording when its practice copy is gone (a restart, or the copy was closed) gets an error instead of making the change on the real workspace.
 - Uploaded files are stored in Postgres (up to 25 MB each), served only to signed-in users while a live resource references them, with `nosniff`, a sandboxing CSP, and forced download for anything that isn't a PDF, image or plain text. Executables are refused.
 - Nothing is reported as saved until the server confirms it; failed saves show the error in place with the form still filled in.
 

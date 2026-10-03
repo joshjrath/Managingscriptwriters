@@ -7,10 +7,10 @@ import {
   SESSION_COOKIE, setSessionCookie, sha, validatePassword, verifyPassword,
 } from '../auth';
 import { assigneesOf, batchLink, loadSettings, loadUsers, logActivity, notify, rulesOf, type Ctx } from '../core';
-import { compressRanges, isManager } from '../../shared/workflow';
+import { compressRanges, isAdmin, isManager } from '../../shared/workflow';
 import { auditEvent } from '../audit';
 import type { Me, UserSummary } from '../../shared/types';
-import { conflict, HttpError, notFound, parse, zs } from '../http';
+import { conflict, forbidden, HttpError, notFound, parse, zs } from '../http';
 import { computeDeadlines, isValidTimeZone } from '../../shared/dates';
 import { findCity, shiftOf, zoneFor } from '../../shared/cities';
 import { fmtDate } from '../../shared/format';
@@ -40,16 +40,15 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.post('/api/auth/login', async (req, reply) => {
     const input = parse(z.object({ email, password }), req.body);
-    const key = `${req.ip}|${input.email}`;
-    checkThrottle(key);
+    checkThrottle(req.ip, input.email);
     const u = await db.one<{ id: number; password_hash: string; active: boolean }>(`select id, password_hash, active and removed_at is null as active from users where lower(email) = $1`, [input.email]);
     const ok = u ? await verifyPassword(input.password, u.password_hash) : await verifyPassword(input.password, 'scrypt$AAAA$AAAA');
     if (!u || !ok || !u.active) {
-      recordFailure(key);
+      recordFailure(req.ip, input.email);
       await auditEvent(db, { userId: u?.id ?? null, kind: 'auth', summary: u ? (ok ? 'Tried to sign in to a deactivated account' : 'Failed sign-in (wrong password)') : `Failed sign-in for unknown email ${input.email}`, ip: req.ip });
       throw new HttpError(401, u && ok && !u.active ? 'This account has been deactivated' : 'Email or password is incorrect');
     }
-    clearFailures(key);
+    clearFailures(req.ip, input.email);
     await auditEvent(db, { userId: u.id, kind: 'auth', summary: 'Signed in', ip: req.ip });
     const token = await createSession(db, u.id);
     setSessionCookie(reply, token, ctx.secureCookies);
@@ -57,9 +56,12 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   app.post('/api/auth/logout', async (req, reply) => {
-    if (req.user) await auditEvent(db, { userId: req.user.id, kind: 'auth', summary: 'Signed out', ip: req.ip });
     await destroySession(db, req.cookies[SESSION_COOKIE]);
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
+    // the person actually signed in, not whoever they were viewing as; and a
+    // failed log entry must never leave them signed in
+    const who = req.realUser ?? req.user;
+    if (who) await auditEvent(db, { userId: who.id, kind: 'auth', summary: 'Signed out', ip: req.ip }).catch((err: unknown) => req.log.warn({ err }, 'master log write failed'));
     return { ok: true };
   });
 
@@ -70,6 +72,8 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const pwErr = validatePassword(input.password);
     if (pwErr) throw new HttpError(400, pwErr, { password: pwErr });
     const id = await db.tx(async (t) => {
+      // one setup at a time: two at once would both see no users and both create an admin
+      await t.query(`select pg_advisory_xact_lock(724002)`);
       const n = await t.one<{ n: number }>(`select count(*) as n from users`);
       if ((n?.n ?? 0) > 0) throw conflict('Setup has already been completed');
       const row = await t.one<{ id: number }>(
@@ -117,18 +121,31 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
   const ROLES = ['owner', 'manager', 'writer'] as const;
   const MANAGER_ROLES = `role in ('owner', 'manager')`;
 
-  /** The team list. Admins and managers also see temporary passwords that haven't been replaced yet. */
+  /**
+   * The team list. Admins and managers also see temporary passwords that haven't been replaced
+   * yet, except an admin's, which only admins see (reading it back would be signing in as them).
+   */
   async function teamFor(me: Me): Promise<UserSummary[]> {
     const users = await loadUsers(db);
     if (!isManager(me.role)) return users;
     const temps = new Map((await db.query<{ id: number; temp_password: string }>(`select id, temp_password from users where temp_password is not null and removed_at is null`)).map((r) => [r.id, r.temp_password]));
-    return users.map((u) => ({ ...u, tempPassword: temps.get(u.id) ?? null }));
+    return users.map((u) => ({ ...u, tempPassword: isAdmin(u.role) && !isAdmin(me.role) ? null : temps.get(u.id) ?? null }));
   }
 
   async function keepAManager(excludeId: number) {
     const others = await db.one<{ n: number }>(`select count(*) as n from users where ${MANAGER_ROLES} and active and removed_at is null and id <> $1`, [excludeId]);
     if (!others?.n) throw new HttpError(400, 'Keep at least one active admin or manager');
   }
+
+  async function keepAnAdmin(excludeId: number) {
+    const others = await db.one<{ n: number }>(`select count(*) as n from users where role = 'owner' and active and removed_at is null and id <> $1`, [excludeId]);
+    if (!others?.n) throw new HttpError(400, 'Keep at least one active admin');
+  }
+
+  // Managers manage the team, but the admin-only tools (Master log, View as,
+  // Recording mode, the Control Center) only mean something if a manager can't
+  // become an admin, or sign in as one, on their own.
+  const ADMIN_ONLY = 'Only an admin can make someone an admin, or change an admin’s role, password or access';
 
   app.get('/api/users', async (req) => {
     return { users: await teamFor(requireUser(req)) };
@@ -172,6 +189,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       name: zs.name('Name', 120), email, role: z.enum(ROLES), password, capacityPerDay: capacity,
       city, timezone, workStart: hour.optional(), workEnd: hour.optional(),
     }), req.body);
+    if (isAdmin(input.role) && !isAdmin(me.role)) throw forbidden(ADMIN_ONLY);
     const place = placeColumns(input);
     const err = validatePassword(input.password);
     if (err) throw new HttpError(400, err, { password: err });
@@ -211,7 +229,12 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       `select role, active, name, removed_at, city, country, timezone from users where id = $1`, [id],
     );
     if (!u || u.removed_at) throw notFound('Team member');
+    // the form sends every field, so only actual changes count
+    const roleChange = input.role !== undefined && input.role !== u.role;
+    const accessChange = (input.active !== undefined && input.active !== u.active) || !!input.password;
+    if (!isAdmin(me.role) && ((roleChange && (isAdmin(input.role!) || isAdmin(u.role))) || (isAdmin(u.role) && accessChange))) throw forbidden(ADMIN_ONLY);
     if (isManager(u.role) && (input.role === 'writer' || input.active === false)) await keepAManager(id);
+    if (isAdmin(u.role) && (roleChange || input.active === false)) await keepAnAdmin(id);
     if (input.active === false && id === me.id) throw new HttpError(400, 'You can’t deactivate your own account');
     const set: Record<string, unknown> = {};
     if (input.name !== undefined) set.name = input.name;
@@ -255,7 +278,9 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     if (id === me.id) throw new HttpError(400, 'You can’t remove yourself');
     const u = await db.one<{ role: 'owner' | 'manager' | 'writer'; name: string; removed_at: string | null }>(`select role, name, removed_at from users where id = $1`, [id]);
     if (!u || u.removed_at) throw notFound('Team member');
+    if (isAdmin(u.role) && !isAdmin(me.role)) throw forbidden(ADMIN_ONLY);
     if (isManager(u.role)) await keepAManager(id);
+    if (isAdmin(u.role)) await keepAnAdmin(id);
     let target: { id: number; name: string } | null = null;
     if (reassignTo) {
       if (reassignTo === id) throw new HttpError(400, 'Choose someone else to take over their scripts');

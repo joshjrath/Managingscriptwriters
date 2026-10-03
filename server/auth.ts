@@ -104,28 +104,49 @@ export function setSessionCookie(reply: FastifyReply, token: string, secure: boo
   });
 }
 
-// ── login throttling (per process) ───────────────────────────────────────
+// ── sign-in throttling (per process) ─────────────────────────────────────
+// Wrong passwords are counted per address and account (8 in 15 minutes) and
+// per account from any address (30): the address comes from a proxy header
+// and can be forged, the account can't. Used by sign-in and Control Center
+// clearance, which check the same passwords.
 
-const attempts = new Map<string, { count: number; until: number }>();
 const WINDOW_MS = 15 * 60_000;
-const MAX_ATTEMPTS = 8;
+const LIMIT = { address: 8, account: 30 };
+const MAX_ENTRIES = 5_000;
+type Counters = Map<string, { count: number; until: number }>;
+const byAddress: Counters = new Map();
+const byAccount: Counters = new Map();
 
-export function checkThrottle(key: string): void {
-  const a = attempts.get(key);
-  if (a && a.until > Date.now() && a.count >= MAX_ATTEMPTS) {
+const over = (map: Counters, key: string, limit: number) => {
+  const a = map.get(key);
+  return !!a && a.until > Date.now() && a.count >= limit;
+};
+
+function count(map: Counters, key: string) {
+  const now = Date.now();
+  if (map.size >= MAX_ENTRIES) {
+    for (const [k, v] of map) if (v.until < now) map.delete(k);
+    // still full: forget the oldest, never everything at once
+    for (const k of map.keys()) { if (map.size < MAX_ENTRIES) break; map.delete(k); }
+  }
+  const a = map.get(key);
+  if (!a || a.until < now) map.set(key, { count: 1, until: now + WINDOW_MS });
+  else a.count++;
+}
+
+/** `account` is whatever identifies who is being signed in to: an email, or `#id` for a signed-in person. */
+export function checkThrottle(ip: string, account: string): void {
+  if (over(byAddress, `${ip}|${account}`, LIMIT.address) || over(byAccount, account, LIMIT.account)) {
     throw new HttpError(429, 'Too many sign-in attempts. Try again in 15 minutes.');
   }
 }
 
-export function recordFailure(key: string): void {
-  // forget expired entries so failed sign-ins from many addresses can't grow this without limit
-  if (attempts.size > 500) for (const [k, v] of attempts) if (v.until < Date.now()) attempts.delete(k);
-  if (attempts.size > 5_000) attempts.clear();
-  const a = attempts.get(key);
-  if (!a || a.until < Date.now()) attempts.set(key, { count: 1, until: Date.now() + WINDOW_MS });
-  else a.count++;
+export function recordFailure(ip: string, account: string): void {
+  count(byAddress, `${ip}|${account}`);
+  count(byAccount, account);
 }
 
-export function clearFailures(key: string): void {
-  attempts.delete(key);
+/** After a successful sign-in. The account-wide count stays, so someone else's guesses aren't forgiven. */
+export function clearFailures(ip: string, account: string): void {
+  byAddress.delete(`${ip}|${account}`);
 }

@@ -31,6 +31,11 @@ export interface Config {
   reminderIntervalMinutes: number;
   port: number;
   host: string;
+  /**
+   * Which proxies to believe about the client's address (sign-in throttling and the Master log use it):
+   * true (the default) trusts every X-Forwarded-For hop; a number trusts that many hops from the server.
+   */
+  trustProxy: boolean | number;
   /** the first manager account, created when there are no users yet */
   manager: { email: string; password: string; name: string; reset: boolean };
 }
@@ -78,6 +83,7 @@ export function loadConfig(
     reminderIntervalMinutes: number('REMINDER_INTERVAL_MINUTES', 10, 1, 24 * 60),
     port: number('PORT', 3001, 1, 65535),
     host: set(env.HOST) ?? '0.0.0.0',
+    trustProxy: trustProxy(set(env.TRUST_PROXY), warn),
     // pasted values often carry a trailing space or newline
     manager: {
       email: env.MANAGER_EMAIL?.trim().toLowerCase() ?? '',
@@ -86,4 +92,13 @@ export function loadConfig(
       reset: truthy(env.MANAGER_RESET_PASSWORD),
     },
   };
+}
+
+function trustProxy(raw: string | undefined, warn: (msg: string) => void): boolean | number {
+  if (raw === undefined || raw === 'true') return true;
+  if (raw === 'false') return false;
+  const hops = Number(raw);
+  if (Number.isInteger(hops) && hops >= 0 && hops <= 10) return hops;
+  warn(`TRUST_PROXY=${JSON.stringify(raw)} is not true, false or a number of proxy hops; trusting every hop`);
+  return true;
 }

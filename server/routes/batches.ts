@@ -764,6 +764,9 @@ export async function applyScriptAction(
     if (action === 'approve' || action === 'request_revisions') {
       // one review record per decision, tied to the document when there is one
       let submissionId = opts.review?.submissionId ?? null;
+      if (submissionId && !(await t.one(`select 1 from submissions where id = $1 and batch_id = $2`, [submissionId, batchId]))) {
+        throw new HttpError(400, 'That document isn’t part of this batch. Refresh and try again.');
+      }
       if (!submissionId) {
         const cur = await t.query<{ script_id: number; submission_id: number }>(
           `select script_id, max(submission_id) as submission_id from submission_scripts where script_id in (${inIds}) group by script_id`, idList,

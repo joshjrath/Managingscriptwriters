@@ -13,6 +13,7 @@ import { buildApp } from '../server/app';
 import { openDb, type Db } from '../server/db';
 import { MIGRATIONS } from '../server/schema';
 import { runReminders } from '../server/reminders';
+import { dropLeftoverSandboxes } from '../server/recording';
 import type { Ctx } from '../server/core';
 import type { BatchDetail, Dashboard, Moment } from '../shared/types';
 
@@ -34,8 +35,8 @@ let app: FastifyInstance;
 let ctx: Ctx;
 
 type Res<T = any> = { status: number; body: T; headers: Record<string, unknown> };
-async function call<T = any>(method: string, url: string, opts: { body?: unknown; cookie?: string; noCsrf?: boolean } = {}): Promise<Res<T>> {
-  const headers: Record<string, string> = {};
+async function call<T = any>(method: string, url: string, opts: { body?: unknown; cookie?: string; noCsrf?: boolean; headers?: Record<string, string> } = {}): Promise<Res<T>> {
+  const headers: Record<string, string> = { ...opts.headers };
   if (!opts.noCsrf) headers['x-scale-media'] = '1';
   if (opts.cookie) headers.cookie = opts.cookie;
   if (opts.body !== undefined) headers['content-type'] = 'application/json';
@@ -376,6 +377,36 @@ describe('permissions are enforced on the server', () => {
     expect((await call('POST', '/api/notifications/read', { cookie, body: { all: true }, noCsrf: true })).status).toBe(403);
     const bad = await call('POST', '/api/auth/login', { body: { email: 'sarah@scale.test', password: 'wrong-password' } });
     expect(bad.status).toBe(401);
+    // an encoded path reaches the same route, so it gets the same checks
+    expect((await call('POST', '/%61pi/notifications/read', { cookie, body: { all: true }, noCsrf: true })).status).toBe(403);
+    expect((await call('GET', '/%61pi/auth/status')).headers['cache-control']).toBe('no-store');
+    // an opaque origin is refused, not a server error
+    const opaque = await call('POST', '/api/notifications/read', { cookie, body: { all: true }, headers: { origin: 'null' } });
+    expect(opaque.status).toBe(403);
+  });
+
+  it('limits wrong passwords per account, whatever address they claim to come from', async () => {
+    const guess = (i: number) => call('POST', '/api/auth/login', { body: { email: 'target@scale.test', password: `guess-${i}-wrong` }, headers: { 'x-forwarded-for': `203.0.113.${i}` } });
+    for (let i = 0; i < 30; i++) expect((await guess(i)).status).toBe(401);
+    expect((await guess(99)).status).toBe(429);
+    // other accounts are unaffected
+    expect((await call('POST', '/api/auth/login', { body: { email: 'sarah@scale.test', password: 'writer-password-1' }, headers: { 'x-forwarded-for': '203.0.113.99' } })).status).toBe(200);
+  });
+});
+
+describe('client owners', () => {
+  it('must be active team members, and an owner who has left can stay', async () => {
+    expect((await manager.patch(`/api/clients/${acmeId}`, { ownerId: 999999 })).status).toBe(400);
+    expect((await manager.post('/api/clients', { name: 'Ownerless Co', ownerId: 999999 })).status).toBe(400);
+    expect((await manager.patch(`/api/clients/${acmeId}`, { ownerId: ids.marcus })).status).toBe(200);
+    await db.query(`update users set active = false where id = $1`, [ids.marcus]);
+    try {
+      // the edit form resends the owner it already has
+      expect((await manager.patch(`/api/clients/${acmeId}`, { ownerId: ids.marcus, description: 'Outdoor gear' })).status).toBe(200);
+    } finally {
+      await db.query(`update users set active = true where id = $1`, [ids.marcus]);
+    }
+    expect((await manager.patch(`/api/clients/${acmeId}`, { ownerId: ids.josh })).status).toBe(200);
   });
 });
 
@@ -439,7 +470,37 @@ describe('team: roles, temporary passwords, removal', () => {
     const mia = as(await login('mia@scale.test', 'manager-temp-1'));
     // a manager can do owner things, including managing the team and settings
     expect((await mia.patch('/api/settings', { reminderLeadDays: 3 })).status).toBe(200);
-    expect((await mia.post('/api/users', { name: 'Owner Two', email: 'o2@scale.test', role: 'owner', password: 'owner-two-temp' })).status).toBe(200);
+    expect((await mia.post('/api/users', { name: 'Mo Writer', email: 'mo@scale.test', role: 'writer', password: 'writer-temp-mo' })).status).toBe(200);
+    // …except making admins, which only an admin can do
+    expect((await mia.post('/api/users', { name: 'Owner Two', email: 'o2@scale.test', role: 'owner', password: 'owner-two-temp' })).status).toBe(403);
+    expect((await manager.post('/api/users', { name: 'Owner Two', email: 'o2@scale.test', role: 'owner', password: 'owner-two-temp' })).status).toBe(200);
+  });
+
+  it('only an admin can make or change an admin, so the admin-only tools stay admin-only', async () => {
+    const mia = as(await login('mia@scale.test', 'manager-temp-1'));
+    const team = async (who = manager) => (await who.get('/api/users')).body.users as any[];
+    const miaId = (await team()).find((u) => u.email === 'mia@scale.test').id;
+    // a manager can't promote themselves, or take over, lock out, demote or remove the admin
+    expect((await mia.patch(`/api/users/${miaId}`, { role: 'owner' })).status).toBe(403);
+    expect((await mia.patch(`/api/users/${ids.josh}`, { password: 'taken-over-123' })).status).toBe(403);
+    expect((await mia.patch(`/api/users/${ids.josh}`, { active: false })).status).toBe(403);
+    expect((await mia.patch(`/api/users/${ids.josh}`, { role: 'manager' })).status).toBe(403);
+    expect((await mia.post(`/api/users/${ids.josh}/remove`, {})).status).toBe(403);
+    expect((await mia.get('/api/audit')).status).toBe(403);
+    expect((await manager.get('/api/bootstrap')).status).toBe(200); // still signed in
+    // the edit form sends every field: an unchanged role and access still save
+    expect((await mia.patch(`/api/users/${ids.josh}`, { name: 'Josh Rath', role: 'owner', active: true, capacityPerDay: null })).status).toBe(200);
+    // an admin's temporary password is only readable by admins
+    const o2 = (await team()).find((u) => u.email === 'o2@scale.test');
+    expect(o2.tempPassword).toBe('owner-two-temp');
+    expect((await team(mia)).find((u) => u.id === o2.id).tempPassword).toBeNull();
+    expect((await team(mia)).find((u) => u.email === 'mo@scale.test').tempPassword).toBe('writer-temp-mo');
+    // an admin can, and there's always an admin left
+    expect((await manager.patch(`/api/users/${o2.id}`, { role: 'manager' })).status).toBe(200);
+    const last = await manager.patch(`/api/users/${ids.josh}`, { role: 'manager' });
+    expect(last.status).toBe(400);
+    expect(last.body.error.message).toMatch(/at least one active admin/);
+    expect((await manager.patch(`/api/users/${o2.id}`, { role: 'owner' })).status).toBe(200);
   });
 
   it('keeps the temporary password readable for managers until the person sets their own', async () => {
@@ -545,6 +606,11 @@ describe('scripts sent as one document', () => {
     const subs = (v2.body.batch as BatchDetail).submissions;
     expect(subs.map((s) => [s.version, s.state])).toEqual([[1, 'superseded'], [2, 'in_review']]);
     expect(subs[1].previousId).toBe(subs[0].id);
+    // the reviewed document has to be this batch's
+    const foreign = await db.one<{ id: number }>(`select id from submissions where batch_id <> $1 order by id limit 1`, [docBatch]);
+    for (const submissionId of [999999, ...(foreign ? [foreign.id] : [])]) {
+      expect((await manager.post(`/api/batches/${docBatch}/review`, { action: 'approve', scriptIds: detail.scripts.map((s) => s.id), submissionId })).status).toBe(400);
+    }
     const ok = await manager.post(`/api/batches/${docBatch}/review`, { action: 'approve', scriptIds: detail.scripts.map((s) => s.id), submissionId: subs[1].id });
     expect(ok.status).toBe(200);
     const after = ok.body.batch as BatchDetail;
@@ -990,6 +1056,44 @@ describe('view as and recording mode', () => {
     const log = (await manager.get('/api/audit?kind=auth')).body.entries.map((e: any) => e.summary);
     expect(log.some((s: string) => s.startsWith('Turned on Recording mode'))).toBe(true);
     expect(log.some((s: string) => s.startsWith('Turned off Recording mode'))).toBe(true);
+  });
+
+  it('a page still in Recording mode can’t change the real workspace once its practice copy is gone', async () => {
+    const on = await manager.post('/api/admin/recording/start');
+    const marked = (method: string, url: string, body?: unknown) =>
+      call(method, url, { cookie: manager.cookie, body, headers: { 'x-scale-recording': on.body.recording.startedAt } });
+    expect((await marked('POST', '/api/clients', { name: 'Practice Two' })).status).toBe(200);
+    // the copy goes away under the page (a restart, or it was closed to make room)
+    await manager.post('/api/admin/recording/stop');
+    const r = await marked('POST', '/api/clients', { name: 'Lost Practice' });
+    expect(r.status).toBe(409);
+    expect(r.body.error.code).toBe('recording_ended');
+    expect(await db.one(`select id from clients where name = 'Lost Practice'`)).toBeUndefined();
+    // reading still works, so the page can learn recording has ended
+    const boot = await marked('GET', '/api/bootstrap');
+    expect(boot.status).toBe(200);
+    expect(boot.body.mode.recording).toBeNull();
+    // and a page that isn't recording is unaffected
+    expect((await manager.post('/api/clients', { name: 'Real After Practice' })).status).toBe(200);
+  });
+
+  it('signing out while viewing as someone is logged as the admin', async () => {
+    const josh = as(await login('josh@scale.test', 'correct-horse-battery'));
+    await josh.post('/api/admin/view-as', { userId: ids.sarah });
+    expect((await josh.post('/api/auth/logout')).status).toBe(200);
+    expect((await josh.get('/api/bootstrap')).status).toBe(401);
+    const latest = (await manager.get('/api/audit?kind=auth')).body.entries.find((e: any) => e.summary === 'Signed out');
+    expect(latest).toMatchObject({ userId: ids.josh });
+  });
+
+  it('cleans up only its own leftover practice copies, never other schemas', async () => {
+    await db.query(`create schema records`);
+    await db.query(`create table records.keep (id int)`);
+    await db.query(`create schema rec_0123456789ab`);
+    expect(await dropLeftoverSandboxes(db)).toBe(1);
+    const left = (await db.query<{ s: string }>(`select nspname as s from pg_namespace where nspname in ('records', 'rec_0123456789ab')`)).map((r) => r.s);
+    expect(left).toEqual(['records']);
+    await db.query(`drop schema records cascade`);
   });
 
   it('signing out ends recording mode', async () => {

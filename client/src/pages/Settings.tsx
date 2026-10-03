@@ -211,13 +211,13 @@ function TeamPanel() {
                 : u.id !== me.id && u.active ? <span className="muted" style={{ fontSize: 12 }}>Set their own password</span> : null}
               <div className="row-flex s2">
                 <Button variant="sm ghost" onClick={() => setEditing(u)}>Edit</Button>
-                {u.id !== me.id && <Button variant="sm ghost" onClick={() => setRemoving(u)}>Remove</Button>}
+                {u.id !== me.id && (isAdmin(me.role) || !isAdmin(u.role)) && <Button variant="sm ghost" onClick={() => setRemoving(u)}>Remove</Button>}
               </div>
             </div>
           </div>
         ))}
       </div>
-      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>Admins and managers have the same permissions. The temporary password stays copyable here until the person sets their own. Writers only show as over capacity when a capacity is set.</p>
+      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>Admins and managers have the same permissions, except the admin-only tools; only an admin can add an admin or change an admin’s role, password or access. The temporary password stays copyable here until the person sets their own. Writers only show as over capacity when a capacity is set.</p>
       {adding && <PersonDialog onClose={() => setAdding(false)} />}
       {editing && <PersonDialog user={editing} onClose={() => setEditing(null)} />}
       {sharing && <ShareDetails name={firstName(sharing.name)} onClose={() => setSharing(null)}
@@ -334,6 +334,8 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
   const [tz, setTz] = useState(user?.timezone ?? findCity(user?.city ?? '')?.timezone ?? '');
   const [hours, setHours] = useState<[number, number]>(user?.workHours ?? [9, 18]);
   const [share, setShare] = useState<string | null>(null);
+  // only an admin can make someone an admin, or change an admin's role, password or access (the server enforces it)
+  const adminLocked = !!user && isAdmin(user.role) && !isAdmin(me.role);
   const place = { city: city.trim() || null, ...(city.trim() ? { timezone: tz || undefined, workStart: hours[0], workEnd: hours[1] % 24 || 24 } : {}) };
   const save = useSave(() => user
     ? api(`/api/users/${user.id}`, { method: 'PATCH', body: { name, role, active, capacityPerDay: capacity ? Number(capacity) : null, password: password || undefined, ...place } })
@@ -359,22 +361,22 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
         <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} /></Field>
         <Field label="Email" htmlFor={ids.e} error={f.email} help={user ? 'Email can’t be changed here.' : 'They sign in with this.'}><input className="input" type="email" value={email} disabled={!!user} onChange={(e) => setEmail(e.target.value)} {...inputProps(ids.e, f.email)} /></Field>
-        <Field label="Role" htmlFor={ids.r} help="Admins and managers can do everything. Writers see everything but can only update their own scripts, blockers, resources and deliveries.">
-          <select className="select" id={ids.r} value={role} onChange={(e) => setRole(e.target.value as Role)}><option value="writer">Writer</option><option value="manager">Manager</option><option value="owner">Admin</option></select>
+        <Field label="Role" htmlFor={ids.r} help={adminLocked ? 'Only an admin can change an admin’s role, password or access.' : 'Admins and managers can do everything. Writers see everything but can only update their own scripts, blockers, resources and deliveries.'}>
+          <select className="select" id={ids.r} value={role} disabled={adminLocked} onChange={(e) => setRole(e.target.value as Role)}><option value="writer">Writer</option><option value="manager">Manager</option>{(isAdmin(me.role) || role === 'owner') && <option value="owner">Admin</option>}</select>
         </Field>
         <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates and over-capacity warnings."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>
         <PlaceFields optional city={city} tz={tz} hours={hours} f={f}
           onChange={(v) => { if (save.error) save.reset(); if (v.city !== undefined) setCity(v.city); if (v.tz !== undefined) setTz(v.tz); if (v.hours) setHours(v.hours); }} />
-        <Field label={user ? 'Reset password' : 'Temporary password'} optional={!!user} htmlFor={ids.p} error={f.password} help={user ? 'Leave empty to keep their password. Set one and you’ll get a message to send them.' : 'At least 10 characters. After saving you’ll get a ready-to-send message with this and the sign-in link.'}>
+        {!adminLocked && <Field label={user ? 'Reset password' : 'Temporary password'} optional={!!user} htmlFor={ids.p} error={f.password} help={user ? 'Leave empty to keep their password. Set one and you’ll get a message to send them.' : 'At least 10 characters. After saving you’ll get a ready-to-send message with this and the sign-in link.'}>
           <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>
             <input className="input" type="text" autoComplete="new-password" spellCheck={false} value={password} onChange={(e) => setPassword(e.target.value)} {...inputProps(ids.p, f.password)} />
             <Button variant="sm" icon={<RefreshCw aria-hidden />} onClick={() => setPassword(generatePassword())}>Generate</Button>
           </div>
-        </Field>
+        </Field>}
         {user?.tempPassword && (
           <div className="banner"><KeyRound aria-hidden /><div className="txt"><b>Temporary password: <span className="tnum" style={{ userSelect: 'all' }}>{user.tempPassword}</span></b><span>They haven’t set their own password yet.</span></div></div>
         )}
-        {user && user.id !== me.id && (
+        {user && user.id !== me.id && !adminLocked && (
           <label className="check"><input type="checkbox" checked={!active} onChange={(e) => setActive(!e.target.checked)} />Deactivate (signs them out; their history is kept)</label>
         )}
         {user && !active && user.active && <div className="banner yellow"><AlertTriangle aria-hidden /><div className="txt"><b>Reassign their open scripts after deactivating.</b></div></div>}

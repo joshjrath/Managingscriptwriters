@@ -16,7 +16,7 @@ describe('configuration', () => {
     expect(config).toMatchObject({
       production: false, databaseUrl: undefined, dataDirSet: false, dataDir: 'data/pglite', allowSetup: true,
       uploadLimitBytes: 25 * 1024 * 1024, controlData: 'workspace', staticDir: '/app/client',
-      remindersEnabled: true, reminderIntervalMinutes: 10, port: 3001, host: '0.0.0.0',
+      remindersEnabled: true, reminderIntervalMinutes: 10, port: 3001, host: '0.0.0.0', trustProxy: true,
     });
     expect(warnings).toEqual([]);
   });
@@ -41,6 +41,14 @@ describe('configuration', () => {
   it('serves no client when STATIC_DIR is set but empty (the dev runner)', () => {
     expect(load({ STATIC_DIR: '' }, { staticDir: '/app/client' }).config.staticDir).toBeUndefined();
     expect(load({ STATIC_DIR: '/srv/client' }, { staticDir: '/app/client' }).config.staticDir).toBe('/srv/client');
+  });
+
+  it('trusts every proxy hop unless told how many there are', () => {
+    expect(load({ TRUST_PROXY: '1' }).config.trustProxy).toBe(1);
+    expect(load({ TRUST_PROXY: 'false' }).config.trustProxy).toBe(false);
+    const odd = load({ TRUST_PROXY: 'render' });
+    expect(odd.config.trustProxy).toBe(true);
+    expect(odd.warnings).toHaveLength(1);
   });
 
   it('shows the simulated Control Center only when asked for exactly', () => {

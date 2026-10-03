@@ -20,9 +20,9 @@ import { z } from 'zod';
 import { migrate, type Db } from './db';
 import { requireUser, SESSION_COOKIE, sha, userForToken } from './auth';
 import { auditEvent } from './audit';
-import { HttpError, parse, zs } from './http';
+import { HttpError, isApiRequest, parse, requestPath, zs } from './http';
 import type { Ctx } from './core';
-import type { Me, SessionMode } from '../shared/types';
+import { RECORDING_ENDED, RECORDING_HEADER, type Me, type SessionMode } from '../shared/types';
 import { isAdmin, ROLE_LABEL } from '../shared/workflow';
 
 const IDLE_MS = 6 * 3600_000;
@@ -62,8 +62,18 @@ const SKIP = new Set(['schema_migrations', 'sessions']);
  * File contents stay on the real workspace (see the /api/files route), and only the
  * newest Master log entries are copied. Closing the copy drops the schema.
  */
-export const SANDBOX_PREFIX = 'rec_';
+const SANDBOX_PREFIX = 'rec_';
+/** A practice copy's schema name, exactly: `rec_` and 12 hex digits. Nothing else is ever dropped as one. */
+const SANDBOX_NAME = '^rec_[0-9a-f]{12}$';
 const AUDIT_ROWS = 500;
+
+/** Drops practice copies left behind by an earlier process (they live only as long as the process that made them). */
+export async function dropLeftoverSandboxes(db: Db): Promise<number> {
+  const rows = await db.query<{ s: string }>(`select nspname as s from pg_namespace where nspname ~ $1`, [SANDBOX_NAME]);
+  const names = rows.map((r) => r.s).filter((s) => new RegExp(SANDBOX_NAME).test(s));
+  for (const s of names) await db.query(`drop schema if exists "${s}" cascade`);
+  return names.length;
+}
 
 export async function cloneDb(src: Db): Promise<Db> {
   const schema = `${SANDBOX_PREFIX}${randomBytes(6).toString('hex')}`;
@@ -141,11 +151,7 @@ const QUIET: Record<string, unknown> = {
 export function registerRecording(app: FastifyInstance, ctx: Ctx, realDb: Db, als: AsyncLocalStorage<Db>) {
   const modes = new Map<string, Mode>();
   // Practice copies live only as long as this process; drop any left behind by a restart.
-  {
-    void realDb.query<{ s: string }>(`select nspname as s from pg_namespace where nspname like '${SANDBOX_PREFIX}%'`)
-      .then((rows) => Promise.all(rows.map((r) => realDb.query(`drop schema if exists ${r.s} cascade`))))
-      .catch((err) => app.log.warn({ err }, 'could not clean up old practice copies'));
-  }
+  dropLeftoverSandboxes(realDb).catch((err: unknown) => app.log.warn({ err }, 'could not clean up old practice copies'));
 
   const closeSandbox = async (m: Mode) => {
     const sb = m.sandbox;
@@ -176,7 +182,7 @@ export function registerRecording(app: FastifyInstance, ctx: Ctx, realDb: Db, al
 
   // Who's asking, and which workspace they're working in.
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
-    if (!req.url.startsWith('/api/')) return;
+    if (!isApiRequest(req)) return;
     const token = req.cookies[SESSION_COOKIE];
     const real = await userForToken(realDb, token);
     req.user = real;
@@ -186,6 +192,15 @@ export function registerRecording(app: FastifyInstance, ctx: Ctx, realDb: Db, al
     if (!real || !token) return;
     const key = sha(token);
     const m = modes.get(key);
+    // The page thinks it's recording but its practice copy is gone (the server restarted, or the copy
+    // was closed to make room or after hours idle): refuse changes rather than make them for real.
+    const claimed = req.headers[RECORDING_HEADER];
+    if (typeof claimed === 'string' && claimed && m?.sandbox?.startedAt !== claimed && req.method !== 'GET' && req.method !== 'HEAD') {
+      const path = requestPath(req);
+      if (!path.startsWith('/api/admin/') && !path.startsWith('/api/auth/')) {
+        throw new HttpError(409, 'Recording mode has ended (the practice copy was closed), so nothing was saved. Reload the page to carry on.', undefined, RECORDING_ENDED);
+      }
+    }
     if (!m) return;
     if (!isAdmin(real.role)) { await closeSandbox(m); modes.delete(key); return; }
     if (m.sandbox) {
@@ -198,7 +213,7 @@ export function registerRecording(app: FastifyInstance, ctx: Ctx, realDb: Db, al
     }
     // Viewing the real workspace as someone: look, don't touch.
     if (req.viewingAs && !req.recording) {
-      const path = req.url.split('?')[0];
+      const path = requestPath(req);
       if (path.startsWith('/api/admin/') || path === '/api/auth/logout') return;
       if (req.method === 'GET' && path === '/api/moments') return reply.send([]);
       if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -212,7 +227,7 @@ export function registerRecording(app: FastifyInstance, ctx: Ctx, realDb: Db, al
   // these admin controls always use the real workspace. Entered again just
   // before the handler in case body parsing lost the context.
   const enter = (req: FastifyRequest, _reply: FastifyReply, done: () => void) => {
-    const path = req.url.split('?')[0];
+    const path = requestPath(req);
     const sb = req.recording && req.realUser ? modes.get(sha(req.cookies[SESSION_COOKIE] ?? ''))?.sandbox : null;
     if (sb && !path.startsWith('/api/auth/') && !path.startsWith('/api/admin/')) als.run(sb.db, done);
     else done();
@@ -295,7 +310,7 @@ export function registerRecording(app: FastifyInstance, ctx: Ctx, realDb: Db, al
 
   // Signing out ends both.
   app.addHook('onResponse', async (req) => {
-    if (req.url.split('?')[0] !== '/api/auth/logout') return;
+    if (requestPath(req) !== '/api/auth/logout') return;
     const key = sha(req.cookies[SESSION_COOKIE] ?? '');
     const m = modes.get(key);
     if (m) { await closeSandbox(m); modes.delete(key); }

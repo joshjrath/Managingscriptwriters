@@ -7,7 +7,7 @@ import '@fontsource-variable/inter';
 import '@fontsource-variable/bricolage-grotesque';
 import './styles/tokens.css';
 import './styles/app.css';
-import { api, queryClient } from './api';
+import { api, queryClient, setRecordingMode } from './api';
 import type { Bootstrap } from '../../shared/types';
 import { AppShell } from './components/Shell';
 import { ErrorState, ToastProvider } from './components/ui';
@@ -42,6 +42,10 @@ function Gate() {
     window.addEventListener('auth:lost', lost);
     return () => window.removeEventListener('auth:lost', lost);
   }, [status]);
+
+  // while recording, every request names its practice copy, so nothing reaches the real workspace once it's gone
+  const recordingSince = boot.data?.mode?.recording?.startedAt ?? null;
+  useEffect(() => { setRecordingMode(recordingSince); }, [recordingSince]);
 
   // the admin's colour palette, for everyone (the sign-in page included)
   const theme = boot.data ? boot.data.settings.theme : status.data?.theme;

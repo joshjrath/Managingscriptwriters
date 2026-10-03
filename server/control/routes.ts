@@ -79,19 +79,19 @@ export function registerControlRoutes(app: FastifyInstance, ctx: Ctx) {
     }), req.body);
     const real = req.realUser;
     if (!real && !input.email) throw new HttpError(400, 'Identify yourself first', { email: 'Enter your email' });
-    const key = `control|${req.ip}|${real ? `#${real.id}` : input.email}`;
+    const account = real ? `#${real.id}` : input.email!;
     try {
-      checkThrottle(key);
+      checkThrottle(req.ip, account);
     } catch {
       throw new HttpError(429, 'Channel locked. Try again in 15 minutes.', undefined, 'throttled');
     }
     const op = await verifyOperator(sessions(), real ? { id: real.id } : { email: input.email! }, input.password);
     if (!op || !op.active) {
-      recordFailure(key);
+      recordFailure(req.ip, account);
       await auditEvent(sessions(), { userId: real?.id ?? null, kind: 'auth', summary: `Failed Control Center authorization${real ? '' : ` for ${input.email}`}`, ip: req.ip });
       throw new HttpError(401, 'Key rejected', undefined, 'rejected');
     }
-    clearFailures(key);
+    clearFailures(req.ip, account);
     if (!isAdmin(op.role)) {
       await auditEvent(sessions(), { userId: op.id, kind: 'denied', summary: 'Tried to open the Control Center — only admins can', ip: req.ip });
       throw new HttpError(403, 'Clearance is limited to admins', undefined, 'clearance');

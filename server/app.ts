@@ -9,7 +9,7 @@ import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { HttpError } from './http';
+import { HttpError, isApiRequest } from './http';
 import type { Ctx } from './core';
 import { registerAccountRoutes } from './routes/account';
 import { registerTodoRoutes } from './todos';
@@ -29,24 +29,27 @@ import { registerControlRoutes } from './control/routes';
 import { registerEditorRoutes } from './control/editors';
 import { registerUploadCleanup } from './files';
 import type { Db } from './db';
+import { CSRF_HEADER } from '../shared/types';
 
-export const CSRF_HEADER = 'x-scale-media';
-
-export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: boolean } = {}): Promise<FastifyInstance> {
-  const app = Fastify({ logger: opts.logger ?? false, trustProxy: true, bodyLimit: 1024 * 1024 });
+export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: boolean; trustProxy?: boolean | number } = {}): Promise<FastifyInstance> {
+  const hops = opts.trustProxy ?? true;
+  // a hop count trusts that many proxies nearest the server (what proxy-addr does with a number)
+  const trustProxy = typeof hops === 'number' ? (_addr: string, i: number) => i < hops : hops;
+  const app = Fastify({ logger: opts.logger ?? false, trustProxy, bodyLimit: 1024 * 1024 });
   await app.register(cookie);
   await app.register(multipart, { limits: { fileSize: ctx.uploadLimitBytes, files: 1, fields: 20 } });
 
   app.decorateRequest('user', null);
 
   app.addHook('onRequest', async (req) => {
-    if (!req.url.startsWith('/api/')) return;
+    if (!isApiRequest(req)) return;
     // Mutations must come from our own page: a custom header can't be sent
     // cross-site without a CORS preflight, which this server never grants.
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       if (req.headers[CSRF_HEADER] !== '1') throw new HttpError(403, 'Request blocked. Reload the page and try again.');
       const origin = req.headers.origin;
-      if (origin && req.headers.host && new URL(origin).host !== req.headers.host) throw new HttpError(403, 'Cross-site request blocked');
+      // an opaque origin ("null", from a sandboxed frame or a file) is never ours
+      if (origin && req.headers.host && originHost(origin) !== req.headers.host) throw new HttpError(403, 'Cross-site request blocked');
     }
   });
 
@@ -63,7 +66,7 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
     reply.header('X-Content-Type-Options', 'nosniff');
     reply.header('Referrer-Policy', 'same-origin');
     reply.header('X-Frame-Options', 'DENY');
-    if (req.url.startsWith('/api/')) {
+    if (isApiRequest(req)) {
       if (!reply.hasHeader('Cache-Control')) reply.header('Cache-Control', 'no-store');
     } else if (!reply.hasHeader('Content-Security-Policy')) {
       reply.header('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
@@ -125,10 +128,14 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
     });
     // the client is a single-page app: unknown paths get index.html
     app.setNotFoundHandler((req, reply) => {
-      if (req.method !== 'GET' || req.url.startsWith('/api/')) return reply.status(404).send({ error: { message: 'Not found' } });
+      if (req.method !== 'GET' || isApiRequest(req)) return reply.status(404).send({ error: { message: 'Not found' } });
       return reply.type('text/html').header('Cache-Control', 'no-cache').send(indexHtml);
     });
   }
 
   return app;
+}
+
+function originHost(origin: string): string | null {
+  try { return new URL(origin).host; } catch { return null; }
 }

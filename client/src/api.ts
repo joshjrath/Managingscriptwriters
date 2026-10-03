@@ -3,6 +3,7 @@
 // the server has answered successfully.
 
 import { QueryClient, useMutation, useQueryClient } from '@tanstack/react-query';
+import { CSRF_HEADER, RECORDING_HEADER } from '../../shared/types';
 
 export class ApiError extends Error {
   constructor(
@@ -17,9 +18,14 @@ export class ApiError extends Error {
 
 type Body = Record<string, unknown> | unknown[] | undefined;
 
+/** The practice copy this page is working in, while Recording mode is on (see RECORDING_HEADER). */
+let recordingStartedAt: string | null = null;
+export function setRecordingMode(startedAt: string | null) { recordingStartedAt = startedAt; }
+
 export async function api<T>(path: string, opts: { method?: string; body?: Body; form?: FormData; signal?: AbortSignal } = {}): Promise<T> {
   const method = opts.method ?? (opts.body || opts.form ? 'POST' : 'GET');
-  const headers: Record<string, string> = { 'x-scale-media': '1' };
+  const headers: Record<string, string> = { [CSRF_HEADER]: '1' };
+  if (recordingStartedAt) headers[RECORDING_HEADER] = recordingStartedAt;
   if (opts.body !== undefined) headers['content-type'] = 'application/json';
   let res: Response;
   try {

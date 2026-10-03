@@ -41,7 +41,7 @@ async function main() {
     notesReader: config.anthropicApiKey ? claudeNotesReader() : null,
     controlData: config.controlData,
   };
-  const app = await buildApp(ctx, { staticDir: config.staticDir, logger: config.production });
+  const app = await buildApp(ctx, { staticDir: config.staticDir, logger: config.production, trustProxy: config.trustProxy });
 
   const stopReminders = config.remindersEnabled ? startReminderScheduler(ctx, config.reminderIntervalMinutes, (m) => console.log(m)) : () => {};
 

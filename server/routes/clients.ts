@@ -160,10 +160,19 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     };
   });
 
+  /** A client's internal owner must be an active team member (one who has since left can stay on). */
+  async function checkOwner(ownerId: number | null | undefined, current: number | null = null) {
+    if (ownerId == null || ownerId === current) return;
+    if (!(await db.one(`select 1 from users where id = $1 and active and removed_at is null`, [ownerId]))) {
+      throw new HttpError(400, 'Choose an active team member', { ownerId: 'Choose an active team member' });
+    }
+  }
+
   app.post('/api/clients', async (req) => {
     const me = requireManager(req);
     const input = parse(clientCreate, req.body);
     await duplicateName(db, input.name);
+    await checkOwner(input.ownerId);
     const settings = await loadSettings(db);
     const clock = await clockFor(ctx, settings);
     const out = await db.tx(async (t) => {
@@ -192,6 +201,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const input = parse(clientPatch, req.body);
     if (input.name) await duplicateName(db, input.name, id);
+    if (input.ownerId !== undefined) await checkOwner(input.ownerId, (await db.one<{ owner_id: number | null }>(`select owner_id from clients where id = $1`, [id]))?.owner_id);
     const set: Record<string, unknown> = {};
     if (input.name !== undefined) set.name = input.name;
     if (input.ownerId !== undefined) set.owner_id = input.ownerId;

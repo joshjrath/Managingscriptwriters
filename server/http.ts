@@ -1,6 +1,19 @@
-// Errors and validation helpers shared by every route.
+// Errors, validation and request helpers shared by every route and hook.
 
+import type { FastifyRequest } from 'fastify';
 import { z } from 'zod';
+
+/**
+ * The request's path, decoded and without its query string: what the router
+ * matched. Hooks use this rather than the raw URL so an encoded path such as
+ * `/%61pi/…` can't reach an API route while skipping the API's checks.
+ */
+export function requestPath(req: FastifyRequest): string {
+  const raw = req.url.split('?')[0];
+  try { return decodeURIComponent(raw); } catch { return raw; }
+}
+
+export const isApiRequest = (req: FastifyRequest) => requestPath(req).startsWith('/api/');
 
 export class HttpError extends Error {
   constructor(
