@@ -279,8 +279,7 @@ export function TimezonePanel({ world, now, offset, playing, onScrub, onPlay, on
 export function SystemPanel({ world, stats, sync, anomalies, onLock, onPeople }: {
   world: ControlWorld; stats: EngineStats; sync: SyncInfo; anomalies: Anomaly[]; onLock: () => void; onPeople: () => void;
 }) {
-  const [, force] = useState(0);
-  useEffect(() => { const t = setInterval(() => force((n) => n + 1), 1000); return () => clearInterval(t); }, []);
+  // no timer of its own: Experience's clock re-renders this once a second, and rests while the tab is hidden
   const since = Math.floor((Date.now() - sync.at) / 1000);
   const zones = new Set(world.writers.map((w) => w.timezone)).size;
   const rows: [string, string, string?][] = [

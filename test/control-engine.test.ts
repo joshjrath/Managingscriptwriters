@@ -12,6 +12,8 @@ import { ORBIT_EXTENT, orbitExtent, orbitReaches } from '../client/src/control/e
 import { landMask } from '../client/src/control/engine/landmask';
 import { buildAtmosphere, buildCore, buildShell } from '../client/src/control/engine/globe';
 import { NodesLayer } from '../client/src/control/engine/nodes';
+import { sleepFor } from '../client/src/control/engine/pacing';
+import { readFileSync } from 'node:fs';
 
 const AT = new Date('2026-09-30T05:24:18Z');
 
@@ -118,5 +120,35 @@ describe('the globe', () => {
     expect(nodes.glyphs.instanceMatrix.updateRanges).toEqual([{ start: 0, count: 5 * 16 }]);
     expect((nodes.cores.geometry.getAttribute('position') as BufferAttribute).updateRanges).toEqual([{ start: 0, count: 5 * 3 }]);
     expect((nodes.beams.geometry.getAttribute('position') as BufferAttribute).updateRanges).toEqual([{ start: 0, count: 5 * 2 * 3 }]);
+  });
+});
+
+describe('frame pacing', () => {
+  it('asks for every display refresh while drawing at 30 or 60 fps', () => {
+    expect(sleepFor(1000 / 30, 0, 1000, 1001, true)).toBe(0);
+    expect(sleepFor(1000 / 60, 0, 1000, 1001, false)).toBe(0);
+  });
+
+  it('sleeps until just before the next frame while the window is in the back (15 fps)', () => {
+    // drew at 1000: the next frame is due at about 1066.7, so wake at about 1062.7
+    expect(sleepFor(1000 / 15, 1000, 1000, 1002, true)).toBeCloseTo(1000 + 1000 / 15 - 4 - 1002, 9);
+    // a callback right after waking, with the previous refresh's time: ask for the next refresh, don't sleep again
+    expect(sleepFor(1000 / 15, 1000, 1050, 1063.5, false)).toBe(0);
+  });
+});
+
+describe('Control Center styles', () => {
+  const css = readFileSync(new URL('../client/src/control/control.css', import.meta.url), 'utf8');
+
+  it('keep the city suggestions above the fields under them', () => {
+    expect(css).toMatch(/\.cc-people \.form > \.city \{ z-index: [1-9]/);
+    expect(css).not.toMatch(/\.cc-people \.form > \* \{[^}]*animation:[^}]*(both|forwards)/);
+  });
+
+  it('run no endless animations in the live view (they keep the screen redrawing at full rate)', () => {
+    for (const sel of ['.anomaly-mark i {', '.cc-brand .mark i b {']) {
+      const rule = css.slice(css.indexOf(sel), css.indexOf('}', css.indexOf(sel)));
+      expect(rule, sel).not.toMatch(/infinite/);
+    }
   });
 });

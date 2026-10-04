@@ -50,7 +50,7 @@ export function Top({ world, now, offset, soundOn, onSound, onPalette, onPeople,
   return (
     <header className="cc-top">
       <div className="cc-brand">
-        <div className="mark"><i aria-hidden /><span className="full">SCALE MEDIA <span style={{ color: 'var(--faint)' }}>/</span> </span>CONTROL CENTER</div>
+        <div className="mark"><i aria-hidden><b /></i><span className="full">SCALE MEDIA <span style={{ color: 'var(--faint)' }}>/</span> </span>CONTROL CENTER</div>
         <div className={`sub${world.source.kind === 'simulated' ? ' sim' : ''}`}>{world.version} · <b>{world.source.label}</b></div>
       </div>
       <div className="cc-clock">
@@ -256,19 +256,23 @@ function GeoReadout({ geo: store }: { geo: GeoStore }) {
 
 // ── the signal feed ──────────────────────────────────────────────────────
 
+/** the most rows the feed shows (in signals; six elsewhere) */
+const FEED_MAX = 14;
+
 export function Feed({ world, expanded, operatorTz }: { world: ControlWorld; expanded: boolean; operatorTz: string }) {
   const [held, setHeld] = useState(false);
   const [shown, setShown] = useState(0);
   const frozen = useRef<ControlWorld['activity'] | null>(null);
   const all = (held && frozen.current) || world.activity;
   if (!held) frozen.current = world.activity;
-  // on arrival the feed streams in, one transmission at a time
+  // on arrival the feed streams in, one transmission at a time, up to the most any mode shows
+  // (streaming the rest would re-render for rows that are never on screen)
   useEffect(() => {
-    if (shown >= all.length) return;
+    if (shown >= Math.min(all.length, FEED_MAX)) return;
     const t = setTimeout(() => setShown((n) => n + 1), shown === 0 ? 900 : 260);
     return () => clearTimeout(t);
   }, [shown, all.length]);
-  const limit = expanded ? 14 : 6;
+  const limit = expanded ? FEED_MAX : 6;
   const items = all.slice(0, Math.min(limit, shown));
   return (
     <aside className={`cc-feed${held ? ' held' : ''}`} onMouseEnter={() => setHeld(true)} onMouseLeave={() => setHeld(false)} aria-label="Signal feed">

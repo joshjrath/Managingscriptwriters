@@ -15,6 +15,7 @@ import { ArcsLayer, type ArcDef } from './arcs';
 import { computeLayouts, deadlineOrbit, projectOrbit, type Layouts } from './layout';
 import { clamp01, damp, dampAngle, DEG, easeInOutCubic, easeOutCubic, geoToVec3, smoothstep, vec3ToGeo, wrapAngle } from './math';
 import { NodesLayer, RING } from './nodes';
+import { sleepFor } from './pacing';
 import { ObjectsLayer, type Edge, type EndRef, type SpaceObject } from './objects';
 import { lower, pickTier, TIERS, type Tier } from './quality';
 import { buildBandField, buildDial, DIAL, MAX_LANES, Orbit, orbitExtent, orbitReaches } from './rings';
@@ -226,6 +227,8 @@ export class Engine implements WorldView {
 
   // loop & input
   private raf = 0;
+  /** the timer the loop sleeps on between frames while the window isn't in front (see pacing.ts) */
+  private sleep = 0;
   private running = false;
   private disposed = false;
   private last = 0;
@@ -302,6 +305,7 @@ export class Engine implements WorldView {
     canvas.addEventListener('pointerleave', this.onLeave);
     canvas.addEventListener('wheel', this.onWheel, { passive: false });
     document.addEventListener('visibilitychange', this.onVisibility);
+    window.addEventListener('focus', this.wake);
     canvas.addEventListener('webglcontextlost', this.onContextLost);
   }
 
@@ -546,7 +550,18 @@ export class Engine implements WorldView {
   stop() {
     this.running = false;
     cancelAnimationFrame(this.raf);
+    clearTimeout(this.sleep);
+    this.sleep = 0;
   }
+
+  /** End a sleep between frames (or the window came to the front): ask for the next frame now. */
+  private wake = () => {
+    clearTimeout(this.sleep);
+    this.sleep = 0;
+    if (!this.running) return;
+    cancelAnimationFrame(this.raf);
+    this.raf = requestAnimationFrame(this.frame);
+  };
 
   dispose() {
     this.disposed = true;
@@ -560,6 +575,7 @@ export class Engine implements WorldView {
     c.removeEventListener('pointerleave', this.onLeave);
     c.removeEventListener('wheel', this.onWheel);
     document.removeEventListener('visibilitychange', this.onVisibility);
+    window.removeEventListener('focus', this.wake);
     c.removeEventListener('webglcontextlost', this.onContextLost);
     this.nodes.dispose();
     this.arcs.dispose();
@@ -654,8 +670,8 @@ export class Engine implements WorldView {
   /**
    * How often to draw right now. Smooth while anything moves (a drag, a camera
    * move, the reveal, a handoff in flight), half that while the planet is just
-   * turning, and slower still while the window isn't in front. Frames that
-   * aren't drawn cost nothing.
+   * turning, and slower still while the window isn't in front. A frame that
+   * isn't drawn still wakes the page, so in the back the loop sleeps instead.
    */
   private frameInterval(): number {
     if (!document.hasFocus()) return 1000 / 15;
@@ -665,10 +681,14 @@ export class Engine implements WorldView {
 
   private frame = (ms: number) => {
     if (!this.running) return;
-    this.raf = requestAnimationFrame(this.frame);
     const interval = this.frameInterval();
     const raw = ms - this.last;
-    if (raw < interval - 3) return;
+    const drew = raw >= interval - 3;
+    // the next frame: the next display refresh, or (window in the back) a sleep until just before it
+    const wait = sleepFor(interval, this.last, ms, performance.now(), drew);
+    if (wait) this.sleep = window.setTimeout(this.wake, wait);
+    else this.raf = requestAnimationFrame(this.frame);
+    if (!drew) return;
     // time follows the clock at any frame rate (only a long stall is cut short)
     const dt = Math.min(0.1, raw / 1000);
     this.last = ms;

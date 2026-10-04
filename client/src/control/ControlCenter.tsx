@@ -41,7 +41,7 @@ export default function ControlCenter() {
   // While the tab is hidden nothing is drawn, so the hum rests too, and comes back with the tab.
   useEffect(() => {
     const wake = () => sound.wake();
-    const shown = () => { if (document.hidden) sound.sleep(); else sound.wake(); };
+    const shown = () => sound.visibility(document.hidden);
     window.addEventListener('pointerdown', wake, { once: true });
     window.addEventListener('keydown', wake, { once: true });
     document.addEventListener('visibilitychange', shown);

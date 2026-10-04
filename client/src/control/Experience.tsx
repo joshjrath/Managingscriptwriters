@@ -52,28 +52,38 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
   const [flat, setFlat] = useState(false);
   // bumped when the GPU drops the WebGL context: a new canvas and engine take over
   const [gen, setGen] = useState(0);
-  // the brand dot breathes and pressure marks blink in step with the view's frames (see pulse.ts);
-  // with reduced motion they stay still
-  const brandDot = useRef<{ el: HTMLElement | null; v: string }>({ el: null, v: '' });
+  // After each frame the view draws: Follow the sun steps (below), and the brand dot breathes and
+  // pressure marks blink (see pulse.ts; with reduced motion they stay still). Each pulse is timed
+  // from when its element appears, as the CSS animations were.
+  const brandDot = useRef<{ el: HTMLElement | null; v: string; start: number }>({ el: null, v: '', start: 0 });
   const markStart = useRef(new WeakMap<Element, number>());
+  const playStep = useRef<((ms: number) => void) | null>(null);
   const onFrame = useCallback((ms: number) => {
+    playStep.current?.(ms);
+    if (reduced) return;
     const b = brandDot.current;
-    if (!b.el?.isConnected) { b.el = document.querySelector<HTMLElement>('.cc-brand .mark i'); b.v = ''; }
-    const v = breathe(ms).toFixed(3);
-    if (b.el && v !== b.v) { b.v = v; b.el.style.setProperty('--breathe', v); }
+    if (!b.el?.isConnected) { b.el = document.querySelector<HTMLElement>('.cc-brand .mark i b'); b.v = ''; b.start = ms; }
+    const v = breathe(ms - b.start).toFixed(3);
+    if (b.el && v !== b.v) {
+      // plain opacity and transform on a real element: they restyle cheaply (a custom property doesn't)
+      b.v = v;
+      const n = Number(v);
+      b.el.style.opacity = (1 - 0.65 * n).toFixed(4);
+      b.el.style.transform = `scale(${(1 - 0.2 * n).toFixed(4)})`;
+    }
     for (const el of document.querySelectorAll<HTMLElement>('.anomaly-mark i')) {
       let start = markStart.current.get(el);
       if (start === undefined) { start = ms; markStart.current.set(el, ms); }
       const dim = blinkDim(ms - start) ? '1' : '';
       if ((el.dataset.dim ?? '') !== dim) { if (dim) el.dataset.dim = dim; else delete el.dataset.dim; }
     }
-  }, []);
+  }, [reduced]);
 
   useEffect(() => {
     const el = canvas.current!;
     const common = {
       reducedMotion: reduced,
-      onFrame: reduced ? undefined : onFrame,
+      onFrame,
       onSelect: (t: Target | null) => handlers.current.select(t),
       onHover: (t: Target | null) => { setHover(t); if (t) sound.hover(); },
       onArrive: (h: CcHandoff) => handlers.current.arrive(h),
@@ -132,25 +142,23 @@ export function Experience({ world, live, returning, sync, onReady, onExit, onLo
     document.addEventListener('visibilitychange', sync);
     return () => { clearInterval(t); document.removeEventListener('visibilitychange', sync); };
   }, [restOffset]);
-  // following the sun: the offset and the clock move together, one render a frame
-  // (every other change to the offset also stops the play, so this never overwrites one)
+  // following the sun: the offset and the clock move together, one render each time the view draws
+  // (not on every display refresh: in between nothing on the globe moves). Every other change to the
+  // offset also stops the play, so this never overwrites one.
   const offsetRef = useRef(offset);
   useEffect(() => { offsetRef.current = offset; }, [offset]);
   useEffect(() => {
     if (!playing) return;
     let last = performance.now();
     let o = offsetRef.current;
-    let raf = 0;
-    const step = (t: number) => {
-      o += (t - last) * 3600;
+    playStep.current = (t: number) => {
+      o += Math.max(0, t - last) * 3600;
       last = t;
       if (o > 12 * 3_600_000) o = -12 * 3_600_000;
       setOffset(o);
       setNow(new Date(Date.now() + o));
-      raf = requestAnimationFrame(step);
     };
-    raf = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(raf);
+    return () => { playStep.current = null; };
   }, [playing]);
 
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `now` is the tick: anomalies are read from the view once a second

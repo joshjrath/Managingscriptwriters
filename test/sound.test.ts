@@ -46,6 +46,22 @@ describe('Control Center sound', () => {
     expect(oscs.filter((o) => o.running)).toHaveLength(4);
   });
 
+  it('does not start a remembered hum when the tab comes back before any touch or key', async () => {
+    const { sound } = await import('../client/src/control/sound');
+    sound.enabled = true; // left on from an earlier visit
+    sound.visibility(true);
+    vi.advanceTimersByTime(1000);
+    sound.visibility(false);
+    expect(made).toHaveLength(0);
+    sound.wake(); // the first touch
+    sound.visibility(true);
+    vi.advanceTimersByTime(1000);
+    expect(made[0].state).toBe('suspended');
+    sound.visibility(false);
+    expect(made[0].state).toBe('running');
+    expect(oscs.filter((o) => o.running)).toHaveLength(4);
+  });
+
   it('plays no tones while asleep, so none pile up for the next wake', async () => {
     const { sound } = await import('../client/src/control/sound');
     sound.setEnabled(true);

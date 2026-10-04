@@ -17,6 +17,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-04-control-center-rests-more',
+    date: '2026-10-04',
+    title: 'The Control Center rests even more',
+    summary: 'Follow-ups from checking the lighter Control Center side by side with the old one.',
+    changes: [
+      { tag: 'improved', text: 'Follow the sun now updates the screen only when the globe moves, about half as often as before, at the same speed.' },
+      { tag: 'improved', text: 'With the Control Center open in a window that isn’t in front, it wakes the computer about 15 times a second instead of 60.' },
+      { tag: 'improved', text: 'The System view and the signal feed no longer keep updating behind the scenes.' },
+      { tag: 'fixed', text: 'Sound left on from an earlier visit no longer starts by itself when you come back to the tab before touching anything.' },
+      { tag: 'fixed', text: 'In People, the city suggestions now show above the time zone and working hours fields, and clicking one picks that city. The fields underneath used to show through the list and take the click.' },
+    ],
+  },
+  {
     id: '2026-10-03-control-center-lighter',
     date: '2026-10-03',
     title: 'The Control Center is lighter on battery and memory',

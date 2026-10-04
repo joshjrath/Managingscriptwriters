@@ -6,6 +6,7 @@
 import { anomaliesOf, presenceOf, subsolarPoint, type Anomaly, type CcHandoff, type ControlWorld } from '../../../../shared/control';
 import { isLand, landMask } from './landmask';
 import { clamp01, DEG, easeInOutCubic, mulberry, wrapAngle } from './math';
+import { sleepFor } from './pacing';
 import type { EngineStats, Filter, Focus, Mode, Target } from './Engine';
 import type { WorldView } from './view';
 
@@ -37,6 +38,8 @@ export class FlatView implements WorldView {
   private goal: { yaw: number; pitch: number; start: number; from: { yaw: number; pitch: number } } | null = null;
   private zoom = 1;
   private raf = 0;
+  /** the timer the loop sleeps on between frames while the window isn't in front (see pacing.ts) */
+  private sleep = 0;
   private running = false;
   private t0 = performance.now();
   private last = 0;
@@ -76,6 +79,7 @@ export class FlatView implements WorldView {
     window.addEventListener('pointermove', this.onMove);
     window.addEventListener('pointerup', this.onUp);
     document.addEventListener('visibilitychange', this.onVisibility);
+    window.addEventListener('focus', this.wake);
   }
 
   private onVisibility = () => { if (document.hidden) this.stop(); else this.start(); };
@@ -133,7 +137,16 @@ export class FlatView implements WorldView {
 
   reveal() { this.revealStart = performance.now(); this.start(); }
   start() { if (!this.running) { this.running = true; this.raf = requestAnimationFrame(this.draw); } }
-  stop() { this.running = false; cancelAnimationFrame(this.raf); }
+  stop() { this.running = false; cancelAnimationFrame(this.raf); clearTimeout(this.sleep); this.sleep = 0; }
+
+  /** End a sleep between frames (or the window came to the front): ask for the next frame now. */
+  private wake = () => {
+    clearTimeout(this.sleep);
+    this.sleep = 0;
+    if (!this.running) return;
+    cancelAnimationFrame(this.raf);
+    this.raf = requestAnimationFrame(this.draw);
+  };
 
   dispose() {
     this.stop();
@@ -141,6 +154,7 @@ export class FlatView implements WorldView {
     window.removeEventListener('pointermove', this.onMove);
     window.removeEventListener('pointerup', this.onUp);
     document.removeEventListener('visibilitychange', this.onVisibility);
+    window.removeEventListener('focus', this.wake);
   }
 
   // ── drawing ────────────────────────────────────────────────────────────
@@ -154,11 +168,15 @@ export class FlatView implements WorldView {
 
   private draw = (ms: number) => {
     if (!this.running) return;
-    this.raf = requestAnimationFrame(this.draw);
     // drawn on the CPU, so only as often as needed: 30 fps unless something is moving, 15 in a window in the back
     const busy = !!this.drag || !!this.goal || this.packets.length > 0 || (this.revealStart >= 0 && ms - this.revealStart < 2000);
     const interval = !document.hasFocus() ? 1000 / 15 : busy ? 1000 / 60 : 1000 / 30;
-    if (ms - this.last < interval - 3) return;
+    const drew = ms - this.last >= interval - 3;
+    // the next frame: the next display refresh, or (window in the back) a sleep until just before it
+    const wait = sleepFor(interval, this.last, ms, performance.now(), drew);
+    if (wait) this.sleep = window.setTimeout(this.wake, wait);
+    else this.raf = requestAnimationFrame(this.draw);
+    if (!drew) return;
     const dt = Math.min(0.1, (ms - (this.last || ms)) / 1000);
     this.last = ms;
     const dpr = Math.min(1.5, window.devicePixelRatio || 1);

@@ -11,6 +11,8 @@ class Sound {
   /** the pending end of a fade-out, and whether the audio has been put to sleep (suspended) */
   private sleepTimer: ReturnType<typeof setTimeout> | null = null;
   private asleep = false;
+  /** whether the hum was playing when the tab was hidden, so showing the tab brings it back */
+  private hiddenAwake = false;
   enabled = false;
 
   constructor() {
@@ -55,6 +57,20 @@ class Sound {
     // once faded out, stop the hum and suspend the audio so the device can rest
     // (kept from the first call if sleep comes twice, so a later wake can always cancel it)
     this.sleepTimer ??= setTimeout(() => { this.sleepTimer = null; this.asleep = true; this.hum?.stop(); this.hum = null; void ctx.suspend(); }, 900);
+  }
+
+  /**
+   * The tab was hidden or shown: rest while hidden, and on return wake only a hum that was playing
+   * (sound left on from an earlier visit still waits for the first touch or key: showing a tab isn't one).
+   */
+  visibility(hidden: boolean) {
+    if (hidden) {
+      this.hiddenAwake ||= this.hum !== null && this.sleepTimer === null;
+      this.sleep();
+    } else if (this.hiddenAwake) {
+      this.hiddenAwake = false;
+      this.wake();
+    }
   }
 
   private startHum(ctx: AudioContext, out: GainNode) {
