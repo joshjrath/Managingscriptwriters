@@ -74,12 +74,13 @@ function FeedDialog({ feed, onClose }: { feed: CalendarFeed | null; onClose: () 
             <li>On the left, under <b>Settings for my calendars</b>, click the calendar (e.g. Joshua Shalamov).</li>
             <li>Scroll to <b>Integrate calendar</b> and copy the <b>Secret address in iCal format</b> (it ends in <code>.ics</code>).</li>
             <li>Paste it below. Keep it private: anyone with the link can see the calendar.</li>
+            <li className="howto-alt">Only have the calendar’s <b>embed code</b>, embed link or email address? Paste that instead. It works if the calendar is public in Google (Access permissions → Make available to public).</li>
           </ol>
         )}
         <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Joshua’s calendar" {...inputProps(ids.n, f.name)} /></Field>
         <Field label={feed ? 'New secret address' : 'Secret address in iCal format'} optional={!!feed} htmlFor={ids.u} error={f.url}
           help={feed ? `Now: ${feed.urlHint}. Paste a new one only if you reset it in Google.` : undefined}>
-          <input className="input" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" autoComplete="off" spellCheck={false} {...inputProps(ids.u, f.url)} />
+          <input className="input" type="text" inputMode="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://calendar.google.com/calendar/ical/…/basic.ics or embed code" autoComplete="off" spellCheck={false} {...inputProps(ids.u, f.url)} />
         </Field>
         <div className="field"><span className="lbl">Colour on the Calendar</span>
           <div className="swatches" role="radiogroup" aria-label="Colour">

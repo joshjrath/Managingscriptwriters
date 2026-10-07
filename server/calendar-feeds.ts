@@ -31,17 +31,46 @@ const toFeed = (r: FeedRow): CalendarFeed => ({
   lastSyncedAt: r.last_synced_at, lastError: r.last_error, eventCount: Number(r.event_count),
 });
 
+const PUBLIC_ICS = (id: string) => `https://calendar.google.com/calendar/ical/${encodeURIComponent(id)}/public/basic.ics`;
+const CAL_ID = /^[^\s@<>"]+@[^\s@<>"]+\.[^\s@<>"]+$/;
+
+/**
+ * A Google Calendar that was shared another way: its embed code (<iframe …>),
+ * embed link (…/calendar/embed?src=…), share link (…?cid=…) or just its
+ * address (name@gmail.com). These give the calendar's public iCal address,
+ * which only works once the calendar is made public in Google.
+ */
+function googleCalendarId(raw: string): string | null {
+  const v = raw.trim();
+  const iframe = /src\s*=\s*["']([^"']+)["']/i.exec(v);
+  const text = (iframe ? iframe[1] : v).replace(/&amp;/g, '&');
+  if (CAL_ID.test(text)) return text;
+  let u: URL;
+  try { u = new URL(text); } catch { return null; }
+  if (!/(^|\.)calendar\.google\.com$/i.test(u.hostname)) return null;
+  const src = u.searchParams.get('src');
+  if (src && CAL_ID.test(src)) return src;
+  const cid = u.searchParams.get('cid');
+  if (cid) {
+    if (CAL_ID.test(cid)) return cid;
+    try { const id = Buffer.from(cid.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8'); if (CAL_ID.test(id)) return id; } catch { /* not base64 */ }
+  }
+  return null;
+}
+
 /** webcal:// is the same link over https. Only public web addresses are allowed. */
 export function normaliseFeedUrl(raw: string): string {
+  const fromGoogle = /\/ical\//i.test(raw) ? null : googleCalendarId(raw);
+  if (fromGoogle) return PUBLIC_ICS(fromGoogle);
   const v = raw.trim().replace(/^webcals?:\/\//i, 'https://');
   let u: URL;
-  try { u = new URL(v); } catch { throw new HttpError(400, 'Paste the full link, starting with https://', { url: 'Paste the full link, starting with https://' }); }
+  try { u = new URL(v); } catch { throw new HttpError(400, 'Paste the calendar’s iCal address, its embed code, or its email address', { url: 'Paste the calendar’s iCal address, its embed code, or its email address' }); }
   if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new HttpError(400, 'Use an https:// link', { url: 'Use an https:// link' });
   const host = u.hostname.toLowerCase();
   const local = host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal') || /^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(host) || host === '[::1]' || host.startsWith('[fc') || host.startsWith('[fd');
   if (local && process.env.CALENDAR_ALLOW_PRIVATE !== '1') throw new HttpError(400, 'That link points to a private address', { url: 'Use the calendar’s public iCal link' });
-  if (/calendar\.google\.com\/calendar\/(u\/\d+\/)?r|calendar\.google\.com\/calendar\/embed/i.test(u.href)) {
-    throw new HttpError(400, 'That’s the page link. In Google Calendar’s settings, copy the “Secret address in iCal format” instead.', { url: 'Use the “Secret address in iCal format” (ends in .ics)' });
+  if (/calendar\.google\.com\/calendar\/(u\/\d+\/)?r(\/|$|\?)/i.test(u.href)) {
+    throw new HttpError(400, 'That’s the Google Calendar page. In the calendar’s settings, copy the “Secret address in iCal format” instead.', { url: 'Use the “Secret address in iCal format” (ends in .ics)' });
   }
   return u.href;
 }
@@ -51,6 +80,9 @@ export type FetchText = (url: string) => Promise<string>;
 /** Reads a feed with a time limit and a size cap, so a wrong link can't hang or flood the server. */
 export const fetchFeed: FetchText = async (url) => {
   const res = await fetch(url, { signal: AbortSignal.timeout(20_000), headers: { accept: 'text/calendar, */*;q=0.5' }, redirect: 'follow' });
+  if ((res.status === 404 || res.status === 401 || res.status === 403) && /\/public\/basic\.ics$/i.test(url)) {
+    throw new Error('That calendar isn’t public, so Google won’t share it this way. Paste its “Secret address in iCal format” instead (recommended), or make the calendar public in its Google settings.');
+  }
   if (res.status === 404 || res.status === 401 || res.status === 403) throw new Error('Google refused the link. It may have been reset: copy the secret address again.');
   if (!res.ok) throw new Error(`The calendar didn’t load (error ${res.status}). It will try again in 15 minutes.`);
   const reader = res.body?.getReader();
@@ -129,7 +161,7 @@ export function registerCalendarFeedRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.post('/api/calendar-feeds', async (req) => {
     const me = requireManager(req);
-    const input = parse(z.object({ name: zs.name('Name', 80), url: z.string().trim().min(1, 'Paste the calendar’s secret iCal address').max(2000), color: color.default('#9CC7F7'), visibility: visibility.default('managers') }), req.body);
+    const input = parse(z.object({ name: zs.name('Name', 80), url: z.string().trim().min(1, 'Paste the calendar’s secret iCal address').max(4000), color: color.default('#9CC7F7'), visibility: visibility.default('managers') }), req.body);
     const url = normaliseFeedUrl(input.url);
     // check the link before saving it, so a wrong one is caught straight away
     let text: string;
@@ -146,7 +178,7 @@ export function registerCalendarFeedRoutes(app: FastifyInstance, ctx: Ctx) {
   app.patch('/api/calendar-feeds/:id', async (req) => {
     requireManager(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
-    const input = parse(z.object({ name: zs.name('Name', 80).optional(), color: color.optional(), visibility: visibility.optional(), url: z.string().trim().min(1).max(2000).optional() }), req.body);
+    const input = parse(z.object({ name: zs.name('Name', 80).optional(), color: color.optional(), visibility: visibility.optional(), url: z.string().trim().min(1).max(4000).optional() }), req.body);
     const f = await db.one<FeedRow>(`select * from calendar_feeds where id = $1`, [id]);
     if (!f) throw notFound('Calendar');
     const set: Record<string, unknown> = {};

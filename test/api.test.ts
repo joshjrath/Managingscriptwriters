@@ -1422,6 +1422,13 @@ describe('synced Google Calendars', () => {
     // the page link and private addresses are refused; writers can't add one
     expect((await manager.post('/api/calendar-feeds', { name: 'Joshua', url: 'https://calendar.google.com/calendar/r' })).body.error.fields.url).toMatch(/Secret address/);
     expect((await manager.post('/api/calendar-feeds', { name: 'Joshua', url: 'http://127.0.0.1/x.ics' })).status).toBe(400);
+    // an embed code (or link, or the address) reads the calendar's public iCal address; a private calendar says what to do
+    const asked: string[] = [];
+    ctx.fetchCalendar = async (u) => { asked.push(u); if (u === URL_OK) return feedText; throw new Error('That calendar isn’t public, so Google won’t share it this way.'); };
+    const embed = await manager.post('/api/calendar-feeds', { name: 'Joshua', url: '<iframe src="https://calendar.google.com/calendar/embed?src=jshalamov4%40gmail.com&amp;ctz=America%2FToronto" style="border: 0"></iframe>' });
+    expect(asked).toEqual(['https://calendar.google.com/calendar/ical/jshalamov4%40gmail.com/public/basic.ics']);
+    expect(embed.status).toBe(400);
+    expect(embed.body.error.fields.url).toMatch(/isn’t public/);
     expect((await sarah.post('/api/calendar-feeds', { name: 'Joshua', url: URL_OK })).status).toBe(403);
     const add = await manager.post('/api/calendar-feeds', { name: 'Joshua’s calendar', url: URL_OK.replace('https://', 'webcal://'), color: '#60D1BE' });
     expect(add.status).toBe(200);

@@ -17,6 +17,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-07-calendar-embed',
+    date: '2026-10-07',
+    title: 'Add a calendar from its embed code',
+    summary: 'Synced calendars also take a Google Calendar’s embed code, embed link or email address.',
+    changes: [
+      { tag: 'improved', text: 'In Settings → Synced calendars, you can paste a Google Calendar’s embed code (<iframe …>), its embed or share link, or just its address (name@gmail.com) instead of the secret iCal address. That works when the calendar is public in Google; if it isn’t, the site says so and asks for the secret address.' },
+    ],
+  },
+  {
     id: '2026-10-07-google-calendar',
     date: '2026-10-07',
     title: 'Google Calendar on the Calendar',

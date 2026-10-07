@@ -1499,3 +1499,4 @@ html.cc-returning #root > * { animation: ccr-in 1100ms cubic-bezier(0.22, 1, 0.3
 .ev.external.allday.cont svg, .ev.external.allday.cont span { display: none; }
 .howto { list-style: decimal; }
 .howto li::marker { color: var(--text-3); font-weight: 700; }
+.howto .howto-alt { list-style: none; margin-left: -18px; padding-top: 6px; border-top: 1px solid var(--line-soft); }
