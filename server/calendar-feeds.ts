@@ -17,7 +17,7 @@ const MAX_BYTES = 10 * 1024 * 1024;
 const PAST_DAYS = 60;
 const FUTURE_DAYS = 400;
 
-interface FeedRow { id: number; name: string; url: string; color: string; visibility: 'managers' | 'everyone'; last_synced_at: string | null; last_error: string | null; event_count: number }
+interface FeedRow { id: number; name: string; url: string; color: string; visibility: 'managers' | 'editors' | 'everyone'; last_synced_at: string | null; last_error: string | null; event_count: number }
 
 /** Shows where the link points without giving the secret away. */
 function urlHint(url: string): string {
@@ -155,7 +155,7 @@ export function registerCalendarFeedRoutes(app: FastifyInstance, ctx: Ctx) {
   const { db } = ctx;
   const fetchText: FetchText = (u) => (ctx.fetchCalendar ?? fetchFeed)(u);
   const color = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Pick a colour');
-  const visibility = z.enum(['managers', 'everyone']);
+  const visibility = z.enum(['managers', 'editors', 'everyone']);
 
   app.get('/api/calendar-feeds', async (req) => {
     requireManager(req);

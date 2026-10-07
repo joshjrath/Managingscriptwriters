@@ -1506,3 +1506,89 @@ describe('shoots on a synced calendar that need writers', () => {
     await manager.del(`/api/calendar-feeds/${add.body.feed.id}`);
   });
 });
+
+describe('editors', () => {
+  const pdf = async (cookie: string, url: string, fields: Record<string, string>) => {
+    const boundary = '----smed' + Math.random().toString(16).slice(2);
+    const parts = Object.entries(fields).map(([k, v]) => `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}`);
+    parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="scripts.pdf"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4 draft`);
+    const r = await app.inject({ method: 'POST', url, headers: { 'x-scale-media': '1', cookie, 'content-type': `multipart/form-data; boundary=${boundary}` }, payload: parts.join('\r\n') + `\r\n--${boundary}--\r\n` });
+    return JSON.parse(r.body);
+  };
+
+  it('sign in to a read-only view: calendar, finished scripts, clients, resources, messages and to-dos', async () => {
+    const add = await manager.post('/api/users', { name: 'Eddie Cut', email: 'eddie@scale.test', role: 'editor', password: 'editor-password-1' });
+    expect([add.status, add.body?.error]).toEqual([200, undefined]);
+    const eddieId = add.body.users.find((u: any) => u.name === 'Eddie Cut').id;
+    const eddie = as(await login('eddie@scale.test', 'editor-password-1'));
+    expect((await eddie.get('/api/bootstrap')).body.me.role).toBe('editor');
+
+    // a batch with one finished document and one still in review
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Editor batch', targetCount: 4, finalDue: '2026-11-25', split: [{ writerId: ids.sarah, count: 4 }] });
+    const s = (await manager.get(`/api/batches/${b.body.batchId}`)).body.scripts as { id: number }[];
+    const done = await pdf(sarah.cookie, `/api/batches/${b.body.batchId}/submissions`, { scriptIds: JSON.stringify([s[0].id, s[1].id]) });
+    await pdf(sarah.cookie, `/api/batches/${b.body.batchId}/submissions`, { scriptIds: JSON.stringify([s[2].id, s[3].id]) });
+    await manager.post(`/api/batches/${b.body.batchId}/review`, { action: 'approve', scriptIds: [s[0].id, s[1].id] });
+    const subs = (await manager.get(`/api/batches/${b.body.batchId}`)).body.submissions as any[];
+    const draftFile = subs.find((x) => x.scriptNumbers.includes(3))?.fileId;
+    const doneFile = subs.find((x) => x.scriptNumbers.includes(1))?.fileId;
+    expect(done).toBeTruthy();
+
+    // Script bank: only the finished document
+    const bank = (await eddie.get(`/api/script-bank?clientId=${acmeId}&q=Editor%20batch`)).body.deliverables;
+    expect(bank).toHaveLength(1);
+    expect(bank[0].state).toBe('approved');
+    expect((await manager.get(`/api/script-bank?clientId=${acmeId}&q=Editor%20batch`)).body.deliverables).toHaveLength(2);
+    // and only that document's file opens
+    expect(doneFile && draftFile).toBeTruthy();
+    expect((await app.inject({ method: 'GET', url: `/api/files/${doneFile}`, headers: { cookie: eddie.cookie } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: `/api/files/${draftFile}`, headers: { cookie: eddie.cookie } })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: `/api/files/${draftFile}`, headers: { cookie: manager.cookie } })).statusCode).toBe(200);
+
+    // Calendar: shoots and final delivery, not the writing in between
+    const cal = (await eddie.get('/api/calendar?from=2026-11-01&to=2026-11-30')).body.events as any[];
+    expect(cal.some((e) => e.type === 'final' && e.batchId === b.body.batchId)).toBe(true);
+    expect(cal.every((e) => ['shoot', 'final', 'external'].includes(e.type))).toBe(true);
+    // Clients: the brand material, not the team's history
+    const client = (await eddie.get(`/api/clients/${acmeId}`)).body;
+    expect(client.brandVoice).toBeTruthy();
+    expect(client.activity).toEqual([]);
+    expect(client.batches).toEqual([]);
+    expect((await eddie.get('/api/resources')).status).toBe(200);
+    // messages and their own to-dos work
+    expect((await eddie.post(`/api/messages/${ids.josh}`, { body: 'Got the Acme scripts, cutting today' })).status).toBe(200);
+    expect((await manager.post('/api/todos', { userId: eddieId, text: 'Cut the Acme reels by Friday' })).status).toBe(200);
+    expect((await eddie.get('/api/todos')).body.todos.map((t: any) => t.text)).toContain('Cut the Acme reels by Friday');
+
+    // everything else is closed, whatever the address
+    for (const [method, url] of [['GET', '/api/dashboard'], ['GET', '/api/batches'], ['GET', `/api/batches/${b.body.batchId}`], ['GET', '/api/review'], ['GET', '/api/my-work'],
+      ['GET', '/api/settings'], ['GET', '/api/users'], ['GET', '/api/search?q=acme'], ['GET', '/api/calendar-shoots'], ['POST', '/api/resources'],
+      ['POST', `/api/batches/${b.body.batchId}/scripts/action`], ['PATCH', `/api/clients/${acmeId}`], ['POST', '/api/clients']] as const) {
+      const r = await call(method, url, { cookie: eddie.cookie, body: method === 'GET' ? undefined : {} });
+      expect([method, url, r.status]).toEqual([method, url, 403]);
+    }
+  });
+
+  it('are never given scripts, and see a synced calendar only when it’s shared with editors', async () => {
+    const eddieId = (await manager.get('/api/users')).body.users.find((u: any) => u.name === 'Eddie Cut').id;
+    const bad = await manager.post('/api/batches', { clientId: acmeId, title: 'No editors', targetCount: 2, split: [{ writerId: eddieId, count: 2 }] });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.message).toMatch(/editor/);
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Assign test', targetCount: 1, split: [] });
+    const sid = (await manager.get(`/api/batches/${b.body.batchId}`)).body.scripts[0].id;
+    expect((await manager.post(`/api/batches/${b.body.batchId}/scripts/assign`, { scriptIds: [sid], assigneeId: eddieId })).status).toBe(400);
+    // a writer with unfinished scripts can't become an editor until they're moved
+    await manager.post(`/api/batches/${b.body.batchId}/scripts/assign`, { scriptIds: [sid], assigneeId: ids.marcus });
+    expect((await manager.patch(`/api/users/${ids.marcus}`, { role: 'editor' })).status).toBe(400);
+
+    const eddie = as(await login('eddie@scale.test', 'editor-password-1'));
+    ctx.fetchCalendar = async () => ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:ed@g', 'DTSTART;VALUE=DATE:20261118', 'DTEND;VALUE=DATE:20261119', 'SUMMARY:Shoot – Acme Outdoor', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    const feed = (await manager.post('/api/calendar-feeds', { name: 'Joshua', url: 'https://calendar.google.com/calendar/ical/j%40example.com/private-ed/basic.ics' })).body.feed;
+    const has = async (who: typeof eddie) => (await who.get('/api/calendar?from=2026-11-01&to=2026-11-30')).body.events.some((e: any) => e.type === 'external');
+    expect(await has(eddie)).toBe(false);
+    await manager.patch(`/api/calendar-feeds/${feed.id}`, { visibility: 'editors' });
+    expect(await has(eddie)).toBe(true);
+    expect(await has(sarah)).toBe(false);
+    await manager.del(`/api/calendar-feeds/${feed.id}`);
+  });
+});

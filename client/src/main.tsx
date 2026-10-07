@@ -1,4 +1,4 @@
-import { lazy, StrictMode, Suspense, useEffect } from 'react';
+import { lazy, StrictMode, Suspense, useEffect, type ReactElement } from 'react';
 import { isManager } from '../../shared/workflow';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
@@ -22,6 +22,7 @@ import { ReviewPage } from './pages/Review';
 import { ResourcesPage } from './pages/Resources';
 import { ScriptBankPage } from './pages/ScriptBank';
 import { WritersPage } from './pages/Writers';
+import { EditorHome } from './pages/EditorHome';
 import { SettingsPage } from './pages/Settings';
 import { MasterLogPage } from './pages/MasterLog';
 import { WhatsNewPage } from './pages/WhatsNew';
@@ -54,24 +55,28 @@ function Gate() {
   if (status.isError) return <main className="login"><ErrorState error={status.error} retry={() => status.refetch()} /></main>;
   if (!status.data!.signedIn) return <Login status={status.data!} onDone={() => { queryClient.clear(); status.refetch(); }} />;
   if (boot.isError || !boot.data) return <main className="login"><ErrorState error={boot.error} retry={() => boot.refetch()} /></main>;
-  const home = isManager(boot.data.me.role) ? '/overview' : '/my-work';
+  const role = boot.data.me.role;
+  const home = isManager(role) ? '/overview' : role === 'editor' ? '/editor' : '/my-work';
+  // editors only have their own pages; anything else takes them home
+  const only = (el: ReactElement) => (role === 'editor' ? <Navigate to="/editor" replace /> : el);
   return (
     <Routes>
       <Route element={<AppShell boot={boot.data} />}>
         <Route index element={<Navigate to={home} replace />} />
-        <Route path="/overview" element={<Overview />} />
-        <Route path="/my-work" element={<MyWorkPage />} />
-        <Route path="/production" element={<Production />} />
+        <Route path="/editor" element={role === 'editor' || isManager(role) ? <EditorHome /> : <Navigate to={home} replace />} />
+        <Route path="/overview" element={only(<Overview />)} />
+        <Route path="/my-work" element={only(<MyWorkPage />)} />
+        <Route path="/production" element={only(<Production />)} />
         <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/clients" element={<ClientsPage />} />
         <Route path="/clients/:id" element={<ClientPage />} />
-        <Route path="/batches/:id" element={<BatchPage />} />
-        <Route path="/review" element={<ReviewPage />} />
+        <Route path="/batches/:id" element={only(<BatchPage />)} />
+        <Route path="/review" element={only(<ReviewPage />)} />
         <Route path="/resources" element={<ResourcesPage />} />
         <Route path="/scripts" element={<ScriptBankPage />} />
         <Route path="/writers" element={<WritersPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/log" element={<MasterLogPage />} />
+        <Route path="/settings" element={only(<SettingsPage />)} />
+        <Route path="/log" element={only(<MasterLogPage />)} />
         <Route path="/whats-new" element={<WhatsNewPage />} />
         <Route path="*" element={<div className="panel"><h2>Page not found</h2><p className="muted" style={{ marginTop: 8 }}>That page doesn’t exist.</p></div>} />
       </Route>

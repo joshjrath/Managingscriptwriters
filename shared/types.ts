@@ -488,7 +488,8 @@ export interface CalendarFeed {
   name: string;
   urlHint: string;
   color: string;
-  visibility: 'managers' | 'everyone';
+  /** managers: admins and managers · editors: and editors · everyone: and writers too */
+  visibility: 'managers' | 'editors' | 'everyone';
   lastSyncedAt: string | null;
   lastError: string | null;
   eventCount: number;

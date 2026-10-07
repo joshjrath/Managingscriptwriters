@@ -81,7 +81,7 @@ export function Production() {
         <select className="select" value={filters.writerId} onChange={(e) => set('writerId', e.target.value)} aria-label="Writer">
           <option value="">All writers</option>
           <option value="unassigned">Has unassigned scripts</option>
-          {users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          {users.filter((u) => u.active && u.role !== 'editor').map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
         <select className="select" value={filters.stage} onChange={(e) => set('stage', e.target.value)} aria-label="Stage">
           <option value="">All stages</option>

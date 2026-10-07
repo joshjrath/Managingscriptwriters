@@ -100,7 +100,7 @@ function WriterCard({ u, manager, load, thread, openTodos, today, onMessage, onT
 
       <div className="row-flex s2 writer-actions">
         <Button variant="sm primary pill" icon={<MessageCircle aria-hidden />} onClick={onMessage}>Message</Button>
-        {manager && <Link to={`/my-work?userId=${u.id}`} className="btn sm"><PenLine aria-hidden />Their work</Link>}
+        {manager && u.role !== 'editor' && <Link to={`/my-work?userId=${u.id}`} className="btn sm"><PenLine aria-hidden />Their work</Link>}
         {manager && <Button variant="sm ghost" icon={<ListTodo aria-hidden />} onClick={onTodo}>Add to-do</Button>}
       </div>
     </section>

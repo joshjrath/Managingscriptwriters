@@ -37,7 +37,7 @@ export function MyWorkPage() {
       <PageHeader title={viewing === me.id ? 'My work' : `${who?.name ?? 'Writer'}’s work`} sub={viewing === me.id ? 'Your scripts, what’s due, and everything you need to write them.' : 'Viewing as a manager. Updates are recorded under your name.'}>
         {isManager(me.role) && (
           <select className="select sm" style={{ width: 'auto' }} aria-label="Show work for" value={viewing} onChange={(e) => setParams(Number(e.target.value) === me.id ? {} : { userId: e.target.value })}>
-            {users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.id === me.id ? `Me (${u.name})` : u.name}</option>)}
+            {users.filter((u) => u.active && u.role !== 'editor').map((u) => <option key={u.id} value={u.id}>{u.id === me.id ? `Me (${u.name})` : u.name}</option>)}
           </select>
         )}
       </PageHeader>

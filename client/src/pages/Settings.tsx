@@ -179,7 +179,7 @@ function RulesPanel() {
   );
 }
 
-const ROLE_COLOR: Record<Role, string> = { owner: 'salmon', manager: 'salmon', writer: 'cyan' };
+const ROLE_COLOR: Record<Role, string> = { owner: 'salmon', manager: 'salmon', writer: 'cyan', editor: 'lavender' };
 
 function TeamPanel() {
   const { me, settings } = useBoot();
@@ -189,7 +189,7 @@ function TeamPanel() {
   const [sharing, setSharing] = useState<UserSummary | null>(null);
   const [removing, setRemoving] = useState<UserSummary | null>(null);
   const team = (q.data?.users ?? []).filter((u) => !u.removed);
-  const order: Record<Role, number> = { owner: 0, manager: 1, writer: 2 };
+  const order: Record<Role, number> = { owner: 0, manager: 1, writer: 2, editor: 3 };
   team.sort((a, b) => Number(b.active) - Number(a.active) || order[a.role] - order[b.role] || a.name.localeCompare(b.name));
   return (
     <Panel title="Team" count={team.filter((u) => u.active).length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setAdding(true)}>Add person</Button>}>
@@ -253,7 +253,7 @@ function RemoveDialog({ user, team, onClose }: { user: UserSummary; team: UserSu
             <Field label="Give their unfinished scripts to" htmlFor={id} help="Delivered scripts keep their name.">
               <select className="select" id={id} value={to} onChange={(e) => setTo(e.target.value)}>
                 <option value="">Nobody — leave them unassigned</option>
-                {team.filter((u) => u.active && u.id !== user.id).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                {team.filter((u) => u.active && u.id !== user.id && u.role !== 'editor').map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
               </select>
             </Field>
           </>
@@ -277,7 +277,7 @@ export function signInMessage(p: { name: string; email: string; password: string
   return [
     p.reset
       ? `Hi ${first}, your ${p.orgName} password has been reset.`
-      : `Hi ${first}, you've been added to ${p.orgName}'s script production workspace as ${p.role === 'owner' ? 'an admin' : `a ${p.role}`}.`,
+      : `Hi ${first}, you've been added to ${p.orgName}'s script production workspace as ${p.role === 'owner' ? 'an admin' : p.role === 'editor' ? 'an editor' : `a ${p.role}`}.`,
     '',
     `Sign in: ${p.url}`,
     `Email: ${p.email}`,
@@ -285,7 +285,7 @@ export function signInMessage(p: { name: string; email: string; password: string
     '',
     p.reset
       ? 'Once you’re in, set your own password: click your name at the bottom left → Change password.'
-      : `Once you’re in, set your own password: click your name at the bottom left → Change password. ${p.role === 'writer' ? 'Your scripts, deadlines and briefs are under “My work”.' : ''}`.trim(),
+      : `Once you’re in, set your own password: click your name at the bottom left → Change password. ${p.role === 'writer' ? 'Your scripts, deadlines and briefs are under “My work”.' : p.role === 'editor' ? 'Your home page shows upcoming shoots and the newest finished scripts; the Calendar, Script bank and client material are in the menu.' : ''}`.trim(),
   ].join('\n');
 }
 
@@ -322,25 +322,26 @@ function ShareDetails({ message, name, onClose }: { message: string; name: strin
   );
 }
 
-function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => void }) {
+function PersonDialog({ user, preset, onCreated, onClose }: { user?: UserSummary; preset?: { name: string; role: Role; city?: string; timezone?: string; hours?: [number, number] }; onCreated?: () => void; onClose: () => void }) {
   const toast = useToast();
   const { me } = useBoot();
-  const [name, setName] = useState(user?.name ?? '');
+  const [name, setName] = useState(user?.name ?? preset?.name ?? '');
   const [email, setEmail] = useState(user?.email ?? '');
-  const [role, setRole] = useState<Role>(user?.role ?? 'writer');
+  const [role, setRole] = useState<Role>(user?.role ?? preset?.role ?? 'writer');
   const [capacity, setCapacity] = useState(user?.capacityPerDay != null ? String(user.capacityPerDay) : '');
   const { settings } = useBoot();
   const [password, setPassword] = useState(() => (user ? '' : generatePassword()));
   const [active, setActive] = useState(user?.active ?? true);
-  const [city, setCity] = useState(user?.city ?? '');
-  const [tz, setTz] = useState(user?.timezone ?? findCity(user?.city ?? '')?.timezone ?? '');
-  const [hours, setHours] = useState<[number, number]>(user?.workHours ?? [9, 18]);
+  const [city, setCity] = useState(user?.city ?? preset?.city ?? '');
+  const [tz, setTz] = useState(user?.timezone ?? preset?.timezone ?? findCity(user?.city ?? preset?.city ?? '')?.timezone ?? '');
+  const [hours, setHours] = useState<[number, number]>(user?.workHours ?? preset?.hours ?? [9, 18]);
   const [share, setShare] = useState<string | null>(null);
   const place = { city: city.trim() || null, ...(city.trim() ? { timezone: tz || undefined, workStart: hours[0], workEnd: hours[1] % 24 || 24 } : {}) };
   const save = useSave(() => user
     ? api(`/api/users/${user.id}`, { method: 'PATCH', body: { name, role, active, capacityPerDay: capacity ? Number(capacity) : null, password: password || undefined, ...place } })
     : api('/api/users', { body: { name, email, role, password, capacityPerDay: capacity ? Number(capacity) : null, ...place } }), {
     onSuccess: () => {
+      if (!user) onCreated?.();
       if (!user || password) {
         // only now, right after saving, is the plain password known
         setShare(signInMessage({ name, email: user?.email ?? email.trim().toLowerCase(), password, role, orgName: settings.orgName, url: window.location.origin, reset: !!user }));
@@ -355,16 +356,18 @@ function PersonDialog({ user, onClose }: { user?: UserSummary; onClose: () => vo
   const ids = { n: useFieldId('n'), e: useFieldId('e'), r: useFieldId('r'), c: useFieldId('c'), p: useFieldId('p') };
   if (share) return <ShareDetails message={share} name={firstName(name)} onClose={onClose} />;
   return (
-    <Dialog open onClose={onClose} title={user ? `Edit ${user.name}` : 'Add a person'} size="narrow"
+    <Dialog open onClose={onClose} title={user ? `Edit ${user.name}` : preset ? `Give ${preset.name} site access` : 'Add a person'} size="narrow"
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={save.isPending} onClick={() => save.mutate(undefined)} icon={user ? undefined : <Plus aria-hidden />}>{user ? 'Save' : 'Add person'}</Button></div>}>
       <form className="form" onSubmit={(e) => { e.preventDefault(); save.mutate(undefined); }}>
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
         <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} /></Field>
         <Field label="Email" htmlFor={ids.e} error={f.email} help={user ? 'Email can’t be changed here.' : 'They sign in with this.'}><input className="input" type="email" value={email} disabled={!!user} onChange={(e) => setEmail(e.target.value)} {...inputProps(ids.e, f.email)} /></Field>
-        <Field label="Role" htmlFor={ids.r} help="Admins and managers can do everything. Writers see everything but can only update their own scripts, blockers, resources and deliveries.">
-          <select className="select" id={ids.r} value={role} onChange={(e) => setRole(e.target.value as Role)}><option value="writer">Writer</option><option value="manager">Manager</option><option value="owner">Admin</option></select>
+        <Field label="Role" htmlFor={ids.r} error={f.role} help={role === 'editor'
+          ? 'Editors see the calendar, finished scripts, clients and resources, and can message the team and get to-dos. Read-only, and they can’t be given scripts.'
+          : 'Admins and managers can do everything. Writers see everything but can only update their own scripts, blockers, resources and deliveries.'}>
+          <select className="select" id={ids.r} value={role} onChange={(e) => setRole(e.target.value as Role)}><option value="writer">Writer</option><option value="editor">Editor</option><option value="manager">Manager</option><option value="owner">Admin</option></select>
         </Field>
-        <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates and over-capacity warnings."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>
+        {role !== 'editor' && <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates and over-capacity warnings."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>}
         <PlaceFields optional city={city} tz={tz} hours={hours} f={f}
           onChange={(v) => { if (save.error) save.reset(); if (v.city !== undefined) setCity(v.city); if (v.tz !== undefined) setTz(v.tz); if (v.hours) setHours(v.hours); }} />
         <Field label={user ? 'Reset password' : 'Temporary password'} optional={!!user} htmlFor={ids.p} error={f.password} help={user ? 'Leave empty to keep their password. Set one and you’ll get a message to send them.' : 'At least 10 characters. After saving you’ll get a ready-to-send message with this and the sign-in link.'}>
@@ -392,6 +395,8 @@ function EditorsPanel() {
   const [editing, setEditing] = useState<Editor | 'new' | null>(null);
   const toast = useToast();
   const remove = useSave((id: number) => api(`/api/editors/${id}`, { method: 'DELETE' }), { onSuccess: () => toast('Editor removed') });
+  // once they have a sign-in they're on the team (and in the Control Center from there), so the list entry goes
+  const [inviting, setInviting] = useState<Editor | null>(null);
   const editors = q.data?.editors ?? [];
   return (
     <Panel title="Editors" count={editors.length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setEditing('new')}>Add editor</Button>}>
@@ -409,6 +414,7 @@ function EditorsPanel() {
             </div>
             <div className="side">
               <div className="row-flex s2">
+                <Button variant="sm" icon={<KeyRound aria-hidden />} onClick={() => setInviting(e)}>Give site access</Button>
                 <Button variant="sm ghost" onClick={() => setEditing(e)}>Edit</Button>
                 <Button variant="sm ghost" busy={remove.isPending && remove.variables === e.id} onClick={() => remove.mutate(e.id)}>Remove</Button>
               </div>
@@ -417,8 +423,10 @@ function EditorsPanel() {
         ))}
       </div>
       {q.data && !editors.length && <p className="muted" style={{ fontSize: 13 }}>No editors yet.</p>}
-      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>Editors only appear in the Control Center, with their local time and working hours. They can’t sign in and aren’t offered as writers. Only admins see this list.</p>
+      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>People here only appear in the Control Center, with their local time and working hours. To let one sign in and see the calendar and finished scripts, click Give site access: they move to the Team as an Editor. Only admins see this list.</p>
       {editing && <EditorDialog editor={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />}
+      {inviting && <PersonDialog preset={{ name: inviting.name, role: 'editor', city: inviting.city, timezone: inviting.timezone, hours: inviting.workHours }}
+        onCreated={() => { const id = inviting.id; api(`/api/editors/${id}`, { method: 'DELETE' }).then(() => q.refetch(), () => {}); }} onClose={() => setInviting(null)} />}
     </Panel>
   );
 }

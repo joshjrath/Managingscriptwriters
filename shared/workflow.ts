@@ -166,11 +166,15 @@ export function nextMilestone(draft: Milestone, final: Milestone): Milestone | n
 
 // ── actions & permissions ────────────────────────────────────────────────
 
-export type Role = 'owner' | 'manager' | 'writer';
+export type Role = 'owner' | 'manager' | 'writer' | 'editor';
 
 /** Admins (stored as 'owner') can do everything managers can. */
 export const isManager = (role: Role) => role === 'manager' || role === 'owner';
-export const ROLE_LABEL: Record<Role, string> = { owner: 'Admin', manager: 'Manager', writer: 'Writer' };
+/** Editors cut the videos: they see the calendar, finished scripts, clients and resources, read-only. */
+export const isEditor = (role: Role) => role === 'editor';
+/** Who can be given scripts to write. */
+export const canWrite = (role: Role) => role !== 'editor';
+export const ROLE_LABEL: Record<Role, string> = { owner: 'Admin', manager: 'Manager', writer: 'Writer', editor: 'Editor' };
 
 export const SCRIPT_ACTIONS = [
   'start', 'reset', 'submit', 'withdraw', 'approve', 'request_revisions', 'deliver', 'undo_delivery',

@@ -21,6 +21,7 @@ import { callsignOf, type ControlStatus, type ControlWorld } from '../../shared/
 import { simulatedWorld } from './simulated';
 import { isAdmin } from './access';
 import { workspaceWorld } from './workspace';
+import type { Role } from '../../shared/workflow';
 
 export const CLEARANCE_HOURS = 12;
 
@@ -38,7 +39,7 @@ export async function loadWorld(ctx: Ctx): Promise<ControlWorld> {
   return simulatedWorld(at, (await loadSettings(ctx.db)).orgName, epoch);
 }
 
-interface Operator { id: number; name: string; role: 'owner' | 'manager' | 'writer'; active: boolean }
+interface Operator { id: number; name: string; role: Role; active: boolean }
 
 /** Checks an operator's password; the one place to swap in another identity check. */
 async function verifyOperator(db: Db, who: { id: number } | { email: string }, password: string): Promise<Operator | null> {

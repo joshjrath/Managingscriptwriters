@@ -6,7 +6,7 @@ import { LayoutGroup, m } from 'framer-motion';
 import { isManager } from '../../../shared/workflow';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Archive, ArchiveRestore, Building2, Camera, FileText, GripVertical, Link2, Pencil, PlayCircle, Plus, Sparkles, UserPlus, Wand2 } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowRight, ArchiveRestore, Building2, Camera, FileText, GripVertical, Link2, Pencil, PlayCircle, Plus, Sparkles, UserPlus, Wand2 } from 'lucide-react';
 import { api, useSave, type ApiError } from '../api';
 import { confetti } from '../fx';
 import { SOFT } from '../motion';
@@ -142,6 +142,7 @@ export function ClientPage() {
   const { id } = useParams();
   const { me, users, clock } = useBoot();
   const manager = isManager(me.role);
+  const editor = me.role === 'editor';
   const openNew = useNewWork();
   const toast = useToast();
   const q = useQuery({ queryKey: ['client', Number(id)], queryFn: () => api<ClientDetail>(`/api/clients/${id}`) });
@@ -188,7 +189,8 @@ export function ClientPage() {
               <div><div className="section-title">Writing guidance</div><p className={`prose${c.guidance ? '' : ' muted'}`}>{c.guidance ?? 'Not written yet.'}</p></div>
             </div>
           </Panel>
-          <Panel title="Shoots" count={upcoming.length || undefined} sub={upcoming.length ? 'upcoming' : undefined}>
+          <Panel title="Shoots" count={upcoming.length || undefined} sub={upcoming.length ? 'upcoming' : undefined}
+            tools={editor ? <Link to={`/scripts?clientId=${c.id}`} className="btn sm">Finished scripts <ArrowRight size={14} aria-hidden /></Link> : undefined}>
             {!c.shoots.length ? <Empty boxed icon={<Camera />} title="No shoots" action={manager && c.status !== 'archived' ? <Button variant="sm" onClick={() => openNew('shoot', { clientId: c.id })}>Schedule a shoot</Button> : undefined} /> : (
               <div className="rows">
                 {[...upcoming, ...past.slice(-3).reverse()].map((s) => (
@@ -204,13 +206,13 @@ export function ClientPage() {
               </div>
             )}
           </Panel>
-          <Panel title="History">
+          {!editor && <Panel title="History">
             {!c.activity.length ? <Empty title="No history yet" /> : (
               <div className="timeline" style={{ maxHeight: 460, overflowY: 'auto' }}>
                 {c.activity.map((a) => <div key={a.id} className="tl"><span className="d" /><div><div className="s">{a.summary}{a.batchTitle && <span className="muted"> · {a.batchTitle}</span>}</div><div className="w">{a.actorName ?? 'System'} · {fmtStamp(a.createdAt, displayTz)}</div></div></div>)}
               </div>
             )}
-          </Panel>
+          </Panel>}
         </div>
         <div className="stack" style={{ gap: 'var(--gap)' }}>
           {/* recordings and documents live in Resources now; older briefing records still show here */}
@@ -227,17 +229,17 @@ export function ClientPage() {
                     </div>
                     {b.summary && <p className="prose" style={{ fontSize: 13.5 }}>{b.summary}</p>}
                     {b.instructions && <div><div className="section-title">Writing instructions</div><p className="prose" style={{ fontSize: 13.5 }}>{b.instructions}</p></div>}
-                    <div className="muted" style={{ fontSize: 12 }}>{b.batchIds.length ? `Applies to ${plural(b.batchIds.length, 'batch', 'batches')}: ${c.batches.filter((x) => b.batchIds.includes(x.id)).map((x) => x.title).join(', ')}` : 'Not attached to a batch yet'}</div>
+                    {!editor && <div className="muted" style={{ fontSize: 12 }}>{b.batchIds.length ? `Applies to ${plural(b.batchIds.length, 'batch', 'batches')}: ${c.batches.filter((x) => b.batchIds.includes(x.id)).map((x) => x.title).join(', ')}` : 'Not attached to a batch yet'}</div>}
                   </div>
                 ))}
               </div>
             )}
           </Panel>}
-          <Panel title="Batches" tools={<Seg role="group" aria-label="Batches"><button aria-pressed={tab === 'active'} onClick={() => setTab('active')}>Active {active.length}</button><button aria-pressed={tab === 'done'} onClick={() => setTab('done')}>Completed {done.length}</button></Seg>}>
+          {!editor && <Panel title="Batches" tools={<Seg role="group" aria-label="Batches"><button aria-pressed={tab === 'active'} onClick={() => setTab('active')}>Active {active.length}</button><button aria-pressed={tab === 'done'} onClick={() => setTab('done')}>Completed {done.length}</button></Seg>}>
             {(tab === 'active' ? active : done).length === 0 ? <Empty boxed title={tab === 'active' ? 'No active batches' : 'Nothing completed yet'} /> : (
               <div className="rows">{(tab === 'active' ? active : done).map((b) => <BatchItem key={b.id} b={b} ring />)}</div>
             )}
-          </Panel>
+          </Panel>}
           <Panel title="Resources" tools={manager ? <Button variant="sm" icon={<Link2 aria-hidden />} onClick={() => setRes({})}>Add</Button> : undefined}>
             {!c.resources.length ? <Empty boxed title="No folders, examples or assets yet" /> : (
               <div className="stack s4">

@@ -31,7 +31,7 @@ export function CalendarFeedsPanel() {
               <div className="row-flex s2"><CalendarDays size={15} aria-hidden color={f.color} /><span className="title">{f.name}</span></div>
               <div className="meta"><span className="ellipsis">{f.urlHint}</span></div>
               <div className="meta">
-                <span>{f.visibility === 'everyone' ? 'Everyone sees it' : 'Admins and managers only'}</span>
+                <span>{f.visibility === 'everyone' ? 'Everyone sees it' : f.visibility === 'editors' ? 'Admins, managers and editors' : 'Admins and managers only'}</span>
                 <span>{plural(f.eventCount, 'event')}</span>
                 <span>{f.lastSyncedAt ? `synced ${fmtAgo(f.lastSyncedAt)}` : 'not synced yet'}</span>
               </div>
@@ -90,9 +90,10 @@ function FeedDialog({ feed, onClose }: { feed: CalendarFeed | null; onClose: () 
         <div className="field"><span className="lbl">Who sees it</span>
           <Seg role="group" aria-label="Who sees it" style={{ alignSelf: 'flex-start' }}>
             <button type="button" aria-pressed={visibility === 'managers'} onClick={() => setVisibility('managers')}>Admins & managers</button>
+            <button type="button" aria-pressed={visibility === 'editors'} onClick={() => setVisibility('editors')}>+ Editors</button>
             <button type="button" aria-pressed={visibility === 'everyone'} onClick={() => setVisibility('everyone')}>Everyone</button>
           </Seg>
-          <span className="help">Writers only see it if you pick Everyone. They see event titles, times, places and notes.</span>
+          <span className="help">“+ Editors” shows it to editors too (handy for shoot days); “Everyone” adds writers. Whoever sees it sees event titles, times, places and notes.</span>
         </div>
       </form>
     </Dialog>

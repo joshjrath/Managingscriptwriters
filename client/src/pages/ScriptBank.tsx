@@ -27,6 +27,7 @@ export function ScriptBankPage() {
   const displayTz = useDisplayTz();
   const { clients, users, me } = useBoot();
   const manager = isManager(me.role);
+  const editor = me.role === 'editor';
   const [adding, setAdding] = useState(false);
   const [params, setParams] = useSearchParams();
   const [text, setText] = useState(params.get('q') ?? '');
@@ -61,12 +62,12 @@ export function ScriptBankPage() {
   const items = bank.data?.pages.flatMap((p) => p.deliverables) ?? [];
   const first = bank.data?.pages[0];
   const filtered = !!(q || clientId || writerId || status);
-  const people = users.filter((u) => !u.removed).sort((a, b) => a.name.localeCompare(b.name));
+  const people = users.filter((u) => !u.removed && u.role !== 'editor').sort((a, b) => a.name.localeCompare(b.name));
   const num = scriptNumber(q);
 
   return (
     <>
-      <PageHeader title="Script bank" sub="Every document your writers have sent, for every client, plus past scripts from before. Search a client, batch, writer, title or script number.">
+      <PageHeader title="Script bank" sub={editor ? 'Every finished script (approved or delivered), for every client, plus past scripts. Search a client, batch, writer, title or script number.' : 'Every document your writers have sent, for every client, plus past scripts from before. Search a client, batch, writer, title or script number.'}>
         {manager && <Button icon={<Upload aria-hidden />} onClick={() => setAdding(true)}>Add past scripts</Button>}
       </PageHeader>
       {manager && <PastDialog open={adding} onClose={() => setAdding(false)} />}
@@ -81,13 +82,13 @@ export function ScriptBankPage() {
           <option value="">All writers</option>
           {people.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
-        <select className="select" value={status} onChange={(e) => set('status', e.target.value)} aria-label="Status">
+        {!editor && <select className="select" value={status} onChange={(e) => set('status', e.target.value)} aria-label="Status">
           <option value="">Any status</option>
           <option value="finished">Finished (approved or delivered)</option>
           <option value="in_review">In review</option>
           <option value="revisions">Sent back for revisions</option>
           <option value="open">Not finished yet</option>
-        </select>
+        </select>}
         <select className="select" value={sort} onChange={(e) => set('sort', e.target.value === 'recent' ? '' : e.target.value)} aria-label="Order">
           <option value="recent">Newest first</option>
           <option value="client">By client</option>
@@ -104,7 +105,7 @@ export function ScriptBankPage() {
             </Empty>
           ) : (
             <div className="rows bank">
-              {items.map((d) => (d.past ? <PastRow key={d.key} d={d} manager={manager} /> : <DeliverableRow key={d.key} d={d} tz={displayTz} num={num} />))}
+              {items.map((d) => (d.past ? <PastRow key={d.key} d={d} manager={manager} /> : <DeliverableRow key={d.key} d={d} tz={displayTz} num={num} linkBatch={!editor} />))}
             </div>
           )}
           {bank.hasNextPage && (
@@ -126,7 +127,7 @@ function breakdown(scripts: Deliverable['scripts']): string {
   return [...counts.entries()].map(([s, n]) => `${n} ${STATUS_SHORT[s].toLowerCase()}`).join(' · ');
 }
 
-function DeliverableRow({ d, tz, num }: { d: Deliverable; tz: string; num: number | null }) {
+export function DeliverableRow({ d, tz, num, linkBatch = true }: { d: Deliverable; tz: string; num: number | null; linkBatch?: boolean }) {
   const st = STATE[d.state];
   const hit = num != null ? d.scripts.find((s) => s.number === num) : null;
   const mix = breakdown(d.scripts);
@@ -137,7 +138,7 @@ function DeliverableRow({ d, tz, num }: { d: Deliverable; tz: string; num: numbe
       </span>
       <div style={{ minWidth: 0 }}>
         <div className="t">
-          <Link className="link" to={`/clients/${d.clientId}`}>{d.clientName}</Link> <span className="dim">›</span> <Link className="link" to={`/batches/${d.batchId}`}>{d.batchTitle}</Link>
+          <Link className="link" to={`/clients/${d.clientId}`}>{d.clientName}</Link> <span className="dim">›</span> {linkBatch ? <Link className="link" to={`/batches/${d.batchId}`}>{d.batchTitle}</Link> : <span>{d.batchTitle}</span>}
           {d.batchArchived && <span className="dim"> (archived)</span>}
         </div>
         <div className="s">
@@ -221,7 +222,7 @@ function PastDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [error, setError] = useState<ApiError | null>(null);
   const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
   const ids = { c: useFieldId('pc'), f: useFieldId('pf'), u: useFieldId('pu'), lt: useFieldId('plt'), w: useFieldId('pw'), d: useFieldId('pd'), n: useFieldId('pn'), no: useFieldId('pno') };
-  const people = users.filter((u) => !u.removed).map((u) => u.name).sort();
+  const people = users.filter((u) => !u.removed && u.role !== 'editor').map((u) => u.name).sort();
   const sorted = [...clients].sort((a, b) => a.name.localeCompare(b.name));
 
   const reset = () => { setFiles([]); setUrl(''); setLinkTitle(''); setWriterName(''); setWrittenOn(''); setScriptCount(''); setNote(''); setError(null); setFieldErr({}); };

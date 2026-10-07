@@ -16,6 +16,7 @@ import { registerTodoRoutes } from './todos';
 import { registerMessageRoutes } from './messages';
 import { registerCalendarFeedRoutes } from './calendar-feeds';
 import { registerCalendarShootRoutes } from './calendar-shoots';
+import { registerEditorAccess } from './editor-access';
 import { registerBatchRoutes } from './routes/batches';
 import { registerClientRoutes } from './routes/clients';
 import { registerShootRoutes } from './routes/shoots';
@@ -59,6 +60,7 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
   ctx.db = routedDb(realDb, als);
   ctx.dbNow = () => als.getStore() ?? realDb;
   registerRecording(app, ctx, realDb, als);
+  registerEditorAccess(app);
   registerUploadCleanup(app);
 
   app.addHook('onSend', async (req, reply, payload) => {

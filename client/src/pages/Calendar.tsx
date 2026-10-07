@@ -40,6 +40,7 @@ interface Move { shootId: number; start: ISODate; end: ISODate | null; toStart?:
 export function CalendarPage() {
   const { clock, users, clients, me } = useBoot();
   const manager = isManager(me.role);
+  const editor = me.role === 'editor';
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   const month = params.get('m') && /^\d{4}-\d{2}$/.test(params.get('m')!) ? `${params.get('m')}-01` : startOfMonth(clock.today);
@@ -81,6 +82,7 @@ export function CalendarPage() {
   const canMove = (e: CalendarEvent) => manager && e.type === 'shoot' && e.shootId != null;
   const open = (e: CalendarEvent) => {
     if (e.external) setSynced(e);
+    else if (editor) { const id = clients.find((c) => c.name === e.clientName)?.id; if (id) nav(`/scripts?clientId=${id}`); }
     else if (canMove(e)) setPicked(e);
     else if (e.batchId) nav(`/batches/${e.batchId}`);
     else if (e.shootId) nav('/production');
@@ -154,7 +156,7 @@ export function CalendarPage() {
 
   return (
     <>
-      <PageHeader title="Calendar" sub={manager ? 'Writing periods, draft deadlines, final deliveries and shoots. Drag a shoot to another day to move it — its deadlines follow.' : 'Writing periods, draft deadlines, final deliveries and shoots.'}>
+      <PageHeader title="Calendar" sub={editor ? 'Shoots, when each batch’s scripts are final, and synced calendars. Click a shoot to see its finished scripts.' : manager ? 'Writing periods, draft deadlines, final deliveries and shoots. Drag a shoot to another day to move it — its deadlines follow.' : 'Writing periods, draft deadlines, final deliveries and shoots.'}>
         <Seg role="group" aria-label="Calendar view">
           <button aria-pressed={view === 'days'} onClick={() => setView('days')}>Days</button>
           <button aria-pressed={view === 'month'} onClick={() => setView('month')}>Month</button>
@@ -169,11 +171,11 @@ export function CalendarPage() {
         <Button variant="sm ghost" onClick={() => setP('m', '')}>Today</Button>
         </>}
         <span className="spacer" />
-        <select className="select sm" style={{ width: 'auto' }} value={writerId} onChange={(e) => setP('writerId', e.target.value)} aria-label="Writer"><option value="">All writers</option>{users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
+        {!editor && <select className="select sm" style={{ width: 'auto' }} value={writerId} onChange={(e) => setP('writerId', e.target.value)} aria-label="Writer"><option value="">All writers</option>{users.filter((u) => u.active && u.role !== 'editor').map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>}
         <select className="select sm" style={{ width: 'auto', maxWidth: 220 }} value={clientId} onChange={(e) => setP('clientId', e.target.value)} aria-label="Client"><option value="">All clients</option>{clients.filter((c) => c.status !== 'archived').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
       </div>
       <div className="quick" role="group" aria-label="Show event types">
-        {(Object.keys(TYPE) as CalendarEvent['type'][]).map((t) => {
+        {(Object.keys(TYPE) as CalendarEvent['type'][]).filter((t) => !editor || t === 'shoot' || t === 'final' || t === 'external').map((t) => {
           const T = TYPE[t];
           return (
             <button key={t} aria-pressed={!hidden.has(t)} style={{ ['--c' as string]: T.c }} onClick={() => setHidden((h) => { const n = new Set(h); n.has(t) ? n.delete(t) : n.add(t); return n; })}>

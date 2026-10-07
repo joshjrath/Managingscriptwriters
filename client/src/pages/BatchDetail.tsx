@@ -11,7 +11,7 @@ import {
 import { api, useSave, type ApiError } from '../api';
 import type { BatchDetail, ClientDetail, Priority, ReschedulePreview, Resource, ResourceCategory, Script } from '../../../shared/types';
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
-import { ACTION_RULES, checkAction, compressRanges, parseRanges, STATUS_LABEL, type ScriptAction, type ScriptStatus, isManager } from '../../../shared/workflow';
+import { ACTION_RULES, canWrite, checkAction, compressRanges, parseRanges, STATUS_LABEL, type ScriptAction, type ScriptStatus, isManager } from '../../../shared/workflow';
 import { addDays, computeDeadlines, diffDays, draftFromFinal, isISODate, suggestStart, type ISODate } from '../../../shared/dates';
 import { cutoffIn, fmtBytes, fmtCutoff, fmtDate, fmtLong, fmtRange, fmtStamp, fmtTimeZoneAbbr, plural } from '../../../shared/format';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
@@ -578,7 +578,7 @@ function AssignDialog({ count, busy, error, onClose, onSubmit }: { count: number
         <Field label="Writer" htmlFor={id} help="Each script has exactly one writer, so moving scripts never double-counts them.">
           <select className="select" id={id} value={uid} onChange={(e) => setUid(e.target.value)}>
             <option value="">Choose…</option>
-            {users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}{u.role !== 'writer' ? ` (${u.role})` : ''}</option>)}
+            {users.filter((u) => u.active && canWrite(u.role)).map((u) => <option key={u.id} value={u.id}>{u.name}{u.role !== 'writer' ? ` (${u.role})` : ''}</option>)}
             <option value="none">Unassigned</option>
           </select>
         </Field>
@@ -879,7 +879,7 @@ function TargetDialog({ b, onClose }: { b: BatchDetail; onClose: () => void }) {
         {p && p.target > p.current && (
           <>
             <p>Adds {plural(p.add, 'script')}{p.restore.length ? ` (restoring removed scripts ${compressRanges(p.restore)} first)` : ''}.</p>
-            <Field label="Assign the new scripts to" optional htmlFor="tgt-a"><select id="tgt-a" className="select" value={assignee} onChange={(e) => setAssignee(e.target.value)}><option value="">Leave unassigned</option>{users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
+            <Field label="Assign the new scripts to" optional htmlFor="tgt-a"><select id="tgt-a" className="select" value={assignee} onChange={(e) => setAssignee(e.target.value)}><option value="">Leave unassigned</option>{users.filter((u) => u.active && canWrite(u.role)).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
           </>
         )}
         {p && shrinking && (

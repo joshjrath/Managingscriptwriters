@@ -7,7 +7,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bell, Building2, CalendarDays, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
-  Circle, Eye, Globe2, Library, MessageCircle, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
+  Circle, Eye, Globe2, Home, Library, MessageCircle, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
 } from 'lucide-react';
 import { LayoutGroup, m } from 'framer-motion';
 import { api, queryClient, useSave } from '../api';
@@ -120,7 +120,17 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
   const { me, counts, settings, mode } = boot;
   const manager = isManager(me.role);
   const inbox = useInbox();
-  const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; show?: boolean }[] = [
+  const unreadMsgs = (inbox.data?.unread ?? counts.unreadMessages) || undefined;
+  // editors get a focused site: what's coming up, finished scripts, and the client material they cut from
+  const editorItems = [
+    { to: '/editor', label: 'Home', icon: <Home /> },
+    { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
+    { to: '/scripts', label: 'Script bank', icon: <Library /> },
+    { to: '/clients', label: 'Clients', icon: <Building2 /> },
+    { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
+    { to: '/writers', label: 'Messages', icon: <MessageCircle />, count: unreadMsgs, hot: !!unreadMsgs },
+  ];
+  const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; show?: boolean }[] = me.role === 'editor' ? editorItems : [
     ...(manager
       ? [{ to: '/overview', label: 'Overview', icon: <LayoutDashboard />, count: counts.attention || undefined, hot: counts.attention > 0 }, { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined }]
       : [{ to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined }, { to: '/overview', label: 'Overview', icon: <LayoutDashboard /> }]),
@@ -134,13 +144,13 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
   ];
   return (
     <div className="rail">
-      <NavLink to={manager ? '/overview' : '/my-work'} className="wordmark" aria-label="Scale Media home">
+      <NavLink to={manager ? '/overview' : me.role === 'editor' ? '/editor' : '/my-work'} className="wordmark" aria-label="Scale Media home">
         <span className="full">Scale</span>
         <span className="full">&nbsp;</span>
         <span>{collapsed && !mobile ? 'S' : 'Media'}</span>
       </NavLink>
       {me.role === 'owner' && !mode?.viewingAs && !mobile && <ControlCenterLink />}
-      <SearchBox />
+      {me.role !== 'editor' && <SearchBox />}
       <LayoutGroup id={mobile ? 'nav-mobile' : 'nav'}>
         <nav className="nav">
           {items.map((it) => (

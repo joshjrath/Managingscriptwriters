@@ -495,4 +495,12 @@ create table calendar_shoot_marks (
   notified_at timestamptz
 );
 `,
+  // 21 · editors: people who cut the videos sign in to see the calendar and finished scripts;
+  // a synced calendar can be shown to them without showing it to writers
+  `
+alter table users drop constraint if exists users_role_check;
+alter table users add constraint users_role_check check (role in ('owner', 'manager', 'writer', 'editor'));
+alter table calendar_feeds drop constraint if exists calendar_feeds_visibility_check;
+alter table calendar_feeds add constraint calendar_feeds_visibility_check check (visibility in ('managers', 'editors', 'everyone'));
+`,
 ];

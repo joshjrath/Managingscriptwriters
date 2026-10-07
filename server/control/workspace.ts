@@ -13,6 +13,7 @@ import {
 import type { ScriptStatus } from '../../shared/workflow';
 import { finishWorld } from './finish';
 import { loadEditorRows } from './editors';
+import type { Role } from '../../shared/workflow';
 
 const H = 3_600_000;
 const D = 24 * H;
@@ -28,7 +29,7 @@ const PROGRESS: Record<ScriptStatus, number> = {
 };
 
 interface UserRow {
-  id: number; name: string; role: 'owner' | 'manager' | 'writer'; capacity_per_day: number | null;
+  id: number; name: string; role: Role; capacity_per_day: number | null;
   city: string | null; city_code: string | null; country: string | null; lat: number | null; lon: number | null;
   timezone: string | null; work_start: number | null; work_end: number | null;
 }
@@ -106,7 +107,7 @@ export async function workspaceWorld(db: Db, at: Date): Promise<ControlWorld> {
   const lastReviewer = new Map((await db.query<{ batch_id: number; reviewed_by: number }>(
     `select distinct on (batch_id) batch_id, reviewed_by from reviews order by batch_id, created_at desc`,
   )).map((r) => [r.batch_id, r.reviewed_by]));
-  const firstLead = placed.find((u) => u.role !== 'writer')?.id ?? null;
+  const firstLead = placed.find((u) => u.role === 'owner' || u.role === 'manager')?.id ?? null;
   const reviewerOf = (b: BatchRow) => nid(lastReviewer.get(b.id)) ?? nid(b.owner_id) ?? nid(b.created_by) ?? nid(firstLead);
 
   const due = (date: string | null) => (date ? deadlineInstant(date, settings.timezone, settings.cutoff) : null);
@@ -156,8 +157,8 @@ export async function workspaceWorld(db: Db, at: Date): Promise<ControlWorld> {
   const awaitingReview = scriptRows.some((s) => s.status === 'ready_for_review');
 
   const writers: CcWriter[] = placed.map((u) => {
-    const lead = u.role !== 'writer';
-    const role: NodeRole = u.role === 'owner' ? 'lead' : u.role === 'manager' ? 'reviewer' : 'writer';
+    const lead = u.role === 'owner' || u.role === 'manager';
+    const role: NodeRole = u.role === 'owner' ? 'lead' : u.role === 'manager' ? 'reviewer' : u.role === 'editor' ? 'editor' : 'writer';
     const status: NodeStatus = lead && awaitingReview ? 'reviewing' : writingNow.has(u.id) ? 'deep_work' : 'active';
     const weekCapacity = (u.capacity_per_day ?? 4) * 5;
     return {

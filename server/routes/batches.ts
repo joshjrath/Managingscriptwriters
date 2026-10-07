@@ -2,7 +2,7 @@
 // review, delivery confirmation, blockers and target changes.
 
 import type { FastifyInstance } from 'fastify';
-import { isManager } from '../../shared/workflow';
+import { canWrite, isManager } from '../../shared/workflow';
 import { z } from 'zod';
 import type { Db } from '../db';
 import {
@@ -112,6 +112,7 @@ export async function insertBatch(
   const seen = new Set<number>();
   for (const s of split) {
     if (!active.has(s.writerId)) fields.split = 'One of the writers is not an active team member';
+    else if (!canWrite(active.get(s.writerId)!.role)) fields.split = `${active.get(s.writerId)!.name} is an editor, so they can’t be given scripts`;
     if (seen.has(s.writerId)) fields.split = 'Each writer can appear only once — combine their counts';
     seen.add(s.writerId);
   }
@@ -493,7 +494,7 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       if (input.targetCount > current) {
         let need = input.targetCount - current;
         if (input.assigneeId) {
-          const u = await t.one(`select 1 from users where id = $1 and active`, [input.assigneeId]);
+          const u = await t.one(`select 1 from users where id = $1 and active and role <> 'editor'`, [input.assigneeId]);
           if (!u) throw new HttpError(400, 'Choose an active writer', { assigneeId: 'Choose an active writer' });
         }
         // restore previously removed scripts first so their numbers and history return
@@ -563,8 +564,9 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       if (!b) throw notFound('Batch');
       let name = 'Unassigned';
       if (input.assigneeId) {
-        const u = await t.one<{ name: string }>(`select name from users where id = $1 and active`, [input.assigneeId]);
+        const u = await t.one<{ name: string; role: string }>(`select name, role from users where id = $1 and active`, [input.assigneeId]);
         if (!u) throw new HttpError(400, 'Choose an active team member', { assigneeId: 'Choose an active team member' });
+        if (u.role === 'editor') throw new HttpError(400, `${u.name} is an editor, so they can’t be given scripts`, { assigneeId: 'Choose a writer' });
         name = u.name;
       }
       const rows = await t.query<{ id: number; number: number; assignee_id: number | null }>(

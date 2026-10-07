@@ -5,7 +5,7 @@ import type { Db } from './db';
 import { makeClock, type Clock, type DeadlineRules, type ISODate } from '../shared/dates';
 import {
   compressRanges, deriveStage, milestone, nextMilestone, summarize,
-  type ScriptLite, type ScriptStatus,
+  type ScriptLite, type ScriptStatus, type Role,
 } from '../shared/workflow';
 import type { WorkspaceTheme } from '../shared/palettes';
 import type { BatchSummary, Me, Priority, Settings, UserSummary, WriterShare, DateMode } from '../shared/types';
@@ -63,7 +63,7 @@ export async function clockFor(ctx: Ctx, settings?: Settings): Promise<Clock> {
 // ── users ────────────────────────────────────────────────────────────────
 
 interface UserRow {
-  id: number; name: string; email: string; role: 'owner' | 'manager' | 'writer'; active: boolean; capacity_per_day: number | null;
+  id: number; name: string; email: string; role: Role; active: boolean; capacity_per_day: number | null;
   removed_at: string | null; temp_password: string | null; city: string | null; country: string | null; timezone: string | null; work_start: number | null; work_end: number | null;
 }
 

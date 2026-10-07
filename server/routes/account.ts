@@ -7,7 +7,7 @@ import {
   SESSION_COOKIE, setSessionCookie, sha, validatePassword, verifyPassword,
 } from '../auth';
 import { assigneesOf, batchLink, loadSettings, loadUsers, logActivity, notify, rulesOf, type Ctx } from '../core';
-import { compressRanges, isManager } from '../../shared/workflow';
+import { compressRanges, isManager, type Role } from '../../shared/workflow';
 import { auditEvent } from '../audit';
 import type { Me, UserSummary } from '../../shared/types';
 import { conflict, forbidden, HttpError, notFound, parse, zs } from '../http';
@@ -115,7 +115,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
 
   // ── team ───────────────────────────────────────────────────────────────
 
-  const ROLES = ['owner', 'manager', 'writer'] as const;
+  const ROLES = ['owner', 'manager', 'writer', 'editor'] as const;
   const MANAGER_ROLES = `role in ('owner', 'manager')`;
 
   /** The team list. Admins and managers also see temporary passwords that haven't been replaced yet. */
@@ -208,11 +208,16 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       capacityPerDay: capacity, password: z.string().max(200).optional(),
       city, timezone, workStart: hour.optional(), workEnd: hour.optional(),
     }), req.body);
-    const u = await db.one<{ role: 'owner' | 'manager' | 'writer'; active: boolean; name: string; removed_at: string | null; city: string | null; country: string | null; timezone: string | null }>(
+    const u = await db.one<{ role: Role; active: boolean; name: string; removed_at: string | null; city: string | null; country: string | null; timezone: string | null }>(
       `select role, active, name, removed_at, city, country, timezone from users where id = $1`, [id],
     );
     if (!u || u.removed_at) throw notFound('Team member');
-    if (isManager(u.role) && (input.role === 'writer' || input.active === false)) await keepAManager(id);
+    if (isManager(u.role) && ((input.role && !isManager(input.role)) || input.active === false)) await keepAManager(id);
+    // an editor writes nothing: move their unfinished scripts first
+    if (input.role === 'editor' && u.role !== 'editor') {
+      const open = await db.one<{ n: number }>(`select count(*)::int as n from scripts where assignee_id = $1 and removed_at is null and status <> 'delivered'`, [id]);
+      if (open && Number(open.n) > 0) throw new HttpError(400, `${u.name} still has ${open.n} unfinished script${Number(open.n) === 1 ? '' : 's'}. Reassign them before making ${u.name.split(' ')[0]} an editor.`, { role: 'Reassign their scripts first' });
+    }
     if (input.active === false && id === me.id) throw new HttpError(400, 'You can’t deactivate your own account');
     const set: Record<string, unknown> = {};
     if (input.name !== undefined) set.name = input.name;
@@ -254,13 +259,13 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const { reassignTo } = parse(z.object({ reassignTo: zs.id.nullable().optional() }), req.body);
     if (id === me.id) throw new HttpError(400, 'You can’t remove yourself');
-    const u = await db.one<{ role: 'owner' | 'manager' | 'writer'; name: string; removed_at: string | null }>(`select role, name, removed_at from users where id = $1`, [id]);
+    const u = await db.one<{ role: Role; name: string; removed_at: string | null }>(`select role, name, removed_at from users where id = $1`, [id]);
     if (!u || u.removed_at) throw notFound('Team member');
     if (isManager(u.role)) await keepAManager(id);
     let target: { id: number; name: string } | null = null;
     if (reassignTo) {
       if (reassignTo === id) throw new HttpError(400, 'Choose someone else to take over their scripts');
-      const t = await db.one<{ id: number; name: string }>(`select id, name from users where id = $1 and active and removed_at is null`, [reassignTo]);
+      const t = await db.one<{ id: number; name: string }>(`select id, name from users where id = $1 and active and removed_at is null and role <> 'editor'`, [reassignTo]);
       if (!t) throw new HttpError(400, 'Choose an active team member', { reassignTo: 'Choose an active team member' });
       target = t;
     }

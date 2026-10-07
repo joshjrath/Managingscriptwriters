@@ -17,6 +17,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-07-editors',
+    date: '2026-10-07',
+    title: 'Editors get their own sign-in',
+    summary: 'Video editors can sign in to see the shoot calendar, the finished scripts to cut from, and each client’s resources. They can’t change anything.',
+    changes: [
+      { tag: 'new', text: 'There’s a new Editor role. Add an editor in Settings → Team → Add person, or use Give site access next to them in Settings → Editors. They get a sign-in message to send, the same as writers.' },
+      { tag: 'new', text: 'Editors land on their own Home page: shoots and final-script dates for the next 4 weeks, the newest finished scripts, and their to-dos. Their menu has Calendar, Script bank, Clients, Resources and Messages.' },
+      { tag: 'new', text: 'Editors only see scripts once they’re approved or delivered, never drafts or reviews in progress. On Clients they see the guidance, shoots and resources, but not batches or history.' },
+      { tag: 'new', text: 'Synced calendars have a new “+ Editors” option, so a calendar like Joshua’s can be shown to editors without showing it to writers.' },
+      { tag: 'improved', text: 'Editors are never offered as writers when you split, assign or reassign scripts.' },
+    ],
+  },
+  {
     id: '2026-10-07-calendar-shoots',
     date: '2026-10-07',
     title: 'Shoots on Joshua’s calendar that need writers',

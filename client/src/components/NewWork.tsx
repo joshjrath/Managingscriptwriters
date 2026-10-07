@@ -11,7 +11,7 @@ import { api, ApiError, queryClient, useSave } from '../api';
 import { useBoot } from './Shell';
 import { Button, Dialog, Field, FormError, inputProps, Seg, useFieldId, useToast } from './ui';
 import { addDays, computeDeadlines, draftFromFinal, dueState, suggestStart, type ISODate } from '../../../shared/dates';
-import { evenSplit, isManager } from '../../../shared/workflow';
+import { canWrite, evenSplit, isManager } from '../../../shared/workflow';
 import { fmtBytes, fmtDate, fmtLong, fmtRange, plural } from '../../../shared/format';
 import { parseEntry, type ParsedEntry } from '../../../shared/parse';
 import type { BatchSummary, ClientDetail, Priority, ResourceCategory } from '../../../shared/types';
@@ -101,7 +101,7 @@ export interface SplitPart { writerId: number | ''; count: number | '' }
 
 export function SplitEditor({ total, parts, onChange, error }: { total: number; parts: SplitPart[]; onChange: (p: SplitPart[]) => void; error?: string }) {
   const { users } = useBoot();
-  const team = users.filter((u) => u.active);
+  const team = users.filter((u) => u.active && canWrite(u.role));
   const assigned = parts.reduce((n, p) => n + (Number(p.count) || 0), 0);
   const over = total > 0 && assigned > total;
   const set = (i: number, patch: Partial<SplitPart>) => onChange(parts.map((p, j) => (j === i ? { ...p, ...patch } : p)));
@@ -840,7 +840,7 @@ function QuickEntry({ preset, onCreated, onOpenForm }: { preset?: NewWorkPreset;
                         <span className={w.kind === 'unknown' ? 'red' : 'muted'}>{w.kind === 'unknown' ? `No team member called “${w.text}”.` : `Which ${w.text}?`}</span>
                         <select className="select sm" style={{ width: 'auto' }} aria-label={`Writer for “${w.text}”`} value={writerChoice[i] ?? ''} onChange={(e) => setWriterChoice({ ...writerChoice, [i]: e.target.value ? Number(e.target.value) : '' })}>
                           <option value="">{w.kind === 'unknown' ? 'Skip' : 'Choose…'}</option>
-                          {(w.kind === 'ambiguous' ? w.options : boot.users.filter((u) => u.active)).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                          {(w.kind === 'ambiguous' ? w.options : boot.users.filter((u) => u.active && canWrite(u.role))).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
                         </select>
                       </>
                     )}

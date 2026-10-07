@@ -141,7 +141,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   app.get('/api/clients/:id', async (req): Promise<ClientDetail> => {
-    requireUser(req);
+    const me = requireUser(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const [summary] = (await clientSummaries(ctx, 'all')).filter((c) => c.id === id);
     if (!summary) throw notFound('Client');
@@ -156,7 +156,9 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     ]);
     return {
       ...summary, brandVoice: c?.brand_voice ?? null, guidance: c?.guidance ?? null,
-      briefings, resources: resources.filter((r) => !r.briefingId), shoots, batches: batches.summaries, activity,
+      briefings, resources: resources.filter((r) => !r.briefingId), shoots,
+      // editors get the brand material, not the team's internal history
+      batches: me.role === 'editor' ? [] : batches.summaries, activity: me.role === 'editor' ? [] : activity,
     };
   });
 
@@ -358,10 +360,18 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
 
   // Files are only served to signed-in users, and only while a live resource references them.
   app.get('/api/files/:id', async (req, reply) => {
-    requireUser(req);
+    const me = requireUser(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
+    // editors: resources, past scripts, approved edits, and documents whose scripts are all approved or delivered
+    const finished = `(exists (select 1 from resources r where r.file_id = f.id and r.removed_at is null)
+      or exists (select 1 from past_documents p where p.file_id = f.id and p.removed_at is null)
+      or exists (select 1 from reviews v where v.file_id = f.id and v.action = 'approved')
+      or exists (select 1 from submissions s where s.file_id = f.id and not exists (
+           select 1 from submission_scripts ss join scripts sc on sc.id = ss.script_id
+            where ss.submission_id = s.id and sc.removed_at is null and sc.status not in ('approved', 'delivered'))))`;
+    const anyLive = `(exists (select 1 from resources r where r.file_id = f.id and r.removed_at is null) or exists (select 1 from submissions s where s.file_id = f.id) or exists (select 1 from reviews v where v.file_id = f.id) or exists (select 1 from past_documents p where p.file_id = f.id and p.removed_at is null))`;
     const f = await db.one<{ filename: string; mime: string; size: number; stored: number }>(
-      `select f.filename, f.mime, f.size, octet_length(f.data) as stored from files f where f.id = $1 and (exists (select 1 from resources r where r.file_id = f.id and r.removed_at is null) or exists (select 1 from submissions s where s.file_id = f.id) or exists (select 1 from reviews v where v.file_id = f.id) or exists (select 1 from past_documents p where p.file_id = f.id and p.removed_at is null))`, [id],
+      `select f.filename, f.mime, f.size, octet_length(f.data) as stored from files f where f.id = $1 and ${me.role === 'editor' ? finished : anyLive}`, [id],
     );
     if (!f) throw notFound('File');
     const inline = SAFE_INLINE.has(f.mime) && (req.query as Record<string, string>).download !== '1';

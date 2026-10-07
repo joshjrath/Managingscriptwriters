@@ -45,7 +45,9 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
   const { db } = ctx;
 
   app.get('/api/script-bank', async (req): Promise<ScriptBankPage> => {
-    requireUser(req);
+    const me = requireUser(req);
+    // editors only ever see finished scripts, so they never cut from a draft
+    const finishedOnly = me.role === 'editor';
     const q = parse(z.object({
       q: z.string().trim().max(120).optional(),
       clientId: zs.id.optional(),
@@ -172,6 +174,7 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
     const needle = q.q?.toLowerCase().replace(/^#/, '');
     const num = q.q && /^#?\d{1,4}$/.test(q.q) ? Number(q.q.replace('#', '')) : null;
     const match = (d: Deliverable) => {
+      if (finishedOnly && !d.past && d.state !== 'approved' && d.state !== 'delivered') return false;
       if (q.clientId && d.clientId !== q.clientId) return false;
       if (q.writerId && d.writerId !== q.writerId) return false;
       if (q.status === 'finished' && d.state !== 'approved' && d.state !== 'delivered') return false;
