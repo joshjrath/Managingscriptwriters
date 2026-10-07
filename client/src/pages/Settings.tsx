@@ -12,6 +12,7 @@ import { fmtCutoff, fmtLong, fmtStamp, plural } from '../../../shared/format';
 import { CITIES, cityLabel, findCity, shiftLength, shiftOf, timeZoneList, zoneOffset } from '../../../shared/cities';
 import { ACCENT_LABEL, ACCENTS, darkTextContrast, DEFAULT_PALETTE, HEX, PALETTES, resolveTheme, SURFACE_LABEL, SURFACES, surfaceSwatch, type Accent, type WorkspaceTheme } from '../../../shared/palettes';
 import { applyTheme, restoreTheme } from '../theme';
+import { CalendarFeedsPanel } from '../components/CalendarFeeds';
 import { PageHeader, useBoot } from '../components/Shell';
 import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, useFieldId, useToast } from '../components/ui';
 
@@ -33,6 +34,7 @@ export function SettingsPage() {
         <RulesPanel />
         <div className="grid" style={{ alignContent: 'start' }}>
           <TeamPanel />
+          <CalendarFeedsPanel />
           {me.role === 'owner' && <EditorsPanel />}
         </div>
       </div>

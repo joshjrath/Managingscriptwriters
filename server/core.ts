@@ -20,6 +20,8 @@ export interface Ctx {
   setupHint?: string;
   /** reads pasted notes into an import plan (Claude); absent when no API key is configured */
   notesReader?: import('./notes-import').NotesReader | null;
+  /** reads a synced calendar's iCal link (tests pass a stand-in) */
+  fetchCalendar?: (url: string) => Promise<string>;
   /** the real workspace; `db` points at a practice copy for requests made in Recording mode */
   realDb?: Db;
   /** the database this request is using right now (for work that outlives the handler, like streaming a file) */

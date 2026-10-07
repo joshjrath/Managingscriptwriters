@@ -1408,3 +1408,49 @@ describe('filling in missing deadlines on existing batches', () => {
     expect((await db.query(`select count(*)::int as n from activity where action = 'batch.deadlines_filled'`))[0]).toEqual(before);
   });
 });
+
+describe('synced Google Calendars', () => {
+  const ICS = (summary: string) => ['BEGIN:VCALENDAR', 'VERSION:2.0',
+    'BEGIN:VEVENT', 'UID:shoot@g', 'DTSTART;VALUE=DATE:20261015', 'DTEND;VALUE=DATE:20261017', `SUMMARY:${summary}`, 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:call@g', 'DTSTART;TZID=America/New_York:20261014T100000', 'DTEND;TZID=America/New_York:20261014T103000', 'SUMMARY:Ideation call', 'LOCATION:https://meet.google.com/x', 'END:VEVENT',
+    'END:VCALENDAR'].join('\r\n');
+  const URL_OK = 'https://calendar.google.com/calendar/ical/joshua%40example.com/private-abc123/basic.ics';
+  let feedText = ICS('Shoot – Dentist Mike');
+
+  it('adds a calendar by its secret address, shows its events, and keeps them in sync', async () => {
+    ctx.fetchCalendar = async (u) => { if (u !== URL_OK) throw new Error('Google refused the link.'); return feedText; };
+    // the page link and private addresses are refused; writers can't add one
+    expect((await manager.post('/api/calendar-feeds', { name: 'Joshua', url: 'https://calendar.google.com/calendar/r' })).body.error.fields.url).toMatch(/Secret address/);
+    expect((await manager.post('/api/calendar-feeds', { name: 'Joshua', url: 'http://127.0.0.1/x.ics' })).status).toBe(400);
+    expect((await sarah.post('/api/calendar-feeds', { name: 'Joshua', url: URL_OK })).status).toBe(403);
+    const add = await manager.post('/api/calendar-feeds', { name: 'Joshua’s calendar', url: URL_OK.replace('https://', 'webcal://'), color: '#60D1BE' });
+    expect(add.status).toBe(200);
+    expect(add.body.result).toMatchObject({ ok: true, count: 2 });
+    expect(add.body.feed.urlHint).toBe('calendar.google.com · joshua@example.com');
+    expect(JSON.stringify(add.body)).not.toContain('private-abc123'); // the secret isn't sent back
+    const id = add.body.feed.id;
+    // managers see the events on the Calendar
+    let cal = (await manager.get('/api/calendar?from=2026-10-01&to=2026-10-31')).body.events.filter((e: any) => e.type === 'external');
+    expect(cal.map((e: any) => [e.title, e.start, e.end])).toEqual([['Ideation call', '2026-10-14', '2026-10-14'], ['Shoot – Dentist Mike', '2026-10-15', '2026-10-16']]);
+    expect(cal[0].external).toMatchObject({ feedName: 'Joshua’s calendar', color: '#60D1BE', allDay: false, startAt: '2026-10-14T14:00:00.000Z', location: 'https://meet.google.com/x' });
+    // writers don't, until it's shared with everyone
+    expect((await sarah.get('/api/calendar?from=2026-10-01&to=2026-10-31')).body.events.some((e: any) => e.type === 'external')).toBe(false);
+    await manager.patch(`/api/calendar-feeds/${id}`, { visibility: 'everyone' });
+    expect((await sarah.get('/api/calendar?from=2026-10-01&to=2026-10-31')).body.events.filter((e: any) => e.type === 'external')).toHaveLength(2);
+    // a change in Google shows up on the next sync
+    feedText = ICS('Shoot – Dentist Mike (moved to studio B)');
+    expect((await manager.post(`/api/calendar-feeds/${id}/sync`)).body.result).toMatchObject({ ok: true, count: 2 });
+    cal = (await manager.get('/api/calendar?from=2026-10-01&to=2026-10-31')).body.events.filter((e: any) => e.type === 'external');
+    expect(cal.map((e: any) => e.title)).toContain('Shoot – Dentist Mike (moved to studio B)');
+    // a failed sync keeps the last events and says why
+    ctx.fetchCalendar = async () => { throw new Error('Google refused the link. It may have been reset: copy the secret address again.'); };
+    const bad = (await manager.post(`/api/calendar-feeds/${id}/sync`)).body;
+    expect(bad.result.ok).toBe(false);
+    expect(bad.feed.lastError).toMatch(/reset/);
+    expect((await manager.get('/api/calendar?from=2026-10-01&to=2026-10-31')).body.events.filter((e: any) => e.type === 'external')).toHaveLength(2);
+    // removing it removes its events
+    expect((await manager.del(`/api/calendar-feeds/${id}`)).status).toBe(200);
+    expect((await manager.get('/api/calendar?from=2026-10-01&to=2026-10-31')).body.events.some((e: any) => e.type === 'external')).toBe(false);
+    expect((await db.query(`select count(*)::int as n from calendar_events`))[0]).toEqual({ n: 0 });
+  });
+});

@@ -218,8 +218,38 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     };
   });
 
+  /** Events from synced calendars (Google Calendar), on the days they fall in the viewer's own time zone. */
+  const syncedEvents = async (me: Me, from: ISODate, to: ISODate, today: ISODate): Promise<CalendarEvent[]> => {
+    const tzRow = await db.one<{ timezone: string | null }>(`select timezone from users where id = $1`, [me.id]);
+    const tz = tzRow?.timezone ?? (await loadSettings(db)).timezone;
+    // a day either side catches events that land on a different date in someone's own zone
+    const rows = await db.query<{ id: number; feed_id: number; feed_name: string; color: string; uid: string; title: string; location: string | null; description: string | null; all_day: boolean; start_at: string; end_at: string; start_date: string | null; end_date: string | null }>(
+      `select e.id, e.feed_id, f.name as feed_name, f.color, e.uid, e.title, e.location, e.description, e.all_day, e.start_at, e.end_at, e.start_date::text as start_date, e.end_date::text as end_date
+         from calendar_events e join calendar_feeds f on f.id = e.feed_id
+        where e.start_at < ($2::date + 2)::timestamptz and e.end_at > ($1::date - 1)::timestamptz ${isManager(me.role) ? '' : `and f.visibility = 'everyone'`}
+        order by e.start_at limit 2000`, [from, to],
+    );
+    const dayIn = (at: string | Date) => nowInZone(tz, new Date(at)).date;
+    const out: CalendarEvent[] = [];
+    for (const r of rows) {
+      const start = r.all_day ? r.start_date! : dayIn(r.start_at);
+      // an event ending exactly at midnight belongs to the day before
+      const end = r.all_day ? r.end_date! : dayIn(new Date(Math.max(new Date(r.start_at).getTime(), new Date(r.end_at).getTime() - 1)));
+      if (end < from || start > to) continue;
+      out.push({
+        id: `x${r.id}`, type: 'external', start, end, title: r.title, clientName: r.feed_name, batchId: null, shootId: null,
+        overdue: false, complete: end < today,
+        external: {
+          feedId: Number(r.feed_id), feedName: r.feed_name, color: r.color, allDay: r.all_day,
+          startAt: new Date(r.start_at).toISOString(), endAt: new Date(r.end_at).toISOString(), location: r.location, description: r.description,
+        },
+      });
+    }
+    return out;
+  };
+
   app.get('/api/calendar', async (req) => {
-    requireUser(req);
+    const me = requireUser(req);
     const q = parse(z.object({ from: zs.date, to: zs.date, writerId: zs.id.optional(), clientId: zs.id.optional() }), req.query);
     const clock = await clockFor(ctx);
     const { summaries } = await loadBatches(ctx, { clientId: q.clientId }, clock);
@@ -247,6 +277,7 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
         batchId: s.batchIds[0] ?? null, shootId: s.id, overdue: false, complete: (s.endDate ?? s.startDate) < clock.today,
       });
     }
+    events.push(...(await syncedEvents(me, q.from, q.to, clock.today)));
     return { events, clock };
   });
 

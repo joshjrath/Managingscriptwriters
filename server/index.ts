@@ -8,6 +8,7 @@ import { buildApp } from './app';
 import { openDb } from './db';
 import { hashPassword, validatePassword } from './auth';
 import { startReminderScheduler } from './reminders';
+import { startCalendarSync } from './calendar-feeds';
 import { seedDemo } from './seed-demo';
 import { claudeNotesReader } from './notes-import';
 import type { Ctx } from './core';
@@ -47,6 +48,8 @@ async function main() {
 
   const minutes = Number(env.REMINDER_INTERVAL_MINUTES ?? 10);
   const stopReminders = env.REMINDERS === 'off' ? () => {} : startReminderScheduler(ctx, minutes, (m) => console.log(m));
+  // synced calendars (Google Calendar iCal links) are re-read every 15 minutes
+  const stopCalendars = env.CALENDAR_SYNC === 'off' ? () => {} : startCalendarSync(ctx, Number(env.CALENDAR_SYNC_MINUTES ?? 15), (m) => console.log(m));
 
   const port = Number(env.PORT ?? 3001);
   await app.listen({ port, host: env.HOST ?? '0.0.0.0' });
@@ -54,6 +57,7 @@ async function main() {
 
   const shutdown = async () => {
     stopReminders();
+    stopCalendars();
     await app.close();
     await db.close();
     process.exit(0);

@@ -42,7 +42,7 @@ export function DaysTimeline({ n, onN, today, writerId, clientId, hidden, render
   const days = useMemo(() => eachDay(range.from, range.to), [range]);
   const byDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
-    const order = { shoot: 0, final: 1, draft: 2, writing: 3 };
+    const order = { shoot: 0, final: 1, draft: 2, writing: 3, external: 4 };
     for (const e of q.data?.events ?? []) {
       if (hidden.has(e.type)) continue;
       for (const d of eachDay(e.start > range.from ? e.start : range.from, e.end < range.to ? e.end : range.to)) map.set(d, [...(map.get(d) ?? []), e]);

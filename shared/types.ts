@@ -458,7 +458,7 @@ export interface Dashboard {
 
 export interface CalendarEvent {
   id: string;
-  type: 'writing' | 'draft' | 'final' | 'shoot';
+  type: 'writing' | 'draft' | 'final' | 'shoot' | 'external';
   start: ISODate;
   end: ISODate;
   title: string;
@@ -467,6 +467,31 @@ export interface CalendarEvent {
   shootId: number | null;
   overdue: boolean;
   complete: boolean;
+  /** an event from a synced calendar (Google Calendar) */
+  external?: ExternalEventInfo;
+}
+
+export interface ExternalEventInfo {
+  feedId: number;
+  feedName: string;
+  color: string;
+  allDay: boolean;
+  startAt: string;
+  endAt: string;
+  location: string | null;
+  description: string | null;
+}
+
+/** A synced calendar, as managers see it in Settings (the secret address is never sent back in full). */
+export interface CalendarFeed {
+  id: number;
+  name: string;
+  urlHint: string;
+  color: string;
+  visibility: 'managers' | 'everyone';
+  lastSyncedAt: string | null;
+  lastError: string | null;
+  eventCount: number;
 }
 
 /** A document (PDF upload or link) a writer sent for a set of their scripts. */

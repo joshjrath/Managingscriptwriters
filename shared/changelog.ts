@@ -17,6 +17,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-07-google-calendar',
+    date: '2026-10-07',
+    title: 'Google Calendar on the Calendar',
+    summary: 'Show a Google Calendar’s shoots and calls on the site’s Calendar. It stays in sync on its own.',
+    changes: [
+      { tag: 'new', text: 'Settings → Synced calendars → Add calendar: paste a Google Calendar’s “Secret address in iCal format” (the steps are in the dialog), pick a colour and who sees it. Its events show on the Calendar in that colour, with times in your own time zone, alongside shoots and deadlines.' },
+      { tag: 'new', text: 'It re-reads the calendar every 15 minutes, or straight away with Sync now, so new, moved and cancelled events (repeating ones too) update here by themselves. Click an event to see its time, place, notes and meeting link.' },
+      { tag: 'new', text: 'By default only admins and managers see a synced calendar; choose “Everyone” to show it to writers too. It’s read-only: nothing is changed in Google.' },
+    ],
+  },
+  {
     id: '2026-10-02-fill-missing-deadlines',
     date: '2026-10-02',
     title: 'Existing batches got their missing deadline',

@@ -456,4 +456,34 @@ alter table users add column timezone_confirmed_at timestamptz;
 `,
   // 18 · batches with only drafts due or only final delivery get the other date
   fillMissingDeadlines,
+  // 19 · synced calendars (a Google Calendar's secret iCal address) shown on the Calendar
+  `
+create table calendar_feeds (
+  id bigint generated always as identity primary key,
+  name text not null,
+  url text not null,
+  color text not null default '#9CC7F7',
+  visibility text not null default 'managers' check (visibility in ('managers', 'everyone')),
+  created_by bigint not null references users(id),
+  created_at timestamptz not null default now(),
+  last_synced_at timestamptz,
+  last_error text,
+  event_count int not null default 0
+);
+create table calendar_events (
+  id bigint generated always as identity primary key,
+  feed_id bigint not null references calendar_feeds(id) on delete cascade,
+  uid text not null,
+  title text not null,
+  location text,
+  description text,
+  all_day boolean not null,
+  start_at timestamptz not null,
+  end_at timestamptz not null,
+  start_date date,
+  end_date date
+);
+create index calendar_events_feed_idx on calendar_events (feed_id);
+create index calendar_events_when_idx on calendar_events (start_at, end_at);
+`,
 ];

@@ -1477,3 +1477,25 @@ html.cc-returning #root > * { animation: ccr-in 1100ms cubic-bezier(0.22, 1, 0.3
 .tz-preview { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; border-radius: var(--r-row); background: var(--row); font-size: 13px; color: var(--text-2); }
 .tz-preview b { color: var(--text); font-size: 14px; }
 .menu-hint { margin-left: auto; font-size: 11.5px; color: var(--text-3); }
+
+/* ── synced calendars (Google Calendar) on the Calendar ────────────────── */
+.ev.external { background: transparent; color: var(--text); font-weight: 500; }
+.ev.external:hover { background: color-mix(in srgb, var(--c) 14%, transparent); }
+.ev.external .ev-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--c); flex: none; }
+.ev.external .ev-time { font-weight: 700; color: var(--c); margin-right: 5px; }
+.ev.external.allday { background: color-mix(in srgb, var(--c) 18%, transparent); box-shadow: inset 3px 0 0 var(--c); }
+.ev.external.allday svg { color: var(--c); }
+.ev.external.cont.allday { opacity: .8; }
+.synced-ev .prose a { color: var(--cyan); text-decoration: underline; text-underline-offset: 2px; overflow-wrap: anywhere; }
+.howto { margin: 0; padding: 12px 14px 12px 32px; border-radius: var(--r-row); background: var(--row); font-size: 13px; line-height: 1.5; color: var(--text-2); display: flex; flex-direction: column; gap: 6px; }
+.howto b { color: var(--text); }
+.howto a { color: var(--cyan); text-decoration: underline; text-underline-offset: 2px; }
+.howto code { font-size: 12px; padding: 1px 5px; border-radius: 5px; background: var(--bg); color: var(--text); }
+.swatches { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatch { width: 28px; height: 28px; border-radius: 50%; border: 0; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .15); transition: transform 150ms var(--ease-out-back); }
+.swatch:hover { transform: scale(1.1); }
+.swatch.on { box-shadow: 0 0 0 2px var(--panel-2), 0 0 0 4px var(--text); }
+.ev.external.allday.cont { height: 7px; min-height: 7px; padding: 0; margin: 3px 0; border-radius: 4px; box-shadow: none; background: color-mix(in srgb, var(--c) 45%, transparent); }
+.ev.external.allday.cont svg, .ev.external.allday.cont span { display: none; }
+.howto { list-style: decimal; }
+.howto li::marker { color: var(--text-3); font-weight: 700; }

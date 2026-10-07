@@ -1,6 +1,7 @@
 // Calendar: writing periods, draft deadlines, final delivery deadlines and
-// shoot dates, each with its own colour, icon and label. Click an event to
-// open its batch. Managers can drag a shoot to another day (or click it and
+// shoot dates, each with its own colour, icon and label, plus events from synced
+// calendars (Google Calendar) in each calendar's colour. Click an event to
+// open its batch, or a synced event to see its details. Managers can drag a shoot to another day (or click it and
 // choose "Change dates"); a preview shows everything that moves with it
 // before anything changes. Month grid on desktop, agenda list on phones.
 
@@ -8,13 +9,13 @@ import { useMemo, useRef, useState, type DragEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, m } from 'framer-motion';
-import { AlertTriangle, ArrowRight, CalendarClock, Camera, Check, ChevronLeft, ChevronRight, FileText, GripVertical, PenLine, Send } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CalendarClock, CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, GripVertical, PenLine, Send } from 'lucide-react';
 import { api, qs } from '../api';
 import type { CalendarEvent } from '../../../shared/types';
 import { addDays, addMonths, diffDays, eachDay, startOfMonth, startOfWeek, type ISODate } from '../../../shared/dates';
 import { isManager } from '../../../shared/workflow';
 import { fmtMonth, fmtWeekday, fmtDate, fmtRange } from '../../../shared/format';
-import { PageHeader, useBoot, useNewWork } from '../components/Shell';
+import { PageHeader, useBoot, useDisplayTz, useNewWork } from '../components/Shell';
 import { Button, Dialog, Empty, ErrorState, Loading, Seg } from '../components/ui';
 import { SOFT } from '../motion';
 import { RescheduleDialog } from './BatchDetail';
@@ -25,7 +26,13 @@ const TYPE = {
   draft: { label: 'Drafts due', icon: FileText, c: 'var(--lavender)' },
   final: { label: 'Final → Timeliner', icon: Send, c: 'var(--yellow)' },
   shoot: { label: 'Shoot', icon: Camera, c: 'var(--salmon)' },
+  external: { label: 'Google Calendar', icon: CalendarDays, c: 'var(--text-2)' },
 } as const;
+
+/** "10:00 AM" in the viewer's time zone, or null for all-day events. */
+const timeOf = (e: CalendarEvent, tz: string) => (e.external && !e.external.allDay
+  ? new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(new Date(e.external.startAt)).replace(':00', '').replace(' ', '').toLowerCase()
+  : null);
 
 /** A shoot being moved: where it is now, and (when dragged) where it's going. */
 interface Move { shootId: number; start: ISODate; end: ISODate | null; toStart?: ISODate; toEnd?: ISODate | null }
@@ -49,6 +56,8 @@ export function CalendarPage() {
   const [drag, setDrag] = useState<{ e: CalendarEvent; offset: number; over: ISODate | null } | null>(null);
   const [move, setMove] = useState<Move | null>(null);
   const [picked, setPicked] = useState<CalendarEvent | null>(null);
+  const [synced, setSynced] = useState<CalendarEvent | null>(null);
+  const tz = useDisplayTz();
   const openNew = useNewWork();
   const gridStart = startOfWeek(month);
   const gridEnd = addDays(startOfWeek(addDays(addMonths(month, 1), -1)), 6);
@@ -62,16 +71,17 @@ export function CalendarPage() {
   const events = (q.data?.events ?? []).filter((e) => !hidden.has(e.type));
   const byDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
-    const order = { shoot: 0, final: 1, draft: 2, writing: 3 };
+    const order = { shoot: 0, final: 1, draft: 2, writing: 3, external: 4 };
     for (const e of events) for (const d of eachDay(e.start > gridStart ? e.start : gridStart, e.end < gridEnd ? e.end : gridEnd)) map.set(d, [...(map.get(d) ?? []), e]);
-    for (const list of map.values()) list.sort((a, b) => order[a.type] - order[b.type]);
+    for (const list of map.values()) list.sort((a, b) => order[a.type] - order[b.type] || (a.external?.startAt ?? '').localeCompare(b.external?.startAt ?? ''));
     return map;
   }, [events, gridStart, gridEnd]);
   const days = eachDay(gridStart, gridEnd);
 
   const canMove = (e: CalendarEvent) => manager && e.type === 'shoot' && e.shootId != null;
   const open = (e: CalendarEvent) => {
-    if (canMove(e)) setPicked(e);
+    if (e.external) setSynced(e);
+    else if (canMove(e)) setPicked(e);
     else if (e.batchId) nav(`/batches/${e.batchId}`);
     else if (e.shootId) nav('/production');
   };
@@ -101,6 +111,21 @@ export function CalendarPage() {
   };
 
   const ev = (e: CalendarEvent, day: ISODate, detail = false) => {
+    if (e.external) {
+      const x = e.external;
+      const time = day === e.start ? timeOf(e, tz) : null;
+      const first = day === e.start || new Date(day + 'T00:00:00Z').getUTCDay() === 1;
+      return (
+        <m.div key={`${e.id}:${day}`} className="ev-wrap" layout="position" transition={SOFT}>
+          <button className={`ev external${x.allDay ? ' allday' : ''}${first ? '' : ' cont'}${e.complete ? ' done' : ''}`} style={{ ['--c' as string]: x.color }} onClick={() => open(e)}
+            title={`${x.feedName}: ${e.title}${time ? ` · ${time}` : ''}${x.location ? ` · ${x.location}` : ''}`}
+            aria-label={`${x.feedName}: ${e.title}${time ? ` at ${time}` : x.allDay ? ', all day' : ''}`}>
+            {x.allDay ? <CalendarDays aria-hidden /> : <i className="ev-dot" aria-hidden />}
+            <span>{first ? <>{time && <b className="ev-time">{time}</b>}{e.title}</> : ' '}{detail && first && <small className="ev-sub">{x.feedName}{x.location ? ` · ${x.location}` : ''}</small>}</span>
+          </button>
+        </m.div>
+      );
+    }
     const T = TYPE[e.type];
     const Icon = e.overdue && e.type !== 'writing' ? AlertTriangle : e.complete && e.type !== 'writing' ? Check : T.icon;
     const showLabel = e.type !== 'writing' || day === e.start || new Date(day + 'T00:00:00Z').getUTCDay() === 1;
@@ -201,6 +226,18 @@ export function CalendarPage() {
                   <h3>{fmtWeekday(d)}{d === clock.today && <span>today</span>}</h3>
                   <div className="rows">
                     {(byDay.get(d) ?? []).filter((e) => e.type !== 'writing' || e.start === d).map((e) => {
+                      if (e.external) {
+                        const x = e.external;
+                        return (
+                          <button key={e.id} className="item clickable" style={{ border: 0, textAlign: 'left', color: 'inherit', font: 'inherit', boxShadow: `inset 3px 0 0 ${x.color}` }} onClick={() => open(e)}>
+                            <div className="body">
+                              <div className="top" style={{ color: x.color, fontWeight: 700 }}><CalendarDays size={14} aria-hidden />{x.feedName}</div>
+                              <div className="title">{e.title}</div>
+                              <div className="meta">{whenText(e, tz)}{x.location ? ` · ${x.location}` : ''}</div>
+                            </div>
+                          </button>
+                        );
+                      }
                       const T = TYPE[e.type];
                       return (
                         <button key={e.id} className={`item clickable ${e.overdue ? 'edge-red' : ''}`} style={{ border: 0, textAlign: 'left', color: 'inherit', font: 'inherit' }} onClick={() => open(e)}>
@@ -231,7 +268,32 @@ export function CalendarPage() {
           <p className="muted" style={{ fontSize: 13.5 }}>Changing the dates moves the draft and final delivery deadlines and the planned writing start with it. You’ll see every change before it’s applied. You can also drag the shoot to another day on the calendar.</p>
         </Dialog>
       )}
+      {synced?.external && (
+        <Dialog open onClose={() => setSynced(null)} size="narrow" title={synced.title} sub={`${synced.external.feedName} · ${whenText(synced, tz)}`}
+          footer={<div className="form-actions"><Button variant="ghost" onClick={() => setSynced(null)}>Close</Button></div>}>
+          <div className="stack s3 synced-ev">
+            <span className="chip" style={{ ['--c' as string]: synced.external.color, alignSelf: 'flex-start' }}><i className="d" aria-hidden />{synced.external.feedName}</span>
+            {synced.external.location && <div><div className="section-title">Where</div><p className="prose"><Linked text={synced.external.location} /></p></div>}
+            {synced.external.description && <div><div className="section-title">Details</div><p className="prose" style={{ whiteSpace: 'pre-wrap' }}><Linked text={synced.external.description} /></p></div>}
+            <p className="muted" style={{ fontSize: 12.5 }}>From Google Calendar. Change it there; it updates here within 15 minutes.</p>
+          </div>
+        </Dialog>
+      )}
       {move && <RescheduleDialog shootId={move.shootId} start={move.start} end={move.end} initialStart={move.toStart} initialEnd={move.toEnd} onClose={() => setMove(null)} />}
     </>
   );
+}
+
+/** "Thu, Oct 8 · 10:00–10:30 AM", or the dates for all-day events, in the viewer's zone. */
+function whenText(e: CalendarEvent, tz: string): string {
+  const x = e.external!;
+  if (x.allDay) return e.end !== e.start ? `${fmtDate(e.start)} – ${fmtDate(e.end)} · all day` : `${fmtWeekday(e.start)} · all day`;
+  const t = (iso: string) => new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
+  return `${fmtWeekday(e.start)} · ${t(x.startAt)}–${t(x.endAt)}${e.end !== e.start ? ` (${fmtDate(e.end)})` : ''}`;
+}
+
+/** Text with its links clickable (meeting links in calendar invites). */
+function Linked({ text }: { text: string }) {
+  const parts = text.split(/(https?:\/\/[^\s<>"]+)/g);
+  return <>{parts.map((p, i) => (/^https?:\/\//.test(p) ? <a key={i} href={p} target="_blank" rel="noopener noreferrer">{p}</a> : p))}</>;
 }
