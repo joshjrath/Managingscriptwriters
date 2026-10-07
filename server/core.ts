@@ -155,13 +155,13 @@ export const BATCH_SELECT = `
     left join shoots s on s.id = b.shoot_id
     left join users bu on bu.id = b.blocked_by`;
 
-export interface ScriptLiteRow { id: number; batch_id: number; number: number; status: ScriptStatus; assignee_id: number | null; delivered_at: string | null }
+export interface ScriptLiteRow { id: number; batch_id: number; number: number; status: ScriptStatus; assignee_id: number | null; delivered_at: string | null; assigned_at?: string | null }
 
 export async function loadScriptsFor(db: Db, batchIds: number[]): Promise<Map<number, ScriptLiteRow[]>> {
   const map = new Map<number, ScriptLiteRow[]>();
   if (!batchIds.length) return map;
   const rows = await db.query<ScriptLiteRow>(
-    `select id, batch_id, number, status, assignee_id, delivered_at from scripts
+    `select id, batch_id, number, status, assignee_id, delivered_at, assigned_at from scripts
       where removed_at is null and batch_id in (${batchIds.map((_, i) => `$${i + 1}`).join(',')})
       order by batch_id, number`,
     batchIds,

@@ -68,6 +68,8 @@ export interface ClientLite {
 
 export interface Counts {
   myOpenScripts: number;
+  /** batches with work given to me this week that I haven't started */
+  myNewWork: number;
   reviewQueue: number;
   unreadNotifications: number;
   unreadMessages: number;
@@ -228,6 +230,8 @@ export interface Script {
   deliveredByName: string | null;
   deliveryId: number | null;
   openRevision: RevisionRequest | null;
+  /** when it was given to its current writer */
+  assignedAt: string | null;
   updatedAt: string;
 }
 

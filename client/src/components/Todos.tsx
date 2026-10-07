@@ -68,7 +68,7 @@ export function TodoPanel({ userId, all, batchId, title, sub, hideWhenEmpty }: S
   const open = list.filter((t) => !t.doneAt);
   const finished = list.filter((t) => t.doneAt);
   const [showDone, setShowDone] = useState(false);
-  if (hideWhenEmpty && q.data && !list.length && !isManager(me.role)) return null;
+  if (hideWhenEmpty && q.data && !open.length && !isManager(me.role)) return null;
   const forName = userId && userId !== me.id ? users.find((u) => u.id === userId)?.name : undefined;
   return (
     <Panel title={title ?? 'To-do'} count={open.length || undefined} sub={sub}

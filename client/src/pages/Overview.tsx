@@ -20,7 +20,7 @@ import { Avatar, Chip, CountUp, DateTile, Empty, ErrorState, Loading, Panel } fr
 
 export function Overview() {
   const displayTz = useDisplayTz();
-  const { me, clock } = useBoot();
+  const { me, clock, counts } = useBoot();
   const nav = useNavigate();
   const openNew = useNewWork();
   const q = useQuery({ queryKey: ['dashboard'], queryFn: () => api<Dashboard>('/api/dashboard'), refetchInterval: 60_000 });
@@ -37,6 +37,13 @@ export function Overview() {
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
       {d && (
         <>
+          {counts.myNewWork > 0 && (
+            <Link to="/my-work" className="mw-alert">
+              <Sparkles aria-hidden />
+              <div><b>You have new work</b><span>{plural(counts.myNewWork, 'batch', 'batches')} just assigned to you. Open My work to see the scripts, dates and brief.</span></div>
+              <ArrowRight aria-hidden className="go" />
+            </Link>
+          )}
           <div style={{ marginBottom: 'var(--gap)' }}><TodayPill /></div>
           <div className="cards4">
             <button className="stat-card salmon" onClick={() => nav('/production?flag=overdue&view=table')} aria-label={`${d.cards.overdueBatches} overdue batches, ${d.cards.overdueScripts} scripts behind. Show them.`}>

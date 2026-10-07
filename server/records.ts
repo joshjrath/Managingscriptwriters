@@ -14,7 +14,7 @@ interface ScriptRow {
   id: number; batch_id: number; number: number; title: string | null; assignee_id: number | null; assignee_name: string | null;
   status: ScriptStatus; doc_url: string | null; timeliner_url: string | null; notes: string | null; version: number;
   submitted_at: string | null; approved_at: string | null; approved_by_name: string | null; delivered_at: string | null;
-  delivered_by_name: string | null; delivery_id: number | null; updated_at: string;
+  delivered_by_name: string | null; delivery_id: number | null; assigned_at: string | null; updated_at: string;
 }
 
 export async function loadScripts(db: Db, where: { batchId?: number; ids?: number[]; status?: ScriptStatus; assigneeId?: number }): Promise<Script[]> {
@@ -27,7 +27,7 @@ export async function loadScripts(db: Db, where: { batchId?: number; ids?: numbe
   const rows = await db.query<ScriptRow>(
     `select s.id, s.batch_id, s.number, s.title, s.assignee_id, u.name as assignee_name, s.status, s.doc_url, s.timeliner_url,
             s.notes, s.version, s.submitted_at, s.approved_at, ab.name as approved_by_name, s.delivered_at,
-            dl.name as delivered_by_name, s.delivery_id, s.updated_at
+            dl.name as delivered_by_name, s.delivery_id, s.assigned_at, s.updated_at
        from scripts s
        left join users u on u.id = s.assignee_id
        left join users ab on ab.id = s.approved_by
@@ -43,7 +43,7 @@ export async function loadScripts(db: Db, where: { batchId?: number; ids?: numbe
     status: r.status, docUrl: r.doc_url, timelinerUrl: r.timeliner_url, notes: r.notes, version: r.version,
     submittedAt: r.submitted_at, approvedAt: r.approved_at, approvedByName: r.approved_by_name,
     deliveredAt: r.delivered_at, deliveredByName: r.delivered_by_name, deliveryId: r.delivery_id,
-    openRevision: openBy.get(r.id) ?? null, updatedAt: r.updated_at,
+    openRevision: openBy.get(r.id) ?? null, assignedAt: r.assigned_at, updatedAt: r.updated_at,
   }));
 }
 

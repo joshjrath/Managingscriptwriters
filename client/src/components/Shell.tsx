@@ -130,10 +130,10 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
     { to: '/writers', label: 'Messages', icon: <MessageCircle />, count: unreadMsgs, hot: !!unreadMsgs },
   ];
-  const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; show?: boolean }[] = me.role === 'editor' ? editorItems : [
+  const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; fresh?: boolean; show?: boolean }[] = me.role === 'editor' ? editorItems : [
     ...(manager
-      ? [{ to: '/overview', label: 'Overview', icon: <LayoutDashboard />, count: counts.attention || undefined, hot: counts.attention > 0 }, { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined }]
-      : [{ to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined }, { to: '/overview', label: 'Overview', icon: <LayoutDashboard /> }]),
+      ? [{ to: '/overview', label: 'Overview', icon: <LayoutDashboard />, count: counts.attention || undefined, hot: counts.attention > 0 }, { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 }]
+      : [{ to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 }, { to: '/overview', label: 'Overview', icon: <LayoutDashboard /> }]),
     { to: '/production', label: 'Production', icon: <Columns3 /> },
     { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
@@ -155,8 +155,9 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
         <nav className="nav">
           {items.map((it) => (
             <NavItem key={it.to} to={it.to} icon={it.icon} label={it.label} collapsed={collapsed}>
-              {it.count != null && <span className={`count${it.hot ? ' hot' : ''}`} aria-label={`${it.count} ${it.to === '/review' ? 'awaiting review' : it.to === '/overview' ? 'need attention' : it.to === '/writers' ? 'unread messages' : 'open scripts'}`}>{it.count}</span>}
-              {it.hot && <span className="dot-badge" aria-hidden />}
+              {it.fresh && <span className="new-pill" aria-label="New work">New</span>}
+              {it.count != null && !it.fresh && <span className={`count${it.hot ? ' hot' : ''}`} aria-label={`${it.count} ${it.to === '/review' ? 'awaiting review' : it.to === '/overview' ? 'need attention' : it.to === '/writers' ? 'unread messages' : 'open scripts'}`}>{it.count}</span>}
+              {(it.hot || it.fresh) && <span className="dot-badge" aria-hidden />}
             </NavItem>
           ))}
           {manager && (

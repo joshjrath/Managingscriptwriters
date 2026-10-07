@@ -17,6 +17,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-07-my-work-redesign',
+    date: '2026-10-07',
+    title: 'My work, rebuilt: new work first',
+    summary: 'New assignments are at the very top of My work, and every batch is easier to read on a phone, tablet or computer.',
+    changes: [
+      { tag: 'new', text: 'Work given to you in the last week sits at the top of My work under “New work”, marked New, until you start it. The My work link in the menu says New, and your Overview shows a banner, so you can’t miss it.' },
+      { tag: 'improved', text: 'The rest is grouped by what you need to do: To do (sent back, to write, to deliver), soonest deadline first, then Waiting on review, folded away. Finished work is at the bottom.' },
+      { tag: 'improved', text: 'Each batch leads with the client’s name and its next deadline in big type. Then one bar shows where your scripts are, each job has its button (write and send, revise, mark delivered), the dates are in the order they happen, and the brief, recording and files are together.' },
+      { tag: 'improved', text: 'On phones the buttons are full width and easier to tap, and the page is about a third shorter.' },
+      { tag: 'improved', text: 'If a batch you’re already writing gets more scripts for you, it says how many are new.' },
+    ],
+  },
+  {
     id: '2026-10-07-calendar-shoots-match',
     date: '2026-10-07',
     title: 'Fewer false “Shoots that need writers”',

@@ -10,7 +10,7 @@ import { buildGroups, loadReviewQueue, publicSubmission } from '../submissions';
 import { parse, zs } from '../http';
 import { loadBriefings, loadDeliveries, loadResources, loadScripts, loadShoots } from '../records';
 import { addDays, diffDays, nowInZone, startOfWeek, workingDaysBetween, type Clock, type ISODate } from '../../shared/dates';
-import { isDraftReady, summarize, type ScriptStatus } from '../../shared/workflow';
+import { isDraftReady, isNewWork, summarize, type ScriptStatus } from '../../shared/workflow';
 import { plural } from '../../shared/format';
 import { sessionMode } from '../recording';
 import type {
@@ -126,15 +126,21 @@ export function workloadFor(batches: BatchSummary[], scripts: Map<number, Script
 export async function computeCounts(ctx: Ctx, me: Me, batches?: BatchSummary[], scripts?: Map<number, ScriptLiteRow[]>): Promise<Counts> {
   const data = batches && scripts ? { summaries: batches, scripts } : await loadBatches(ctx);
   let myOpen = 0;
+  let myNew = 0;
+  const now = ctx.now();
   for (const b of data.summaries) {
-    for (const s of data.scripts.get(b.id) ?? []) {
-      if (s.assignee_id === me.id && s.status !== 'delivered' && s.status !== 'ready_for_review') myOpen++;
+    const mine = (data.scripts.get(b.id) ?? []).filter((s) => s.assignee_id === me.id);
+    for (const s of mine) {
+      if (s.status !== 'delivered' && s.status !== 'ready_for_review') myOpen++;
     }
+    const written = b.writers.find((w) => w.userId === me.id)?.written ?? 0;
+    if (isNewWork(mine.map((s) => ({ status: s.status, assignedAt: s.assigned_at ?? null })), written, now)) myNew++;
   }
   const unread = await ctx.db.one<{ n: number }>(`select count(*) as n from notifications where user_id = $1 and read_at is null`, [me.id]);
   const msgs = await ctx.db.one<{ n: number }>(`select count(*) as n from messages m join users u on u.id = m.sender_id where m.recipient_id = $1 and m.read_at is null and u.active`, [me.id]);
   return {
     myOpenScripts: myOpen,
+    myNewWork: myNew,
     reviewQueue: isManager(me.role) ? data.summaries.reduce((n, b) => n + b.progress.inReview, 0) : 0,
     unreadNotifications: unread?.n ?? 0,
     unreadMessages: Number(msgs?.n ?? 0),

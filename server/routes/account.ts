@@ -275,7 +275,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
           where s.assignee_id = $1 and s.removed_at is null and s.status <> 'delivered' order by s.batch_id, s.number for update of s`, [id],
       );
       if (scripts.length) {
-        await t.query(`update scripts set assignee_id = $1, version = version + 1, updated_at = now() where id in (${scripts.map((_, i) => `$${i + 2}`).join(',')})`, [target?.id ?? null, ...scripts.map((x) => x.id)]);
+        await t.query(`update scripts set assignee_id = $1, assigned_at = case when $1::bigint is null then null else now() end, version = version + 1, updated_at = now() where id in (${scripts.map((_, i) => `$${i + 2}`).join(',')})`, [target?.id ?? null, ...scripts.map((x) => x.id)]);
       }
       const byBatch = new Map<number, typeof scripts>();
       for (const x of scripts) byBatch.set(x.batch_id, [...(byBatch.get(x.batch_id) ?? []), x]);

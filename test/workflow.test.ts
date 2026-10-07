@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  checkAction, compressRanges, deriveStage, evenSplit, milestone, parseRanges, parseTitleLines, progressLabel, splitAssignments, summarize,
+  checkAction, compressRanges, deriveStage, evenSplit, isNewWork, milestone, parseRanges, parseTitleLines, progressLabel, splitAssignments, summarize,
   type ScriptStatus,
 } from '../shared/workflow';
 import { makeClock } from '../shared/dates';
@@ -153,5 +153,19 @@ describe('What’s new', () => {
     expect([...dates].sort().reverse()).toEqual(dates);
     expect(CHANGELOG.at(-1)!.title).toMatch(/launches/);
     for (const e of CHANGELOG) expect(e.changes.length).toBeGreaterThan(0);
+  });
+});
+
+describe('new work', () => {
+  const now = new Date('2026-10-07T12:00:00Z');
+  const day = 86400_000;
+  const at = (daysAgo: number) => new Date(now.getTime() - daysAgo * day).toISOString();
+  it('is work given in the last week that nothing has happened to yet', () => {
+    expect(isNewWork([{ status: 'not_started', assignedAt: at(2) }], 0, now)).toBe(true);
+    expect(isNewWork([{ status: 'not_started', assignedAt: at(8) }], 0, now)).toBe(false);
+    expect(isNewWork([{ status: 'not_started', assignedAt: at(1) }], 1, now)).toBe(false);
+    expect(isNewWork([{ status: 'not_started', assignedAt: at(1) }, { status: 'ready_for_review', assignedAt: at(1) }], 0, now)).toBe(false);
+    expect(isNewWork([{ status: 'not_started', assignedAt: null }], 0, now)).toBe(false);
+    expect(isNewWork([], 0, now)).toBe(false);
   });
 });

@@ -1610,3 +1610,33 @@ describe('editors', () => {
     await manager.del(`/api/calendar-feeds/${feed.id}`);
   });
 });
+
+describe('new work on My work', () => {
+  it('marks work given to a writer this week as new until they start it, and counts it for the menu', async () => {
+    const before = (await sarah.get('/api/counts')).body.myNewWork;
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Fresh batch', targetCount: 4, finalDue: '2027-03-05', split: [{ writerId: ids.sarah, count: 4 }] });
+    expect(b.status).toBe(200);
+    const id = b.body.batchId;
+    expect((await sarah.get('/api/counts')).body.myNewWork).toBe(before + 1);
+    const entry = (await sarah.get('/api/my-work')).body.batches.find((e: any) => e.batch.id === id);
+    expect(entry.mine).toHaveLength(4);
+    expect(entry.mine.every((s: any) => typeof s.assignedAt === 'string')).toBe(true);
+    // once they put a number on the counter it isn't new any more
+    expect((await sarah.post(`/api/batches/${id}/written`, { written: 1 })).status).toBe(200);
+    expect((await sarah.get('/api/counts')).body.myNewWork).toBe(before);
+    // scripts handed to someone else are new for them, with a fresh assignment time
+    const scripts = (await manager.get(`/api/batches/${id}`)).body.scripts;
+    const first = scripts.find((s: any) => s.number === 4);
+    const was = first.assignedAt;
+    const mBefore = (await marcus.get('/api/counts')).body.myNewWork;
+    await new Promise((r) => setTimeout(r, 15));
+    expect((await manager.post(`/api/batches/${id}/scripts/assign`, { scriptIds: [first.id], assigneeId: ids.marcus })).status).toBe(200);
+    const moved = (await manager.get(`/api/batches/${id}`)).body.scripts.find((s: any) => s.id === first.id);
+    expect(moved.assigneeId).toBe(ids.marcus);
+    expect(Date.parse(moved.assignedAt)).toBeGreaterThan(Date.parse(was));
+    expect((await marcus.get('/api/counts')).body.myNewWork).toBe(mBefore + 1);
+    // unassigned scripts have no assignment time
+    await manager.post(`/api/batches/${id}/scripts/assign`, { scriptIds: [first.id], assigneeId: null });
+    expect((await manager.get(`/api/batches/${id}`)).body.scripts.find((s: any) => s.id === first.id).assignedAt).toBeNull();
+  });
+});

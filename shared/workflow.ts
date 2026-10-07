@@ -169,6 +169,19 @@ export function nextMilestone(draft: Milestone, final: Milestone): Milestone | n
 export type Role = 'owner' | 'manager' | 'writer' | 'editor';
 
 /** Admins (stored as 'owner') can do everything managers can. */
+/** How long work counts as new on My work. */
+export const NEW_WORK_DAYS = 7;
+
+/**
+ * A writer's scripts in a batch are new work when they were given to them in the last week and
+ * nothing has happened yet: none written on the counter, none sent, none sent back.
+ */
+export function isNewWork(mine: { status: ScriptStatus; assignedAt: string | null }[], written: number, now: Date): boolean {
+  if (!mine.length || written > 0 || mine.some((s) => s.status !== 'not_started')) return false;
+  const cut = now.getTime() - NEW_WORK_DAYS * 86400_000;
+  return mine.some((s) => s.assignedAt != null && new Date(s.assignedAt).getTime() >= cut);
+}
+
 export const isManager = (role: Role) => role === 'manager' || role === 'owner';
 /** Editors cut the videos: they see the calendar, finished scripts, clients and resources, read-only. */
 export const isEditor = (role: Role) => role === 'editor';

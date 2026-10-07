@@ -184,9 +184,9 @@ async function insertPlaceholders(t: Db, batchId: number, items: { number: numbe
     const params: unknown[] = [];
     const values = chunk.map((it) => {
       params.push(batchId, it.number, it.assignee);
-      return `($${params.length - 2}, $${params.length - 1}, $${params.length})`;
+      return `($${params.length - 2}, $${params.length - 1}, $${params.length}, case when $${params.length}::bigint is null then null else now() end)`;
     });
-    await t.query(`insert into scripts (batch_id, number, assignee_id) values ${values.join(',')}`, params);
+    await t.query(`insert into scripts (batch_id, number, assignee_id, assigned_at) values ${values.join(',')}`, params);
   }
 }
 
@@ -577,7 +577,7 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       const moving = rows.filter((r) => r.assignee_id !== input.assigneeId);
       if (!moving.length) return;
       await t.query(
-        `update scripts set assignee_id = $1, version = version + 1, updated_at = now() where id in (${moving.map((_, i) => `$${i + 2}`).join(',')})`,
+        `update scripts set assignee_id = $1, assigned_at = case when $1::bigint is null then null else now() end, version = version + 1, updated_at = now() where id in (${moving.map((_, i) => `$${i + 2}`).join(',')})`,
         [input.assigneeId, ...moving.map((r) => r.id)],
       );
       const nums = compressRanges(moving.map((r) => r.number));

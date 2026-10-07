@@ -47,6 +47,10 @@ Writers don't send scripts one at a time. On **My work** (or the batch page) the
 - Script titles can also be set from **Titles** on the batch page or My work: paste a list and it's applied in order, or keep the "3. Title" numbers.
 - Everything is still recorded per script, so progress, deadlines and delivery rules work exactly as before.
 
+### My work
+
+A writer's home. **New work** comes first: batches with scripts given to them in the last 7 days (`scripts.assigned_at`, set whenever a script gets a writer) that they haven't touched (nothing on the counter, nothing sent), marked New until they start (`isNewWork` in `shared/workflow.ts`). The My work menu link says New, and their Overview shows a banner. Then **To do** (sent back, to write, approved to deliver), soonest deadline first; **Waiting on review**, collapsed; and **Finished** (delivered in the last week, plus their delivery confirmations) at the bottom. Today and to-dos sit in a column beside the work on wide screens, and below New work on smaller ones. Each batch card leads with the client and its next deadline. Below that: one bar for where the writer's scripts are, a block per job with its button, the dates in the order they happen, and the brief and files.
+
 ### "Written so far" counter
 
 Writers work in one master document, so each batch on **My work**, and their share on the batch page, has a **Written so far** counter (+ / −) they tap to keep their manager posted. Admins and managers also get a small + / − on each writer's row on the batch page. It is only an update: it never sends, withdraws or changes any script. It can't go below the scripts they've already sent or above how many they have. Managers see it as a lighter "written" layer in every progress bar, as "12 / 25 written · 8 sent" next to each writer on the batch page, and as one line in the history per writing session (repeated taps within 15 minutes update the same line).

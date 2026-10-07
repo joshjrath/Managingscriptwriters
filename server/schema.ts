@@ -503,4 +503,9 @@ alter table users add constraint users_role_check check (role in ('owner', 'mana
 alter table calendar_feeds drop constraint if exists calendar_feeds_visibility_check;
 alter table calendar_feeds add constraint calendar_feeds_visibility_check check (visibility in ('managers', 'editors', 'everyone'));
 `,
+  // 22 · when each script was given to its writer, so My work can put new work first
+  `
+alter table scripts add column assigned_at timestamptz;
+update scripts set assigned_at = created_at where assignee_id is not null;
+`,
 ];
