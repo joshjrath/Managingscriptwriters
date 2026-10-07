@@ -55,6 +55,10 @@ describe('which client a calendar shoot is for', () => {
     expect(matchClient('ELEGANT JEWELER content day', clients)?.id).toBe(3);
     expect(matchClient('Layliev filming', clients)?.id).toBe(4);
     expect(matchClient('Shoot – new brand', clients)).toBeNull();
+    // Google adds the calendar's owner to booked events: the other client wins, the owner's own only when alone
+    const withOwner = [...clients, { id: 5, name: 'Joshua Shalamov' }];
+    expect(matchClient('Shimonov Law Filming Session and Joshua Shalamov', withOwner, 'Joshua Shalamov’s Calendar')?.id).toBe(2);
+    expect(matchClient('Joshua Shalamov filming', withOwner, 'Joshua Shalamov’s Calendar')?.id).toBe(5);
     expect(SHOOT_WORDS.test('Shoot – Dentist Mike')).toBe(true);
     expect(SHOOT_WORDS.test('Filming day')).toBe(true);
     expect(SHOOT_WORDS.test('Lunch with Mike')).toBe(false);

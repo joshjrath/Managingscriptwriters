@@ -1505,6 +1505,24 @@ describe('shoots on a synced calendar that need writers', () => {
     expect((await manager.get('/api/notifications')).body.notifications.length).toBe(before + 1);
     await manager.del(`/api/calendar-feeds/${add.body.feed.id}`);
   });
+
+  it('counts a batch planned without a shoot, and looks past the calendar owner’s name', async () => {
+    const owner = await manager.post('/api/clients', { name: 'Joshua Shalamov' });
+    const lawId = (await db.query<{ id: number }>(`select id from clients where name = 'Shimonov Law'`))[0].id; // from the notes import above
+    ctx.fetchCalendar = async () => ['BEGIN:VCALENDAR', 'VERSION:2.0',
+      'BEGIN:VEVENT', 'UID:law@g', 'DTSTART;VALUE=DATE:20270208', 'DTEND;VALUE=DATE:20270209', 'SUMMARY:Shimonov Law Filming Session and Joshua Shalamov', 'END:VEVENT',
+      'END:VCALENDAR'].join('\r\n');
+    const add = await manager.post('/api/calendar-feeds', { name: 'Joshua Shalamov’s Calendar', url: 'https://calendar.google.com/calendar/ical/j%40example.com/private-y/basic.ics' });
+    let list = (await manager.get('/api/calendar-shoots')).body.shoots;
+    expect(list.map((s: any) => [s.client?.name, s.status])).toEqual([['Shimonov Law', 'no_shoot']]);
+    // scripts planned as a batch on its own, due before the filming, everyone writing: nothing to do
+    const b = await manager.post('/api/batches', { clientId: lawId, title: 'February filming', targetCount: 3, finalDue: '2027-02-04', split: [{ writerId: ids.sarah, count: 3 }] });
+    expect(b.status).toBe(200);
+    list = (await manager.get('/api/calendar-shoots')).body.shoots;
+    expect(list).toEqual([]);
+    await manager.del(`/api/calendar-feeds/${add.body.feed.id}`);
+    expect(owner.status).toBe(200);
+  });
 });
 
 describe('editors', () => {

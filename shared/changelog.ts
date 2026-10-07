@@ -17,6 +17,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-07-calendar-shoots-match',
+    date: '2026-10-07',
+    title: 'Fewer false “Shoots that need writers”',
+    summary: 'Shoots you’ve already planned stop showing up in the list on the Overview.',
+    changes: [
+      { tag: 'fixed', text: 'Google adds the calendar owner’s name to booked events (“Shimonov Law Filming Session and Joshua Shalamov”), so they were being matched to the client named after Joshua instead of the real one. The real client now comes first.' },
+      { tag: 'fixed', text: 'A shoot counts as planned when that client has a batch without a booked shoot that’s due in the 3 weeks before it, with every script assigned.' },
+    ],
+  },
+  {
     id: '2026-10-07-editors',
     date: '2026-10-07',
     title: 'Editors get their own sign-in',

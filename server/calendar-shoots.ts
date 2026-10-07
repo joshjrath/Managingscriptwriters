@@ -19,10 +19,15 @@ export const SHOOT_WORDS = /\b(shoots?|shooting|filming|film day|photo ?shoot|vi
 const STOP = new Set(['the', 'and', 'of', 'co', 'inc', 'llc', 'ltd', 'group', 'company', 'studio', 'studios', 'shoot', 'shoots', 'shooting', 'film', 'filming', 'day', 'with', 'for']);
 const norm = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
 
-/** The client a calendar title is about: the full name if it's there, else a distinctive word of it ("Shimonov"). */
-export function matchClient(text: string, clients: { id: number; name: string }[]): { id: number; name: string } | null {
+/**
+ * Every client a calendar title could be about, best first: the full name if it's there, else a distinctive word
+ * of it ("Shimonov"). `owner` is the calendar's own name ("Joshua Shalamov's calendar"): Google adds the owner to
+ * booked events ("Shimonov Law Filming Session and Joshua Shalamov"), so a client named after them goes last.
+ */
+export function matchClients<C extends { id: number; name: string }>(text: string, clients: C[], owner = ''): C[] {
   const t = ` ${norm(text)} `;
-  let best: { c: { id: number; name: string }; score: number } | null = null;
+  const o = ` ${norm(owner)} `;
+  const scored: { c: C; score: number }[] = [];
   for (const c of clients) {
     const n = norm(c.name);
     if (!n) continue;
@@ -33,9 +38,14 @@ export function matchClient(text: string, clients: { id: number; name: string }[
       const hits = words.filter((w) => t.includes(` ${w} `));
       if (hits.length && (hits.length === words.length || hits.some((w) => w.length >= 5))) score = 10 * hits.length + hits.join('').length;
     }
-    if (score && (!best || score > best.score)) best = { c, score };
+    if (score && owner && o.includes(` ${n} `)) score -= 1000;
+    if (score) scored.push({ c, score });
   }
-  return best?.c ?? null;
+  return scored.sort((a, b) => b.score - a.score).map((x) => x.c);
+}
+
+export function matchClient<C extends { id: number; name: string }>(text: string, clients: C[], owner = ''): C | null {
+  return matchClients(text, clients, owner)[0] ?? null;
 }
 
 export async function findCalendarShoots(ctx: Ctx, opts: { includeDismissed?: boolean } = {}): Promise<CalendarShoot[]> {
@@ -62,13 +72,27 @@ export async function findCalendarShoots(ctx: Ctx, opts: { includeDismissed?: bo
     const start = (e.all_day ? e.start_date : day(e.start_at)) as ISODate;
     const end = (e.all_day ? e.end_date : day(new Date(new Date(e.end_at).getTime() - 1).toISOString())) as ISODate;
     if (end < today) continue;
-    const client = matchClient(`${e.title} ${e.location ?? ''}`, clients);
-    // the site's shoot for that client on the same days (a day either side); without a client we don't guess
-    const shoot = client ? siteShoots.find((s) => s.clientId === client.id && s.startDate <= addDays(end, 1) && (s.endDate ?? s.startDate) >= addDays(start, -1)) : undefined;
-    const batches = shoot ? summaries.filter((b) => b.shootId === shoot.id) : [];
+    const candidates = matchClients(`${e.title} ${e.location ?? ''}`, clients, e.feed_name);
+    // the site's shoot for one of those clients on the same days (a day either side); without a client we don't guess
+    let client = candidates[0] ?? null;
+    let shoot: (typeof siteShoots)[number] | undefined;
+    let batches: typeof summaries = [];
+    for (const c of candidates) {
+      shoot = siteShoots.find((s) => s.clientId === c.id && s.startDate <= addDays(end, 1) && (s.endDate ?? s.startDate) >= addDays(start, -1));
+      if (shoot) { client = c; batches = summaries.filter((b) => b.shootId === shoot!.id); break; }
+    }
+    // or a batch planned for it without booking the shoot: that client's, not tied to a shoot, due in the 3 weeks up to it
+    if (!shoot) {
+      for (const c of candidates) {
+        const near = summaries.filter((b) => b.clientId === c.id && !b.shootId && !b.archivedAt && b.progress.total > 0
+          && (b.stage !== 'delivered' || (b.finalDue ?? b.draftDue ?? '') >= today)
+          && [b.finalDue, b.draftDue].some((d) => d && d >= addDays(start, -21) && d <= end));
+        if (near.length) { client = c; batches = near; break; }
+      }
+    }
     const unassigned = batches.reduce((n, b) => n + b.progress.unassigned, 0);
     const total = batches.reduce((n, b) => n + b.progress.total, 0);
-    const status: CalendarShoot['status'] | null = !shoot ? 'no_shoot' : !batches.length || !total ? 'no_scripts' : unassigned ? 'unassigned' : null;
+    const status: CalendarShoot['status'] | null = !shoot && !batches.length ? 'no_shoot' : !batches.length || !total ? 'no_scripts' : unassigned ? 'unassigned' : null;
     if (!status) continue;
     // start from what this client had last time
     const last = client ? summaries.filter((b) => b.clientId === client!.id && b.progress.total > 0).sort((a, b) => b.id - a.id)[0] : undefined;
