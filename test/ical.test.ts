@@ -45,3 +45,19 @@ describe('reading a Google Calendar feed', () => {
     expect(() => parseIcs('<html>Sign in</html>', new Date(), new Date())).toThrow(/Secret address/);
   });
 });
+
+describe('which client a calendar shoot is for', () => {
+  it('matches the full name or a distinctive part of it', async () => {
+    const { matchClient, SHOOT_WORDS } = await import('../server/calendar-shoots');
+    const clients = [{ id: 1, name: 'Dentist Mike' }, { id: 2, name: 'Shimonov Law' }, { id: 3, name: 'Elegant Jeweler' }, { id: 4, name: 'Elon Layliev' }];
+    expect(matchClient('Shoot – Dentist Mike', clients)?.id).toBe(1);
+    expect(matchClient('Shimonov shoot @ office', clients)?.id).toBe(2);
+    expect(matchClient('ELEGANT JEWELER content day', clients)?.id).toBe(3);
+    expect(matchClient('Layliev filming', clients)?.id).toBe(4);
+    expect(matchClient('Shoot – new brand', clients)).toBeNull();
+    expect(SHOOT_WORDS.test('Shoot – Dentist Mike')).toBe(true);
+    expect(SHOOT_WORDS.test('Filming day')).toBe(true);
+    expect(SHOOT_WORDS.test('Lunch with Mike')).toBe(false);
+    expect(SHOOT_WORDS.test('Photoshoot')).toBe(true);
+  });
+});

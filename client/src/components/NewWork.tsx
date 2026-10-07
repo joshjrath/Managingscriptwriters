@@ -473,12 +473,12 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   const names = useNames();
   const [clientId, setClientId] = useState<number | ''>(preset?.clientId ?? '');
   const [title, setTitle] = useState('');
-  const [count, setCount] = useState<number | ''>('');
+  const [count, setCount] = useState<number | ''>(preset?.count ?? '');
   const [shootId, setShootId] = useState<number | ''>(preset?.shootId ?? '');
   const [draft, setDraft] = useState('');
   const [draftFollows, setDraftFollows] = useState(true);
   const [final, setFinal] = useState('');
-  const [parts, setParts] = useState<SplitPart[]>([{ writerId: '', count: '' }]);
+  const [parts, setParts] = useState<SplitPart[]>(preset?.split?.length ? preset.split : [{ writerId: '', count: '' }]);
   const [priority, setPriority] = useState<Priority>('normal');
   const [planned, setPlanned] = useState('');
   const [briefingIds, setBriefingIds] = useState<number[]>([]);

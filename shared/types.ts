@@ -700,3 +700,24 @@ export interface ChatInbox {
   threads: ChatThread[];
   unread: number;
 }
+
+/** A shoot on a synced calendar (e.g. Joshua's Google Calendar) that still needs planning on the site. */
+export interface CalendarShoot {
+  uid: string;
+  feedName: string;
+  color: string;
+  title: string;
+  start: ISODate;
+  end: ISODate;
+  location: string | null;
+  /** the client it seems to be for, from the event's title */
+  client: { id: number; name: string } | null;
+  /** no_shoot: not on the site yet · no_scripts: on the site, no scripts planned · unassigned: scripts without a writer */
+  status: 'no_shoot' | 'no_scripts' | 'unassigned';
+  shootId: number | null;
+  batchId: number | null;
+  unassigned: number;
+  total: number;
+  /** what this client's last batch had, to start from */
+  suggested: { count: number; split: { writerId: number; name: string; count: number }[] } | null;
+}

@@ -17,6 +17,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-07-calendar-shoots',
+    date: '2026-10-07',
+    title: 'Shoots on Joshua’s calendar that need writers',
+    summary: 'The Overview now lists shoots from your synced Google Calendar that don’t have writers yet, with one click to plan them.',
+    changes: [
+      { tag: 'new', text: 'Admins and managers get a “Shoots that need writers” list at the top of the Overview. It reads synced calendars for events that look like shoots (shoot, filming, content day…), works out the client from the title, and checks the site: not booked yet, booked with no scripts, or scripts without a writer.' },
+      { tag: 'new', text: 'Plan scripts opens New shoot (or New batch) already filled in with the client, the shoot dates, and last time’s script count and writers for that client, so it’s usually just a check and Create. If only writers are missing, Assign writers opens the batch.' },
+      { tag: 'new', text: 'A notification goes out once when new ones appear after a sync. Hide one with × if it isn’t a shoot you write for.' },
+    ],
+  },
+  {
     id: '2026-10-07-calendar-embed',
     date: '2026-10-07',
     title: 'Add a calendar from its embed code',

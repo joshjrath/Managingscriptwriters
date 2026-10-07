@@ -486,4 +486,13 @@ create table calendar_events (
 create index calendar_events_feed_idx on calendar_events (feed_id);
 create index calendar_events_when_idx on calendar_events (start_at, end_at);
 `,
+  // 20 · shoots found on a synced calendar: ones a manager dismissed, and ones they've been told about
+  `
+create table calendar_shoot_marks (
+  uid text primary key,
+  dismissed_at timestamptz,
+  dismissed_by bigint references users(id),
+  notified_at timestamptz
+);
+`,
 ];

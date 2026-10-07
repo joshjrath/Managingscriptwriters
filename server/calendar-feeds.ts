@@ -10,6 +10,7 @@ import { loadSettings, logActivity, type Ctx } from './core';
 import { requireManager } from './auth';
 import { HttpError, notFound, parse, zs } from './http';
 import { parseIcs } from './ical';
+import { notifyNewCalendarShoots } from './calendar-shoots';
 import type { CalendarFeed } from '../shared/types';
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -141,7 +142,9 @@ export function startCalendarSync(ctx: Ctx, minutes: number, log: (m: string) =>
   const tick = async () => {
     if (running) return;
     running = true;
-    try { await syncAllFeeds(ctx.realDb ?? ctx.db, ctx.fetchCalendar ?? fetchFeed, ctx.now()); } catch (err) { log(`calendar sync failed: ${(err as Error).message}`); } finally { running = false; }
+    try {
+      if (await syncAllFeeds(ctx.realDb ?? ctx.db, ctx.fetchCalendar ?? fetchFeed, ctx.now())) await notifyNewCalendarShoots({ ...ctx, db: ctx.realDb ?? ctx.db });
+    } catch (err) { log(`calendar sync failed: ${(err as Error).message}`); } finally { running = false; }
   };
   const first = setTimeout(tick, 20_000);
   const every = setInterval(tick, minutes * 60_000);
@@ -171,6 +174,7 @@ export function registerCalendarFeedRoutes(app: FastifyInstance, ctx: Ctx) {
     const row = await db.one<{ id: number }>(`insert into calendar_feeds (name, url, color, visibility, created_by) values ($1, $2, $3, $4, $5) returning id`, [input.name, url, input.color, input.visibility, me.id]);
     const id = Number(row!.id);
     const result = await syncFeed(db, id, async () => text, ctx.now());
+    await notifyNewCalendarShoots(ctx);
     await logActivity(db, { actor: me, action: 'calendar.added', entityType: 'calendar_feed', entityId: id, summary: `Synced the calendar “${input.name}” (${result.count} events)` });
     return { feed: toFeed((await db.one<FeedRow>(`select * from calendar_feeds where id = $1`, [id]))!), result };
   });
@@ -197,6 +201,7 @@ export function registerCalendarFeedRoutes(app: FastifyInstance, ctx: Ctx) {
     const { id } = parse(z.object({ id: zs.id }), req.params);
     if (!(await db.one(`select 1 from calendar_feeds where id = $1`, [id]))) throw notFound('Calendar');
     const result = await syncFeed(db, id, fetchText, ctx.now());
+    if (result.ok) await notifyNewCalendarShoots(ctx);
     return { feed: toFeed((await db.one<FeedRow>(`select * from calendar_feeds where id = $1`, [id]))!), result };
   });
 

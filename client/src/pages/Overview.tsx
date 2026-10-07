@@ -11,6 +11,7 @@ import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
 import { compressRanges, isManager } from '../../../shared/workflow';
 import { PipLegend, TodayBump, WritingFeed } from '../components/WritingPulse';
 import { TodoPanel } from '../components/Todos';
+import { CalendarShootsPanel } from '../components/CalendarShoots';
 import { TodayPill } from '../components/TodayPill';
 import { PageHeader, useBoot, useNewWork, useDisplayTz } from '../components/Shell';
 import { DueChart } from '../components/DueChart';
@@ -60,6 +61,7 @@ export function Overview() {
             </button>
           </div>
 
+          {isManager(me.role) && <CalendarShootsPanel />}
           <div className="dash">
             <Panel className="a-chart"><DueChart draft={d.due.draft} final={d.due.final} today={clock.today} /></Panel>
 

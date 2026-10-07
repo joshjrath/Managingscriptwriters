@@ -1461,3 +1461,48 @@ describe('synced Google Calendars', () => {
     expect((await db.query(`select count(*)::int as n from calendar_events`))[0]).toEqual({ n: 0 });
   });
 });
+
+describe('shoots on a synced calendar that need writers', () => {
+  it('finds them, prompts managers once, and drops each one as it gets planned', async () => {
+    const ICS = ['BEGIN:VCALENDAR', 'VERSION:2.0',
+      'BEGIN:VEVENT', 'UID:a@g', 'DTSTART;VALUE=DATE:20270112', 'DTEND;VALUE=DATE:20270114', 'SUMMARY:Shoot – Acme Outdoor', 'END:VEVENT',
+      'BEGIN:VEVENT', 'UID:b@g', 'DTSTART;VALUE=DATE:20270118', 'DTEND;VALUE=DATE:20270119', 'SUMMARY:Shoot – mystery brand', 'END:VEVENT',
+      'BEGIN:VEVENT', 'UID:c@g', 'DTSTART:20270113T170000Z', 'DTEND:20270113T180000Z', 'SUMMARY:Lunch with Mike', 'END:VEVENT',
+      'END:VCALENDAR'].join('\r\n');
+    ctx.fetchCalendar = async () => ICS;
+    const before = (await manager.get('/api/notifications')).body.notifications.length;
+    const add = await manager.post('/api/calendar-feeds', { name: 'Joshua’s calendar', url: 'https://calendar.google.com/calendar/ical/j%40example.com/private-x/basic.ics' });
+    expect(add.status).toBe(200);
+    let list = (await manager.get('/api/calendar-shoots')).body.shoots;
+    expect(list.map((s: any) => [s.title, s.client?.name ?? null, s.status, s.start, s.end])).toEqual([
+      ['Shoot – Acme Outdoor', 'Acme Outdoor Co.', 'no_shoot', '2027-01-12', '2027-01-13'],
+      ['Shoot – mystery brand', null, 'no_shoot', '2027-01-18', '2027-01-18'],
+    ]);
+    expect(list[0].suggested.count).toBeGreaterThan(0); // last time's numbers to start from
+    // managers were told once
+    const notes = (await manager.get('/api/notifications')).body.notifications;
+    expect(notes.length).toBe(before + 1);
+    expect(notes[0]).toMatchObject({ type: 'planning', title: '2 shoots on Joshua’s calendar need writers' });
+    expect((await sarah.get('/api/calendar-shoots')).status).toBe(403);
+    // the shoot is booked on the site, scripts not planned yet
+    const sh = await manager.post('/api/shoots', { clientId: acmeId, startDate: '2027-01-12', endDate: '2027-01-13' });
+    list = (await manager.get('/api/calendar-shoots')).body.shoots;
+    expect(list[0]).toMatchObject({ status: 'no_scripts', shootId: sh.body.shootId });
+    // scripts planned but nobody writing them
+    const b = await manager.post('/api/batches', { clientId: acmeId, shootId: sh.body.shootId, title: 'Dec shoot', targetCount: 4, split: [{ writerId: ids.sarah, count: 1 }] });
+    list = (await manager.get('/api/calendar-shoots')).body.shoots;
+    expect(list[0]).toMatchObject({ status: 'unassigned', unassigned: 3, total: 4, batchId: b.body.batchId });
+    // all assigned: it's done
+    const scripts = (await manager.get(`/api/batches/${b.body.batchId}`)).body.scripts.filter((s: any) => !s.assigneeId).map((s: any) => s.id);
+    await manager.post(`/api/batches/${b.body.batchId}/scripts/assign`, { scriptIds: scripts, assigneeId: ids.marcus });
+    list = (await manager.get('/api/calendar-shoots')).body.shoots;
+    expect(list.map((s: any) => s.title)).toEqual(['Shoot – mystery brand']);
+    // not ours: hide it
+    await manager.post('/api/calendar-shoots/dismiss', { uid: list[0].uid });
+    expect((await manager.get('/api/calendar-shoots')).body.shoots).toEqual([]);
+    // syncing again doesn't notify again
+    await manager.post(`/api/calendar-feeds/${add.body.feed.id}/sync`);
+    expect((await manager.get('/api/notifications')).body.notifications.length).toBe(before + 1);
+    await manager.del(`/api/calendar-feeds/${add.body.feed.id}`);
+  });
+});
