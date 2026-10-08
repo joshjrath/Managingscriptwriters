@@ -98,7 +98,7 @@ export function CalendarPage() {
     else if (editor) { const id = clients.find((c) => c.name === e.clientName)?.id; if (id) nav(`/scripts?clientId=${id}`); }
     else if (canMove(e)) setPicked(e);
     else if (e.batchId) nav(`/batches/${e.batchId}`);
-    else if (e.shootId && manager) nav('/production');
+    else if (e.shootId) nav('/production');
   };
   const moveOf = (e: CalendarEvent, toStart?: ISODate): Move => {
     const len = diffDays(e.end, e.start);

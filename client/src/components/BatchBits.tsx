@@ -95,7 +95,7 @@ export function AttentionRow({ a }: { a: AttentionItem }) {
 
 export function BatchDrawer({ id, onClose }: { id: number | null; onClose: () => void }) {
   const displayTz = useDisplayTz();
-  const { clock } = useBoot();
+  const { clock, me } = useBoot();
   const nav = useNavigate();
   const q = useQuery({ queryKey: ['batch', id], queryFn: () => api<BatchDetail>(`/api/batches/${id}`), enabled: id != null });
   const b = q.data;
@@ -125,7 +125,7 @@ export function BatchDrawer({ id, onClose }: { id: number | null; onClose: () =>
               ))}
             </div>
           </div>
-          {b.nextAction && <div><div className="section-title">Next action</div><p className="prose">{b.nextAction}</p></div>}
+          {b.nextAction && isManager(me.role) && <div><div className="section-title">Next action</div><p className="prose">{b.nextAction}</p></div>}
           <div>
             <div className="section-title">Recent activity</div>
             <div className="timeline">

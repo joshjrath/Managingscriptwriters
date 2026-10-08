@@ -243,7 +243,11 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
         lastReviewAt: iso(lastReview?.at),
       },
       due: { draft: dueByDay('draft', summaries, scripts, clock), final: dueByDay('final', summaries, scripts, clock) },
-      attention: attentionFor(summaries, mine ? new Map() : await inactivePeople(db)),
+      // a writer can't confirm or change deadlines, so their list leaves that check out
+      attention: mine
+        ? attentionFor(summaries).map((a) => ({ ...a, issues: a.issues.filter((i) => i.kind !== 'date_review') })).filter((a) => a.issues.length)
+          .map((a) => ({ ...a, kind: a.issues[0].kind }))
+        : attentionFor(summaries, await inactivePeople(db)),
       upcomingShoots: shoots,
       activeBatches: summaries
         .filter((b) => b.stage !== 'delivered')

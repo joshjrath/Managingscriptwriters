@@ -83,7 +83,7 @@ export function StatCards({ d }: { d: Dashboard }) {
           {late.length > 2 && <span className="kpi-row muted"><span>and {plural(late.length - 2, 'more batch', 'more batches')}</span></span>}
         </span>
       ) : (
-        <span className="kpi-row"><span>Next deadline</span><b className="ellipsis">{next ? `${next.clientName} · ${kindWord(next)} ${fmtDate(next.next!.date!, clock.today)}` : 'None coming up'}</b></span>
+        <span className="kpi-row"><span>Next deadline</span><b className="ellipsis">{next ? `${shortName(next.clientName)} · ${kindWord(next)} ${fmtDate(next.next!.date!, clock.today)}` : 'None coming up'}</b></span>
       )} />
   );
 
@@ -106,7 +106,7 @@ export function StatCards({ d }: { d: Dashboard }) {
       ) : (
         <span className="kpi-row">
           <span>{dueTomorrow.length ? 'Tomorrow' : next ? fmtWeekday(next.next!.date!) : 'Next'}</span>
-          <b className="ellipsis">{dueTomorrow.length ? `${dueTomorrow[0].clientName} · ${kindWord(dueTomorrow[0])}${dueTomorrow.length > 1 ? ` +${dueTomorrow.length - 1}` : ''}` : next ? `${next.clientName} · ${kindWord(next)}` : 'Nothing scheduled'}</b>
+          <b className="ellipsis">{dueTomorrow.length ? `${shortName(dueTomorrow[0].clientName)} · ${kindWord(dueTomorrow[0])}${dueTomorrow.length > 1 ? ` +${dueTomorrow.length - 1}` : ''}` : next ? `${shortName(next.clientName)} · ${kindWord(next)}` : 'Nothing scheduled'}</b>
         </span>
       )} />
   );

@@ -48,7 +48,8 @@ export function Overview() {
             </Link>
           )}
           {(() => {
-            // a brand-new workspace: three steps instead of a page of zeros
+            // a brand-new workspace: three steps instead of a page of zeros (for whoever sets it up)
+            if (!isManager(me.role)) return null;
             const team = users.filter((u) => u.active && u.id !== me.id).length > 0;
             const client = clients.some((c) => c.status !== 'archived');
             const work = d.activeBatches.length > 0 || d.upcomingShoots.length > 0;

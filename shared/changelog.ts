@@ -20,7 +20,7 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-09-28-potential-clients': ['managers'], '2026-09-28-plan-later': ['managers'], '2026-09-28-admin-name': ['managers'],
   '2026-09-28-calendar-drag': ['managers'], '2026-09-28-team': ['managers'], '2026-09-28-signin-details': ['managers'],
   '2026-10-07-my-work-redesign': ['writers', 'managers'], '2026-09-28-written-counter': ['writers', 'managers'], '2026-10-08-writers-never-miss': ['writers', 'managers'],
-  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers'],
+  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -34,6 +34,16 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-08-writers-overview-back',
+    date: '2026-10-08',
+    title: 'Writers have Overview and Production back',
+    summary: 'Writers’ menu has their Overview and the Production board again, next to My work.',
+    changes: [
+      { tag: 'fixed', text: 'Writers see Overview (counting only their own scripts) and the Production board again. Their menu is My work, Overview, Production, Calendar, Script bank, Resources and Clients. The Review queue stays with managers.' },
+      { tag: 'improved', text: 'A writer’s Needs attention leaves out deadline checks only a manager can confirm.' },
+    ],
+  },
   {
     id: '2026-10-08-overview-cards',
     date: '2026-10-08',

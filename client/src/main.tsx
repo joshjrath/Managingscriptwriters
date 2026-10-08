@@ -65,16 +65,16 @@ function Gate() {
   const home = isManager(role) ? '/overview' : role === 'editor' ? '/editor' : '/my-work';
   // editors only have their own pages; anything else takes them home
   const only = (el: ReactElement) => (role === 'editor' ? <Navigate to="/editor" replace /> : el);
-  // writers work from My work; the team-wide boards are for managers
+  // the review queue (other writers' feedback) and the team page are for managers
   const managers = (el: ReactElement) => (isManager(role) ? el : <Navigate to={home} replace />);
   return (
     <Routes>
       <Route element={<AppShell boot={boot.data} />}>
         <Route index element={<Navigate to={home} replace />} />
         <Route path="/editor" element={role === 'editor' || isManager(role) ? <EditorHome /> : <Navigate to={home} replace />} />
-        <Route path="/overview" element={managers(<Overview />)} />
+        <Route path="/overview" element={only(<Overview />)} />
         <Route path="/my-work" element={only(<MyWorkPage />)} />
-        <Route path="/production" element={managers(<Production />)} />
+        <Route path="/production" element={only(<Production />)} />
         <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/clients" element={<ClientsPage />} />
         <Route path="/clients/:id" element={<ClientPage />} />

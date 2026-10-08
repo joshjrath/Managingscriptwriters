@@ -155,9 +155,11 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
   ];
-  // writers get the pages they use: their work first, then where to find things
+  // writers: their own work first, then their Overview and the Production board, then where to find things
   const writerItems = [
     { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 },
+    { to: '/overview', label: 'Overview', icon: <LayoutDashboard /> },
+    { to: '/production', label: 'Production', icon: <Columns3 /> },
     { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
