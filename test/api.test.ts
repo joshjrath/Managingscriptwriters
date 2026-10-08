@@ -1920,3 +1920,26 @@ describe('overview cards', () => {
     expect(c.lastReviewAt === null || typeof c.lastReviewAt === 'string').toBe(true);
   });
 });
+
+describe('revised after feedback', () => {
+  it('only quotes a send-back on the same scripts in the same batch, and only for the version that answered it', async () => {
+    const a = await manager.post('/api/batches', { clientId: acmeId, title: 'Feedback batch A', targetCount: 2, split: [{ writerId: ids.sarah, count: 2 }] });
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Feedback batch B', targetCount: 2, split: [{ writerId: ids.marcus, count: 2 }] });
+    const sa = (await manager.get(`/api/batches/${a.body.batchId}`)).body.scripts.map((s: any) => s.id);
+    const sb = (await manager.get(`/api/batches/${b.body.batchId}`)).body.scripts.map((s: any) => s.id);
+    const a1 = await sarah.post(`/api/batches/${a.body.batchId}/submissions`, { scriptIds: sa, url: 'https://docs.google.com/document/d/fb-a1' });
+    await manager.post(`/api/batches/${a.body.batchId}/review`, { action: 'revisions', scriptIds: sa, submissionId: a1.body.submissionId, note: 'Only for batch A' });
+    // batch B has scripts 1–2 too, but nobody gave it feedback
+    const b1 = await marcus.post(`/api/batches/${b.body.batchId}/submissions`, { scriptIds: sb, url: 'https://docs.google.com/document/d/fb-b1' });
+    // the Review queue loads every batch at once, which is where the numbers used to collide
+    const queue = (await manager.get('/api/review')).body;
+    const subB = queue.waiting.find((g: any) => g.submission?.id === b1.body.submissionId).submission;
+    expect(subB.afterFeedback).toBeNull();
+    // batch A's revised version answers it; a newer version after that, with no new feedback, doesn't repeat it
+    const a2 = await sarah.post(`/api/batches/${a.body.batchId}/submissions`, { scriptIds: sa, url: 'https://docs.google.com/document/d/fb-a2' });
+    const a3 = await sarah.post(`/api/batches/${a.body.batchId}/submissions`, { scriptIds: sa, url: 'https://docs.google.com/document/d/fb-a3' });
+    const subsA = (await manager.get(`/api/batches/${a.body.batchId}`)).body.submissions;
+    expect(subsA.find((s: any) => s.id === a2.body.submissionId).afterFeedback).toMatchObject({ note: 'Only for batch A' });
+    expect(subsA.find((s: any) => s.id === a3.body.submissionId).afterFeedback).toBeNull();
+  });
+});
