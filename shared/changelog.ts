@@ -15,7 +15,7 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-10-07-calendar-shoots-match': ['managers'], '2026-10-07-editors': ['managers', 'editors'], '2026-10-07-calendar-shoots': ['managers'],
   '2026-10-07-calendar-embed': ['managers'], '2026-10-02-fill-missing-deadlines': ['managers'], '2026-10-02-drafts-from-final': ['managers'],
   '2026-10-01-palettes': ['managers'], '2026-09-30-control-center-people': ['managers'], '2026-09-30-control-center-admin-editors': ['managers'],
-  '2026-09-30-control-center': ['managers'], '2026-09-30-batch-delivery-catch-up': ['managers'], '2026-09-30-batch-delivery': ['managers'],
+  '2026-09-30-control-center': ['managers'], '2026-10-08-control-center-removed': ['managers'], '2026-09-30-batch-delivery-catch-up': ['managers'], '2026-09-30-batch-delivery': ['managers'],
   '2026-09-29-potential-label': ['managers'], '2026-09-29-view-as-recording': ['managers'], '2026-09-28-paste-notes': ['managers'],
   '2026-09-28-potential-clients': ['managers'], '2026-09-28-plan-later': ['managers'], '2026-09-28-admin-name': ['managers'],
   '2026-09-28-calendar-drag': ['managers'], '2026-09-28-team': ['managers'], '2026-09-28-signin-details': ['managers'],
@@ -50,7 +50,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     summary: 'The admin-only Control Center (the globe view of the team) is gone. Everything else works as before.',
     changes: [
       { tag: 'improved', text: 'The Control Center link and page are gone. The rest of the site has less code to keep up to date.' },
-      { tag: 'improved', text: 'Nothing else changes: each person’s city, time zone and working hours, Settings → Editors and Give site access all stay as they were.' },
+      { tag: 'improved', text: 'Nothing else changes: each person’s city, time zone and working hours stay, and Settings → Editors (now just called Editors, since there’s no map) and Give site access work as before.' },
     ],
   },
   {

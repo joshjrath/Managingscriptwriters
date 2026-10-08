@@ -300,7 +300,7 @@ function TeamPanel() {
           </div>
         ))}
       </div>
-      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>Managers can do everything the Admin can, except change the Admin’s account and use the Admin-only parts (Master log, View as and the colour palette). The temporary password stays copyable here until the person sets their own. Writers only show as over capacity when a capacity is set.</p>
+      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>Managers can do everything the Admin can, except change the Admin’s account and use the Admin-only parts (Editors, Master log, View as and the colour palette). The temporary password stays copyable here until the person sets their own. Writers only show as over capacity when a capacity is set.</p>
       {adding && <PersonDialog onClose={() => setAdding(false)} />}
       {editing && <PersonDialog user={editing} team={team} onClose={() => setEditing(null)} />}
       {sharing && <ShareDetails name={firstName(sharing.name)} onClose={() => setSharing(null)}

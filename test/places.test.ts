@@ -1,5 +1,6 @@
 // Where people work from, through the real HTTP routes: team members' cities,
-// time zones and working hours, and the editors list (admin only).
+// time zones and working hours, and the editors list (admin only). Also the
+// sign-in lockout, whose only test used to go through the Control Center.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
@@ -148,5 +149,12 @@ describe('editors', () => {
     expect(e.body.editors[0]).toMatchObject({ city: 'Berlin, Germany', workHours: [9, 17] });
     expect((await call('DELETE', `/api/editors/${priya.id}`, { cookie: manager })).body.editors).toEqual([]);
     expect((await call('DELETE', `/api/editors/${priya.id}`, { cookie: manager })).status).toBe(404);
+  });
+});
+
+describe('signing in', () => {
+  it('locks out an email after 8 wrong passwords', async () => {
+    for (let i = 0; i < 8; i++) expect((await call('POST', '/api/auth/login', { body: { email: 'nobody@scale.test', password: `wrong-${i}` } })).status).toBe(401);
+    expect((await call('POST', '/api/auth/login', { body: { email: 'nobody@scale.test', password: 'wrong-again' } })).status).toBe(429);
   });
 });
