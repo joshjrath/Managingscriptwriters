@@ -1,7 +1,7 @@
-// The Overview's four summary cards. Overdue and Due today always wear their
-// gradient fills (warm and yellow: the cards people look for first), and say
-// "All clear" / "Nothing due" when there's nothing in them. In review and
-// Delivered this week are dark cards with a glow in their colour, calm at zero. Each card ends in a small footer
+// The Overview's four summary cards, each a gradient fill in its own colour
+// (warm, yellow, violet, mint) whatever the numbers say, so the row looks the
+// same on a quiet day as a busy one; the pills say "All clear", "Nothing due"
+// or "Queue clear" when there's nothing in them. Each card ends in a small footer
 // that says what's behind the number: which batches are late, how far today's
 // work has got, where the scripts in review are, and deliveries day by day.
 
@@ -16,20 +16,18 @@ import { fmtCutoff, fmtDate, fmtTimeZoneAbbr, fmtWeekday, plural } from '../../.
 import { useBoot } from './Shell';
 import { CountUp } from './ui';
 
-type Look = 'aurora' | 'glow' | 'calm';
-
-function Card({ look, tone, icon, pill, n, cap, sub, foot, onClick, label }: {
-  look: Look; tone: 'overdue' | 'today' | 'review' | 'done'; icon: ReactNode; pill?: ReactNode;
+function Card({ tone, icon, pill, n, cap, sub, foot, onClick, label }: {
+  tone: 'overdue' | 'today' | 'review' | 'done'; icon: ReactNode; pill?: ReactNode;
   n: number; cap: string; sub: string; foot: ReactNode; onClick: () => void; label: string;
 }) {
   return (
-    <button type="button" className={`kpi ${look} ${tone}`} onClick={onClick} aria-label={label}>
+    <button type="button" className={`kpi aurora ${tone}`} onClick={onClick} aria-label={label}>
       <span className="kpi-top">
         <span className="kpi-ic" aria-hidden>{icon}</span>
         {pill}
       </span>
       <span className="kpi-main">
-        <span className={`kpi-n${n === 0 && look === 'calm' ? ' zero' : ''}`}><CountUp value={n} /></span>
+        <span className="kpi-n"><CountUp value={n} /></span>
         <span className="kpi-cap">{cap}</span>
         <span className="kpi-sub">{sub}</span>
       </span>
@@ -71,7 +69,7 @@ export function StatCards({ d }: { d: Dashboard }) {
 
   // 1 · overdue: always the warm gradient
   const overdue = (
-    <Card look="aurora" tone="overdue" icon={<AlertTriangle />} n={c.overdueBatches}
+    <Card tone="overdue" icon={<AlertTriangle />} n={c.overdueBatches}
       pill={c.overdueBatches ? <span className="kpi-pill hot"><i aria-hidden />Needs you</span> : <span className="kpi-pill"><Check aria-hidden />All clear</span>}
       cap={mine ? (c.overdueBatches === 1 ? 'Your overdue batch' : 'Your overdue batches') : c.overdueBatches === 1 ? 'Overdue batch' : 'Overdue batches'}
       sub={c.overdueScripts ? `${plural(c.overdueScripts, 'script')} behind` : 'Nothing overdue'}
@@ -92,7 +90,7 @@ export function StatCards({ d }: { d: Dashboard }) {
   const dueTomorrow = upcoming.filter((b) => b.next!.date === tomorrow);
   const dueNow = c.dueTodayBatches > 0;
   const todayCard = (
-    <Card look="aurora" tone="today" icon={dueNow ? <CalendarCheck /> : <CalendarDays />} n={c.dueTodayBatches}
+    <Card tone="today" icon={dueNow ? <CalendarCheck /> : <CalendarDays />} n={c.dueTodayBatches}
       pill={dueNow ? <span className="kpi-pill hot">Due {fmtCutoff(settings.cutoff)} {fmtTimeZoneAbbr(settings.timezone)}</span> : <span className="kpi-pill"><Check aria-hidden />Nothing due</span>}
       cap={mine ? 'Yours due today' : c.dueTodayBatches === 1 ? 'Batch due today' : 'Batches due today'}
       sub={c.dueTodayScripts ? `${plural(c.dueTodayScripts, 'script')} left to finish` : 'No deadlines today'}
@@ -116,9 +114,9 @@ export function StatCards({ d }: { d: Dashboard }) {
   const top = inReview.slice(0, 3);
   const rest = inReview.slice(3).reduce((n, b) => n + b.progress.inReview, 0);
   const reviewCard = (
-    <Card look={c.awaitingReviewScripts ? 'glow' : 'calm'} tone="review" icon={<ClipboardCheck />} n={c.awaitingReviewScripts}
+    <Card tone="review" icon={<ClipboardCheck />} n={c.awaitingReviewScripts}
       pill={c.awaitingReviewScripts && c.oldestInReviewAt ? <span className="kpi-pill">Oldest waiting {waited(c.oldestInReviewAt)}</span>
-        : !c.awaitingReviewScripts ? <span className="kpi-pill ok"><Check aria-hidden />Queue clear</span> : undefined}
+        : !c.awaitingReviewScripts ? <span className="kpi-pill"><Check aria-hidden />Queue clear</span> : undefined}
       cap={mine ? 'Your scripts in review' : c.awaitingReviewScripts === 1 ? 'Script in review' : 'Scripts in review'}
       sub={c.awaitingReviewBatches ? `across ${plural(c.awaitingReviewBatches, 'batch', 'batches')}` : 'Nothing waiting on you'}
       label={`${plural(c.awaitingReviewScripts, 'script')} in review. Open the review queue.`}
@@ -145,7 +143,7 @@ export function StatCards({ d }: { d: Dashboard }) {
   const todayIndex = (() => { const wd = new Date(`${clock.today}T12:00:00Z`).getUTCDay(); return wd === 0 ? 6 : wd - 1; })();
   const weekStart = addDays(clock.today, -todayIndex) as ISODate;
   const doneCard = (
-    <Card look={c.deliveredThisWeekScripts ? 'glow' : 'calm'} tone="done" icon={<Send />} n={c.deliveredThisWeekScripts}
+    <Card tone="done" icon={<Send />} n={c.deliveredThisWeekScripts}
       pill={<span className="kpi-pill">Mon – Sun</span>}
       cap="Delivered this week"
       sub={`${mine ? 'your scripts' : 'scripts in Timeliner'}${c.deliveredThisWeekBatches ? ` · ${plural(c.deliveredThisWeekBatches, 'batch', 'batches')}` : ''}`}
