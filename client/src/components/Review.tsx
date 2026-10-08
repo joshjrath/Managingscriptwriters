@@ -152,7 +152,16 @@ export function TitlesDialog({ batchId, scripts, onClose }: { batchId: number; s
  * Send a set of scripts as one document. `candidates` are the scripts that
  * can be sent (the writer's own, not yet approved); `preselect` is the default.
  */
-export function SendDialog({ batchId, batchTitle, candidates, preselect, resend, onClose }: { batchId: number; batchTitle: string; candidates: Script[]; preselect: number[]; resend?: boolean; onClose: () => void }) {
+export function SendDialog({ batchId, batchTitle, candidates, preselect, resend, replace, feedback, onClose }: {
+  batchId: number; batchTitle: string; candidates: Script[]; preselect: number[];
+  /** sending a revised version of scripts that were sent back */
+  resend?: boolean;
+  /** swapping the document for scripts still in review */
+  replace?: boolean;
+  /** the send-back being answered, shown so the writer can check it */
+  feedback?: { note: string | null; byName: string } | null;
+  onClose: () => void;
+}) {
   const toast = useToast();
   const pre = candidates.filter((s) => preselect.includes(s.id));
   const [scope, setScope] = useState<'all' | 'some'>('all');
@@ -178,18 +187,22 @@ export function SendDialog({ batchId, batchTitle, candidates, preselect, resend,
     const e: Record<string, string> = {};
     const a = attachError(att, true);
     if (a) e.document = a;
-    if (!chosen.length) e.range = `Use script numbers from ${compressRanges(candidates.map((s) => s.number))}, like 1–5`;
+    if (!chosen.length) e.range = `Use your script numbers (${compressRanges(candidates.map((s) => s.number))}), like ${example}`;
     setErrs(e);
     if (!Object.keys(e).length) save.mutate(undefined);
   };
   const server = save.error as ApiError | null;
+  const sorted = candidates.map((s) => s.number).sort((a, b) => a - b);
+  const example = sorted.length > 1 ? `${sorted[0]}–${sorted[Math.min(sorted.length - 1, 2)]}` : `${sorted[0] ?? 1}`;
   return (
-    <Dialog open onClose={onClose} title={resend ? 'Send your revised version' : 'Send scripts for review'} sub={`${batchTitle} · one document for all the scripts it covers`}
+    <Dialog open onClose={onClose} title={replace ? 'Send a newer version' : resend ? 'Send your revised version' : 'Send scripts for review'}
+      sub={replace ? `${batchTitle} · it takes the place of the document in review; the old one is kept in the history` : `${batchTitle} · one document for all the scripts it covers`}
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" icon={<Send aria-hidden />} busy={save.isPending} onClick={submit}>Send {plural(chosen.length, 'script')}</Button></div>}>
       <div className="form">
         <FormError error={server && !Object.keys(server.fields).length ? server : null} />
+        {feedback?.note && <blockquote className="rc-note">“{feedback.note}” <span>— {feedback.byName}. Check it’s covered before you send.</span></blockquote>}
         <div className="field">
-          <span className="lbl">Your document</span>
+          <span className="lbl">{replace || resend ? 'Your new document' : 'Your document'}</span>
           <AttachInput value={att} onChange={setAtt} error={errs.document ?? server?.fields.document}
             fileHelp="A PDF with all the scripts is ideal. Up to 25 MB."
             linkHelp="Google Docs or Drive: set sharing so the team can open it (and edit, if you want changes made in the doc)." />
@@ -200,7 +213,7 @@ export function SendDialog({ batchId, batchTitle, candidates, preselect, resend,
           <label className="check"><input type="radio" name="scope" checked={scope === 'some'} onChange={() => setScope('some')} />Only some</label>
           {scope === 'some' && (
             <Field label="Script numbers" htmlFor={ids.r} error={errs.range} help={`Yours: ${compressRanges(candidates.map((s) => s.number))}`}>
-              <input className="input" value={range} onChange={(e) => setRange(e.target.value)} placeholder="e.g. 1–5" {...inputProps(ids.r, errs.range)} />
+              <input className="input" value={range} onChange={(e) => setRange(e.target.value)} placeholder={`e.g. ${example}`} {...inputProps(ids.r, errs.range)} />
             </Field>
           )}
         </div>
@@ -246,7 +259,7 @@ export function DecisionDialog({ batchId, scripts, submissionId, mode, groupKey,
     const at = from.current ?? centerOf(null);
     if (mode === 'revisions') burst(at.x, at.y, { colors: PINK, count: 14 });
     else { burst(at.x, at.y, { colors: MINT, count: 18 }); confetti({ x: at.x, y: at.y, count: 40, spread: 80, power: 10 }); }
-    undoable(out?.reviewId, mode === 'revisions' ? `Sent ${plural(scripts.length, 'script')} back for revisions` : `Approved ${plural(scripts.length, 'script')} with your edits`);
+    undoable(out?.reviewId, mode === 'revisions' ? `Sent ${plural(scripts.length, 'script')} back` : `Approved ${plural(scripts.length, 'script')} with your edits`);
     onClose();
   } });
   const submit = () => {
@@ -262,7 +275,7 @@ export function DecisionDialog({ batchId, scripts, submissionId, mode, groupKey,
     <Dialog open onClose={onClose} size="narrow"
       title={mode === 'revisions' ? `Send ${plural(scripts.length, 'script')} back` : 'Approve with your edits'}
       sub={`Scripts ${nums}${mode === 'revisions' ? ' · the writer gets one request with your note' : ' · the writer is told to use your version'}`}
-      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant={mode === 'revisions' ? 'danger' : 'mint'} busy={save.isPending} onClick={submit}>{mode === 'revisions' ? 'Send back for revisions' : `Approve ${plural(scripts.length, 'script')}`}</Button></div>}>
+      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant={mode === 'revisions' ? 'danger' : 'mint'} busy={save.isPending} onClick={submit}>{mode === 'revisions' ? 'Send back' : `Approve ${plural(scripts.length, 'script')}`}</Button></div>}>
       <div className="form">
         <FormError error={save.error} />
         <Field label={mode === 'revisions' ? 'What needs to change?' : 'Note'} optional={mode !== 'revisions'} htmlFor={nid} error={errs.note}>
@@ -294,7 +307,7 @@ function TitlesPreview({ scripts }: { scripts: Script[] }) {
   );
 }
 
-/** One document (or one writer's scripts) waiting for review. */
+/** One document (or one writer's scripts) in review. */
 export function WaitingCard({ group, showBatch = true, onReplace }: { group: ReviewGroup; showBatch?: boolean; onReplace?: () => void }) {
   const displayTz = useDisplayTz();
   const { me, clock } = useBoot();
@@ -342,12 +355,19 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
       {sub && sub.scriptNumbers.length > n && <p className="muted" style={{ fontSize: 12.5 }}>This document covers scripts {compressRanges(sub.scriptNumbers)}. Only {nums} still need{n === 1 ? 's' : ''} a decision.</p>}
       {sub?.note && <blockquote className="rc-note">“{sub.note}” <span>— {sub.submittedByName}</span></blockquote>}
       <TitlesPreview scripts={group.scripts} />
-      {sub && sub.version > 1 && <p className="muted" style={{ fontSize: 12.5 }}>Revised after earlier feedback. Every version is kept on the <Link className="link" to={`/batches/${group.batch.id}#documents`}>batch page</Link>.</p>}
+      {sub?.afterFeedback && (
+        <div className="rc-feedback">
+          <span className="lbl"><RotateCcw aria-hidden />Revised after this feedback</span>
+          {sub.afterFeedback.note && <blockquote className="rc-note">“{sub.afterFeedback.note}” <span>— {sub.afterFeedback.byName}, {fmtStamp(sub.afterFeedback.at, displayTz)}</span></blockquote>}
+          <span className="muted" style={{ fontSize: 12.5 }}>Earlier versions are kept on the <Link className="link" to={`/batches/${group.batch.id}#documents`}>batch page</Link>.</span>
+        </div>
+      )}
+      {sub && sub.version > 1 && !sub.afterFeedback && <p className="muted" style={{ fontSize: 12.5 }}>This replaces an earlier version. Every version is kept on the <Link className="link" to={`/batches/${group.batch.id}#documents`}>batch page</Link>.</p>}
       {manager && (
         <>
           <div className="rc-actions">
             <Button variant="mint" icon={<Check aria-hidden />} busy={approve.isPending && approve.variables === target} onClick={(e) => approveNow(target, e.currentTarget)}>{sel ? `Approve ${target.length} selected` : n === 1 ? 'Approve' : `Approve all ${n}`}</Button>
-            <Button variant="danger" icon={<RotateCcw aria-hidden />} onClick={() => setDialog({ mode: 'revisions', scripts: target })}>{sel ? `Send ${target.length} selected back` : 'Send back for revisions'}</Button>
+            <Button variant="danger" icon={<RotateCcw aria-hidden />} onClick={() => setDialog({ mode: 'revisions', scripts: target })}>{sel ? `Send ${target.length} selected back` : 'Send back'}</Button>
             <Button variant="ghost" icon={<PenLine aria-hidden />} onClick={() => setDialog({ mode: 'approve_edits', scripts: target })}>{sel ? `Approve ${target.length} with my edits` : 'Approve with my edits'}</Button>
             {n > 1 && <button type="button" className="linkbtn rc-more" aria-expanded={oneByOne} onClick={() => setOneByOne(!oneByOne)}>{oneByOne ? 'Hide script list' : 'Review scripts one by one'}</button>}
           </div>
@@ -368,8 +388,8 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
       )}
       {!manager && (
         <div className="rc-actions">
-          <span className="muted" style={{ fontSize: 13 }}>Waiting for a manager to review.</span>
-          {onReplace && <Button variant="sm ghost" icon={<Upload aria-hidden />} onClick={onReplace}>Replace document</Button>}
+          <span className="muted" style={{ fontSize: 13 }}>In review. Nothing to do until a manager looks at it.</span>
+          {onReplace && <Button variant="sm ghost" icon={<Upload aria-hidden />} onClick={onReplace}>Send a newer version</Button>}
         </div>
       )}
       {manager && onReplace && <button type="button" className="linkbtn" style={{ alignSelf: 'flex-start' }} onClick={onReplace}>Replace the document</button>}
@@ -386,14 +406,14 @@ export function SentBackCard({ group, onResend, showBatch = true }: { group: Rev
   const n = group.scripts.length;
   const nums = compressRanges(group.scripts.map((s) => s.number));
   return (
-    <section className="review-card edge-pink" aria-label={`Revisions requested on scripts ${nums}`}>
+    <section className="review-card edge-pink" aria-label={`Sent back: scripts ${nums}`}>
       <div className="rc-head">
         <div style={{ minWidth: 0 }}>
           {showBatch && <div className="rc-client">{group.batch.clientName} · <Link to={`/batches/${group.batch.id}`} className="rc-batch">{group.batch.title}</Link></div>}
           <div className="rc-title">{n === 1 ? `Script ${nums}` : `${n} scripts (${nums})`} sent back to {group.writerId === me.id ? 'you' : group.writerName}</div>
           <div className="rc-meta">{r && <span>by {r.reviewedByName} · {fmtStamp(r.createdAt, displayTz)}</span>}</div>
         </div>
-        <Chip color="pink" icon={<RotateCcw aria-hidden />}>Revisions needed</Chip>
+        <Chip color="pink" icon={<RotateCcw aria-hidden />}>Sent back</Chip>
       </div>
       {r?.note && <blockquote className="rc-note pink">“{r.note}”</blockquote>}
       {r && hasDoc(r) && <DocRow a={r} label="Their changes" tone="pink" />}

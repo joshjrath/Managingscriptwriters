@@ -59,7 +59,7 @@ export function Overview() {
             <button className="stat-card" onClick={() => nav(isManager(me.role) ? '/review' : '/production?flag=review&view=table')} style={{ ['--c' as string]: 'var(--lavender)' }} aria-label={`${d.cards.awaitingReviewScripts} scripts awaiting review. Open the review queue.`}>
               <span className="corner"><ClipboardCheck /></span>
               <span className={`n${d.cards.awaitingReviewScripts ? '' : ' zero'}`}><CountUp value={d.cards.awaitingReviewScripts} /></span>
-              <span><span className="cap">{d.scope === 'mine' ? 'Your scripts in review' : 'Scripts awaiting review'}</span><span className="sub" style={{ display: 'block' }}>{d.cards.awaitingReviewBatches ? `across ${plural(d.cards.awaitingReviewBatches, 'batch', 'batches')}` : 'Queue is clear'}</span></span>
+              <span><span className="cap">{d.scope === 'mine' ? 'Your scripts in review' : 'Scripts in review'}</span><span className="sub" style={{ display: 'block' }}>{d.cards.awaitingReviewBatches ? `across ${plural(d.cards.awaitingReviewBatches, 'batch', 'batches')}` : 'Queue is clear'}</span></span>
             </button>
             <button className="stat-card elev" onClick={() => nav('/production?stage=delivered&view=table&completed=1')} style={{ ['--c' as string]: 'var(--mint)' }} aria-label={`${d.cards.deliveredThisWeekScripts} scripts delivered this week.`}>
               <span className="corner"><Send /></span>

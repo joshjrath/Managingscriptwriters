@@ -14,7 +14,7 @@ import { ACCENT_LABEL, ACCENTS, darkTextContrast, DEFAULT_PALETTE, HEX, PALETTES
 import { applyTheme, restoreTheme } from '../theme';
 import { CalendarFeedsPanel } from '../components/CalendarFeeds';
 import { PageHeader, useBoot } from '../components/Shell';
-import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, useFieldId, useToast } from '../components/ui';
+import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, Term, useFieldId, useToast } from '../components/ui';
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const fmtHour = (h: number) => `${((h + 11) % 12) + 1}:00 ${h < 12 ? 'AM' : 'PM'}`;
@@ -171,7 +171,7 @@ function RulesPanel() {
         <FormError error={save.error && !Object.keys(save.error.fields).length ? save.error : null} />
         <div className="form-grid">
           <Field label="Drafts due" htmlFor={ids.d} error={f.draftOffsetDays} help="days before the shoot starts"><input className="input num" type="number" min={0} max={60} value={shown(v.draftOffsetDays)} onChange={(e) => setV({ ...v, draftOffsetDays: num(e.target.value) })} {...inputProps(ids.d, f.draftOffsetDays)} /></Field>
-          <Field label="Final delivery to Timeliner" htmlFor={ids.fo} error={f.finalOffsetDays} help="days before the shoot starts (the same as drafts, or fewer)"><input className="input num" type="number" min={0} max={60} value={shown(v.finalOffsetDays)} onChange={(e) => setV({ ...v, finalOffsetDays: num(e.target.value) })} {...inputProps(ids.fo, f.finalOffsetDays)} /></Field>
+          <Field label={<>Final delivery to <Term k="Timeliner" /></>} htmlFor={ids.fo} error={f.finalOffsetDays} help="days before the shoot starts (the same as drafts, or fewer)"><input className="input num" type="number" min={0} max={60} value={shown(v.finalOffsetDays)} onChange={(e) => setV({ ...v, finalOffsetDays: num(e.target.value) })} {...inputProps(ids.fo, f.finalOffsetDays)} /></Field>
         </div>
         <div className="field">
           <span className="lbl">Count days as</span>

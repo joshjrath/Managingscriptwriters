@@ -79,7 +79,7 @@ export function AttentionRow({ a }: { a: AttentionItem }) {
         <ul className="issues">
           {a.issues.map((i, k) => <li key={k}>{ISSUE_ICON[i.kind]}<span><b>{i.text}</b></span></li>)}
         </ul>
-        <div className="meta"><span className="ellipsis">{writersText(b)}</span><span className="num">{b.progress.draftReady} / {b.progress.total} drafts ready · {b.progress.pctDraft}%</span></div>
+        <div className="meta"><span className="ellipsis">{writersText(b)}</span><span className="num">{b.progress.draftReady} / {b.progress.total} drafts sent · {b.progress.pctDraft}%</span></div>
       </div>
       <div className="side">
         {b.next?.date && <span className="when">{b.next.kind === 'draft' ? 'Drafts' : 'Final'} {fmtDate(b.next.date)}</span>}

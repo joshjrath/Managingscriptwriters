@@ -518,4 +518,14 @@ create index shoots_calendar_uid_idx on shoots (calendar_uid);
 alter table notifications add column review_id bigint;
 alter table moments add column review_id bigint;
 `,
+  // 25 · when each writer last looked at their work in a batch ("Got it", opening it, or sending),
+  // so scripts added after that still show as new
+  `
+create table work_seen (
+  user_id bigint not null references users(id) on delete cascade,
+  batch_id bigint not null references batches(id) on delete cascade,
+  seen_at timestamptz not null default now(),
+  primary key (user_id, batch_id)
+);
+`,
 ];

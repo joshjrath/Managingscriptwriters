@@ -135,9 +135,11 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
   const { db } = ctx;
 
   app.get('/api/clients', async (req) => {
-    requireUser(req);
+    const me = requireUser(req);
     const { status } = parse(z.object({ status: z.enum(['prospect', 'active', 'archived', 'all', 'current']).default('active') }), req.query);
-    return { clients: await clientSummaries(ctx, status) };
+    const list = await clientSummaries(ctx, status);
+    // notes about potential clients are sales talk, for managers only
+    return { clients: isManager(me.role) ? list : list.map((c) => (c.status === 'prospect' ? { ...c, description: null } : c)) };
   });
 
   app.get('/api/clients/:id', async (req): Promise<ClientDetail> => {
@@ -155,10 +157,11 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
       loadActivity(db, { clientId: id, limit: 80 }),
     ]);
     return {
-      ...summary, brandVoice: c?.brand_voice ?? null, guidance: c?.guidance ?? null,
+      ...summary, description: summary.status === 'prospect' && !isManager(me.role) ? null : summary.description,
+      brandVoice: c?.brand_voice ?? null, guidance: c?.guidance ?? null,
       briefings, resources: resources.filter((r) => !r.briefingId), shoots,
-      // editors get the brand material, not the team's internal history
-      batches: me.role === 'editor' ? [] : batches.summaries, activity: me.role === 'editor' ? [] : activity,
+      // editors get the brand material, not the batches; the team's internal history is for managers
+      batches: me.role === 'editor' ? [] : batches.summaries, activity: isManager(me.role) ? activity : [],
     };
   });
 

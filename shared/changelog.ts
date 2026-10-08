@@ -17,6 +17,28 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-08-writers-never-miss',
+    date: '2026-10-08',
+    title: 'Writers never miss new work, and one set of words everywhere',
+    summary: 'The second round of fixes: new work and send-backs are impossible to miss, deadlines are each writer’s own, and every page uses the same words for where a script is.',
+    changes: [
+      { tag: 'new', text: 'New work stays at the top of My work until you press “Got it”, open the batch or send something. Scripts added to a batch you’ve already started show as new too, with their numbers.' },
+      { tag: 'new', text: 'A “Due now” strip at the top of My work lists anything due today, tomorrow or overdue. Tap a line to jump to it.' },
+      { tag: 'improved', text: 'Deadlines on My work are your own: your drafts are done when your scripts are sent, whoever else is still writing. Each one says the time it’s due in your time zone.' },
+      { tag: 'improved', text: 'Sent-back scripts are counted in the page header, tagged on their batch and listed first. The pop-up when you come back leads with them, and approvals that were sent back since aren’t celebrated.' },
+      { tag: 'improved', text: 'Cards stay where they are while you update Written so far, instead of jumping to another section.' },
+      { tag: 'improved', text: 'The Today pill says how many tasks are done and how many are overdue in plain words, counts to-dos with a date, and takes you to the work when you tap it.' },
+      { tag: 'improved', text: 'One word for each step, on every page: Not started, Writing, In review, Sent back, Approved, Delivered. Progress reads “drafts sent”, and the last deadline is “Final delivery”.' },
+      { tag: 'improved', text: 'Writers’ menu has just what they use: My work, Calendar, Messages, Script bank, Resources and Clients. A batch page starts with “Your scripts”.' },
+      { tag: 'improved', text: 'Writers can undo their own delivery on the same day, from the confirmation or the batch page. Managers are told.' },
+      { tag: 'improved', text: 'Sending a revised version shows the feedback you’re answering, and the reviewer sees it next to the new version. “Replace document” is now “Send a newer version”.' },
+      { tag: 'improved', text: 'Script numbers can be typed the way people write them: “1 to 5”, “1 - 5 and 8”, “scripts 2–4”. Examples use your own numbers, and only scripts you can send are offered.' },
+      { tag: 'improved', text: 'The time zone question lets you search by city, preselects a zone an Admin set for you, waits until other pop-ups are closed, and “Not now” holds for 30 days.' },
+      { tag: 'improved', text: '“Owner” on clients is now “Account lead”, the first sign-up creates the “admin account”, and “New work” is “+ Create”. Hover or tap Timeliner and Phantom for a short explanation.' },
+      { tag: 'fixed', text: 'Writers and editors no longer see notes about potential clients or a client’s internal history. Date checks and the next action on a batch are for managers only, and a blocker says who flagged it.' },
+    ],
+  },
+  {
     id: '2026-10-08-safety-fixes',
     date: '2026-10-08',
     title: 'Safer approvals, a Script bank that keeps everything, and other fixes',

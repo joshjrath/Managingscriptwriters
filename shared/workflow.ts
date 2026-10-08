@@ -18,23 +18,17 @@ export const SCRIPT_STATUSES = [
 ] as const;
 export type ScriptStatus = (typeof SCRIPT_STATUSES)[number];
 
+// One word for each state, used everywhere: chips, filters, notifications, pop-ups and the history.
 export const STATUS_LABEL: Record<ScriptStatus, string> = {
-  not_started: 'Not started',
-  in_progress: 'In progress',
-  ready_for_review: 'Ready for review',
-  revisions_needed: 'Revisions needed',
-  approved: 'Approved',
-  delivered: 'Delivered to Timeliner',
-};
-
-export const STATUS_SHORT: Record<ScriptStatus, string> = {
   not_started: 'Not started',
   in_progress: 'Writing',
   ready_for_review: 'In review',
-  revisions_needed: 'Revisions',
+  revisions_needed: 'Sent back',
   approved: 'Approved',
   delivered: 'Delivered',
 };
+
+export const STATUS_SHORT: Record<ScriptStatus, string> = STATUS_LABEL;
 
 export const isDraftReady = (s: ScriptStatus) => s === 'ready_for_review' || s === 'approved' || s === 'delivered';
 export const isApproved = (s: ScriptStatus) => s === 'approved' || s === 'delivered';
@@ -93,8 +87,8 @@ export function summarize(scripts: Pick<ScriptLite, 'status' | 'assigneeId'>[]):
   return p;
 }
 
-/** "20 / 45 drafts ready · 44%" */
-export function progressLabel(n: number, total: number, noun = 'drafts ready'): string {
+/** "20 / 45 drafts sent · 44%" */
+export function progressLabel(n: number, total: number, noun = 'drafts sent'): string {
   return `${n} / ${total} ${noun} · ${pct(n, total)}%`;
 }
 
@@ -107,7 +101,7 @@ export const STAGE_LABEL: Record<Stage, string> = {
   not_started: 'Not started',
   writing: 'Writing',
   in_review: 'In review',
-  approved: 'Approved · to deliver',
+  approved: 'Approved',
   delivered: 'Delivered',
 };
 
@@ -174,13 +168,20 @@ export type Role = 'owner' | 'manager' | 'writer' | 'editor';
 export const NEW_WORK_DAYS = 7;
 
 /**
- * A writer's scripts in a batch are new work when they were given to them in the last week and
- * nothing has happened yet: none written on the counter, none sent, none sent back.
+ * A writer's scripts in a batch are new work when they were given to them in the last week,
+ * the writer hasn't said "Got it" (or opened the batch) since, and nothing has happened yet:
+ * none written on the counter, none sent, none sent back.
  */
-export function isNewWork(mine: { status: ScriptStatus; assignedAt: string | null }[], written: number, now: Date): boolean {
+export function isNewWork(mine: { status: ScriptStatus; assignedAt: string | null }[], written: number, now: Date, seenAt: string | null = null): boolean {
   if (!mine.length || written > 0 || mine.some((s) => s.status !== 'not_started')) return false;
-  const cut = now.getTime() - NEW_WORK_DAYS * 86400_000;
+  const cut = Math.max(now.getTime() - NEW_WORK_DAYS * 86400_000, seenAt ? new Date(seenAt).getTime() + 1 : 0);
   return mine.some((s) => s.assignedAt != null && new Date(s.assignedAt).getTime() >= cut);
+}
+
+/** Scripts added to work the writer has already started, since they last looked (or in the last week). */
+export function newlyAdded<T extends { status: ScriptStatus; assignedAt: string | null }>(mine: T[], now: Date, seenAt: string | null): T[] {
+  const cut = Math.max(now.getTime() - NEW_WORK_DAYS * 86400_000, seenAt ? new Date(seenAt).getTime() + 1 : 0);
+  return mine.filter((s) => (s.status === 'not_started' || s.status === 'in_progress') && s.assignedAt != null && new Date(s.assignedAt).getTime() >= cut);
 }
 
 /** Admins (stored as 'owner') can do everything managers can. */
@@ -205,14 +206,15 @@ interface ActionRule {
 }
 
 export const ACTION_RULES: Record<ScriptAction, ActionRule> = {
-  start: { from: ['not_started'], to: 'in_progress', who: 'assignee', label: 'Mark in progress' },
+  start: { from: ['not_started'], to: 'in_progress', who: 'assignee', label: 'Start writing' },
   reset: { from: ['in_progress'], to: 'not_started', who: 'assignee', label: 'Mark not started' },
   submit: { from: ['not_started', 'in_progress', 'revisions_needed'], to: 'ready_for_review', who: 'assignee', label: 'Submit for review' },
   withdraw: { from: ['ready_for_review'], to: 'in_progress', who: 'assignee', label: 'Withdraw from review' },
   approve: { from: ['ready_for_review'], to: 'approved', who: 'manager', label: 'Approve' },
   request_revisions: { from: ['ready_for_review', 'approved'], to: 'revisions_needed', who: 'manager', label: 'Request revisions' },
-  deliver: { from: ['approved'], to: 'delivered', who: 'assignee', label: 'Mark delivered to Timeliner' },
-  undo_delivery: { from: ['delivered'], to: 'approved', who: 'manager', label: 'Undo delivery' },
+  deliver: { from: ['approved'], to: 'delivered', who: 'assignee', label: 'Mark delivered' },
+  // writers can take back their own delivery on the day they made it (the server checks); managers any time
+  undo_delivery: { from: ['delivered'], to: 'approved', who: 'assignee', label: 'Undo delivery' },
 };
 
 export interface Actor {
@@ -248,10 +250,11 @@ export function compressRanges(numbers: number[]): string {
   return parts.join(', ');
 }
 
-/** "1-20, 25" → [1..20, 25]; returns null if the text isn't a valid range list. */
+/** "1-20, 25", "1 - 20 and 25", "1 to 20; 25" → [1..20, 25]; returns null if the text isn't a valid range list. */
 export function parseRanges(text: string, max: number): number[] | null {
   const out = new Set<number>();
-  const cleaned = text.replace(/[–—]/g, '-').trim();
+  const cleaned = text.replace(/[–—]/g, '-').replace(/#|\bscripts?\b/gi, '').replace(/\s*(?:-|\bto\b|\bthrough\b|\.\.)\s*/gi, '-')
+    .replace(/\s*(?:;|&|\band\b)\s*/gi, ',').trim();
   if (!cleaned) return null;
   for (const part of cleaned.split(/[,\s]+/).filter(Boolean)) {
     const m = /^(\d+)(?:-(\d+))?$/.exec(part);

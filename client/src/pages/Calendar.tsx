@@ -24,7 +24,7 @@ import { DAY_COUNTS, DaysTimeline, type DayCount } from '../components/DaysTimel
 const TYPE = {
   writing: { label: 'Writing', icon: PenLine, c: 'var(--cyan)' },
   draft: { label: 'Drafts due', icon: FileText, c: 'var(--lavender)' },
-  final: { label: 'Final → Timeliner', icon: Send, c: 'var(--yellow)' },
+  final: { label: 'Final delivery', icon: Send, c: 'var(--yellow)' },
   shoot: { label: 'Shoot', icon: Camera, c: 'var(--salmon)' },
   external: { label: 'Google Calendar', icon: CalendarDays, c: 'var(--text-2)' },
 } as const;
@@ -85,7 +85,7 @@ export function CalendarPage() {
     else if (editor) { const id = clients.find((c) => c.name === e.clientName)?.id; if (id) nav(`/scripts?clientId=${id}`); }
     else if (canMove(e)) setPicked(e);
     else if (e.batchId) nav(`/batches/${e.batchId}`);
-    else if (e.shootId) nav('/production');
+    else if (e.shootId && manager) nav('/production');
   };
   const moveOf = (e: CalendarEvent, toStart?: ISODate): Move => {
     const len = diffDays(e.end, e.start);

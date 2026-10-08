@@ -4,20 +4,20 @@
 // only waiting on a review; and what they've finished at the bottom. Managers
 // who also write use the same view, and can look at any writer's.
 
-import { useId, useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, ArrowRight, Camera, CheckCheck, ChevronDown, ClipboardCheck, FileText, PenLine, PlayCircle, Plus, Send, Sparkles, Type } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Camera, Check, CheckCheck, ChevronDown, ClipboardCheck, Clock, FileText, PenLine, PlayCircle, Plus, RotateCcw, Send, Sparkles, Type } from 'lucide-react';
 import { api, useSave } from '../api';
 import type { MyWork, Script } from '../../../shared/types';
-import { compressRanges, isApproved, isManager, isNewWork, NEW_WORK_DAYS, type Milestone } from '../../../shared/workflow';
+import { compressRanges, isManager, isNewWork, newlyAdded, type Milestone } from '../../../shared/workflow';
 import { diffDays, type ISODate } from '../../../shared/dates';
-import { fmtAgo, fmtDate, fmtStamp, fmtWeekday, plural } from '../../../shared/format';
+import { cutoffIn, fmtAgo, fmtCutoff, fmtDate, fmtStamp, fmtTimeZoneAbbr, fmtWeekday, plural } from '../../../shared/format';
 import { TodayPill } from '../components/TodayPill';
 import { TodoPanel } from '../components/Todos';
 import { WrittenCounter } from '../components/WrittenCounter';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
-import { Button, Chip, Empty, ErrorState, ExtLink, LiquidBar, Loading, Panel, useToast } from '../components/ui';
+import { Button, Chip, Empty, ErrorState, ExtLink, LiquidBar, Loading, Panel, Term, useToast } from '../components/ui';
 import { approvedSources, CardList, SendDialog, SentBackCard, SourceList, TitlesDialog, WaitingCard } from '../components/Review';
 import { DeliverDialog } from './BatchDetail';
 import { confetti } from '../fx';
@@ -44,7 +44,7 @@ function split(mine: Script[]) {
 function kindOf(e: Entry, writerId: number, now: Date): Kind {
   const st = split(e.mine);
   if (!e.mine.length || st.delivered.length === e.mine.length) return 'done';
-  if (isNewWork(e.mine, writtenOf(e, writerId), now)) return 'new';
+  if (isNewWork(e.mine, writtenOf(e, writerId), now, e.seenAt)) return 'new';
   return st.notSent.length + st.sentBack.length + st.approved.length > 0 ? 'todo' : 'waiting';
 }
 
@@ -57,9 +57,20 @@ export function MyWorkPage() {
   const q = useQuery({ queryKey: ['my-work', viewing], queryFn: () => api<MyWork>(`/api/my-work${!self ? `?userId=${viewing}` : ''}`) });
   const who = users.find((u) => u.id === viewing);
   const now = new Date();
+  // a card shown as new stays in New work until "Got it" (or it's done), so
+  // tapping the counter doesn't make it jump to another section mid-update
+  const sticky = useRef(new Map<number, string | null>());
   const by: Record<Kind, Entry[]> = { new: [], todo: [], waiting: [], done: [] };
-  for (const e of q.data?.batches ?? []) by[kindOf(e, viewing, now)].push(e);
+  for (const e of q.data?.batches ?? []) {
+    let k = kindOf(e, viewing, now);
+    if (k !== 'done' && sticky.current.has(e.batch.id) && sticky.current.get(e.batch.id) === e.seenAt) k = 'new';
+    if (k === 'new') sticky.current.set(e.batch.id, e.seenAt); else sticky.current.delete(e.batch.id);
+    by[k].push(e);
+  }
+  const sentBackN = (q.data?.batches ?? []).reduce((n, e) => n + e.myProgress.revisions, 0);
+  const dueNow = by.todo.filter((e) => e.myNext && (e.myNext.overdue || e.myNext.dueToday || (e.myNext.daysUntil ?? 99) === 1));
   const summary = [
+    sentBackN > 0 && `${plural(sentBackN, 'script')} sent back`,
     by.new.length && `${plural(by.new.length, 'new batch', 'new batches')}`,
     by.todo.length && `${by.todo.length} to work on`,
     by.waiting.length && `${by.waiting.length} waiting on review`,
@@ -79,7 +90,8 @@ export function MyWorkPage() {
       {q.isLoading && <Loading height={420} />}
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
       {q.data && (
-        <div className={`mw${by.new.length ? ' has-new' : ''}`}>
+        <div className={`mw${by.new.length ? ' has-new' : ''}${dueNow.length ? ' has-due' : ''}`}>
+          {dueNow.length > 0 && <DueNow list={dueNow} self={self} />}
           {by.new.length > 0 && (
             <Section className="mw-new" tone="new" icon={<Sparkles aria-hidden />} title="New work" count={by.new.length}
               sub={self ? 'Just assigned to you. Start here.' : `Just assigned to ${first}.`}>
@@ -98,7 +110,7 @@ export function MyWorkPage() {
               <div className="mw-clear"><CheckCheck aria-hidden /><div><b>You’re all caught up.</b><span>{by.waiting.length ? 'Everything you’ve sent is with a manager. Anything sent back shows up here.' : 'Nothing left to write or deliver.'}</span></div></div>
             )}
             {by.todo.length > 0 && (
-              <Section tone="todo" icon={<PenLine aria-hidden />} title="To do" count={by.todo.length} sub="Soonest deadline first">
+              <Section tone="todo" icon={<PenLine aria-hidden />} title="To do" count={by.todo.length} sub={sentBackN ? 'Sent back first, then soonest deadline' : 'Soonest deadline first'}>
                 {by.todo.map((e) => <WorkCard key={e.batch.id} e={e} writerId={viewing} />)}
               </Section>
             )}
@@ -152,38 +164,77 @@ function Section({ title, sub, count, icon, tone, className = '', children }: { 
   );
 }
 
-/** The next deadline, big enough to read at a glance. */
+/** Batches with a deadline today, tomorrow or already past: one line each, jumps to the card. */
+function DueNow({ list, self }: { list: Entry[]; self: boolean }) {
+  return (
+    <section className="mw-due" aria-label="Due now">
+      <div className="mw-due-head"><Clock aria-hidden /><b>Due now</b><span>{self ? 'Deadlines you need to hit first' : 'Their nearest deadlines'}</span></div>
+      <ul>
+        {list.map((e) => {
+          const m = e.myNext!;
+          const n = m.daysUntil ?? 0;
+          const when = m.overdue ? `${plural(-n || 1, 'day')} overdue` : m.dueToday ? 'Today' : 'Tomorrow';
+          return (
+            <li key={e.batch.id} className={m.overdue ? 'late' : 'soon'}>
+              <a href={`#wc-${e.batch.id}`} onClick={(ev) => { ev.preventDefault(); document.getElementById(`wc-${e.batch.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>
+                <span className="w">{when}</span>
+                <span className="t ellipsis">{m.kind === 'draft' ? 'Drafts' : 'Final delivery'} · {e.batch.clientName}, {e.batch.title}</span>
+                <span className="n num">{plural(m.remaining, 'script')} left</span>
+              </a>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/** The next deadline (the writer's own), big enough to read at a glance, with the time in their zone. */
 function NextDue({ m, today }: { m: Milestone | null; today: ISODate }) {
+  const { settings } = useBoot();
+  const tz = useDisplayTz();
   if (!m) return <div className="wc-due done"><span className="k">All delivered</span><span className="v"><CheckCheck aria-hidden /></span></div>;
-  const what = m.kind === 'draft' ? 'Drafts due' : 'Final delivery';
+  const what = m.kind === 'draft' ? 'Your drafts due' : 'Final delivery';
   if (!m.date) return <div className="wc-due"><span className="k">{what}</span><span className="v muted">No date yet</span></div>;
   const n = diffDays(m.date, today);
   const tone = m.complete ? 'done' : m.overdue ? 'late' : m.dueToday || n <= 2 ? 'soon' : '';
   const rel = m.complete ? 'Done' : m.overdue ? `${plural(-n || 1, 'day')} overdue` : n === 0 ? 'Today' : n === 1 ? 'Tomorrow' : `In ${n} days`;
+  const mine = cutoffIn(settings.cutoff, settings.timezone, tz, m.date);
+  const by = `by ${mine ?? fmtCutoff(settings.cutoff)} ${fmtTimeZoneAbbr(mine ? tz : settings.timezone)}`;
   return (
     <div className={`wc-due ${tone}`}>
       <span className="k">{what}</span>
       <span className="v">{fmtWeekday(m.date)}</span>
       <span className="r">{m.overdue && <AlertTriangle aria-hidden />}{rel}</span>
+      {!m.complete && <span className="t">{by}</span>}
     </div>
   );
 }
 
-function WorkCard({ e, writerId, fresh, collapsible }: { e: Entry; writerId: number; fresh?: boolean; collapsible?: boolean }) {
+export function WorkCard({ e, writerId, fresh, collapsible, standalone }: { e: Entry; writerId: number; fresh?: boolean; collapsible?: boolean; standalone?: boolean }) {
   const { clock, me } = useBoot();
   const toast = useToast();
   const b = e.batch;
   const st = split(e.mine);
   const total = e.mine.length;
   const written = writtenOf(e, writerId);
-  const sendable = e.mine.filter((s) => !isApproved(s.status));
+  // what can go in a new document: unsent and sent-back scripts (in-review ones only when swapping their document)
+  const sendable = e.mine.filter((s) => s.status === 'not_started' || s.status === 'in_progress' || s.status === 'revisions_needed');
   const [open, setOpen] = useState(!collapsible);
   const [showReview, setShowReview] = useState(false);
   const bodyId = useId();
-  const [dialog, setDialog] = useState<null | { kind: 'send'; preselect: number[]; resend?: boolean } | { kind: 'titles' } | { kind: 'deliver' }>(null);
+  const [dialog, setDialog] = useState<null | { kind: 'send'; preselect: number[]; resend?: boolean; replace?: boolean; feedback?: { note: string | null; byName: string } | null } | { kind: 'titles' } | { kind: 'deliver' }>(null);
   const deliver = useSave((v: { url: string | null; note: string | null; ids: number[] }) => api<{ changed: number[] }>(`/api/batches/${b.id}/scripts/action`, {
     body: { action: 'deliver', scriptIds: v.ids, timelinerUrl: v.url, note: v.note, versions: Object.fromEntries(st.approved.filter((s) => v.ids.includes(s.id)).map((s) => [s.id, s.version])) },
-  }), { onSuccess: (o, v) => { confetti({ y: innerHeight * 0.55, count: 70, spread: 120, power: 13 }); toast(o.changed.length > v.ids.length ? `Delivered all ${o.changed.length} approved scripts in this batch` : `Delivered ${o.changed.length === 1 ? 'script' : 'scripts'} ${compressRanges(st.approved.filter((s) => v.ids.includes(s.id)).map((s) => s.number))}`); setDialog(null); } });
+  }), { onSuccess: (o, v) => {
+    confetti({ y: innerHeight * 0.55, count: 70, spread: 120, power: 13 });
+    toast(o.changed.length > v.ids.length ? `Delivered all ${o.changed.length} approved scripts in this batch` : `Delivered ${o.changed.length === 1 ? 'script' : 'scripts'} ${compressRanges(st.approved.filter((s) => v.ids.includes(s.id)).map((s) => s.number))}`,
+      'ok', { label: 'Undo', run: () => undo.mutate(o.changed) });
+    setDialog(null);
+  } });
+  // a writer can take a delivery back the same day (a mis-tap, or it wasn't in Timeliner after all)
+  const undo = useSave((ids: number[]) => api(`/api/batches/${b.id}/scripts/action`, { body: { action: 'undo_delivery', scriptIds: ids, note: 'Undone right after confirming' } }),
+    { onSuccess: () => toast('Delivery undone. The scripts are approved again.') });
   const sources = approvedSources(st.approved, e.submissions);
   const extraApproved = isManager(me.role) ? b.progress.awaitingDelivery - st.approved.length : 0;
   // send what the counter says is written, not every unsent script
@@ -192,27 +243,30 @@ function WorkCard({ e, writerId, fresh, collapsible }: { e: Entry; writerId: num
   const waiting = e.groups.filter((g) => g.kind === 'waiting');
   const sentBack = e.groups.filter((g) => g.kind === 'sent_back');
   const assigned = lastAssigned(e.mine);
-  const cut = Date.now() - NEW_WORK_DAYS * 86400_000;
-  const newlyAdded = fresh ? 0 : st.notSent.filter((s) => s.assignedAt && Date.parse(s.assignedAt) >= cut).length;
-  const tone = b.blocked || b.next?.overdue ? 'late' : b.next?.dueToday ? 'today' : '';
+  const added = fresh ? [] : newlyAdded(e.mine, new Date(), e.seenAt);
+  const self = writerId === me.id;
+  const seen = useSave(() => api(`/api/batches/${b.id}/seen`, { method: 'POST', body: {} }));
+  const tone = b.blocked || e.myNext?.overdue ? 'late' : e.myNext?.dueToday ? 'today' : '';
   const status = st.inReview.length ? `${st.inReview.length === total ? `All ${plural(total, 'script')}` : plural(st.inReview.length, 'script')} (${nums(st.inReview)}) with a manager for review` : '';
 
   return (
-    <article className={`wc${fresh ? ' fresh' : ''}${tone ? ` ${tone}` : ''}${open ? '' : ' closed'}`} aria-label={`${b.clientName}: ${b.title}`}>
+    <article id={standalone ? undefined : `wc-${b.id}`} className={`wc${fresh ? ' fresh' : ''}${tone ? ` ${tone}` : ''}${open ? '' : ' closed'}`} aria-label={`${b.clientName}: ${b.title}`}>
       <header className="wc-head">
         <div className="wc-id">
-          {(fresh || newlyAdded > 0 || b.blocked) && (
+          {(fresh || added.length > 0 || b.blocked || st.sentBack.length > 0) && (
             <div className="wc-tags">
               {fresh && <span className="new-tag">New</span>}
               {fresh && assigned && <span className="wc-when">Assigned {fmtAgo(assigned)}</span>}
-              {newlyAdded > 0 && <span className="new-tag soft">{plural(newlyAdded, 'new script')}</span>}
+              {added.length > 0 && <span className="new-tag soft">{plural(added.length, 'new script')} ({nums(added)})</span>}
+              {st.sentBack.length > 0 && <Chip color="pink" icon={<RotateCcw aria-hidden />}>{plural(st.sentBack.length, 'script')} sent back</Chip>}
               {b.blocked && <Chip color="red">Blocked</Chip>}
+              {self && (fresh || added.length > 0) && <button type="button" className="btn sm ghost wc-gotit" disabled={seen.isPending} onClick={() => seen.mutate(undefined)}><Check aria-hidden />Got it</button>}
             </div>
           )}
           <h3 className="wc-client">{b.clientName}</h3>
           <div className="wc-batch"><Link to={`/batches/${b.id}`}>{b.title}</Link><span aria-hidden> · </span><span className="num">{total === 1 ? 'your script' : `your ${total} scripts`} ({nums(e.mine)})</span></div>
         </div>
-        <NextDue m={b.next} today={clock.today} />
+        <NextDue m={e.myNext} today={clock.today} />
       </header>
 
       {collapsible && (
@@ -227,7 +281,7 @@ function WorkCard({ e, writerId, fresh, collapsible }: { e: Entry; writerId: num
           {b.blocked && <div className="banner red"><AlertTriangle aria-hidden /><div className="txt"><b>Blocked{b.blockerNote ? `: ${b.blockerNote}` : ''}</b><span>Your manager is sorting this out.</span></div></div>}
           {!fresh && <ScriptStates st={st} total={total} written={written} />}
 
-          <CardList groups={sentBack}>{(g) => <SentBackCard group={g} showBatch={false} onResend={() => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id), resend: true })} />}</CardList>
+          <CardList groups={sentBack}>{(g) => <SentBackCard group={g} showBatch={false} onResend={() => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id), resend: true, feedback: g.review ? { note: g.review.note, byName: g.review.reviewedByName } : null })} />}</CardList>
 
           {st.notSent.length > 0 && (
             <div className="wc-task write">
@@ -251,7 +305,7 @@ function WorkCard({ e, writerId, fresh, collapsible }: { e: Entry; writerId: num
                 <span className="wc-task-ic"><CheckCheck aria-hidden /></span>
                 <div style={{ minWidth: 0 }}>
                   <div className="t">{plural(st.approved.length, 'script')} approved ({nums(st.approved)})</div>
-                  <div className="s">{sources.some((g) => g.edit) ? 'Paste the version shown into Timeliner, then confirm here.' : `Add ${st.approved.length === 1 ? 'it' : 'them'} to Timeliner, then confirm here.`}</div>
+                  <div className="s">{sources.some((g) => g.edit) ? <>Paste the version shown into <Term k="Timeliner" />, then confirm here.</> : <>Add {st.approved.length === 1 ? 'it' : 'them'} to <Term k="Timeliner" />, then confirm here.</>}</div>
                 </div>
               </div>
               {(sources.some((g) => g.edit) || sources.length > 1) && <SourceList sources={sources} />}
@@ -262,14 +316,14 @@ function WorkCard({ e, writerId, fresh, collapsible }: { e: Entry; writerId: num
           )}
 
           {waiting.length > 0 && (collapsible ? (
-            <CardList groups={waiting}>{(g) => <WaitingCard group={g} showBatch={false} onReplace={() => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id) })} />}</CardList>
+            <CardList groups={waiting}>{(g) => <WaitingCard group={g} showBatch={false} onReplace={() => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id), replace: true })} />}</CardList>
           ) : (
             <div className="wc-review">
               <button type="button" className="wc-review-line" aria-expanded={showReview} onClick={() => setShowReview(!showReview)}>
                 <span className="d" aria-hidden /><span className="ellipsis">{status}</span>
                 <span className="wc-toggle-cta">{showReview ? 'Hide' : 'Show'}<ChevronDown aria-hidden /></span>
               </button>
-              {showReview && <CardList groups={waiting}>{(g) => <WaitingCard group={g} showBatch={false} onReplace={() => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id) })} />}</CardList>}
+              {showReview && <CardList groups={waiting}>{(g) => <WaitingCard group={g} showBatch={false} onReplace={() => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id), replace: true })} />}</CardList>}
             </div>
           ))}
 
@@ -282,7 +336,8 @@ function WorkCard({ e, writerId, fresh, collapsible }: { e: Entry; writerId: num
           </footer>
         </div>
       )}
-      {dialog?.kind === 'send' && <SendDialog batchId={b.id} batchTitle={b.title} candidates={sendable} preselect={dialog.preselect} resend={dialog.resend} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'send' && <SendDialog batchId={b.id} batchTitle={b.title} candidates={dialog.replace ? e.mine.filter((s) => dialog.preselect.includes(s.id)) : sendable} preselect={dialog.preselect}
+        resend={dialog.resend} replace={dialog.replace} feedback={dialog.feedback} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'titles' && <TitlesDialog batchId={b.id} scripts={e.mine} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'deliver' && <DeliverDialog scripts={st.approved} submissions={e.submissions} pick={!isManager(me.role)}
         also={extraApproved > 0 ? { count: extraApproved, detail: `${plural(extraApproved, 'more approved script')} from others on this batch` } : null}

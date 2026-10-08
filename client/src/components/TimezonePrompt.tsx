@@ -21,6 +21,13 @@ const deviceZone = () => { try { return Intl.DateTimeFormat().resolvedOptions().
 const store = { get: (k: string) => { try { return localStorage.getItem(k) ?? sessionStorage.getItem(k); } catch { return null; } },
   set: (k: string, v: string, session = false) => { try { (session ? sessionStorage : localStorage).setItem(k, v); } catch { /* ignore */ } } };
 
+const LATER_DAYS = 30;
+const laterKey = (id: number) => `sm.tz-later.${id}`;
+/** "Not now" holds for a month, not just this visit. */
+const askedRecently = (id: number) => { const at = Number(store.get(laterKey(id)) ?? 0); return at > 0 && Date.now() - at < LATER_DAYS * 86400_000; };
+/** Only one pop-up at a time: wait for any open dialog (a celebration, say) to close first. */
+const otherDialogOpen = () => !!document.querySelector('dialog[open]');
+
 const zoneName = (tz: string) => {
   const city = CITIES.find((c) => c.timezone === tz);
   return `${tz.replace(/_/g, ' ')}${city ? ` (${cityLabel(city)})` : ''}`;
@@ -32,14 +39,20 @@ export function TimezonePrompt() {
   const zones = useMemo(() => timeZoneList(), []);
   const [why, setWhy] = useState<null | 'first' | 'moved' | 'manual'>(null);
 
-  // ask once: not confirmed yet, or the device is now somewhere else
+  // ask once: not confirmed yet, or the device is now somewhere else; once per visit at most
   useEffect(() => {
-    if (mode?.viewingAs) return;
+    if (mode?.viewingAs || store.get(`sm.tz-asked.${me.id}`)) return;
+    let ask: null | 'first' | 'moved' = null;
     if (!timezone.confirmed) {
-      if (!store.get(`sm.tz-later.${me.id}`)) setWhy('first');
+      if (!askedRecently(me.id)) ask = 'first';
     } else if (device && timezone.mine && device !== timezone.mine && zones.includes(device) && !store.get(`sm.tz-keep.${me.id}.${device}`)) {
-      setWhy('moved');
+      ask = 'moved';
     }
+    if (!ask) return;
+    const tick = () => { if (otherDialogOpen()) return false; store.set(`sm.tz-asked.${me.id}`, '1', true); setWhy(ask); return true; };
+    const first = setTimeout(() => { if (!tick()) poll = setInterval(() => { if (tick()) clearInterval(poll); }, 1500); }, 1200);
+    let poll: ReturnType<typeof setInterval> | undefined;
+    return () => { clearTimeout(first); if (poll) clearInterval(poll); };
   }, [me.id, mode?.viewingAs, timezone.confirmed, timezone.mine, device, zones]);
   useEffect(() => {
     const on = () => setWhy('manual');
@@ -49,10 +62,10 @@ export function TimezonePrompt() {
 
   if (!why) return null;
   const known = device && zones.includes(device) ? device : null;
-  // first time: the device's zone is the best guess; afterwards, what they chose
-  const initial = why === 'manual' ? timezone.mine ?? known ?? settings.timezone : known ?? timezone.mine ?? settings.timezone;
+  // a zone an admin already set for them comes first; then the device's; then the workspace's
+  const initial = why === 'moved' ? known ?? timezone.mine ?? settings.timezone : timezone.mine ?? known ?? settings.timezone;
   const close = () => {
-    if (why === 'first') store.set(`sm.tz-later.${me.id}`, '1', true);
+    if (why === 'first') store.set(laterKey(me.id), String(Date.now()));
     if (why === 'moved' && device) store.set(`sm.tz-keep.${me.id}.${device}`, '1');
     setWhy(null);
   };
@@ -68,6 +81,17 @@ function TimezoneDialog({ why, initial, current, device, zones, onClose, onSaved
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
   const id = useFieldId('tz');
+  const searchId = useFieldId('tzq');
+  const [q, setQ] = useState('');
+  // search by city or country as well as the zone's own name
+  const options = useMemo(() => {
+    const all = [...new Set([initial, ...(device ? [device] : []), ...zones])];
+    const term = q.trim().toLowerCase();
+    if (!term) return all;
+    const byCity = new Set(CITIES.filter((c) => cityLabel(c).toLowerCase().includes(term) || c.code.toLowerCase() === term).map((c) => c.timezone));
+    return all.filter((z) => byCity.has(z) || zoneName(z).toLowerCase().includes(term) || fmtTimeZoneAbbr(z).toLowerCase() === term);
+  }, [q, zones, device, initial]);
+  useEffect(() => { if (options.length && !options.includes(tz)) setTz(options[0]); }, [options]); // eslint-disable-line react-hooks/exhaustive-deps
   const [now, setNow] = useState(() => new Date());
   useEffect(() => { const t = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(t); }, []);
   const there = new Intl.DateTimeFormat('en-US', { timeZone: tz, weekday: 'long', hour: 'numeric', minute: '2-digit' }).format(now);
@@ -93,9 +117,13 @@ function TimezoneDialog({ why, initial, current, device, zones, onClose, onSaved
       </div>}>
       <div className="form">
         <FormError error={error} />
-        <Field label="Time zone" htmlFor={id} help={device && tz === device ? 'Detected from this device.' : undefined}>
+        <Field label="Find your city" optional htmlFor={searchId}>
+          <input className="input" id={searchId} type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="e.g. Toronto, Manila, London" autoComplete="off" />
+        </Field>
+        <Field label="Time zone" htmlFor={id} help={device && tz === device ? 'Detected from this device.' : current && tz === current && why === 'first' ? 'Set for you by an admin. Change it if it’s wrong.' : undefined}>
           <select className="select" id={id} value={tz} onChange={(e) => setTz(e.target.value)}>
-            {[...new Set([tz, ...(device ? [device] : []), ...zones])].map((z) => <option key={z} value={z}>{zoneName(z)} · {zoneOffset(z)}</option>)}
+            {!options.length && <option value={tz}>No match for “{q}” · keeping {zoneName(tz)}</option>}
+            {options.map((z) => <option key={z} value={z}>{zoneName(z)} · {zoneOffset(z)}</option>)}
           </select>
         </Field>
         <div className="tz-preview">

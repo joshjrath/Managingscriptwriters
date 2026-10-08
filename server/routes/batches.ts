@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { Db } from '../db';
 import {
   assigneesOf, batchLink, buildSummary, clockFor, isAssignedTo, lastDeliveredAt, loadBatch, loadBatches,
-  loadSettings, loadUsers, loadWritten, logActivity, managerIds, notify, rulesOf, type BatchRow, type Ctx, BATCH_SELECT, loadScriptsFor,
+  loadSettings, loadUsers, loadWritten, logActivity, managerIds, markSeen, notify, rulesOf, type BatchRow, type Ctx, BATCH_SELECT, loadScriptsFor,
 } from '../core';
 import { requireManager, requireUser } from '../auth';
 import { buildGroups, publicSubmission } from '../submissions';
@@ -672,6 +672,16 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
     });
   });
 
+  // "Got it": the writer has seen their new work here (also sent when they open the batch)
+  app.post('/api/batches/:id/seen', async (req) => {
+    const me = requireUser(req);
+    const { id } = parse(z.object({ id: zs.id }), req.params);
+    const mine = await db.one<{ n: number }>(`select count(*)::int as n from scripts where batch_id = $1 and assignee_id = $2 and removed_at is null`, [id, me.id]);
+    if (!mine?.n) return { ok: true, seen: false };
+    await markSeen(db, me.id, id);
+    return { ok: true, seen: true };
+  });
+
   app.post('/api/batches/:id/quick-progress', async (req) => {
     const me = requireUser(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
@@ -748,6 +758,16 @@ export async function applyScriptAction(
     if (opts.versions) {
       const stale = rows.filter((r) => opts.versions![String(r.id)] !== undefined && opts.versions![String(r.id)] !== r.version);
       if (stale.length) throw conflict(`Script${stale.length > 1 ? 's' : ''} ${compressRanges(stale.map((r) => r.number))} changed since you loaded this page. Refresh and try again.`, 'stale');
+    }
+    if (action === 'undo_delivery' && !isManager(me.role)) {
+      // "the same day" on the workspace's calendar, both times as the database recorded them
+      const tz = (await loadSettings(t)).timezone;
+      const late = await t.query<{ number: number }>(
+        `select number from scripts where id = any($1) and (delivered_by is distinct from $2 or delivered_at is null
+           or (delivered_at at time zone $3)::date <> (now() at time zone $3)::date) order by number`,
+        [ids, me.id, tz],
+      );
+      if (late.length) throw forbidden(`Only a manager can undo delivery of script${late.length > 1 ? 's' : ''} ${compressRanges(late.map((r) => r.number))}. You can undo your own delivery on the day you made it.`);
     }
     const problems = new Map<string, number[]>();
     for (const r of rows) {
@@ -826,8 +846,8 @@ export async function applyScriptAction(
       onBehalf = ` (on behalf of ${named.map((n) => n.name).join(', ')})`;
     }
     const verb: Record<ScriptAction, string> = {
-      start: 'Started', reset: 'Marked not started', submit: 'Submitted for review', withdraw: 'Withdrew from review',
-      approve: 'Approved', request_revisions: 'Requested revisions on', deliver: 'Confirmed delivery to Timeliner for', undo_delivery: 'Undid delivery of',
+      start: 'Started', reset: 'Marked not started', submit: 'Sent for review', withdraw: 'Withdrew from review',
+      approve: 'Approved', request_revisions: 'Sent back', deliver: 'Confirmed delivery to Timeliner for', undo_delivery: 'Undid delivery of',
     };
     const scriptsWord = `script${rows.length > 1 ? 's' : ''} ${nums}`;
     const summary = action === 'submit' && opts.submission
@@ -838,6 +858,8 @@ export async function applyScriptAction(
       summary,
       detail: { action, scripts: rows.map((r) => r.number), note: opts.note, timelinerUrl: opts.timelinerUrl, deliveryId: deliveryId ?? null },
     });
+
+    if (action === 'submit' && rows.some((r) => r.assignee_id === me.id)) await markSeen(t, me.id, batchId);
 
     // notifications: each writer hears about their own scripts only
     const link = batchLink(batchId);
@@ -851,13 +873,13 @@ export async function applyScriptAction(
       const waiting = await t.query<{ number: number }>(`select number from scripts where batch_id = $1 and status = 'ready_for_review' and removed_at is null order by number`, [batchId]);
       if (opts.submission) {
         await notify(t, await managerIds(t), {
-          type: 'review_request', title: `Ready for review · ${b.client_name}`,
+          type: 'review_request', title: `To review · ${b.client_name}`,
           body: `${me.name} sent ${scriptsWord} of ${b.title} as one document (“${opts.submission.label}”${opts.submission.version > 1 ? `, version ${opts.submission.version}` : ''}).`,
           link: `/review`,
         }, me.id);
       } else {
         await notify(t, await managerIds(t), {
-          type: 'review_request', title: `Ready for review · ${b.client_name}`,
+          type: 'review_request', title: `To review · ${b.client_name}`,
           body: `${b.title}: ${plural(waiting.length, 'script')} waiting (${compressRanges(waiting.map((w) => w.number))}). Latest from ${me.name}.`,
           link: `/review`, dedupeKey: `review:${batchId}:${today}`, refresh: true,
         }, me.id);
@@ -879,7 +901,7 @@ export async function applyScriptAction(
     } else if (action === 'deliver') {
       const mgrs = await managerIds(t);
       await notify(t, mgrs, {
-        type: 'delivery', title: `Delivered to Timeliner · ${b.client_name}`,
+        type: 'delivery', title: `Delivered · ${b.client_name}`,
         body: `${me.name} confirmed script${rows.length > 1 ? 's' : ''} ${nums} of ${b.title} in Timeliner${onBehalf}.`, link,
       }, me.id);
       for (const uid of others.filter((id) => !mgrs.includes(id))) {
@@ -887,6 +909,9 @@ export async function applyScriptAction(
         await notify(t, [uid], { type: 'delivery', title: `Delivered · ${b.client_name} · ${b.title}`, body: `${me.name} marked your ${w.word} delivered to Timeliner for you. Nothing left to do for ${w.them}.`, link: '/my-work' }, me.id);
       }
     } else if (action === 'undo_delivery') {
+      if (!isManager(me.role)) {
+        await notify(t, await managerIds(t), { type: 'delivery', title: `Delivery undone · ${b.client_name}`, body: `${me.name} took back their delivery of ${scriptsWord} of ${b.title}. They’re approved again.${opts.note ? ` “${opts.note}”` : ''}`, link }, me.id);
+      }
       for (const uid of writers) {
         const w = theirs(uid);
         await notify(t, [uid], { type: 'delivery', title: `Delivery undone · ${b.client_name} · ${b.title}`, body: `${me.name} moved your ${w.word} back to approved.${opts.note ? ` “${opts.note}”` : ''}`, link: '/my-work' }, me.id);

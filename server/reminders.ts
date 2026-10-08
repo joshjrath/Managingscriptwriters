@@ -35,7 +35,7 @@ export async function runReminders(ctx: Ctx): Promise<{ created: number; skipped
         const behind = (s: ScriptLiteRow) => (m.kind === 'draft' ? !isDraftReady(s.status) : s.status !== 'delivered');
         const writers = [...new Set(rows.filter(behind).map((s) => s.assignee_id).filter((x): x is number => x != null))];
         const what = m.kind === 'draft' ? 'Drafts' : 'Final delivery to Timeliner';
-        const left = `${plural(m.remaining, 'script')} ${m.kind === 'draft' ? 'not yet draft-ready' : 'not yet delivered'}`;
+        const left = `${plural(m.remaining, 'script')} ${m.kind === 'draft' ? 'with drafts not yet sent' : 'not yet delivered'}`;
         const base = `${m.kind}:${b.id}:${m.date}`;
 
         if (m.overdue) {

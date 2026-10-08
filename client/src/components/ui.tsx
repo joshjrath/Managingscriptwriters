@@ -140,12 +140,12 @@ export function LiquidBar({ total, segs, thin }: { total: number; segs: { n: num
 }
 
 /**
- * "20 / 45 drafts ready · 44%" with a liquid bar: delivered, approved, in review,
+ * "20 / 45 drafts sent · 44%" with a liquid bar: delivered, approved, in review,
  * and (lighter) what writers say they've written but not sent yet.
  */
 export function BatchProgress({ p, thin, showSecondary = true, written = 0 }: { p: Progress; thin?: boolean; showSecondary?: boolean; written?: number }) {
   const extra = Math.max(0, Math.min(p.total, written) - p.draftReady);
-  const label = `${p.draftReady} / ${p.total} drafts ready · ${p.pctDraft}%${extra ? ` · ${p.draftReady + extra} written` : ''}`;
+  const label = `${p.draftReady} / ${p.total} drafts sent · ${p.pctDraft}%${extra ? ` · ${p.draftReady + extra} written` : ''}`;
   return (
     <div className="prog" role="group" aria-label={`${label}. ${p.approved} approved, ${p.delivered} delivered.`}>
       <LiquidBar total={p.total} thin={thin} segs={[
@@ -155,7 +155,7 @@ export function BatchProgress({ p, thin, showSecondary = true, written = 0 }: { 
         { n: extra, c: 'color-mix(in srgb, var(--cyan) 70%, var(--track))' },
       ]} />
       <div className="label">
-        <span><b>{p.draftReady} / {p.total}</b> drafts ready · <span className="n">{p.pctDraft}%</span>{extra > 0 && <span className="written-tag"> · {p.draftReady + extra} written</span>}</span>
+        <span><b>{p.draftReady} / {p.total}</b> drafts sent · <span className="n">{p.pctDraft}%</span>{extra > 0 && <span className="written-tag"> · {p.draftReady + extra} written</span>}</span>
         {showSecondary && <span className="n">{p.approved} approved · {p.delivered} delivered{p.revisions ? ` · ${p.revisions} revisions` : ''}</span>}
       </div>
     </div>
@@ -416,6 +416,17 @@ export function DateTile({ date, color }: { date: string; color?: string }) {
       <span className="d">{d.getUTCDate()}</span>
     </div>
   );
+}
+
+/** Words the team uses that newcomers might not know. */
+export const GLOSSARY = {
+  Timeliner: 'Timeliner is the client’s editing app. Finished scripts are pasted in there; “delivered” means they’re in Timeliner.',
+  Phantom: 'Phantom is the tool that records our calls. Paste the link to the call recording.',
+} as const;
+
+/** A jargon word with a short explanation on hover, focus or tap. */
+export function Term({ k, children }: { k: keyof typeof GLOSSARY; children?: ReactNode }) {
+  return <span className="term" tabIndex={0} data-tip={GLOSSARY[k]} title={GLOSSARY[k]}>{children ?? k}</span>;
 }
 
 export function ExtLink({ href, children, className = 'link' }: { href: string; children: ReactNode; className?: string }) {

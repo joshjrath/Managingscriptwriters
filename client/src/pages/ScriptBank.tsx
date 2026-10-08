@@ -15,7 +15,7 @@ import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import { Button, Chip, Dialog, Empty, ErrorState, Field, FormError, Loading, Panel, Seg, inputProps, useFieldId, useToast } from '../components/ui';
 
 const STATE: Record<DeliverableState, { label: string; color: string }> = {
-  in_progress: { label: 'In progress', color: 'cyan' },
+  in_progress: { label: 'Writing', color: 'cyan' },
   in_review: { label: 'In review', color: 'lavender' },
   revisions: { label: 'Revisions', color: 'pink' },
   approved: { label: 'Approved', color: 'mint' },
@@ -92,7 +92,7 @@ export function ScriptBankPage() {
           <option value="">Any status</option>
           <option value="finished">Finished (approved or delivered)</option>
           <option value="in_review">In review</option>
-          <option value="revisions">Sent back for revisions</option>
+          <option value="revisions">Sent back</option>
           <option value="open">Not finished yet</option>
         </select>}
         <select className="select" value={sort} onChange={(e) => set('sort', e.target.value === 'recent' ? '' : e.target.value)} aria-label="Order">

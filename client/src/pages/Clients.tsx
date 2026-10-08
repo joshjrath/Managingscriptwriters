@@ -14,7 +14,7 @@ import type { Briefing, ClientDetail, ClientSummary } from '../../../shared/type
 import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
 import { PageHeader, useBoot, useNewWork, useDisplayTz } from '../components/Shell';
 import { BatchItem } from '../components/BatchBits';
-import { Button, Chip, DateTile, Dialog, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel, Seg, useFieldId, useToast } from '../components/ui';
+import { Button, Chip, DateTile, Dialog, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel, Seg, Term, useFieldId, useToast } from '../components/ui';
 import { RescheduleDialog, ResourceDialog, ResourceRow } from './BatchDetail';
 
 export function ClientsPage() {
@@ -91,7 +91,7 @@ export function ClientsPage() {
                           {c.becameClientAt && Date.now() - Date.parse(c.becameClientAt) < 7 * 86400_000 && !c.overdueBatches && <Chip color="mint" icon={<Sparkles aria-hidden />}>New client</Chip>}
                         </div>
                         {c.description ? <p className="desc">{c.description}</p> : <p className="desc">No description yet.</p>}
-                        <span className="muted" style={{ fontSize: 12.5 }}>Owner: {c.ownerName ?? '—'}</span>
+                        <span className="muted" style={{ fontSize: 12.5 }}>Account lead: {c.ownerName ?? '—'}</span>
                         <div className="stats">
                           <div><b>{c.activeBatches}</b><span>active batches</span></div>
                           <div><b className="num">{c.scriptsDelivered}/{c.scriptsTotal}</b><span>delivered</span></div>
@@ -120,7 +120,7 @@ export function ClientsPage() {
                         <div className="pbody">
                           <Link to={`/clients/${c.id}`} className="pname" draggable={false}>{c.name}</Link>
                           {c.description && <p className="desc">{c.description}</p>}
-                          <span className="meta">{c.ownerName ?? 'No owner'} · added {fmtDate(c.createdAt.slice(0, 10))}</span>
+                          <span className="meta">{c.ownerName ?? 'No account lead'} · added {fmtDate(c.createdAt.slice(0, 10))}</span>
                         </div>
                         {manager && <Button variant="sm mint" onClick={(x) => { const r = (x.currentTarget as HTMLElement).getBoundingClientRect(); move.mutate({ id: c.id, to: 'active', at: { x: r.left + r.width / 2, y: r.top } }); }}>Mark as client</Button>}
                       </div>
@@ -169,7 +169,7 @@ export function ClientPage() {
   return (
     <>
       <PageHeader title={c.name} crumbs={<Link to="/clients">Clients</Link>}
-        sub={<span className="row-flex s2">{c.status === 'archived' ? <Chip icon={<Archive aria-hidden />}>Archived</Chip> : c.status === 'prospect' ? <Chip color="yellow" icon={<UserPlus aria-hidden />}>Potential client</Chip> : <Chip color="mint" dot>Active</Chip>}<span>Owner: {c.ownerName ?? '—'}</span></span>} hideNewWork>
+        sub={<span className="row-flex s2">{c.status === 'archived' ? <Chip icon={<Archive aria-hidden />}>Archived</Chip> : c.status === 'prospect' ? <Chip color="yellow" icon={<UserPlus aria-hidden />}>Potential client</Chip> : <Chip color="mint" dot>Active</Chip>}<span>Account lead: {c.ownerName ?? '—'}</span></span>} hideNewWork>
         {manager && c.status === 'prospect' && <Button variant="mint" icon={<Sparkles aria-hidden />} busy={convert.isPending} onClick={(x) => { const r = (x.currentTarget as HTMLElement).getBoundingClientRect(); convertAt.current = { x: r.left + r.width / 2, y: r.top }; convert.mutate(undefined); }}>Mark as client</Button>}
         {manager && c.status !== 'archived' && <><Button icon={<Camera aria-hidden />} onClick={() => openNew('shoot', { clientId: c.id })}>New shoot</Button><Button icon={<Plus aria-hidden />} onClick={() => openNew('batch', { clientId: c.id })}>New batch</Button></>}
         {manager && <Button icon={<Pencil aria-hidden />} onClick={() => setEdit(true)}>Edit</Button>}
@@ -206,7 +206,7 @@ export function ClientPage() {
               </div>
             )}
           </Panel>
-          {!editor && <Panel title="History">
+          {manager && <Panel title="History">
             {!c.activity.length ? <Empty title="No history yet" /> : (
               <div className="timeline" style={{ maxHeight: 460, overflowY: 'auto' }}>
                 {c.activity.map((a) => <div key={a.id} className="tl"><span className="d" /><div><div className="s">{a.summary}{a.batchTitle && <span className="muted"> · {a.batchTitle}</span>}</div><div className="w">{a.actorName ?? 'System'} · {fmtStamp(a.createdAt, displayTz)}</div></div></div>)}
@@ -286,7 +286,7 @@ function EditClientDialog({ c, open, onClose, managers }: { c: ClientDetail; ope
       <div className="form">
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
         <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} /></Field>
-        <Field label="Internal owner" htmlFor={ids.o}><select className="select" id={ids.o} value={ownerId} onChange={(e) => setOwnerId(e.target.value ? Number(e.target.value) : '')}><option value="">No owner</option>{managers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Field>
+        <Field label="Account lead" htmlFor={ids.o}><select className="select" id={ids.o} value={ownerId} onChange={(e) => setOwnerId(e.target.value ? Number(e.target.value) : '')}><option value="">No owner</option>{managers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Field>
         <Field label="Description" optional htmlFor={ids.d}><textarea className="textarea" id={ids.d} value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
         <Field label="Brand voice" optional htmlFor={ids.v}><textarea className="textarea" id={ids.v} value={brandVoice} onChange={(e) => setBrandVoice(e.target.value)} /></Field>
         <Field label="Writing guidance" optional htmlFor={ids.g}><textarea className="textarea" id={ids.g} value={guidance} onChange={(e) => setGuidance(e.target.value)} style={{ minHeight: 160 }} /></Field>
@@ -314,7 +314,7 @@ function BriefingDialog({ clientId, briefing, batches, onClose }: { clientId: nu
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
         <Field label="Title" htmlFor={ids.t} error={f.title}><input className="input" value={v.title} onChange={(e) => setV({ ...v, title: e.target.value })} {...inputProps(ids.t, f.title)} /></Field>
         <Field label="Call date" optional htmlFor={ids.d}><input className="input" type="date" id={ids.d} value={v.callDate} onChange={(e) => setV({ ...v, callDate: e.target.value })} /></Field>
-        <Field label="Recording link" optional htmlFor={ids.r} error={f.recordingUrl} help="e.g. the Phantom recording URL"><input className="input" type="url" placeholder="https://" value={v.recordingUrl} onChange={(e) => setV({ ...v, recordingUrl: e.target.value })} {...inputProps(ids.r, f.recordingUrl)} /></Field>
+        <Field label="Recording link" optional htmlFor={ids.r} error={f.recordingUrl} help={<>e.g. the <Term k="Phantom" /> call recording link</>}><input className="input" type="url" placeholder="https://" value={v.recordingUrl} onChange={(e) => setV({ ...v, recordingUrl: e.target.value })} {...inputProps(ids.r, f.recordingUrl)} /></Field>
         <Field label="Document link" optional htmlFor={ids.doc} error={f.documentUrl} help="To upload a file instead, save this and use “Attach file”."><input className="input" type="url" placeholder="https://" value={v.documentUrl} onChange={(e) => setV({ ...v, documentUrl: e.target.value })} {...inputProps(ids.doc, f.documentUrl)} /></Field>
         <Field label="Summary" optional htmlFor={ids.s}><textarea className="textarea" id={ids.s} value={v.summary} onChange={(e) => setV({ ...v, summary: e.target.value })} /></Field>
         <Field label="Writing instructions" optional htmlFor={ids.i}><textarea className="textarea" id={ids.i} value={v.instructions} onChange={(e) => setV({ ...v, instructions: e.target.value })} /></Field>

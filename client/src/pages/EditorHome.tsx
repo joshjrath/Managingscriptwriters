@@ -58,7 +58,7 @@ export function EditorHome() {
             <div className="rows">
               {upcoming.slice(0, 12).map((e) => {
                 const kind = e.type === 'shoot' ? { label: 'Shoot', icon: <Camera size={13} aria-hidden />, c: 'var(--salmon)' }
-                  : e.type === 'final' ? { label: 'Scripts final', icon: <Send size={13} aria-hidden />, c: 'var(--yellow)' }
+                  : e.type === 'final' ? { label: 'Final delivery', icon: <Send size={13} aria-hidden />, c: 'var(--yellow)' }
                   : { label: e.external!.feedName, icon: <CalendarDays size={13} aria-hidden />, c: e.external!.color };
                 const clickable = !e.external && !!clientOf(e.clientName);
                 return (

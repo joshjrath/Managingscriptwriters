@@ -12,8 +12,8 @@ export type AccentColors = Record<Accent, string>;
 export const ACCENT_LABEL: Record<Accent, { name: string; use: string }> = {
   brand: { name: 'Brand', use: 'Active page, featured cards, focus' },
   action: { name: 'Action', use: 'Primary buttons, due today' },
-  info: { name: 'In progress', use: 'Writing, information' },
-  review: { name: 'Review', use: 'Waiting for review' },
+  info: { name: 'Writing', use: 'Writing, information' },
+  review: { name: 'In review', use: 'Scripts in review' },
   done: { name: 'Done', use: 'Approved and delivered' },
   revisions: { name: 'Revisions', use: 'Sent back for changes' },
   alert: { name: 'Alert', use: 'Overdue, blockers, errors' },

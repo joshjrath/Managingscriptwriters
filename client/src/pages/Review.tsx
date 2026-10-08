@@ -26,12 +26,12 @@ export function ReviewPage() {
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
       {q.data && (
         <div className="stack" style={{ gap: 'var(--gap)' }}>
-          <Panel title="Waiting for review" count={q.data.waiting.length} sub={q.data.waiting.length ? plural(scripts(q.data.waiting), 'script') : undefined}>
-            {!q.data.waiting.length ? <Empty boxed icon={<CheckCheck />} title="Nothing waiting for review">When a writer sends their scripts (a PDF or a Google Doc link), it shows up here as one card.</Empty> : (
+          <Panel title="In review" count={q.data.waiting.length} sub={q.data.waiting.length ? plural(scripts(q.data.waiting), 'script') : undefined}>
+            {!q.data.waiting.length ? <Empty boxed icon={<CheckCheck />} title="Nothing in review">When a writer sends their scripts (a PDF or a Google Doc link), it shows up here as one card.</Empty> : (
               <div className="stack s4"><CardList groups={q.data.waiting}>{(g) => <WaitingCard group={g} />}</CardList></div>
             )}
           </Panel>
-          <Panel title="Sent back for revisions" count={q.data.sentBack.length} sub={q.data.sentBack.length ? `${plural(scripts(q.data.sentBack), 'script')} · waiting on the writer` : undefined}>
+          <Panel title="Sent back" count={q.data.sentBack.length} sub={q.data.sentBack.length ? `${plural(scripts(q.data.sentBack), 'script')} · waiting on the writer` : undefined}>
             {!q.data.sentBack.length ? <Empty boxed icon={<RotateCcw />} title="Nothing waiting on revisions" /> : (
               <div className="stack s4">
                 <CardList groups={q.data.sentBack}>{(g) => <SentBackCard group={g} onResend={g.writerId === me.id ? () => setResend(g) : undefined} />}</CardList>

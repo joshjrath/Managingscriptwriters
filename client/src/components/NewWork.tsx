@@ -9,7 +9,7 @@ import { AlertTriangle, CalendarDays, Camera, CheckCheck, ChevronDown, FileText,
 import { NotesImport } from './NotesImport';
 import { api, ApiError, queryClient, useSave } from '../api';
 import { useBoot } from './Shell';
-import { Button, Dialog, Field, FormError, inputProps, Seg, useFieldId, useToast } from './ui';
+import { Button, Dialog, Field, FormError, inputProps, Seg, Term, useFieldId, useToast } from './ui';
 import { addDays, computeDeadlines, draftFromFinal, dueState, suggestStart, type ISODate } from '../../../shared/dates';
 import { canWrite, evenSplit, isManager, ROLE_LABEL } from '../../../shared/workflow';
 import { fmtBytes, fmtDate, fmtLong, fmtRange, plural } from '../../../shared/format';
@@ -47,7 +47,7 @@ export function NewWorkDialog({ state, onClose }: { state: { tab: NewWorkTab; pr
   }, [state]);
   const again = () => { setCreated(null); setFormKey((k) => k + 1); };
   return (
-    <Dialog open={!!state} onClose={onClose} title={created ? 'Created' : 'New work'} sub={created ? undefined : 'Only the essentials are required. More options are tucked away below.'} size="wide">
+    <Dialog open={!!state} onClose={onClose} title={created ? 'Created' : 'Create'} sub={created ? undefined : 'Only the essentials are required. More options are tucked away below.'} size="wide">
       {created ? (
         <CreatedView created={created} onClose={onClose} onAgain={again} />
       ) : (
@@ -179,7 +179,7 @@ function DeadlinePreview({ start, draftOverride, finalOverride, draftFollowsFina
     <div className="stack s2">
       <div className="preview-dates" aria-live="polite">
         <div><span className="k">Drafts due</span><span className="v">{fmtLong(draft)}</span><span className="r">{draftOverride ? (draftFollowsFinal ? 'From final delivery' : 'Manual override') : d.draftRule}</span></div>
-        <div><span className="k">Final delivery to Timeliner</span><span className="v">{fmtLong(final)}</span><span className="r">{finalOverride ? 'Manual override' : d.finalRule}</span></div>
+        <div><span className="k">Final delivery to <Term k="Timeliner" /></span><span className="v">{fmtLong(final)}</span><span className="r">{finalOverride ? 'Manual override' : d.finalRule}</span></div>
       </div>
       {past.map((p) => <div key={p} className="banner red"><AlertTriangle aria-hidden /><div className="txt"><b>{p}</b><span>You can still save; the batch will show as overdue straight away.</span></div></div>)}
     </div>
@@ -343,7 +343,7 @@ function AttachmentsSection({ value, onChange, errors: shown }: { value: Attach;
   const errors = { recordingUrl: live.recordingUrl && shown.recordingUrl, documentUrl: live.documentUrl && shown.documentUrl };
   return (
     <div className="form-grid">
-      <Field label="Recording link" optional htmlFor={ids.r} error={errors.recordingUrl} help="e.g. the Phantom recording of the ideation call">
+      <Field label="Recording link" optional htmlFor={ids.r} error={errors.recordingUrl} help={<>e.g. the <Term k="Phantom" /> recording of the ideation call</>}>
         <input className="input" type="url" placeholder="https://" value={value.recordingUrl} onChange={(e) => onChange({ ...value, recordingUrl: e.target.value })} {...inputProps(ids.r, errors.recordingUrl)} />
       </Field>
       <Field label="Document link" optional htmlFor={ids.d} error={errors.documentUrl} help="Google Doc, Notion page, Drive folder…">
@@ -703,14 +703,14 @@ function ClientForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: 
       {prospect && <span className="help" style={{ marginTop: -8 }}>Not signed yet. They sit in Potential clients until you drag them into Clients. It’s only a label: shoots and batches work the same.</span>}
       <div className="form-grid">
         <Field label={prospect ? 'Name' : 'Client name'} htmlFor={ids.name} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.name, f.name)} /></Field>
-        <Field label="Internal owner" htmlFor={ids.owner}><select className="select" id={ids.owner} value={ownerId} onChange={(e) => setOwnerId(Number(e.target.value))}>{managers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
+        <Field label="Account lead" htmlFor={ids.owner}><select className="select" id={ids.owner} value={ownerId} onChange={(e) => setOwnerId(Number(e.target.value))}>{managers.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
       </div>
       <label className="check"><input type="checkbox" checked={withCall} onChange={(e) => setWithCall(e.target.checked)} />Attach an ideation / briefing call</label>
       {withCall && (
         <div className="form-grid">
           <Field label="Call title" htmlFor={ids.ct}><input className="input" id={ids.ct} value={call.title} onChange={(e) => setCall({ ...call, title: e.target.value })} /></Field>
           <Field label="Call date" optional htmlFor={ids.cdate}><input className="input" type="date" id={ids.cdate} value={call.callDate} onChange={(e) => setCall({ ...call, callDate: e.target.value })} /></Field>
-          <Field label="Recording link" optional htmlFor={ids.rec} error={f['briefing.recordingUrl']} help="e.g. the Phantom recording URL"><input className="input" type="url" placeholder="https://" value={call.recordingUrl} onChange={(e) => setCall({ ...call, recordingUrl: e.target.value })} {...inputProps(ids.rec, f['briefing.recordingUrl'])} /></Field>
+          <Field label="Recording link" optional htmlFor={ids.rec} error={f['briefing.recordingUrl']} help={<>e.g. the <Term k="Phantom" /> call recording link</>}><input className="input" type="url" placeholder="https://" value={call.recordingUrl} onChange={(e) => setCall({ ...call, recordingUrl: e.target.value })} {...inputProps(ids.rec, f['briefing.recordingUrl'])} /></Field>
           <Field label="Document link" optional htmlFor={ids.doc} error={f['briefing.documentUrl']}><input className="input" type="url" placeholder="https://" value={call.documentUrl} onChange={(e) => setCall({ ...call, documentUrl: e.target.value })} {...inputProps(ids.doc, f['briefing.documentUrl'])} /></Field>
           <Field label="Or upload the document" optional htmlFor={ids.file} className="full" help="PDF, Word, text or images, up to 25 MB. Stored privately; only signed-in team members can open it."><input className="input" type="file" id={ids.file} onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></Field>
           <Field label="Summary" optional htmlFor={ids.sum} className="full"><textarea className="textarea" id={ids.sum} value={call.summary} onChange={(e) => setCall({ ...call, summary: e.target.value })} /></Field>

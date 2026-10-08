@@ -102,7 +102,7 @@ export function Production() {
 
       {q.isLoading && <Loading height={420} />}
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
-      {q.data && !batches.length && <div className="panel"><Empty title={anyFilter ? 'No batches match these filters' : 'No batches yet'}>{anyFilter ? 'Try clearing a filter.' : 'Create a shoot or batch with “New work”.'}</Empty></div>}
+      {q.data && !batches.length && <div className="panel"><Empty title={anyFilter ? 'No batches match these filters' : 'No batches yet'}>{anyFilter ? 'Try clearing a filter.' : 'Create a shoot or batch with “+ Create”.'}</Empty></div>}
 
       {q.data && batches.length > 0 && view === 'board' && (
         <div className="board-scroll" tabIndex={0} aria-label="Production board — scroll sideways for more stages">
@@ -114,7 +114,7 @@ export function Production() {
                   <div className="col-head" style={{ ['--c' as string]: STAGE_C[stage] }}><i aria-hidden /><h3>{STAGE_LABEL[stage]}</h3><span className="n">{col.length}</span></div>
                   {!col.length && <div className="empty-col">Nothing here</div>}
                   {col.map((b) => (
-                    <button key={b.id} className={`bcard ${edgeFor(b.next, b.blocked)}`} onClick={() => setInspect(b.id)} aria-label={`${b.clientName}: ${b.title}. ${b.progress.draftReady} of ${b.progress.total} drafts ready.`}>
+                    <button key={b.id} className={`bcard ${edgeFor(b.next, b.blocked)}`} onClick={() => setInspect(b.id)} aria-label={`${b.clientName}: ${b.title}. ${b.progress.draftReady} of ${b.progress.total} drafts sent.`}>
                       <span className="client ellipsis">{b.clientName}</span>
                       <span className="t">{b.title}</span>
                       <span className="muted ellipsis" style={{ fontSize: 12 }}>{writersText(b)}</span>
@@ -124,7 +124,7 @@ export function Production() {
                         <span className="row-flex s2">
                           <TodayBump n={b.writtenToday} />
                           {b.blocked && <Chip color="red" icon={<Ban aria-hidden />}>Blocked</Chip>}
-                          {b.progress.inReview > 0 && <Chip color="lavender" dot title={`${b.progress.inReview} scripts waiting for review`}>{b.progress.inReview} in review</Chip>}
+                          {b.progress.inReview > 0 && <Chip color="lavender" dot title={`${b.progress.inReview} scripts in review`}>{b.progress.inReview} in review</Chip>}
                           {b.progress.unassigned > 0 && <Chip color="pink" icon={<UserPlus aria-hidden />} title={`${b.progress.unassigned} unassigned scripts`}>{b.progress.unassigned}</Chip>}
                           {b.progress.revisions > 0 && <Chip color="pink" icon={<RotateCcw aria-hidden />}>{b.progress.revisions}</Chip>}
                         </span>

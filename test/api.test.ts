@@ -1792,3 +1792,89 @@ describe('round 1 safety checks', () => {
     await manager.del(`/api/calendar-feeds/${feed.body.feed.id}`);
   });
 });
+
+describe('round 2: writers never miss work', () => {
+  it('remembers when a writer has seen new work, and shows scripts added after that as new', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Seen work', targetCount: 2, draftDue: '2026-10-20', finalDue: '2026-10-22', split: [{ writerId: ids.sarah, count: 2 }] });
+    const id = b.body.batchId;
+    const before = (await sarah.get('/api/bootstrap')).body.counts.myNewWork;
+    let mine = (await sarah.get('/api/my-work')).body.batches.find((e: any) => e.batch.id === id);
+    expect(mine.seenAt).toBeNull();
+    expect(mine.myNext).toMatchObject({ kind: 'draft', date: '2026-10-20', remaining: 2 });
+    const seen = await sarah.post(`/api/batches/${id}/seen`, {});
+    expect(seen.body).toMatchObject({ ok: true, seen: true });
+    expect((await sarah.get('/api/bootstrap')).body.counts.myNewWork).toBe(before - 1);
+    mine = (await sarah.get('/api/my-work')).body.batches.find((e: any) => e.batch.id === id);
+    expect(mine.seenAt).toBeTruthy();
+    // someone not on the batch can't mark it
+    expect((await marcus.post(`/api/batches/${id}/seen`, {})).body.seen).toBe(false);
+  });
+
+  it('measures deadlines on the writer’s own scripts and puts sent-back work first', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Own deadlines', targetCount: 2, draftDue: '2026-10-25', finalDue: '2026-10-28', split: [{ writerId: ids.sarah, count: 1 }, { writerId: ids.marcus, count: 1 }] });
+    const id = b.body.batchId;
+    const sc = (await manager.get(`/api/batches/${id}`)).body.scripts;
+    const hers = sc.find((s: any) => s.assigneeId === ids.sarah).id;
+    const sent = await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: [hers], url: 'https://docs.google.com/document/d/own-v1' });
+    let e = (await sarah.get('/api/my-work')).body.batches.find((x: any) => x.batch.id === id);
+    // her drafts are done even though Marcus hasn't sent his
+    expect(e.myDraft.complete).toBe(true);
+    expect(e.batch.draft.complete).toBe(false);
+    expect(e.myNext.kind).toBe('final');
+    await manager.post(`/api/batches/${id}/review`, { action: 'revisions', scriptIds: [hers], submissionId: sent.body.submissionId, note: 'Punchier hook' });
+    const list = (await sarah.get('/api/my-work')).body.batches;
+    expect(list[0].myProgress.revisions).toBeGreaterThan(0);
+    // the revised version says which feedback it answers
+    const v2 = await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: [hers], url: 'https://docs.google.com/document/d/own-v2' });
+    expect(v2.status).toBe(200);
+    const detail = (await manager.get(`/api/batches/${id}`)).body;
+    const doc = detail.submissions.find((s: any) => s.id === v2.body.submissionId);
+    expect(doc.afterFeedback).toMatchObject({ note: 'Punchier hook' });
+    expect(detail.submissions.find((s: any) => s.id === sent.body.submissionId).afterFeedback).toBeNull();
+    // a sent-back script still counts as written
+    expect(detail.writers.find((w: any) => w.userId === ids.sarah).written).toBe(1);
+  });
+
+  it('lets a writer undo their own delivery the same day, and tells managers', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Undo my delivery', targetCount: 1, split: [{ writerId: ids.sarah, count: 1 }] });
+    const id = b.body.batchId;
+    const s = (await manager.get(`/api/batches/${id}`)).body.scripts[0].id;
+    await sarah.post(`/api/batches/${id}/scripts/action`, { action: 'submit', scriptIds: [s] });
+    await manager.post(`/api/batches/${id}/scripts/action`, { action: 'approve', scriptIds: [s] });
+    await sarah.post(`/api/batches/${id}/scripts/action`, { action: 'deliver', scriptIds: [s] });
+    // someone else's delivery isn't theirs to undo
+    expect((await marcus.post(`/api/batches/${id}/scripts/action`, { action: 'undo_delivery', scriptIds: [s] })).status).toBe(403);
+    const undo = await sarah.post(`/api/batches/${id}/scripts/action`, { action: 'undo_delivery', scriptIds: [s], note: 'Not in Timeliner yet' });
+    expect(undo.status).toBe(200);
+    expect((await manager.get(`/api/batches/${id}`)).body.scripts[0].status).toBe('approved');
+    const n = (await manager.get('/api/notifications')).body.notifications.find((x: any) => x.title.startsWith('Delivery undone'));
+    expect(n.body).toMatch(/took back their delivery/);
+    // an older delivery needs a manager
+    await sarah.post(`/api/batches/${id}/scripts/action`, { action: 'deliver', scriptIds: [s] });
+    await db.query(`update scripts set delivered_at = delivered_at - interval '3 days' where id = $1`, [s]);
+    const late = await sarah.post(`/api/batches/${id}/scripts/action`, { action: 'undo_delivery', scriptIds: [s] });
+    expect(late.status).toBe(403);
+    expect(late.body.error.message).toMatch(/Only a manager can undo/);
+  });
+
+  it('counts dated to-dos in the Today pill, overdue ones included', async () => {
+    const before = (await sarah.get('/api/today')).body;
+    const t = await manager.post('/api/todos', { userId: ids.sarah, text: 'Send the hook ideas', due: '2026-01-05' });
+    expect(t.status).toBe(200);
+    const after = (await sarah.get('/api/today')).body;
+    expect(after.total).toBe(before.total + 1);
+    expect(after.items.find((i: any) => i.kind === 'todo' && i.text === 'Send the hook ideas')).toMatchObject({ overdue: true, done: 0 });
+  });
+
+  it('keeps notes about potential clients and the client history for managers', async () => {
+    const p = await manager.post('/api/clients', { name: 'Quiet Prospect Co', prospect: true, description: 'Budget is tight, push the bundle' });
+    const pid = p.body.clientId ?? p.body.client?.id ?? p.body.id;
+    const asWriter = (await sarah.get('/api/clients?status=all')).body.clients.find((c: any) => c.name === 'Quiet Prospect Co');
+    expect(asWriter.description).toBeNull();
+    expect((await manager.get('/api/clients?status=all')).body.clients.find((c: any) => c.name === 'Quiet Prospect Co').description).toMatch(/bundle/);
+    const one = (await sarah.get(`/api/clients/${pid}`)).body;
+    expect(one.description).toBeNull();
+    expect((await sarah.get(`/api/clients/${acmeId}`)).body.activity).toEqual([]);
+    expect((await manager.get(`/api/clients/${acmeId}`)).body.activity.length).toBeGreaterThan(0);
+  });
+});

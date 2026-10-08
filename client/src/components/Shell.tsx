@@ -88,7 +88,7 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
             <button className="icon-btn" onClick={() => setDrawer(true)} aria-label="Open navigation"><Menu /></button>
             <span className="wordmark"><span className="full">Scale</span>&nbsp;<span>Media</span></span>
             <div className="end">
-              {isManager(boot.me.role) && <button className="icon-btn" onClick={() => setNewWork({ tab: 'shoot' })} aria-label="New work"><Plus /></button>}
+              {isManager(boot.me.role) && <button className="icon-btn" onClick={() => setNewWork({ tab: 'shoot' })} aria-label="Create a shoot, batch or client"><Plus /></button>}
               <NotificationsButton />
             </div>
           </div>
@@ -132,15 +132,23 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
     { to: '/writers', label: 'Messages', icon: <MessageCircle />, count: unreadMsgs, hot: !!unreadMsgs },
   ];
-  const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; fresh?: boolean; show?: boolean }[] = me.role === 'editor' ? editorItems : [
-    ...(manager
-      ? [{ to: '/overview', label: 'Overview', icon: <LayoutDashboard />, count: counts.attention || undefined, hot: counts.attention > 0 }, { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 }]
-      : [{ to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 }, { to: '/overview', label: 'Overview', icon: <LayoutDashboard /> }]),
+  // writers get the pages they use: their work first, then where to find things
+  const writerItems = [
+    { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 },
+    { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
+    { to: '/writers', label: 'Messages', icon: <MessageCircle />, count: unreadMsgs, hot: !!unreadMsgs },
+    { to: '/scripts', label: 'Script bank', icon: <Library /> },
+    { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
+    { to: '/clients', label: 'Clients', icon: <Building2 /> },
+  ];
+  const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; fresh?: boolean; show?: boolean }[] = me.role === 'editor' ? editorItems : !manager ? writerItems : [
+    { to: '/overview', label: 'Overview', icon: <LayoutDashboard />, count: counts.attention || undefined, hot: counts.attention > 0 },
+    { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 },
     { to: '/production', label: 'Production', icon: <Columns3 /> },
     { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
-    { to: '/review', label: 'Review queue', icon: <ClipboardCheck />, count: manager ? counts.reviewQueue || undefined : undefined },
-    { to: '/writers', label: manager ? 'Writers' : 'Messages', icon: manager ? <Users /> : <MessageCircle />, count: (inbox.data?.unread ?? counts.unreadMessages) || undefined, hot: (inbox.data?.unread ?? counts.unreadMessages) > 0 },
+    { to: '/review', label: 'Review queue', icon: <ClipboardCheck />, count: counts.reviewQueue || undefined },
+    { to: '/writers', label: 'Writers', icon: <Users />, count: unreadMsgs, hot: !!unreadMsgs },
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
   ];
@@ -163,8 +171,8 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
         <nav className="nav">
           {items.map((it) => (
             <NavItem key={it.to} to={it.to} icon={it.icon} label={it.label} collapsed={collapsed}>
-              {it.fresh && <span className="new-pill" aria-label="New work">New</span>}
-              {it.count != null && !it.fresh && <span className={`count${it.hot ? ' hot' : ''}`} aria-label={`${it.count} ${it.to === '/review' ? 'awaiting review' : it.to === '/overview' ? 'need attention' : it.to === '/writers' ? 'unread messages' : 'open scripts'}`}>{it.count}</span>}
+              {it.fresh && <span className="new-pill" aria-label="Has new work">New</span>}
+              {it.count != null && !it.fresh && <span className={`count${it.hot ? ' hot' : ''}`} aria-label={`${it.count} ${it.to === '/review' ? 'in review' : it.to === '/overview' ? 'need attention' : it.to === '/writers' ? 'unread messages' : 'open scripts'}`}>{it.count}</span>}
               {(it.hot || it.fresh) && <span className="dot-badge" aria-hidden />}
             </NavItem>
           ))}
@@ -401,7 +409,7 @@ export function PageHeader({ title, sub, crumbs, children, hideNewWork }: { titl
       <div className="head-tools">
         {children}
         <OrgDate tz={displayTz} hq={settings.timezone} />
-        {isManager(me.role) && !hideNewWork && <Button variant="primary pill lg" icon={<Plus aria-hidden />} onClick={() => openNew('shoot')}>New work</Button>}
+        {isManager(me.role) && !hideNewWork && <Button variant="primary pill lg" icon={<Plus aria-hidden />} onClick={() => openNew('shoot')}>Create</Button>}
         <NotificationsButton />
       </div>
     </header>

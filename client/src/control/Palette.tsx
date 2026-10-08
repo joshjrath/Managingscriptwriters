@@ -30,7 +30,7 @@ const MODE_WORDS: [string, string, Command, string][] = [
   ['ARCHIVE', 'archive history delivered past completed', { kind: 'mode', mode: 'archive' }, 'WHAT WE HAVE WRITTEN'],
   ['SYSTEM', 'system diagnostics status health', { kind: 'mode', mode: 'system' }, 'DIAGNOSTICS'],
   ['WRITERS ONLINE', 'writers online on shift active who is working', { kind: 'filter', filter: 'online' }, 'SHOW WHO IS ON SHIFT'],
-  ['REVIEWS', 'reviews review queue pending approvals', { kind: 'filter', filter: 'reviews' }, 'WHAT IS WAITING FOR REVIEW'],
+  ['REVIEWS', 'reviews review queue pending approvals', { kind: 'filter', filter: 'reviews' }, 'WHAT IS IN REVIEW'],
   ['PRESSURE', 'pressure anomalies problems risks alerts overloaded', { kind: 'filter', filter: 'pressure' }, 'WHERE THE SYSTEM IS STRAINED'],
   ['PEOPLE', 'people team editors editor add place city cities location locations time zone timezone hours working map roster', { kind: 'action', action: 'people' }, 'PLACE THE TEAM · ADD EDITORS'],
   ['RETURN TO NOW', 'now live reset time', { kind: 'action', action: 'now' }, 'LIVE CLOCK'],

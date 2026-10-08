@@ -127,7 +127,12 @@ export async function loadSubmissionData(db: Db, batchIds: number[]): Promise<Su
             : counts.approved + counts.delivered === n ? 'approved'
               : 'withdrawn';
     const num = (ids: number[]) => ids.map((id) => numbers.get(id)!.number).sort((a, b) => a - b);
+    // the send-back this document answers: the latest one on any of its scripts before it was sent
+    const mineNums = new Set(num(scriptIds));
+    const sentAt = new Date(s.created_at).getTime();
+    const fb = [...reviews].reverse().find((r) => r.action === 'revisions' && new Date(r.createdAt).getTime() <= sentAt && r.scriptNumbers.some((x) => mineNums.has(x)));
     return {
+      afterFeedback: fb ? { note: fb.note, byName: fb.reviewedByName, at: fb.createdAt } : null,
       id: s.id, batchId: s.batch_id, writerId: s.writer_id, writerName: s.writer_name, submittedByName: s.submitted_by_name, version: s.version,
       previousId: s.previous_id, url: s.url, fileId: s.file_id, fileName: s.file_name, fileSize: s.file_size, note: s.note, createdAt: s.created_at,
       scriptNumbers: num(scriptIds), currentNumbers: num(currentIds), counts, state,

@@ -32,7 +32,7 @@ export function Login({ status, onDone }: { status: AuthStatus; onDone: () => vo
       <div className="login-card">
         <div className="wordmark"><span className="full" style={{ color: '#fff' }}>Scale</span>&nbsp;<span>Media</span></div>
         <h1>{setup ? 'Set up your workspace' : 'Sign in'}</h1>
-        <p className="sub">{setup ? 'Create the first manager account. You can add writers afterwards.' : 'Script production for the Scale Media team.'}</p>
+        <p className="sub">{setup ? 'Create the first admin account. You can add managers and writers afterwards.' : 'Script production for the Scale Media team.'}</p>
         {setup && !status.setupAllowed ? (
           <div className="form-error" role="alert"><span>{status.setupHint ?? 'Set MANAGER_EMAIL and MANAGER_PASSWORD in the server’s environment, then redeploy.'}</span></div>
         ) : (
@@ -41,7 +41,7 @@ export function Login({ status, onDone }: { status: AuthStatus; onDone: () => vo
             {setup && <Field label="Your name" htmlFor={ids.n} error={f.name}><input className="input" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} /></Field>}
             <Field label="Email" htmlFor={ids.e} error={f.email}><input className="input" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} {...inputProps(ids.e, f.email)} autoFocus /></Field>
             <Field label="Password" htmlFor={ids.p} error={f.password} help={setup ? 'At least 10 characters.' : undefined}><input className="input" type="password" autoComplete={setup ? 'new-password' : 'current-password'} value={password} onChange={(e) => setPassword(e.target.value)} {...inputProps(ids.p, f.password)} /></Field>
-            <Button type="submit" variant="primary pill lg block" busy={busy}>{setup ? 'Create manager account' : 'Sign in'}</Button>
+            <Button type="submit" variant="primary pill lg block" busy={busy}>{setup ? 'Create admin account' : 'Sign in'}</Button>
           </form>
         )}
         {status.demo && (

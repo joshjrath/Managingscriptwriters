@@ -131,7 +131,8 @@ export interface TodayTasks {
   scope: 'me' | 'person' | 'team';
   total: number;
   done: number;
-  items: { batchId: number; batchTitle: string; clientName: string; kind: 'draft' | 'final'; total: number; done: number; overdue: boolean }[];
+  /** script deadlines per batch, plus to-dos due today or overdue (kind 'todo', one each) */
+  items: { batchId: number | null; batchTitle: string; clientName: string; kind: 'draft' | 'final' | 'todo'; text?: string; total: number; done: number; overdue: boolean }[];
 }
 
 /** An admin's View as / Recording mode state (null for everyone else). */
@@ -198,6 +199,7 @@ export interface BatchSummary {
   blocked: boolean;
   blockerNote: string | null;
   blockedAt: string | null;
+  blockedBy: number | null;
   blockedByName: string | null;
   nextAction: string | null;
   needsDateReview: boolean;
@@ -547,6 +549,8 @@ export interface Submission extends Attachment {
   counts: { inReview: number; approved: number; delivered: number; revisions: number; notSubmitted: number };
   state: SubmissionState;
   reviews: ReviewRecord[];
+  /** when this is a revised version: the send-back it answers */
+  afterFeedback: { note: string | null; byName: string; at: string } | null;
 }
 
 /** Scripts reviewed together: everything one writer sent as one document, or sent back in one go. */
@@ -569,7 +573,14 @@ export interface ReviewQueue {
 }
 
 export interface MyWork {
-  batches: { batch: BatchSummary; mine: Script[]; myProgress: Progress; briefings: Briefing[]; resources: Resource[]; groups: ReviewGroup[]; submissions: Submission[] }[];
+  batches: {
+    batch: BatchSummary; mine: Script[]; myProgress: Progress;
+    /** deadlines measured on this writer's own scripts */
+    myDraft: Milestone; myFinal: Milestone; myNext: Milestone | null;
+    /** when the writer last looked at this batch (Got it, opened it, sent or updated the counter) */
+    seenAt: string | null;
+    briefings: Briefing[]; resources: Resource[]; groups: ReviewGroup[]; submissions: Submission[];
+  }[];
   sentBack: ReviewGroup[];
   recentDeliveries: (Delivery & { batchTitle: string; clientName: string })[];
 }

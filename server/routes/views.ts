@@ -4,13 +4,13 @@
 import type { FastifyInstance } from 'fastify';
 import { isManager } from '../../shared/workflow';
 import { z } from 'zod';
-import { clockFor, lastDeliveredAt, loadBatches, loadSettings, loadUsers, type Ctx, type ScriptLiteRow } from '../core';
+import { clockFor, lastDeliveredAt, loadBatches, loadSeen, loadSettings, loadUsers, type Ctx, type ScriptLiteRow } from '../core';
 import { requireUser } from '../auth';
 import { buildGroups, loadReviewQueue, publicSubmission } from '../submissions';
 import { parse, zs } from '../http';
 import { loadBriefings, loadDeliveries, loadResources, loadScripts, loadShoots } from '../records';
 import { addDays, diffDays, nowInZone, startOfWeek, workingDaysBetween, type Clock, type ISODate } from '../../shared/dates';
-import { isDraftReady, isNewWork, summarize, type ScriptStatus } from '../../shared/workflow';
+import { isDraftReady, isNewWork, milestone, nextMilestone, summarize, type Milestone, type ScriptStatus } from '../../shared/workflow';
 import { plural } from '../../shared/format';
 import { sessionMode } from '../recording';
 import type {
@@ -82,13 +82,13 @@ export function attentionFor(batches: BatchSummary[], inactive: Map<number, stri
       if (w.userId != null && inactive.has(w.userId) && left > 0) issues.push({ kind: 'unassigned', text: `${plural(left, 'script')} still with ${w.name}, who’s deactivated · reassign them` });
     }
     if (b.final.overdue) issues.push({ kind: 'overdue', text: `Final delivery ${b.final.label.toLowerCase()} · ${plural(b.final.remaining, 'script')} not delivered` });
-    else if (b.draft.overdue) issues.push({ kind: 'overdue', text: `Drafts ${b.draft.label.toLowerCase()} · ${plural(b.draft.remaining, 'script')} not draft-ready` });
+    else if (b.draft.overdue) issues.push({ kind: 'overdue', text: `Drafts ${b.draft.label.toLowerCase()} · ${plural(b.draft.remaining, 'script')} with drafts not sent` });
     if (b.blocked) issues.push({ kind: 'blocked', text: `Blocked: ${b.blockerNote ?? 'no details'}` });
     if (b.final.dueToday) issues.push({ kind: 'due_today', text: `Final delivery due today · ${b.final.remaining} left` });
     else if (b.draft.dueToday) issues.push({ kind: 'due_today', text: `Drafts due today · ${b.draft.remaining} left` });
     if (b.needsDateReview) issues.push({ kind: 'date_review', text: b.dateReviewNote ?? 'Deadlines need review' });
     if (b.progress.unassigned) issues.push({ kind: 'unassigned', text: `${plural(b.progress.unassigned, 'script')} unassigned` });
-    if (b.progress.revisions) issues.push({ kind: 'revisions', text: `${plural(b.progress.revisions, 'script')} returned for revisions` });
+    if (b.progress.revisions) issues.push({ kind: 'revisions', text: `${plural(b.progress.revisions, 'script')} sent back` });
     if (!issues.length) continue;
     issues.sort((a, c) => RANK[a.kind] - RANK[c.kind]);
     out.push({ kind: issues[0].kind, batch: b, issues });
@@ -139,13 +139,14 @@ export async function computeCounts(ctx: Ctx, me: Me, batches?: BatchSummary[], 
   let myOpen = 0;
   let myNew = 0;
   const now = ctx.now();
+  const seen = await loadSeen(ctx.db, me.id);
   for (const b of data.summaries) {
     const mine = (data.scripts.get(b.id) ?? []).filter((s) => s.assignee_id === me.id);
     for (const s of mine) {
       if (s.status !== 'delivered' && s.status !== 'ready_for_review') myOpen++;
     }
     const written = b.writers.find((w) => w.userId === me.id)?.written ?? 0;
-    if (isNewWork(mine.map((s) => ({ status: s.status, assignedAt: s.assigned_at ?? null })), written, now)) myNew++;
+    if (isNewWork(mine.map((s) => ({ status: s.status, assignedAt: s.assigned_at ?? null })), written, now, seen.get(b.id) ?? null)) myNew++;
   }
   const unread = await ctx.db.one<{ n: number }>(`select count(*) as n from notifications where user_id = $1 and read_at is null`, [me.id]);
   const msgs = await ctx.db.one<{ n: number }>(`select count(*) as n from messages m join users u on u.id = m.sender_id where m.recipient_id = $1 and m.read_at is null and u.active`, [me.id]);
@@ -324,14 +325,24 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     const allScripts = await loadScripts(db, { assigneeId: uid });
     const briefings = await Promise.all(mineBatches.map((b) => loadBriefings(db, { batchId: b.id })));
     const resources = await Promise.all(mineBatches.map((b) => loadResources(db, { batchId: b.id, includeArchivedClients: true })));
-    const rank = (b: BatchSummary) => (b.next?.overdue ? 0 : b.next?.dueToday ? 1 : 2);
+    const seen = await loadSeen(db, uid);
+    // the writer's own deadlines: drafts are done when *their* scripts are sent, not the whole batch's
+    const rank = (m: Milestone | null) => (m?.overdue ? 0 : m?.dueToday ? 1 : 2);
     const list = mineBatches.map((b, i) => {
       const mine = allScripts.filter((s) => s.batchId === b.id);
-      return { batch: b, mine, myProgress: summarize(mine.map((s) => ({ status: s.status, assigneeId: s.assigneeId }))), briefings: briefings[i], resources: resources[i] };
+      const myProgress = summarize(mine.map((s) => ({ status: s.status, assigneeId: s.assigneeId })));
+      const myDraft = milestone('draft', b.draftDue, myProgress, clock);
+      const myFinal = milestone('final', b.finalDue, myProgress, clock);
+      return {
+        batch: b, mine, myProgress, myDraft, myFinal, myNext: nextMilestone(myDraft, myFinal), seenAt: seen.get(b.id) ?? null,
+        briefings: briefings[i], resources: resources[i],
+      };
     }).sort((a, b) => {
       const doneA = a.myProgress.delivered === a.myProgress.total ? 1 : 0;
       const doneB = b.myProgress.delivered === b.myProgress.total ? 1 : 0;
-      return doneA - doneB || rank(a.batch) - rank(b.batch) || (a.batch.next?.date ?? '9999').localeCompare(b.batch.next?.date ?? '9999');
+      const backA = a.myProgress.revisions > 0 ? 0 : 1;
+      const backB = b.myProgress.revisions > 0 ? 0 : 1;
+      return doneA - doneB || backA - backB || rank(a.myNext) - rank(b.myNext) || (a.myNext?.date ?? '9999').localeCompare(b.myNext?.date ?? '9999');
     });
     const { groups, data } = await buildGroups(db, mineBatches, { assigneeId: uid });
     const withDocs = list.map((e) => {
