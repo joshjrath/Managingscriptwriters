@@ -73,6 +73,18 @@ export function storedFileName(name: string): string {
 /** Whether a file of this name is refused (judged on the name it would be stored under). */
 export const isBlockedFile = (name: string) => BLOCKED_EXT.test(storedFileName(name));
 
+/**
+ * The stored files (`f`) an editor may open: resources, past scripts, approved edited versions, and documents
+ * whose every script is approved or delivered. `/api/files/:id` serves editors only these, and the Editors tab
+ * links only to these.
+ */
+export const EDITOR_FILES = `(exists (select 1 from resources r where r.file_id = f.id and r.removed_at is null)
+      or exists (select 1 from past_documents p where p.file_id = f.id and p.removed_at is null)
+      or exists (select 1 from reviews v where v.file_id = f.id and v.action = 'approved')
+      or exists (select 1 from submissions s where s.file_id = f.id and not exists (
+           select 1 from submission_scripts ss join scripts sc on sc.id = ss.script_id
+            where ss.submission_id = s.id and sc.removed_at is null and sc.status not in ('approved', 'delivered'))))`;
+
 /** Saves an upload into the files table, piece by piece. Run it inside the caller's transaction. */
 export async function storeFile(t: Db, me: Me, file: UploadedFile): Promise<number> {
   const safeName = storedFileName(file.filename);

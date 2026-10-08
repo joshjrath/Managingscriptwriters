@@ -639,4 +639,12 @@ create table editing_done (
 alter table settings add column timeliner_synced_at timestamptz;
 alter table settings add column timeliner_sync_error text;
 `,
+  // 30 · videos removed from the copy of Timeliner (trashed, or gone from a read), and when: a read that began
+  // before then doesn't write them back. Kept for a day.
+  `
+create table timeliner_removed (
+  id text primary key,
+  removed_at timestamptz not null
+);
+`,
 ];

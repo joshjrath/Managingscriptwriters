@@ -1,6 +1,6 @@
 // Clients, briefing/ideation-call records, resources and secure file access.
 
-import { fileStream, isBlockedFile, spool, storedFileName, storeFile, type UploadedFile } from '../files';
+import { EDITOR_FILES, fileStream, isBlockedFile, spool, storedFileName, storeFile, type UploadedFile } from '../files';
 import type { FastifyInstance } from 'fastify';
 import { isEditor, isManager, type Role } from '../../shared/workflow';
 import { z } from 'zod';
@@ -375,16 +375,10 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/api/files/:id', async (req, reply) => {
     const me = requireUser(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
-    // editors: resources, past scripts, approved edits, and documents whose scripts are all approved or delivered
-    const finished = `(exists (select 1 from resources r where r.file_id = f.id and r.removed_at is null)
-      or exists (select 1 from past_documents p where p.file_id = f.id and p.removed_at is null)
-      or exists (select 1 from reviews v where v.file_id = f.id and v.action = 'approved')
-      or exists (select 1 from submissions s where s.file_id = f.id and not exists (
-           select 1 from submission_scripts ss join scripts sc on sc.id = ss.script_id
-            where ss.submission_id = s.id and sc.removed_at is null and sc.status not in ('approved', 'delivered'))))`;
+    // editors: only EDITOR_FILES (finished work); everyone else: any file something live still refers to
     const anyLive = `(exists (select 1 from resources r where r.file_id = f.id and r.removed_at is null) or exists (select 1 from submissions s where s.file_id = f.id) or exists (select 1 from reviews v where v.file_id = f.id) or exists (select 1 from past_documents p where p.file_id = f.id and p.removed_at is null))`;
     const f = await db.one<{ filename: string; mime: string; size: number; stored: number }>(
-      `select f.filename, f.mime, f.size, octet_length(f.data) as stored from files f where f.id = $1 and ${isEditor(me.role) ? finished : anyLive}`, [id],
+      `select f.filename, f.mime, f.size, octet_length(f.data) as stored from files f where f.id = $1 and ${isEditor(me.role) ? EDITOR_FILES : anyLive}`, [id],
     );
     if (!f) throw notFound('File');
     const inline = SAFE_INLINE.has(f.mime) && (req.query as Record<string, string>).download !== '1';

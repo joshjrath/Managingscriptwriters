@@ -97,7 +97,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
   | `requireAdmin` | Admin only |
 
   Role checks use `isManager`, `isAdmin`, `isEditor` and `canWrite` from `shared/workflow.ts`. Never compare role strings in routes.
-- **Editors** get only the routes listed in `server/editor-access.ts`; every other route is refused before it runs, so a new route is closed to editors until it's added there on purpose. Their reads are also scoped to finished (approved or delivered) work.
+- **Editors** get only the routes listed in `server/editor-access.ts`; every other route is refused before it runs, so a new route is closed to editors until it's added there on purpose. Their reads are also scoped to finished (approved or delivered) work; which stored files they may open is `EDITOR_FILES` in `server/files.ts`.
 - **Script actions:** every status change goes through `applyScriptAction`. It locks the rows and checks each one with `checkAction` and `ACTION_RULES`. Writers can act only on their own scripts.
 - **Ownership checks** live in the route: the assignee on a script edit, `isAssignedTo` for blockers and resources. A personal view (My work, Today, to-dos) always gives a writer their own data, from the session. A manager may name someone with `?userId=`, and may ask for the whole team on Today (no `userId`) and to-dos (`?all=1`). Notifications always use the session user.
 - **Admin protection:** only an Admin can grant the Admin role or change anything on an Admin's account. The last Admin can't be removed or demoted. Temporary passwords are shown only to managers, and never an Admin's to a non-admin.

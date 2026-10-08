@@ -26,6 +26,9 @@ const fake: TimelinerApi = {
   project: async (id) => ({ p_acme: { id, name: 'Acme Outdoor · Nov shoot' }, p_lumen: { id, name: 'Lumen Skincare launch' }, p_odd: { id, name: 'Misc uploads' } } as Record<string, { id: string; name: string }>)[id] ?? null,
   brand: async (id) => ({ b_acme: { id, name: 'Acme Outdoor' }, b_lumen: { id, name: 'Lumen' }, b_odd: { id, name: 'Somebody Else' } } as Record<string, { id: string; name: string }>)[id] ?? null,
   task: async () => null,
+  tasks: async () => ({ data: [], nextBefore: null }),
+  brands: async () => ({ data: [], nextBefore: null }),
+  lastMove: async () => null,
   members: async () => [{ id: 'm_wes', email: 'wes@scale.test', firstName: 'Wes', lastName: 'Writer' }, { id: 'm_ed', email: 'editor@agency.test', firstName: 'Ed', lastName: null }],
   webhooks: async () => [],
   createWebhook: async (url, events) => { calls.push(`create ${url} ${events.join(',')}`); return { id: 'wh_1', secret: SECRET }; },
@@ -89,8 +92,25 @@ describe('talking to Timeliner', () => {
     const refusing = (async () => new Response(JSON.stringify({ error: 'Insufficient scope', code: 'insufficient_scope', requiredScope: 'write:webhooks', grantedScopes: ['read:projects'] }), { status: 403 })) as typeof fetch;
     const api = timelinerClient('tlsk_test', 'https://timeliner.test', refusing);
     await expect(api.createWebhook('https://scripts.example.com/hooks/timeliner', ['version.uploaded'])).rejects.toThrow(
-      'The Timeliner key isn’t allowed to write webhooks. In Timeliner → Settings → Developers, make a key with Webhooks (read & write), Projects (read) and Workspace (read), put it in TIMELINER_API_KEY, and connect again.',
+      'The Timeliner key isn’t allowed to write webhooks. In Timeliner → Settings → Developers, make a key with Tasks (read), Projects (read), Workspace (read) and Webhooks (read & write), put it in TIMELINER_API_KEY, and connect again.',
     );
+  });
+
+  it('reads the videos a page at a time and a video’s last step move, waiting when Timeliner asks', async () => {
+    const asked: string[] = [];
+    let limited = true;
+    const answer = (async (url: string | URL | Request) => {
+      const path = String(url).replace('https://timeliner.test/api/v1', '');
+      asked.push(path);
+      if (path.startsWith('/tasks?') && limited) { limited = false; return new Response(JSON.stringify({ error: 'Rate limit exceeded' }), { status: 429, headers: { 'retry-after': '0' } }); }
+      if (path.includes('/activity')) return new Response(JSON.stringify({ data: [{ id: 'a1', createdAt: '2026-10-07T17:15:00Z', action: 'moved', movedTo: 'Needs review', actor: { id: 'm_leo' } }], hasMore: true }));
+      return new Response(JSON.stringify({ data: [{ id: 't1', title: 'Organic 01' }], nextBefore: null }));
+    }) as typeof fetch;
+    const api = timelinerClient('tlsk_test', 'https://timeliner.test', answer);
+    expect(await api.tasks('2026-10-01T00:00:00.000Z')).toEqual({ data: [{ id: 't1', title: 'Organic 01' }], nextBefore: null });
+    expect(await api.lastMove('t1')).toEqual({ at: '2026-10-07T17:15:00Z', to: 'Needs review', byId: 'm_leo' });
+    const page = '/tasks?limit=100&before=2026-10-01T00%3A00%3A00.000Z';
+    expect(asked).toEqual([page, page, '/tasks/t1/activity?action=moved&limit=1']);
   });
 });
 
@@ -129,7 +149,7 @@ describe('Timeliner uploads deliver batches', () => {
   it('connects by registering the webhook with Timeliner', async () => {
     const r = await send('POST', '/api/timeliner/connect', admin, {});
     expect(r.status).toBe(200);
-    expect(calls).toEqual(['create https://scripts.example.com/hooks/timeliner version.uploaded,file.uploaded']);
+    expect(calls).toEqual(['create https://scripts.example.com/hooks/timeliner version.uploaded,file.uploaded,task.created,task.updated,task.status_changed,task.trashed,project.trashed']);
     const s = r.body as TimelinerStatus;
     expect(s).toMatchObject({ keySet: true, webhookUrl: 'https://scripts.example.com/hooks/timeliner', connected: { byName: 'Ada Admin' } });
     // writers can't see or change it

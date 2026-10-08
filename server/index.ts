@@ -1,6 +1,6 @@
 // Entry point. Reads configuration (server/config.ts), opens the database,
-// creates the first manager if configured, and starts the web server and the
-// reminder scheduler.
+// creates the first manager if configured, and starts the web server, the
+// reminder scheduler and the timed reads (synced calendars, Timeliner).
 
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +11,7 @@ import { hashPassword, validatePassword } from './auth';
 import { startReminderScheduler } from './reminders';
 import { startCalendarSync } from './calendar-feeds';
 import { connectOnStart, timelinerClient } from './timeliner';
+import { startTimelinerSync } from './editing';
 import { seedDemo } from './seed-demo';
 import { claudeNotesReader } from './notes-import';
 import type { Ctx } from './core';
@@ -44,7 +45,7 @@ async function main() {
     notesReader: config.anthropicApiKey ? claudeNotesReader() : null,
     remindersEnabled: config.remindersEnabled,
     calendarAllowPrivate: config.calendarAllowPrivate,
-    // a script document uploaded in Timeliner marks its batch delivered
+    // the editors' videos are read from Timeliner, and a script document uploaded there marks its batch delivered
     timeliner: config.timelinerApiKey ? timelinerClient(config.timelinerApiKey, config.timelinerApiUrl) : null,
     publicUrl: config.publicUrl,
   };
@@ -53,10 +54,12 @@ async function main() {
   const stopReminders = config.remindersEnabled ? startReminderScheduler(ctx, config.reminderIntervalMinutes, (m) => console.log(m)) : () => {};
   // synced calendars (Google Calendar iCal links) are re-read every CALENDAR_SYNC_MINUTES
   const stopCalendars = config.calendarSyncEnabled ? startCalendarSync(ctx, config.calendarSyncMinutes, (m) => console.log(m)) : () => {};
+  // with a Timeliner key, the editors' videos are re-read every TIMELINER_SYNC_MINUTES (a read-only key is enough)
+  const stopTimeliner = ctx.timeliner && config.timelinerSyncEnabled ? startTimelinerSync(ctx, config.timelinerSyncMinutes, (m) => console.log(m)) : () => {};
 
   await app.listen({ port: config.port, host: config.host });
   console.log(`SCALE Media scripts listening on :${config.port}`);
-  // with a Timeliner key and a public address, register the webhook the first time
+  // with a Timeliner key and a public address, register the webhook the first time (or give it the video messages)
   void connectOnStart(ctx, (m) => console.log(m));
 
   let stopping = false;
@@ -65,6 +68,7 @@ async function main() {
     stopping = true;
     stopReminders();
     stopCalendars();
+    stopTimeliner();
     app.close().then(() => db.close()).then(
       () => process.exit(0),
       (err: unknown) => { console.error('shutdown failed', err); process.exit(1); },

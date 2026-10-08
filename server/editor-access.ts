@@ -1,7 +1,8 @@
 // What an editor's sign-in may do. Editors cut the videos: they read the
-// calendar, finished scripts, clients and resources, and use
-// to-dos. Everything else is refused here, before any route runs, so a new
-// route is closed to editors until it's added to this list on purpose.
+// calendar, finished scripts, clients and resources, use to-dos, and see
+// their own videos from Timeliner, saying which one they're on. Everything
+// else is refused here, before any route runs, so a new route is closed to
+// editors until it's added to this list on purpose.
 // (An admin viewing the site as an editor gets exactly the same.)
 
 import type { FastifyInstance } from 'fastify';
@@ -13,12 +14,12 @@ const ALLOW: Record<string, ReadonlySet<string>> = {
     '/api/auth/status', '/api/bootstrap', '/api/counts', '/api/moments', '/api/notifications',
     '/api/calendar', '/api/script-bank', '/api/files/:id', '/api/shoot-readiness', '/api/search',
     '/api/clients', '/api/clients/:id', '/api/resources',
-    '/api/todos',
+    '/api/todos', '/api/editing/me',
   ]),
   POST: new Set([
     '/api/auth/login', '/api/auth/logout', '/api/me/password', '/api/me/timezone', '/api/me/whats-new',
     '/api/moments/seen', '/api/notifications/read',
-    '/api/todos',
+    '/api/todos', '/api/editing/focus',
   ]),
   PATCH: new Set(['/api/todos/:id']),
   DELETE: new Set(['/api/todos/:id']),

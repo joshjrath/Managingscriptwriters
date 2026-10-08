@@ -24,11 +24,11 @@ import { applyTaskMessage } from './editing';
 import type { Me, TimelinerEvent, TimelinerOutcome, TimelinerStatus } from '../shared/types';
 import { compressRanges } from '../shared/workflow';
 
-/** uploads deliver batches; task messages keep the editors' videos current between reads */
+/** uploads deliver batches; task messages (and a trashed project, which takes its tasks with it) keep the editors' videos current between reads */
 const UPLOAD_EVENTS = ['version.uploaded', 'file.uploaded'];
-const TASK_EVENTS = ['task.created', 'task.updated', 'task.status_changed', 'task.trashed'];
+const VIDEO_EVENTS = ['task.created', 'task.updated', 'task.status_changed', 'task.trashed', 'project.trashed'];
 /** the messages this server subscribes to */
-export const TIMELINER_EVENTS = [...UPLOAD_EVENTS, ...TASK_EVENTS];
+export const TIMELINER_EVENTS = [...UPLOAD_EVENTS, ...VIDEO_EVENTS];
 /**
  * What the key needs: read the videos (tasks), where they and uploads sit (projects and brands), and who is who
  * (workspace members). Registering the webhook also needs Webhooks; without it the videos are still read on a timer.
@@ -115,7 +115,7 @@ export function timelinerClient(key: string, base: string, fetchImpl: typeof fet
       throw new TimelinerError('Couldn’t reach Timeliner. Try again in a minute.', 0);
     }
     // over the key's per-minute limit: wait as long as Timeliner asks, when that's short, and try once more
-    const wait = Number(res.headers.get('retry-after'));
+    const wait = Number(res.headers.get('retry-after') ?? NaN);
     if (res.status === 429 && !retried && Number.isFinite(wait) && wait >= 0 && wait <= 10) {
       await new Promise((r) => setTimeout(r, wait * 1000));
       return call<T>(method, path, body, true);
@@ -320,8 +320,9 @@ async function place(ctx: Ctx, api: TimelinerApi | null, m: UploadMessage, settl
     await db.query(`update settings set timeliner_test_at = $1 where id = 1`, [ctx.now().toISOString()]);
     return { outcome: 'test' };
   }
-  if (TASK_EVENTS.includes(m.type)) {
+  if (VIDEO_EVENTS.includes(m.type)) {
     // a video was added, changed step, was reassigned or trashed: the Editors tab's copy follows straight away
+    // (answered even when Timeliner won't give the video back: see applyTaskMessage)
     const detail = await applyTaskMessage(ctx, api, m);
     await settle(db, 'ignored', { detail });
     return { outcome: 'video' };
@@ -441,9 +442,11 @@ export async function connectTimeliner(ctx: Ctx, api: TimelinerApi, publicUrl: s
 }
 
 /**
- * On start-up: connect once when there's a key and an address but no webhook yet. Connected before the videos
- * were read from Timeliner, the webhook is given the task messages too (a read-only key can't: the timed read
- * still keeps the videos current, just not straight away).
+ * On start-up: connect once when there's a key and an address but no webhook yet. Already connected, the webhook
+ * is switched back on when Timeliner switched it off (it does after deliveries keep failing), and given the
+ * messages it lacks, like the video messages for a webhook connected before the videos were read from Timeliner.
+ * A key that can't write webhooks can do neither (the timed read still keeps the videos current, just not
+ * straight away).
  */
 export async function connectOnStart(ctx: Ctx, log: (m: string) => void): Promise<void> {
   if (!ctx.timeliner || !ctx.publicUrl) return;
@@ -451,12 +454,14 @@ export async function connectOnStart(ctx: Ctx, log: (m: string) => void): Promis
   if (s?.id) {
     try {
       const hook = (await ctx.timeliner.webhooks()).find((w) => w.id === s.id);
-      if (hook && TIMELINER_EVENTS.some((e) => !hook.events.includes(e))) {
-        await ctx.timeliner.updateWebhook(hook.id, { events: [...new Set([...hook.events, ...TIMELINER_EVENTS])] });
-        log('timeliner: the webhook now also says when videos change');
+      const missing = hook ? TIMELINER_EVENTS.filter((e) => !hook.events.includes(e)) : [];
+      if (hook && (!hook.active || missing.length)) {
+        await ctx.timeliner.updateWebhook(hook.id, { events: [...new Set([...hook.events, ...TIMELINER_EVENTS])], active: true });
+        if (!hook.active) log('timeliner: the webhook was switched off in Timeliner (it does that after deliveries keep failing); it’s on again');
+        if (missing.length) log(`timeliner: the webhook now also sends ${missing.join(', ')}`);
       }
     } catch (err) {
-      log(`timeliner: couldn't add the video messages to the webhook (videos are still read every few minutes): ${err instanceof Error ? err.message : String(err)}`);
+      log(`timeliner: couldn't update the webhook (videos are still read every few minutes): ${err instanceof Error ? err.message : String(err)}`);
     }
     return;
   }

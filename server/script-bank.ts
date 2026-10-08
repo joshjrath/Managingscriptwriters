@@ -44,6 +44,31 @@ interface LooseRow {
 
 const FINISHED = new Set<ScriptStatus>(['approved', 'delivered']);
 
+/** A version a manager approved scripts with, edited by them: what the editors cut from. */
+export type ScriptEdit = Omit<NonNullable<Deliverable['edited']>, 'ranges'>;
+
+/**
+ * The manager's edited versions, by script id: the newest approved review with an edited version (a link or a
+ * file) that covers that script. Scripts approved with the same review share one object.
+ */
+export async function loadScriptEdits(db: Db, by: { clientId?: number | null; batchIds?: number[] } = {}): Promise<Map<number, ScriptEdit>> {
+  const out = new Map<number, ScriptEdit>();
+  if (by.batchIds && !by.batchIds.length) return out;
+  const edits = await db.query<EditRow>(
+    `select r.script_ids, r.url, r.file_id, f.filename as file_name, r.note, u.name as reviewer, r.created_at
+       from reviews r left join files f on f.id = r.file_id join batches b on b.id = r.batch_id join users u on u.id = r.reviewed_by
+      where r.action = 'approved' and (r.url is not null or r.file_id is not null)
+        and ($1::bigint is null or b.client_id = $1) and ($2::bigint[] is null or r.batch_id = any($2::bigint[]))
+      order by r.created_at`, [by.clientId ?? null, by.batchIds ?? null],
+  );
+  // oldest first, so a later approval of a script replaces an earlier one
+  for (const e of edits) {
+    const edit: ScriptEdit = { kind: e.file_id ? 'file' : 'link', href: e.file_id ? `/api/files/${e.file_id}` : e.url!, name: e.file_name, at: e.created_at, by: e.reviewer, note: e.note };
+    for (const id of (Array.isArray(e.script_ids) ? e.script_ids : [])) out.set(Number(id), edit);
+  }
+  return out;
+}
+
 /**
  * Every document sent (one row each), finished scripts sent without one, scripts tracked by their own link, and
  * past scripts, as the Script bank lists them (filters, search and paging are the caller's). `batchIds` narrows it
@@ -79,20 +104,12 @@ export async function loadDeliverables(db: Db, by: { clientId?: number | null; w
   for (const l of scriptsBySub.values()) l.sort((a, b) => a.number - b.number);
 
   // the manager's edited version, for the scripts it was approved with
-  const edits = await db.query<EditRow>(
-    `select r.script_ids, r.url, r.file_id, f.filename as file_name, r.note, u.name as reviewer, r.created_at
-       from reviews r left join files f on f.id = r.file_id join batches b on b.id = r.batch_id join users u on u.id = r.reviewed_by
-      where r.action = 'approved' and (r.url is not null or r.file_id is not null)
-        and ($1::bigint is null or b.client_id = $1) and ($2::bigint[] is null or r.batch_id = any($2::bigint[]))
-      order by r.created_at`, [by.clientId ?? null, by.batchIds ?? null],
-  );
-  const editOfScript = new Map<number, EditRow>();
-  for (const e of edits) for (const id of (Array.isArray(e.script_ids) ? e.script_ids : [])) editOfScript.set(Number(id), e);
+  const editOfScript = await loadScriptEdits(db, by);
   const editFor = (list: { id: number; number: number; status: ScriptStatus }[]): Deliverable['edited'] => {
     const covered = list.filter((x) => FINISHED.has(x.status) && editOfScript.has(x.id));
     if (!covered.length) return null;
-    const e = covered.map((x) => editOfScript.get(x.id)!).sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
-    return { kind: e.file_id ? 'file' : 'link', href: e.file_id ? `/api/files/${e.file_id}` : e.url!, name: e.file_name, at: e.created_at, by: e.reviewer, note: e.note, ranges: compressRanges(covered.filter((x) => editOfScript.get(x.id) === e).map((x) => x.number)) };
+    const e = covered.map((x) => editOfScript.get(x.id)!).sort((a, b) => b.at.localeCompare(a.at))[0];
+    return { ...e, ranges: compressRanges(covered.filter((x) => editOfScript.get(x.id) === e).map((x) => x.number)) };
   };
 
   const out: Deliverable[] = [];

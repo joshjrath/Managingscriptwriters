@@ -74,6 +74,9 @@ const ACCESS: Record<string, Access> = {
   'POST /api/todos': 'user',
   'PATCH /api/todos/:id': 'user',
   'DELETE /api/todos/:id': 'user',
+  // their own videos from Timeliner, and saying which one they're on (only ever their own: test/editing.test.ts)
+  'GET /api/editing/me': 'user',
+  'POST /api/editing/focus': 'user',
 
   'POST /api/users': 'manager',
   'PATCH /api/users/:id': 'manager',
@@ -118,6 +121,8 @@ const ACCESS: Record<string, Access> = {
   'POST /api/timeliner/connect': 'manager',
   'POST /api/timeliner/test': 'manager',
   'POST /api/timeliner/events/:id/assign': 'manager',
+  'GET /api/editing': 'manager',
+  'POST /api/editing/sync': 'manager',
   // Timeliner calls it; the signature is the protection (test/timeliner.test.ts)
   'POST /hooks/timeliner': 'public',
 };
