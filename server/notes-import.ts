@@ -18,7 +18,7 @@ import { insertBatch } from './routes/batches';
 import { insertShoot } from './routes/shoots';
 import { insertBriefing } from './routes/clients';
 import { isISODate, type ISODate } from '../shared/dates';
-import { evenSplit } from '../shared/workflow';
+import { canWrite, evenSplit } from '../shared/workflow';
 import { fmtRange, plural } from '../shared/format';
 import type { ImportClient, ImportPlan, ImportResult, Me } from '../shared/types';
 
@@ -217,7 +217,8 @@ async function finishPlan(db: Db, raw: Awaited<ReturnType<NotesReader['read']>>)
 
 export async function applyPlan(ctx: Ctx, me: Me, plan: z.infer<typeof planSchema>): Promise<ImportResult> {
   const settings = await loadSettings(ctx.db);
-  const users = (await loadUsers(ctx.db)).filter((u) => u.active && !u.removed);
+  // editors don't write, so a name in the notes never gives them scripts
+  const users = (await loadUsers(ctx.db)).filter((u) => u.active && !u.removed && canWrite(u.role));
   // a full name, or a first name only one person on the team has; otherwise nobody is guessed
   // (the same rule as quick entry), and those scripts stay unassigned with a warning
   const findUser = (name: string) => {
@@ -379,7 +380,7 @@ export function registerNotesImportRoutes(app: FastifyInstance, ctx: Ctx) {
     const rules = rulesOf(settings);
     const clients = await ctx.db.query<{ name: string; status: string }>(`select name, status from clients order by lower(name)`);
     // editors don't write, so they're never suggested as writers
-    const team = (await loadUsers(ctx.db)).filter((u) => u.active && !u.removed && u.role !== 'editor').map((u) => ({ name: u.name, role: u.role }));
+    const team = (await loadUsers(ctx.db)).filter((u) => u.active && !u.removed && canWrite(u.role)).map((u) => ({ name: u.name, role: u.role }));
     allowRead(userId);
     const raw = await reader.read(input, {
       today: clock.today, weekday: new Date(`${clock.today}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' }), timezone: settings.timezone,

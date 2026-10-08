@@ -46,6 +46,6 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npx vitest run test/api.test.ts test/control-api.test.ts test/access.test.ts test/workspace.test.ts test/files.test.ts
+      - run: npx vitest run test/api.test.ts test/access.test.ts test/workspace.test.ts test/files.test.ts test/safeguards.test.ts
         env:
           TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres

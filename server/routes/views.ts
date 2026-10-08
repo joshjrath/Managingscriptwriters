@@ -2,9 +2,9 @@
 // calendar, review queue, My work, and the bootstrap payload.
 
 import type { FastifyInstance } from 'fastify';
-import { isManager } from '../../shared/workflow';
+import { canWrite, isEditor, isManager } from '../../shared/workflow';
 import { z } from 'zod';
-import { clockFor, lastDeliveredAt, loadBatches, loadSeen, loadSettings, loadUsers, type Ctx, type ScriptLiteRow } from '../core';
+import { clockFor, lastDeliveredAt, loadBatches, loadSeen, loadSettings, loadUsers, settingsFor, type Ctx, type ScriptLiteRow } from '../core';
 import { requireUser } from '../auth';
 import { buildGroups, loadReviewQueue, publicSubmission } from '../submissions';
 import { parse, zs } from '../http';
@@ -104,7 +104,7 @@ export function workloadFor(batches: BatchSummary[], scripts: Map<number, Script
   const active = batches.filter((b) => b.stage !== 'delivered');
   const horizon = addDays(clock.today, 6);
   const loads: WriterLoad[] = [];
-  for (const u of users.filter((x) => x.active && x.role !== 'editor')) {
+  for (const u of users.filter((x) => x.active && canWrite(x.role))) {
     let assigned = 0, remaining = 0, toDeliver = 0, overdueScripts = 0, dueNext7 = 0;
     const batchIds = new Set<number>();
     let blocked = 0;
@@ -167,7 +167,7 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.get('/api/bootstrap', async (req): Promise<Bootstrap> => {
     const me = requireUser(req);
-    const settings = await loadSettings(db);
+    const settings = await settingsFor(ctx);
     const clock = await clockFor(ctx, settings);
     const { summaries, scripts } = await loadBatches(ctx, {}, clock);
     const users = await loadUsers(db);
@@ -268,7 +268,7 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     const rows = await db.query<{ id: number; feed_id: number; feed_name: string; color: string; uid: string; title: string; location: string | null; description: string | null; all_day: boolean; start_at: string; end_at: string; start_date: string | null; end_date: string | null }>(
       `select e.id, e.feed_id, f.name as feed_name, f.color, e.uid, e.title, e.location, e.description, e.all_day, e.start_at, e.end_at, e.start_date::text as start_date, e.end_date::text as end_date
          from calendar_events e join calendar_feeds f on f.id = e.feed_id
-        where e.start_at < ($2::date + 2)::timestamptz and e.end_at > ($1::date - 1)::timestamptz ${isManager(me.role) ? '' : me.role === 'editor' ? `and f.visibility in ('editors', 'everyone')` : `and f.visibility = 'everyone'`}
+        where e.start_at < ($2::date + 2)::timestamptz and e.end_at > ($1::date - 1)::timestamptz ${isManager(me.role) ? '' : isEditor(me.role) ? `and f.visibility in ('editors', 'everyone')` : `and f.visibility = 'everyone'`}
         order by e.start_at limit 2000`, [from, to],
     );
     const dayIn = (at: string | Date) => nowInZone(tz, new Date(at)).date;
@@ -332,7 +332,7 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     }
     events.push(...(await syncedEvents(me, q.from, q.to, clock.today)));
     // editors plan around shoots and when scripts are final, not the writing in between
-    if (me.role === 'editor') return { events: events.filter((e) => e.type === 'shoot' || e.type === 'final' || e.type === 'external'), clock };
+    if (isEditor(me.role)) return { events: events.filter((e) => e.type === 'shoot' || e.type === 'final' || e.type === 'external'), clock };
     return { events, clock };
   });
 

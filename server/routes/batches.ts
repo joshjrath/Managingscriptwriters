@@ -2,7 +2,7 @@
 // review, delivery confirmation, blockers and target changes.
 
 import type { FastifyInstance } from 'fastify';
-import { canWrite, isManager } from '../../shared/workflow';
+import { canWrite, isManager, type Role } from '../../shared/workflow';
 import { z } from 'zod';
 import type { Db } from '../db';
 import {
@@ -511,17 +511,22 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
           if (!u) throw new HttpError(400, 'Choose an active writer', { assigneeId: 'Choose an active writer' });
         }
         // restore previously removed scripts first so their numbers and history return; they go to the
-        // writer chosen for the new scripts, or back to their old writer if that person is still on the team
+        // writer chosen for the new scripts, or back to their old writer if that person is still on the team and
+        // still writes (not an editor now)
         const removed = await t.query<{ id: number; number: number }>(
           `select id, number from scripts where batch_id = $1 and removed_at is not null order by number limit $2`, [id, need],
         );
         for (const r of removed) {
           await t.query(
-            `update scripts set removed_at = null, removed_by = null, updated_at = now(), version = version + 1,
-                    assignee_id = case when $2::bigint is not null then $2::bigint
-                                       when exists (select 1 from users u where u.id = scripts.assignee_id and u.active and u.removed_at is null) then assignee_id
-                                       else null end
-              where id = $1`, [r.id, input.assigneeId ?? null]);
+            `with next as (
+               select case when $2::bigint is not null then $2::bigint
+                           when exists (select 1 from users u where u.id = s.assignee_id and u.active and u.removed_at is null and u.role <> 'editor') then s.assignee_id
+                      end as assignee
+                 from scripts s where s.id = $1
+             )
+             update scripts set removed_at = null, removed_by = null, updated_at = now(), version = version + 1,
+                    assignee_id = next.assignee, assigned_at = case when next.assignee is null then null else now() end
+               from next where scripts.id = $1`, [r.id, input.assigneeId ?? null]);
         }
         need -= removed.length;
         const max = await t.one<{ max: number | null }>(`select max(number) as max from scripts where batch_id = $1`, [id]);
@@ -590,17 +595,17 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const input = parse(z.object({ scriptIds: z.array(zs.id).min(1, 'Select at least one script').max(500), assigneeId: zs.id.nullable() }), req.body);
     await db.tx(async (t) => {
-      const b = await t.one<{ client_id: number; title: string; draft_due: ISODate | null }>(`select client_id, title, draft_due from batches where id = $1`, [id]);
+      const b = await t.one<{ client_id: number; title: string; draft_due: ISODate | null }>(`select client_id, title, draft_due from batches where id = $1 for no key update`, [id]);
       if (!b) throw notFound('Batch');
       let name = 'Unassigned';
       if (input.assigneeId) {
-        const u = await t.one<{ name: string; role: string }>(`select name, role from users where id = $1 and active`, [input.assigneeId]);
+        const u = await t.one<{ name: string; role: Role }>(`select name, role from users where id = $1 and active`, [input.assigneeId]);
         if (!u) throw new HttpError(400, 'Choose an active team member', { assigneeId: 'Choose an active team member' });
-        if (u.role === 'editor') throw new HttpError(400, `${u.name} is an editor, so they can’t be given scripts`, { assigneeId: 'Choose a writer' });
+        if (!canWrite(u.role)) throw new HttpError(400, `${u.name} is an editor, so they can’t be given scripts`, { assigneeId: 'Choose a writer' });
         name = u.name;
       }
       const rows = await t.query<{ id: number; number: number; assignee_id: number | null }>(
-        `select id, number, assignee_id from scripts where batch_id = $1 and removed_at is null and id in (${input.scriptIds.map((_, i) => `$${i + 2}`).join(',')}) for update`,
+        `select id, number, assignee_id from scripts where batch_id = $1 and removed_at is null and id in (${input.scriptIds.map((_, i) => `$${i + 2}`).join(',')}) order by number for update`,
         [id, ...input.scriptIds],
       );
       if (rows.length !== new Set(input.scriptIds).size) throw conflict('Some scripts are no longer in this batch. Refresh and try again.');

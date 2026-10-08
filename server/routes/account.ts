@@ -6,8 +6,8 @@ import {
   checkThrottle, clearFailures, createSession, destroySession, hashPassword, recordFailure, requireAdmin, requireManager, requireUser,
   SESSION_COOKIE, setSessionCookie, sha, validatePassword, verifyPassword,
 } from '../auth';
-import { assigneesOf, batchLink, loadSettings, loadUsers, logActivity, notify, rulesOf, type Ctx } from '../core';
-import { compressRanges, isAdmin, isManager, ROLE_LABEL, type Role } from '../../shared/workflow';
+import { assigneesOf, batchLink, loadSettings, loadUsers, logActivity, notify, rulesOf, settingsFor, type Ctx } from '../core';
+import { compressRanges, isAdmin, isEditor, isManager, ROLE_LABEL, type Role } from '../../shared/workflow';
 import { auditEvent } from '../audit';
 import { LOCKS, type Db } from '../db';
 import type { Me, Settings, UserSummary } from '../../shared/types';
@@ -289,7 +289,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     if (isAdmin(u.role) && (roleChange || input.active === false)) await keepAnAdmin(id);
     if (isManager(u.role) && ((input.role && !isManager(input.role)) || input.active === false)) await keepAManager(id);
     // an editor writes nothing: move their unfinished scripts first
-    if (input.role === 'editor' && u.role !== 'editor') {
+    if (input.role && isEditor(input.role) && !isEditor(u.role)) {
       const open = await db.one<{ n: number }>(`select count(*)::int as n from scripts where assignee_id = $1 and removed_at is null and status <> 'delivered'`, [id]);
       if (open && Number(open.n) > 0) throw new HttpError(400, `${u.name} still has ${open.n} unfinished script${Number(open.n) === 1 ? '' : 's'}. Reassign them before making ${u.name.split(' ')[0]} an editor.`, { role: 'Reassign their scripts first' });
     }
@@ -381,7 +381,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.get('/api/settings', async (req) => {
     requireUser(req);
-    return { settings: await loadSettings(db) };
+    return { settings: await settingsFor(ctx) };
   });
 
   // the colour palette: the admin's choice, applied to the whole site for everyone
@@ -401,7 +401,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       await t.query(`update settings set theme = $1::jsonb, updated_at = now() where id = 1`, [JSON.stringify(theme)]);
       await logActivity(t, { actor: me, action: 'settings.theme', entityType: 'settings', summary: `Changed the colour palette to ${r.palette.name}${r.custom ? ' (customised)' : ''}` });
     });
-    return { settings: await loadSettings(db) };
+    return { settings: await settingsFor(ctx) };
   });
 
   const rulesInput = {
@@ -497,7 +497,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
         }
       }
     });
-    return { settings: await loadSettings(db), recalculated, changed: keys.length };
+    return { settings: await settingsFor(ctx), recalculated, changed: keys.length };
   });
 
   // ── notifications ──────────────────────────────────────────────────────

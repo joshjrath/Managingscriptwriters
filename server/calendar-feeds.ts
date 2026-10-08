@@ -59,8 +59,8 @@ function googleCalendarId(raw: string): string | null {
   return null;
 }
 
-/** webcal:// is the same link over https. Only public web addresses are allowed. */
-export function normaliseFeedUrl(raw: string): string {
+/** webcal:// is the same link over https. Only public web addresses are allowed, unless `allowPrivate` (CALENDAR_ALLOW_PRIVATE). */
+export function normaliseFeedUrl(raw: string, allowPrivate = false): string {
   const fromGoogle = /\/ical\//i.test(raw) ? null : googleCalendarId(raw);
   if (fromGoogle) return PUBLIC_ICS(fromGoogle);
   const v = raw.trim().replace(/^webcals?:\/\//i, 'https://');
@@ -69,7 +69,7 @@ export function normaliseFeedUrl(raw: string): string {
   if (u.protocol !== 'https:' && u.protocol !== 'http:') throw new HttpError(400, 'Use an https:// link', { url: 'Use an https:// link' });
   const host = u.hostname.toLowerCase();
   const local = host === 'localhost' || host.endsWith('.local') || host.endsWith('.internal') || /^(127\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.|0\.)/.test(host) || host === '[::1]' || host.startsWith('[fc') || host.startsWith('[fd');
-  if (local && process.env.CALENDAR_ALLOW_PRIVATE !== '1') throw new HttpError(400, 'That link points to a private address', { url: 'Use the calendar’s public iCal link' });
+  if (local && !allowPrivate) throw new HttpError(400, 'That link points to a private address', { url: 'Use the calendar’s public iCal link' });
   if (/calendar\.google\.com\/calendar\/(u\/\d+\/)?r(\/|$|\?)/i.test(u.href)) {
     throw new HttpError(400, 'That’s the Google Calendar page. In the calendar’s settings, copy the “Secret address in iCal format” instead.', { url: 'Use the “Secret address in iCal format” (ends in .ics)' });
   }
@@ -170,7 +170,7 @@ export function registerCalendarFeedRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post('/api/calendar-feeds', async (req) => {
     const me = requireManager(req);
     const input = parse(z.object({ name: zs.name('Name', 80), url: z.string().trim().min(1, 'Paste the calendar’s secret iCal address').max(4000), color: color.default('#9CC7F7'), visibility: visibility.default('managers') }), req.body);
-    const url = normaliseFeedUrl(input.url);
+    const url = normaliseFeedUrl(input.url, ctx.calendarAllowPrivate === true);
     // check the link before saving it, so a wrong one is caught straight away
     let text: string;
     try { text = await fetchText(url); parseIcs(text, new Date(), new Date()); } catch (err) {
@@ -194,7 +194,7 @@ export function registerCalendarFeedRoutes(app: FastifyInstance, ctx: Ctx) {
     if (input.name) set.name = input.name;
     if (input.color) set.color = input.color;
     if (input.visibility) set.visibility = input.visibility;
-    if (input.url) set.url = normaliseFeedUrl(input.url);
+    if (input.url) set.url = normaliseFeedUrl(input.url, ctx.calendarAllowPrivate === true);
     const keys = Object.keys(set);
     if (keys.length) await db.query(`update calendar_feeds set ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')} where id = $1`, [id, ...keys.map((k) => set[k])]);
     if (input.url) await syncFeed(db, id, fetchText, ctx.now());

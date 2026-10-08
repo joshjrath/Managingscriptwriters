@@ -218,7 +218,7 @@ export function registerRecording(app: FastifyInstance, ctx: Ctx, realDb: Db, al
     }
     // A practice copy can't change your real sign-in: say so instead of pretending it worked.
     if (req.recording && req.method === 'POST') {
-      const path = req.url.split('?')[0];
+      const path = requestPath(req);
       if (path === '/api/me/password') throw new HttpError(403, 'You’re in Recording mode, a practice copy, so your password can’t be changed here. Turn Recording mode off first.', undefined, 'recording');
       if (path === '/api/me/timezone') throw new HttpError(403, 'You’re in Recording mode, a practice copy, so your time zone can’t be changed here. Turn Recording mode off first.', undefined, 'recording');
     }

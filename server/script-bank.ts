@@ -16,7 +16,7 @@ import { requireManager, requireUser } from './auth';
 import { HttpError, notFound, parse, zs } from './http';
 import { readForm } from './submissions';
 import { storeFile } from './files';
-import { compressRanges, documentState, type ScriptStatus } from '../shared/workflow';
+import { compressRanges, documentState, isEditor, type ScriptStatus } from '../shared/workflow';
 import type { Deliverable, ScriptBankPage } from '../shared/types';
 
 interface SubRow {
@@ -49,7 +49,7 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/api/script-bank', async (req): Promise<ScriptBankPage> => {
     const me = requireUser(req);
     // editors only ever see finished scripts, so they never cut from a draft
-    const finishedOnly = me.role === 'editor';
+    const finishedOnly = isEditor(me.role);
     const q = parse(z.object({
       q: z.string().trim().max(120).optional(),
       clientId: zs.id.optional(),

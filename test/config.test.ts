@@ -59,6 +59,7 @@ describe('configuration', () => {
   it('reads on/off settings the same way everywhere, and says when one makes no sense', () => {
     expect(load({ PGSSL: 'true', DEMO: '1', REMINDERS: 'OFF', MANAGER_RESET_PASSWORD: 'yes' }).config).toMatchObject({ pgSsl: true, demo: true, remindersEnabled: false, manager: { reset: true } });
     expect(load({ REMINDERS: 'false' }).config.remindersEnabled).toBe(false);
+    expect([load({}).config.calendarAllowPrivate, load({ CALENDAR_ALLOW_PRIVATE: '1' }).config.calendarAllowPrivate]).toEqual([false, true]);
     expect(load({ NODE_ENV: 'production', ALLOW_SETUP: 'on' }).config.allowSetup).toBe(true);
     const odd = load({ REMINDERS: 'sometimes' });
     expect(odd.config.remindersEnabled).toBe(true);

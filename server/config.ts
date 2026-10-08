@@ -28,6 +28,8 @@ export interface Config {
   /** synced calendars are re-read on a timer (CALENDAR_SYNC=off turns it off) */
   calendarSyncEnabled: boolean;
   calendarSyncMinutes: number;
+  /** let a synced calendar point at a private address (local testing only) */
+  calendarAllowPrivate: boolean;
   port: number;
   host: string;
   /**
@@ -100,6 +102,7 @@ export function loadConfig(
     remindersEnabled: flag('REMINDERS', true),
     reminderIntervalMinutes: number('REMINDER_INTERVAL_MINUTES', 10, 1, 24 * 60),
     calendarSyncEnabled: flag('CALENDAR_SYNC', true),
+    calendarAllowPrivate: flag('CALENDAR_ALLOW_PRIVATE', false),
     calendarSyncMinutes: number('CALENDAR_SYNC_MINUTES', 15, 1, 24 * 60),
     port: number('PORT', 3001, 1, 65535, { integer: true }),
     host: set(env.HOST) ?? '0.0.0.0',

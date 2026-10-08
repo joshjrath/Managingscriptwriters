@@ -20,7 +20,7 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-09-28-potential-clients': ['managers'], '2026-09-28-plan-later': ['managers'], '2026-09-28-admin-name': ['managers'],
   '2026-09-28-calendar-drag': ['managers'], '2026-09-28-team': ['managers'], '2026-09-28-signin-details': ['managers'],
   '2026-10-07-my-work-redesign': ['writers', 'managers'], '2026-09-28-written-counter': ['writers', 'managers'], '2026-10-08-writers-never-miss': ['writers', 'managers'],
-  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'],
+  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-editors-never-get-scripts': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -34,6 +34,18 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-08-editors-never-get-scripts',
+    date: '2026-10-08',
+    title: 'Editors never get scripts by accident',
+    summary: 'Two ways scripts could end up with an editor are closed, and a few smaller fixes.',
+    changes: [
+      { tag: 'fixed', text: 'Raising a batch’s script count gives brought-back scripts to their old writer only if they still write: someone who has since become an editor no longer gets them. Scripts brought back to a writer now show as newly added on their My work.' },
+      { tag: 'fixed', text: 'Paste notes never gives scripts to an editor named in the notes. Those scripts stay unassigned, with a warning, like any name it can’t match.' },
+      { tag: 'fixed', text: 'Settings says reminders are off whenever the server has them switched off, however that setting was written.' },
+      { tag: 'improved', text: 'Behind the scenes: moving scripts to another writer and undoing a review now wait their turn like every other change to a batch, so two people working on the same batch at once can’t hold each other up.' },
+    ],
+  },
   {
     id: '2026-10-08-faster-large-uploads',
     date: '2026-10-08',

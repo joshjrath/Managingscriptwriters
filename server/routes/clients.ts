@@ -2,7 +2,7 @@
 
 import { fileStream, isBlockedFile, spool, storedFileName, storeFile, type UploadedFile } from '../files';
 import type { FastifyInstance } from 'fastify';
-import { isManager, type Role } from '../../shared/workflow';
+import { isEditor, isManager, type Role } from '../../shared/workflow';
 import { z } from 'zod';
 import { clockFor, isAssignedTo, loadBatches, loadSettings, logActivity, type Ctx } from '../core';
 import { requireManager, requireUser } from '../auth';
@@ -161,7 +161,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
       brandVoice: c?.brand_voice ?? null, guidance: c?.guidance ?? null,
       briefings, resources: resources.filter((r) => !r.briefingId), shoots,
       // editors get the brand material, not the batches; the team's internal history is for managers
-      batches: me.role === 'editor' ? [] : batches.summaries, activity: isManager(me.role) ? activity : [],
+      batches: isEditor(me.role) ? [] : batches.summaries, activity: isManager(me.role) ? activity : [],
     };
   });
 
@@ -384,7 +384,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
             where ss.submission_id = s.id and sc.removed_at is null and sc.status not in ('approved', 'delivered'))))`;
     const anyLive = `(exists (select 1 from resources r where r.file_id = f.id and r.removed_at is null) or exists (select 1 from submissions s where s.file_id = f.id) or exists (select 1 from reviews v where v.file_id = f.id) or exists (select 1 from past_documents p where p.file_id = f.id and p.removed_at is null))`;
     const f = await db.one<{ filename: string; mime: string; size: number; stored: number }>(
-      `select f.filename, f.mime, f.size, octet_length(f.data) as stored from files f where f.id = $1 and ${me.role === 'editor' ? finished : anyLive}`, [id],
+      `select f.filename, f.mime, f.size, octet_length(f.data) as stored from files f where f.id = $1 and ${isEditor(me.role) ? finished : anyLive}`, [id],
     );
     if (!f) throw notFound('File');
     const inline = SAFE_INLINE.has(f.mime) && (req.query as Record<string, string>).download !== '1';
@@ -426,9 +426,9 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
           order by br.call_date desc nulls last limit 5`, [like, /^(call )?recordings?$/i.test(q)]),
     ]);
     const extra = {
-      people: me.role === 'editor' ? [] : people,
-      shoots: shoots.map((s) => ({ id: s.id, title: s.title ?? 'Shoot', clientId: s.client_id, clientName: s.client_name, startDate: s.start_date, batchId: me.role === 'editor' ? null : s.batch_id })),
-      scripts: me.role === 'editor' ? [] : scripts.map((s) => ({ batchId: s.batch_id, batchTitle: s.batch_title, clientName: s.client_name, number: s.number, title: s.title })),
+      people: isEditor(me.role) ? [] : people,
+      shoots: shoots.map((s) => ({ id: s.id, title: s.title ?? 'Shoot', clientId: s.client_id, clientName: s.client_name, startDate: s.start_date, batchId: isEditor(me.role) ? null : s.batch_id })),
+      scripts: isEditor(me.role) ? [] : scripts.map((s) => ({ batchId: s.batch_id, batchTitle: s.batch_title, clientName: s.client_name, number: s.number, title: s.title })),
       briefings: briefings.map((b) => ({ id: b.id, title: b.title, clientId: b.client_id, clientName: b.client_name, callDate: b.call_date })),
     };
     const [clients, batches, resources] = await Promise.all([
@@ -443,7 +443,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     ]);
     return {
       clients,
-      batches: me.role === 'editor' ? [] : batches.map((b) => ({ id: b.id, title: b.title, clientName: b.client_name })),
+      batches: isEditor(me.role) ? [] : batches.map((b) => ({ id: b.id, title: b.title, clientName: b.client_name })),
       resources: resources.map((r) => ({ id: r.id, title: r.title, clientName: r.client_name, url: r.url, fileId: r.file_id })),
       ...extra,
     };

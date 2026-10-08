@@ -41,6 +41,8 @@ async function main() {
     setupHint,
     // paste-notes import reads notes with Claude when an API key is configured
     notesReader: config.anthropicApiKey ? claudeNotesReader() : null,
+    remindersEnabled: config.remindersEnabled,
+    calendarAllowPrivate: config.calendarAllowPrivate,
   };
   const app = await buildApp(ctx, { staticDir: config.staticDir, logger: config.production, trustProxy: config.trustProxy });
 

@@ -344,11 +344,13 @@ export function registerSubmissionRoutes(app: FastifyInstance, ctx: Ctx) {
         `select r.batch_id, r.action, r.script_ids, r.created_at, b.client_id, b.title from reviews r join batches b on b.id = r.batch_id where r.id = $1 for update of r`, [id],
       );
       if (!r) throw notFound('Decision');
+      // the batch, then its scripts in order: the same order as every other change to a batch's scripts
+      await t.query(`select 1 from batches where id = $1 for no key update`, [r.batch_id]);
       if (ctx.now().getTime() - new Date(r.created_at).getTime() > 15 * 60_000) throw new HttpError(409, 'It’s been more than 15 minutes, so this can’t be undone here. Use the batch page instead.', undefined, 'too_late');
       const ids = (Array.isArray(r.script_ids) ? r.script_ids : []).map(Number);
       const want = r.action === 'approved' ? 'approved' : 'revisions_needed';
       const rows = await t.query<{ id: number; number: number; status: ScriptStatus; assignee_id: number | null }>(
-        `select id, number, status, assignee_id from scripts where id = any($1::bigint[]) and removed_at is null for update`, [ids],
+        `select id, number, status, assignee_id from scripts where id = any($1::bigint[]) and removed_at is null order by number for update`, [ids],
       );
       if (rows.length !== ids.length || rows.some((x) => x.status !== want)) throw conflict('These scripts have changed since, so the decision can’t be undone. Refresh to see where they are now.', 'stale');
       const later = await t.one<{ id: number }>(

@@ -26,6 +26,10 @@ export interface Ctx {
   realDb?: Db;
   /** the database this request is using right now (for work that outlives the handler, like streaming a file) */
   dbNow?: () => Db;
+  /** whether this server sends reminders (REMINDERS in loadConfig); on unless set */
+  remindersEnabled?: boolean;
+  /** synced calendars may point at private addresses (CALENDAR_ALLOW_PRIVATE, for local testing only) */
+  calendarAllowPrivate?: boolean;
 }
 
 // ── settings ─────────────────────────────────────────────────────────────
@@ -36,7 +40,8 @@ interface SettingsRow {
   is_demo: boolean; reminders_last_run_at: string | null; theme: WorkspaceTheme | string | null;
 }
 
-export async function loadSettings(db: Db): Promise<Settings> {
+/** `remindersEnabled` is the server's, not the workspace's: pages get settings through `settingsFor`, which fills it in. */
+export async function loadSettings(db: Db, remindersEnabled = true): Promise<Settings> {
   const r = await db.one<SettingsRow>(`select * from settings where id = 1`);
   if (!r) throw new Error('settings row missing');
   const wd = typeof r.working_days === 'string' ? JSON.parse(r.working_days) : r.working_days;
@@ -44,10 +49,13 @@ export async function loadSettings(db: Db): Promise<Settings> {
     orgName: r.org_name, timezone: r.timezone, cutoff: r.cutoff,
     draftOffsetDays: r.draft_offset_days, finalOffsetDays: r.final_offset_days,
     dayMode: r.day_mode, workingDays: wd, reminderLeadDays: r.reminder_lead_days, planReminderDays: r.plan_reminder_days ?? 14,
-    isDemo: r.is_demo, remindersLastRunAt: r.reminders_last_run_at, remindersEnabled: process.env.REMINDERS !== 'off',
+    isDemo: r.is_demo, remindersLastRunAt: r.reminders_last_run_at, remindersEnabled,
     theme: typeof r.theme === 'string' ? JSON.parse(r.theme) : r.theme ?? null,
   };
 }
+
+/** The settings as a page sees them, saying whether this server sends reminders. */
+export const settingsFor = (ctx: Ctx, db: Db = ctx.db): Promise<Settings> => loadSettings(db, ctx.remindersEnabled !== false);
 
 export const rulesOf = (s: Settings): DeadlineRules => ({
   draftOffsetDays: s.draftOffsetDays, finalOffsetDays: s.finalOffsetDays, dayMode: s.dayMode, workingDays: s.workingDays,
