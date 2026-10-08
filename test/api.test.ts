@@ -486,7 +486,13 @@ describe('team: roles, temporary passwords, removal', () => {
     expect((await find()).tempPassword).toBe('tess-temp-pass');
     expect((await find(sarah)).tempPassword).toBeNull(); // writers never see it
     const tess = as(await login('tess@scale.test', 'tess-temp-pass'));
+    // first sign-in asks for their own password, and the temporary one can't be kept
+    expect((await tess.get('/api/bootstrap')).body.mustChangePassword).toBe(true);
+    const same = await tess.post('/api/me/password', { current: 'tess-temp-pass', next: 'tess-temp-pass' });
+    expect(same.status).toBe(400);
+    expect(same.body.error.fields.next).toMatch(/new password/);
     expect((await tess.post('/api/me/password', { current: 'tess-temp-pass', next: 'tess-own-password' })).status).toBe(200);
+    expect((await tess.get('/api/bootstrap')).body.mustChangePassword).toBe(false);
     expect((await find()).tempPassword).toBeNull();
     // a reset makes a new readable temporary password
     await manager.patch(`/api/users/${(await find()).id}`, { password: 'tess-reset-pass' });
@@ -1346,36 +1352,6 @@ describe('to-dos', () => {
   });
 });
 
-describe('messages', () => {
-  it('sends, lists conversations with unread counts, fetches only newer, and marks read', async () => {
-    const a = await manager.post(`/api/messages/${ids.sarah}`, { body: 'Hey Sarah, can you look at script 4?' });
-    expect(a.status).toBe(200);
-    expect(a.body.message).toMatchObject({ fromId: ids.josh, toId: ids.sarah, readAt: null });
-    await manager.post(`/api/messages/${ids.sarah}`, { body: 'No rush' });
-    // her inbox shows one thread with 2 unread, and her counts know
-    let inbox = (await sarah.get('/api/messages')).body;
-    expect(inbox.unread).toBe(2);
-    expect(inbox.threads[0]).toMatchObject({ userId: ids.josh, name: 'Josh Rath', unread: 2, last: { body: 'No rush' } });
-    expect((await sarah.get('/api/bootstrap')).body.counts.unreadMessages).toBe(2);
-    // the thread, oldest first; then only what's newer
-    const thread = (await sarah.get(`/api/messages/${ids.josh}`)).body.messages;
-    expect(thread.map((m: any) => m.body)).toEqual(['Hey Sarah, can you look at script 4?', 'No rush']);
-    const reply = await sarah.post(`/api/messages/${ids.josh}`, { body: 'On it!' });
-    const newer = (await manager.get(`/api/messages/${ids.sarah}?after=${thread[1].id}`)).body.messages;
-    expect(newer).toEqual([expect.objectContaining({ id: reply.body.message.id, body: 'On it!' })]);
-    // reading clears her unread; his message shows as seen
-    expect((await sarah.post(`/api/messages/${ids.josh}/read`)).status).toBe(200);
-    inbox = (await sarah.get('/api/messages')).body;
-    expect(inbox.unread).toBe(0);
-    expect((await manager.get(`/api/messages/${ids.sarah}`)).body.messages[0].readAt).toBeTruthy();
-    // Marcus can't see their conversation
-    expect((await marcus.get('/api/messages')).body.threads.some((t: any) => t.userId === ids.josh && t.last.body === 'On it!')).toBe(false);
-    expect((await marcus.get(`/api/messages/${ids.josh}`)).body.messages.some((m: any) => m.body === 'On it!')).toBe(false);
-    // no empty messages, none to yourself
-    expect((await sarah.post(`/api/messages/${ids.josh}`, { body: '   ' })).status).toBe(400);
-    expect((await sarah.post(`/api/messages/${ids.sarah}`, { body: 'hi me' })).status).toBe(400);
-  });
-});
 
 describe('client resources picked for a batch', () => {
   it('picked on creation, shown to the writers on My work, and attachable or detachable later', async () => {
@@ -1607,7 +1583,7 @@ describe('editors', () => {
     return JSON.parse(r.body);
   };
 
-  it('sign in to a read-only view: calendar, finished scripts, clients, resources, messages and to-dos', async () => {
+  it('sign in to a read-only view: calendar, finished scripts, clients, resources and to-dos', async () => {
     const add = await manager.post('/api/users', { name: 'Eddie Cut', email: 'eddie@scale.test', role: 'editor', password: 'editor-password-1' });
     expect([add.status, add.body?.error]).toEqual([200, undefined]);
     const eddieId = add.body.users.find((u: any) => u.name === 'Eddie Cut').id;
@@ -1646,8 +1622,7 @@ describe('editors', () => {
     expect(client.activity).toEqual([]);
     expect(client.batches).toEqual([]);
     expect((await eddie.get('/api/resources')).status).toBe(200);
-    // messages and their own to-dos work
-    expect((await eddie.post(`/api/messages/${ids.josh}`, { body: 'Got the Acme scripts, cutting today' })).status).toBe(200);
+    // their own to-dos work
     expect((await manager.post('/api/todos', { userId: eddieId, text: 'Cut the Acme reels by Friday' })).status).toBe(200);
     expect((await eddie.get('/api/todos')).body.todos.map((t: any) => t.text)).toContain('Cut the Acme reels by Friday');
 
@@ -1933,3 +1908,4 @@ describe('round 3: manager and editor screens', () => {
     expect(act.some((a: any) => /\(document version 1\)/.test(a.summary))).toBe(true);
   });
 });
+

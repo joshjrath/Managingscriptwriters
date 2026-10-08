@@ -51,7 +51,7 @@ export function RecordingOffDialog({ open, onClose }: { open: boolean; onClose: 
   const act = useModeActions();
   return (
     <Dialog open={open} onClose={onClose} title="Turn off Recording mode?" size="narrow"
-      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Keep recording</Button><Button variant="primary" busy={act.busy === 'recording'} onClick={act.stopRecording}>Turn off and discard</Button></div>}>
+      footer={<div className="form-actions mode-ok"><Button variant="ghost" onClick={onClose}>Keep recording</Button><Button variant="primary" busy={act.busy === 'recording'} onClick={act.stopRecording}>Turn off and discard</Button></div>}>
       <p className="muted" style={{ margin: 0 }}>Everything you did while recording is thrown away, and you’re back on the real workspace exactly as you left it.</p>
       <FormError error={act.error} />
     </Dialog>
@@ -143,7 +143,7 @@ export function RecordingDialog({ open, onClose }: { open: boolean; onClose: () 
   const act = useModeActions();
   return (
     <Dialog open={open} onClose={onClose} title="Recording mode" size="narrow"
-      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" busy={act.busy === 'recording'} onClick={act.startRecording}>Start recording mode</Button></div>}>
+      footer={<div className="form-actions mode-ok"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" busy={act.busy === 'recording'} onClick={act.startRecording}>Start recording mode</Button></div>}>
       <div className="stack s2">
         <p style={{ margin: 0 }}>Makes a private practice copy of the whole workspace for tutorials. Send scripts, approve, drag shoots, add clients, and view as anyone to click through what they’d do.</p>
         <p className="muted" style={{ margin: 0 }}>Nobody else sees any of it. When you turn it off, everything you did is thrown away. It also ends when you sign out.</p>

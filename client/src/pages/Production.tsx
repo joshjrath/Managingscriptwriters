@@ -5,13 +5,13 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDownUp, Ban, Camera, Columns3, RotateCcw, Rows3, UserPlus } from 'lucide-react';
+import { ArrowDownUp, Ban, Camera, Columns3, RotateCcw, Rows3, SlidersHorizontal, UserPlus } from 'lucide-react';
 import { api, qs } from '../api';
 import type { BatchSummary } from '../../../shared/types';
 import { bothLate, STAGES, STAGE_LABEL, type Stage } from '../../../shared/workflow';
 import { fmtDate, fmtRange, plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
-import { BatchDrawer, writersText } from '../components/BatchBits';
+import { BatchDrawer, BatchItem, writersText } from '../components/BatchBits';
 import { BatchProgress, Chip, DueChip, edgeFor, Empty, ErrorState, Loading, Seg, StageChip } from '../components/ui';
 import { TodayBump } from '../components/WritingPulse';
 
@@ -63,6 +63,10 @@ export function Production() {
     <button onClick={() => setSort((s) => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : 1 }))} aria-label={`Sort by ${label}`}>{label}{sort.key === key && <ArrowDownUp size={12} aria-hidden />}</button>
   );
   const anyFilter = Object.entries(filters).some(([k, v]) => v && k !== 'completed');
+  const activeFilters = Object.entries(filters).filter(([k, v]) => v && k !== 'completed').length;
+  // on a phone the filters fold behind one button, and the table becomes a list of cards
+  const [showFilters, setShowFilters] = useState(false);
+  const phone = typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches;
 
   return (
     <>
@@ -73,7 +77,10 @@ export function Production() {
         </Seg>
       </PageHeader>
 
-      <div className="filters" role="search">
+      <button type="button" className="btn filters-toggle" aria-expanded={showFilters} onClick={() => setShowFilters(!showFilters)}>
+        <SlidersHorizontal aria-hidden />Filters{activeFilters ? ` (${activeFilters})` : ''}
+      </button>
+      <div className={`filters prod-filters${showFilters ? ' open' : ''}`} role="search">
         <input className="input search" type="search" placeholder="Search batches or clients" value={filters.q} onChange={(e) => set('q', e.target.value)} aria-label="Search batches" />
         <select className="select" value={filters.clientId} onChange={(e) => set('clientId', e.target.value)} aria-label="Client">
           <option value="">All clients</option>
@@ -93,7 +100,7 @@ export function Production() {
         <label className="check" style={{ fontSize: 13 }}><input type="checkbox" checked={filters.completed === '1'} onChange={(e) => set('completed', e.target.checked ? '1' : '')} />Include older delivered</label>
         {anyFilter && <button className="btn sm ghost" onClick={() => setParams(view === 'table' ? { view: 'table' } : {})}>Clear filters</button>}
       </div>
-      <div className="quick" role="group" aria-label="Quick filters">
+      <div className={`quick prod-quick${showFilters ? ' open' : ''}`} role="group" aria-label="Quick filters">
         {FLAGS.map((f) => (
           <button key={f.id} aria-pressed={filters.flag === f.id} style={{ ['--c' as string]: f.c }} onClick={() => set('flag', filters.flag === f.id ? '' : f.id)}>
             <i className="d" aria-hidden />{f.label}<span className="n">{flagCounts[f.id] ?? 0}</span>
@@ -155,7 +162,10 @@ export function Production() {
         </div>
       )}
 
-      {q.data && batches.length > 0 && view === 'table' && (
+      {q.data && batches.length > 0 && view === 'table' && phone && (
+        <div className="panel"><div className="rows">{sorted.map((b) => <BatchItem key={b.id} b={b} onOpen={() => setInspect(b.id)} />)}</div></div>
+      )}
+      {q.data && batches.length > 0 && view === 'table' && !phone && (
         <div className="panel" style={{ padding: '14px 16px' }}>
           <div className="table-scroll" tabIndex={0} aria-label="Batches table">
             <table className="tbl" style={{ minWidth: 860 }}>

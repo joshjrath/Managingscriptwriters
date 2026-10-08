@@ -74,7 +74,6 @@ export interface Counts {
   myNewWork: number;
   reviewQueue: number;
   unreadNotifications: number;
-  unreadMessages: number;
   attention: number;
 }
 
@@ -155,6 +154,8 @@ export interface Bootstrap {
   whatsNewSeen: string | null;
   /** this person's own time zone (times across the site show in it) and whether they've confirmed it */
   timezone: { mine: string | null; confirmed: boolean };
+  /** signed in with a temporary password an admin or manager set */
+  mustChangePassword: boolean;
   settings: Settings;
   users: UserSummary[];
   clients: ClientLite[];
@@ -725,30 +726,6 @@ export interface Todo {
   doneAt: string | null;
   /** may change the text, date or remove it (the person who added it, or a manager) */
   canEdit: boolean;
-}
-
-/** A direct message between two team members. */
-export interface ChatMessage {
-  id: number;
-  fromId: number;
-  toId: number;
-  body: string;
-  createdAt: string;
-  readAt: string | null;
-}
-
-/** One conversation in the list: the other person, the latest message and how many you haven't read. */
-export interface ChatThread {
-  userId: number;
-  name: string;
-  role: Role;
-  last: ChatMessage;
-  unread: number;
-}
-
-export interface ChatInbox {
-  threads: ChatThread[];
-  unread: number;
 }
 
 /** A shoot on a synced calendar (e.g. Joshua's Google Calendar) that still needs planning on the site. */

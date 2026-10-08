@@ -11,13 +11,13 @@ import {
 import { api, useSave, type ApiError } from '../api';
 import type { BatchDetail, ClientDetail, MyWork, Priority, ReschedulePreview, Resource, ResourceCategory, Script, Submission } from '../../../shared/types';
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
-import { canWrite, checkAction, compressRanges, parseRanges, ROLE_LABEL, STATUS_LABEL, type ScriptAction, type ScriptStatus, isManager } from '../../../shared/workflow';
+import { canWrite, checkAction, compressRanges, parseRanges, ROLE_LABEL, scriptsLabel, STATUS_LABEL, type ScriptAction, type ScriptStatus, isManager } from '../../../shared/workflow';
 import { addDays, computeDeadlines, diffDays, draftFromFinal, isISODate, suggestStart, type ISODate } from '../../../shared/dates';
 import { cutoffIn, fmtBytes, fmtCutoff, fmtDate, fmtLong, fmtRange, fmtStamp, fmtTimeZoneAbbr, plural } from '../../../shared/format';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import {
   Avatar, BatchProgress, Button, Chip, CountUp, Dialog, DueChip, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel,
-  Ring, ringColor, StageChip, StatusChip, Term, useFieldId, useToast, Seg,
+  NotFound, Ring, ringColor, StageChip, StatusChip, Term, useFieldId, useToast, Seg,
 } from '../components/ui';
 import { WrittenCounter } from '../components/WrittenCounter';
 import { PipLegend, ScriptPips, TodayBump } from '../components/WritingPulse';
@@ -27,7 +27,9 @@ import { approvedSources, CardList, DecisionDialog, DocumentHistory, SendDialog,
 
 export function BatchPage() {
   const { id } = useParams();
-  const q = useQuery({ queryKey: ['batch', Number(id)], queryFn: () => api<BatchDetail>(`/api/batches/${id}`) });
+  const bad = !/^\d+$/.test(id ?? '');
+  const q = useQuery({ queryKey: ['batch', Number(id)], queryFn: () => api<BatchDetail>(`/api/batches/${id}`), enabled: !bad });
+  if (bad || (q.error as ApiError | null)?.status === 404) return <NotFound what="batch" />;
   if (q.isLoading) return <><div style={{ height: 90 }} /><Loading height={520} /></>;
   if (q.isError) return <ErrorState error={q.error} retry={() => q.refetch()} />;
   return <BatchView b={q.data!} />;
@@ -574,7 +576,7 @@ export function NoteDialog({ title, label, required, busy, error, confirm, varia
   const id = useFieldId('note');
   const submit = () => { if (required && !note.trim()) { setErr('Add a note so the writer knows what to change'); return; } onSubmit(note.trim() || null); };
   return (
-    <Dialog open onClose={onClose} title={title} sub={`Scripts ${scripts}`} size="narrow"
+    <Dialog open onClose={onClose} title={title} sub={`${/[,–]/.test(scripts) ? 'Scripts' : 'Script'} ${scripts}`} size="narrow"
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant={variant} busy={busy} onClick={submit}>{confirm}</Button></div>}>
       <div className="form">
         <FormError error={error} />
@@ -892,7 +894,7 @@ function Deliveries({ b }: { b: BatchDetail }) {
           {b.deliveries.map((d) => (
             <div key={d.id} className="item edge-mint">
               <div className="body">
-                <div className="title">Scripts {compressRanges(d.scriptNumbers) || '—'}</div>
+                <div className="title">{d.scriptNumbers.length ? scriptsLabel(d.scriptNumbers) : 'Scripts —'}</div>
                 <div className="meta"><span>{d.forNames.length ? <>Confirmed by <b style={{ color: 'var(--text)' }}>{d.confirmedByName}</b> for {d.forNames.join(', ')}</> : <>Confirmed by the writer, <b style={{ color: 'var(--text)' }}>{d.confirmedByName}</b></>}</span><span>{fmtStamp(d.confirmedAt, displayTz)}</span></div>
                 {d.note && <div className="muted" style={{ fontSize: 13 }}>{d.note}</div>}
                 {d.scriptNumbers.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>These scripts were later moved back to approved.</div>}

@@ -293,6 +293,21 @@ export function ErrorState({ error, retry }: { error: unknown; retry?: () => voi
   );
 }
 
+/** A page or record that isn't there, with a way back instead of a dead end. */
+export function NotFound({ what = 'page' }: { what?: string }) {
+  useEffect(() => { const t = document.title; document.title = `Not found · Scale Media`; return () => { document.title = t; }; }, []);
+  return (
+    <div className="panel not-found">
+      <h1>That {what} isn’t here</h1>
+      <p className="muted">It may have been removed, or the link is mistyped.</p>
+      <div className="row-flex s2" style={{ marginTop: 16 }}>
+        <a className="btn primary pill" href="/">Go home</a>
+        <button type="button" className="btn ghost" onClick={() => history.back()}>Go back</button>
+      </div>
+    </div>
+  );
+}
+
 export function Loading({ label = 'Loading…', height = 320 }: { label?: string; height?: number }) {
   return <div className="skel" style={{ height }} role="status" aria-label={label} />;
 }
@@ -332,12 +347,27 @@ export const inputProps = (id: string, error?: string) => ({ id, 'aria-invalid':
 /** Native <dialog>: focus trapping, Escape and backdrop come from the browser. */
 export function Dialog({ open, onClose, title, sub, children, footer, kind = 'modal', size = '' }: { open: boolean; onClose: () => void; title: ReactNode; sub?: ReactNode; children: ReactNode; footer?: ReactNode; kind?: 'modal' | 'drawer'; size?: '' | 'wide' | 'narrow' }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
   const hid = useId();
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
-    if (open && !d.open) d.showModal();
+    if (open && !d.open) {
+      // keyboard users keep their place: remember what opened it, start on the first field
+      opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      d.showModal();
+      requestAnimationFrame(() => {
+        if (d.contains(document.activeElement) && document.activeElement !== d.querySelector('.sheet-head .icon-btn')) return;
+        // on touch screens, don't pop the keyboard open uninvited
+        if (window.matchMedia('(pointer: coarse)').matches) return;
+        const first = d.querySelector<HTMLElement>('.sheet-body input:not([type=hidden]):not([disabled]), .sheet-body select:not([disabled]), .sheet-body textarea:not([disabled])');
+        (first ?? d.querySelector<HTMLElement>('.sheet-foot .btn.primary, .sheet-foot button'))?.focus();
+      });
+    }
     if (!open && d.open) d.close();
+    const back = () => { const o = opener.current; opener.current = null; if (o && o.isConnected) requestAnimationFrame(() => o.focus()); };
+    if (!open) back();
+    return () => { if (open) back(); };
   }, [open]);
   return (
     <dialog

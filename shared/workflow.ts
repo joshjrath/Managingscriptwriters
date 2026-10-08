@@ -259,6 +259,12 @@ export function compressRanges(numbers: number[]): string {
   return parts.join(', ');
 }
 
+/** "Script 3" or "Scripts 1–3, 7": the right word for however many there are. */
+export function scriptsLabel(numbers: number[]): string {
+  const n = new Set(numbers).size;
+  return `${n === 1 ? 'Script' : 'Scripts'} ${compressRanges(numbers)}`;
+}
+
 /** "1-20, 25", "1 - 20 and 25", "1 to 20; 25" → [1..20, 25]; returns null if the text isn't a valid range list. */
 export function parseRanges(text: string, max: number): number[] | null {
   const out = new Set<number>();

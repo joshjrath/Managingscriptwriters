@@ -14,7 +14,7 @@ import type { Briefing, ClientDetail, ClientSummary } from '../../../shared/type
 import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
 import { PageHeader, useBoot, useNewWork, useDisplayTz } from '../components/Shell';
 import { BatchItem } from '../components/BatchBits';
-import { Button, Chip, DateTile, Dialog, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel, Seg, Term, useFieldId, useToast } from '../components/ui';
+import { Button, Chip, DateTile, Dialog, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, NotFound, Panel, Seg, Term, useFieldId, useToast } from '../components/ui';
 import { RescheduleDialog, ResourceDialog, ResourceRow } from './BatchDetail';
 
 export function ClientsPage() {
@@ -152,7 +152,8 @@ export function ClientPage() {
   const editor = me.role === 'editor';
   const openNew = useNewWork();
   const toast = useToast();
-  const q = useQuery({ queryKey: ['client', Number(id)], queryFn: () => api<ClientDetail>(`/api/clients/${id}`) });
+  const bad = !/^\d+$/.test(id ?? '');
+  const q = useQuery({ queryKey: ['client', Number(id)], queryFn: () => api<ClientDetail>(`/api/clients/${id}`), enabled: !bad });
   const [edit, setEdit] = useState(false);
   const [brief, setBrief] = useState<Briefing | 'new' | null>(null);
   const [res, setRes] = useState<{ briefingId?: number } | null>(null);
@@ -164,6 +165,7 @@ export function ClientPage() {
   const convert = useSave(() => api(`/api/clients/${id}/stage`, { body: { stage: 'client' } }), {
     onSuccess: () => { confetti({ ...(convertAt.current ?? {}), count: 90, spread: 100, power: 13 }); toast(`${q.data?.name ?? 'They'} ${q.data?.name ? 'is' : 'are'} now a client`); },
   });
+  if (bad || (q.error as { status?: number } | null)?.status === 404) return <NotFound what="client" />;
   if (q.isLoading) return <><div style={{ height: 90 }} /><Loading height={480} /></>;
   if (q.isError) return <ErrorState error={q.error} retry={() => q.refetch()} />;
   const c = q.data!;

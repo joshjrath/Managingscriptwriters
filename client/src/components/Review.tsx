@@ -9,7 +9,7 @@ import { AnimatePresence, m } from 'framer-motion';
 import { Check, ChevronDown, ExternalLink, FileText, Link2, PenLine, RotateCcw, Send, Upload } from 'lucide-react';
 import { api, ApiError, queryClient, useSave } from '../api';
 import type { Attachment, ReviewGroup, ReviewRecord, Script, Submission } from '../../../shared/types';
-import { compressRanges, parseRanges, parseTitleLines } from '../../../shared/workflow';
+import { compressRanges, parseRanges, parseTitleLines, scriptsLabel } from '../../../shared/workflow';
 import { fmtBytes, fmtStamp, plural } from '../../../shared/format';
 import { useBoot, useDisplayTz } from './Shell';
 import { burst, centerOf, confetti, plane } from '../fx';
@@ -139,7 +139,7 @@ export function TitlesDialog({ batchId, scripts, onClose }: { batchId: number; s
     onSuccess: (out) => { toast(out.changed ? `Updated ${plural(out.changed, 'title')}` : 'No titles changed'); onClose(); },
   });
   return (
-    <Dialog open onClose={onClose} title="Script titles" sub={`Scripts ${compressRanges(scripts.map((s) => s.number))}`} size="narrow"
+    <Dialog open onClose={onClose} title="Script titles" sub={scriptsLabel(scripts.map((s) => s.number))} size="narrow"
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={save.isPending} onClick={() => save.mutate(undefined)}>Save titles</Button></div>}>
       <div className="form"><FormError error={save.error} /><TitlesField id={id} scripts={scripts} value={text} onChange={setText} /></div>
     </Dialog>
@@ -245,7 +245,7 @@ export function DecisionDialog({ batchId, scripts, submissionId, mode, groupKey,
   const from = useRef<{ x: number; y: number } | null>(null);
   const undoable = useUndoDecision();
   const [note, setNote] = useState('');
-  const [att, setAtt] = useState<AttachValue>(emptyAttach(mode === 'approve_edits' ? 'file' : 'none'));
+  const [att, setAtt] = useState<AttachValue>(emptyAttach('none'));
   const [errs, setErrs] = useState<Record<string, string>>({});
   const nid = useFieldId('dn');
   const nums = compressRanges(scripts.map((s) => s.number));
@@ -259,22 +259,23 @@ export function DecisionDialog({ batchId, scripts, submissionId, mode, groupKey,
     const at = from.current ?? centerOf(null);
     if (mode === 'revisions') burst(at.x, at.y, { colors: PINK, count: 14 });
     else { burst(at.x, at.y, { colors: MINT, count: 18 }); confetti({ x: at.x, y: at.y, count: 40, spread: 80, power: 10 }); }
-    undoable(out?.reviewId, mode === 'revisions' ? `Sent ${plural(scripts.length, 'script')} back` : `Approved ${plural(scripts.length, 'script')} with your edits`);
+    undoable(out?.reviewId, mode === 'revisions' ? `Sent ${plural(scripts.length, 'script')} back` : `Approved ${plural(scripts.length, 'script')}${(att.file || att.url.trim()) ? ' with your edits' : note.trim() ? ' with your note' : ''}`);
     onClose();
   } });
   const submit = () => {
     from.current = centerOf(document.activeElement);
     const e: Record<string, string> = {};
     if (mode === 'revisions' && !note.trim()) e.note = 'Say what needs to change';
-    const a = attachError(att, mode === 'approve_edits');
+    // approving: a note, your edited version, or both; neither is required
+    const a = attachError(att, false);
     if (a) e.attach = a;
     setErrs(e);
     if (!Object.keys(e).length) save.mutate(undefined);
   };
   return (
     <Dialog open onClose={onClose} size="narrow"
-      title={mode === 'revisions' ? `Send ${plural(scripts.length, 'script')} back` : 'Approve with your edits'}
-      sub={`Scripts ${nums}${mode === 'revisions' ? ' · the writer gets one request with your note' : ' · the writer is told to use your version'}`}
+      title={mode === 'revisions' ? `Send ${plural(scripts.length, 'script')} back` : 'Approve with a note or your edits'}
+      sub={`${scripts.length === 1 ? 'Script' : 'Scripts'} ${nums}${mode === 'revisions' ? ' · the writer gets one request with your note' : ' · the writer sees your note, and is told to use your version if you attach one'}`}
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant={mode === 'revisions' ? 'danger' : 'mint'} busy={save.isPending} onClick={submit}>{mode === 'revisions' ? 'Send back' : `Approve ${plural(scripts.length, 'script')}`}</Button></div>}>
       <div className="form">
         <FormError error={save.error} />
@@ -282,8 +283,8 @@ export function DecisionDialog({ batchId, scripts, submissionId, mode, groupKey,
           <textarea className="textarea" autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder={mode === 'revisions' ? 'e.g. Tighten every opening line. See my comments in the PDF.' : 'Optional'} {...inputProps(nid, errs.note)} />
         </Field>
         <div className="field">
-          <span className="lbl">{mode === 'revisions' ? 'Attach your changes' : 'Your edited version'}{mode === 'revisions' && <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional</span>}</span>
-          <AttachInput value={att} onChange={setAtt} allowNone={mode === 'revisions'} error={errs.attach}
+          <span className="lbl">{mode === 'revisions' ? 'Attach your changes' : 'Your edited version'}{<span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional</span>}</span>
+          <AttachInput value={att} onChange={setAtt} allowNone error={errs.attach}
             fileHelp={mode === 'revisions' ? 'Your marked-up PDF.' : 'The final version with your changes.'}
             linkHelp="Your edited Google Doc, or a link to the marked-up file." />
         </div>
@@ -351,7 +352,7 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
         </div>
         <DueChip m={group.batch.final} today={clock.today} />
       </div>
-      {sub && hasDoc(sub) ? <DocRow a={sub} tone="lavender" /> : <p className="muted" style={{ fontSize: 13 }}>No document attached — these were marked ready without one. Check each script’s own link on the batch page.</p>}
+      {sub && hasDoc(sub) ? <DocRow a={sub} tone="lavender" /> : <p className="muted" style={{ fontSize: 13 }}>No document attached — these were marked ready without one. {showBatch ? 'Check each script’s own link on the batch page.' : 'Check each script’s own link in the checklist below.'}</p>}
       {sub && sub.scriptNumbers.length > n && <p className="muted" style={{ fontSize: 12.5 }}>This document covers scripts {compressRanges(sub.scriptNumbers)}. Only {nums} still need{n === 1 ? 's' : ''} a decision.</p>}
       {sub?.note && <blockquote className="rc-note">“{sub.note}” <span>— {sub.submittedByName}</span></blockquote>}
       <TitlesPreview scripts={group.scripts} />
@@ -368,7 +369,7 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
           <div className="rc-actions">
             <Button variant="mint" icon={<Check aria-hidden />} busy={approve.isPending && approve.variables === target} onClick={(e) => approveNow(target, e.currentTarget)}>{sel ? `Approve ${target.length} selected` : n === 1 ? 'Approve' : `Approve all ${n}`}</Button>
             <Button variant="danger" icon={<RotateCcw aria-hidden />} onClick={() => setDialog({ mode: 'revisions', scripts: target })}>{sel ? `Send ${target.length} selected back` : 'Send back'}</Button>
-            <Button variant="ghost" icon={<PenLine aria-hidden />} onClick={() => setDialog({ mode: 'approve_edits', scripts: target })}>{sel ? `Approve ${target.length} with my edits` : 'Approve with my edits'}</Button>
+            <Button variant="ghost" icon={<PenLine aria-hidden />} onClick={() => setDialog({ mode: 'approve_edits', scripts: target })}>{sel ? `Approve ${target.length} with a note…` : 'Approve with a note or edits…'}</Button>
             {n > 1 && <button type="button" className="linkbtn rc-more" aria-expanded={oneByOne} onClick={() => setOneByOne(!oneByOne)}>{oneByOne ? 'Hide script list' : 'Review scripts one by one'}</button>}
           </div>
           <FormError error={approve.error} />
@@ -416,7 +417,7 @@ export function SentBackCard({ group, onResend, showBatch = true }: { group: Rev
         <Chip color="pink" icon={<RotateCcw aria-hidden />}>Sent back</Chip>
       </div>
       {r?.note && <blockquote className="rc-note pink">“{r.note}”</blockquote>}
-      {r && hasDoc(r) && <DocRow a={r} label="Their changes" tone="pink" />}
+      {r && hasDoc(r) && <DocRow a={r} label={r.reviewedByName === me.name ? 'Your changes' : `${r.reviewedByName.split(' ')[0]}’s changes`} tone="pink" />}
       {group.submission && hasDoc(group.submission) && <DocRow a={group.submission} label={`Version ${group.submission.version} that was reviewed`} />}
       {onResend && <div className="rc-actions"><Button variant="primary pill" icon={<Send aria-hidden />} onClick={onResend}>Send revised version</Button></div>}
     </section>
@@ -424,16 +425,55 @@ export function SentBackCard({ group, onResend, showBatch = true }: { group: Rev
 }
 
 /** Every version and decision for one writer's scripts, newest first. */
+/**
+ * Every version and decision, grouped by document: "Scripts 1–3 · Sarah Chen: v1 → v2 → v3",
+ * each version with its Open link and the decisions made on it underneath.
+ */
 export function DocumentHistory({ submissions }: { submissions: Submission[] }) {
   const displayTz = useDisplayTz();
   if (!submissions.length) return null;
-  const items = submissions.flatMap((s) => [
-    { at: s.createdAt, key: `s${s.id}`, node: <><b>Version {s.version}</b> sent by {s.submittedByName} · scripts {compressRanges(s.scriptNumbers)} {hasDoc(s) && <a className="link" href={docHref(s)} target="_blank" rel="noopener noreferrer">open</a>}{s.note ? ` — “${s.note}”` : ''}</> , c: 'var(--lavender)' },
-    ...s.reviews.map((r) => ({ at: r.createdAt, key: `r${r.id}`, c: r.action === 'approved' ? 'var(--mint)' : 'var(--pink)', node: <><b>{r.action === 'approved' ? 'Approved' : 'Sent back'}</b> by {r.reviewedByName} · scripts {compressRanges(r.scriptNumbers)}{r.note ? ` — “${r.note}”` : ''} {hasDoc(r) && <a className="link" href={docHref(r)} target="_blank" rel="noopener noreferrer">{r.action === 'approved' ? 'edited version' : 'their changes'}</a>}</> })),
-  ]).sort((a, b) => b.at.localeCompare(a.at));
+  const byId = new Map(submissions.map((s) => [s.id, s]));
+  const rootOf = (s: Submission) => { let x = s; const seen = new Set<number>(); while (x.previousId && byId.has(x.previousId) && !seen.has(x.id)) { seen.add(x.id); x = byId.get(x.previousId)!; } return x.id; };
+  const chains = new Map<number, Submission[]>();
+  for (const s of submissions) chains.set(rootOf(s), [...(chains.get(rootOf(s)) ?? []), s]);
+  // newest activity first
+  const list = [...chains.values()].map((c) => c.sort((x, y) => x.createdAt.localeCompare(y.createdAt)))
+    .sort((x, y) => y[y.length - 1].createdAt.localeCompare(x[x.length - 1].createdAt));
   return (
-    <div className="timeline">
-      {items.map((i) => <div key={i.key} className="tl" style={{ ['--c' as string]: i.c }}><span className="d" /><div><div className="s">{i.node}</div><div className="w">{fmtStamp(i.at, displayTz)}</div></div></div>)}
+    <div className="doc-chains">
+      {list.map((chain) => {
+        const nums = [...new Set(chain.flatMap((s) => s.scriptNumbers))];
+        const last = chain[chain.length - 1];
+        return (
+          <section key={chain[0].id} className="doc-chain">
+            <div className="doc-chain-head">
+              <b>{scriptsLabel(nums)}</b>
+              <span className="muted">{last.writerName ?? last.submittedByName} · {chain.map((s) => `v${s.version}`).join(' → ')}</span>
+            </div>
+            <ol className="timeline">
+              {chain.map((s) => (
+                <li key={s.id} className="tl" style={{ ['--c' as string]: 'var(--lavender)' }}>
+                  <span className="d" />
+                  <div>
+                    <div className="s"><b>Version {s.version}</b> sent by {s.submittedByName}{s.scriptNumbers.length !== nums.length ? ` · ${scriptsLabel(s.scriptNumbers).toLowerCase()}` : ''} {hasDoc(s) && <a className="link" href={docHref(s)} target="_blank" rel="noopener noreferrer">Open</a>}{s.note ? ` — “${s.note}”` : ''}</div>
+                    <div className="w">{fmtStamp(s.createdAt, displayTz)}</div>
+                    {s.reviews.length > 0 && (
+                      <ul className="doc-decisions">
+                        {s.reviews.map((r) => (
+                          <li key={r.id} style={{ ['--c' as string]: r.action === 'approved' ? 'var(--mint)' : 'var(--pink)' }}>
+                            <b>{r.action === 'approved' ? 'Approved' : 'Sent back'}</b> by {r.reviewedByName} · {scriptsLabel(r.scriptNumbers).toLowerCase()}{r.note ? ` — “${r.note}”` : ''} {hasDoc(r) && <a className="link" href={docHref(r)} target="_blank" rel="noopener noreferrer">{r.action === 'approved' ? 'edited version' : 'changes'}</a>}
+                            <span className="w"> · {fmtStamp(r.createdAt, displayTz)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                </li>
+              ))}
+            </ol>
+          </section>
+        );
+      })}
     </div>
   );
 }

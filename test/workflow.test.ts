@@ -153,6 +153,10 @@ describe('What’s new', () => {
     expect([...dates].sort().reverse()).toEqual(dates);
     expect(CHANGELOG.at(-1)!.title).toMatch(/launches/);
     for (const e of CHANGELOG) expect(e.changes.length).toBeGreaterThan(0);
+    // who-it's-for tags only name real entries
+    const { ONLY_FOR, TECHNICAL } = await import('../shared/changelog');
+    const ids = new Set(CHANGELOG.map((e) => e.id));
+    for (const id of [...Object.keys(ONLY_FOR), ...TECHNICAL]) expect(ids.has(id)).toBe(true);
   });
 });
 

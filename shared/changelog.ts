@@ -7,6 +7,24 @@ import type { ISODate } from './dates';
 
 export type ChangeTag = 'new' | 'improved' | 'fixed';
 
+/** Who an update matters to. Entries not listed in ONLY_FOR are for everyone. */
+export type Audience = 'managers' | 'writers' | 'editors';
+
+/** Updates that only matter to some people (Admins count as managers). */
+export const ONLY_FOR: Record<string, Audience[]> = {
+  '2026-10-07-calendar-shoots-match': ['managers'], '2026-10-07-editors': ['managers', 'editors'], '2026-10-07-calendar-shoots': ['managers'],
+  '2026-10-07-calendar-embed': ['managers'], '2026-10-02-fill-missing-deadlines': ['managers'], '2026-10-02-drafts-from-final': ['managers'],
+  '2026-10-01-palettes': ['managers'], '2026-09-30-control-center-people': ['managers'], '2026-09-30-control-center-admin-editors': ['managers'],
+  '2026-09-30-control-center': ['managers'], '2026-09-30-batch-delivery-catch-up': ['managers'], '2026-09-30-batch-delivery': ['managers'],
+  '2026-09-29-potential-label': ['managers'], '2026-09-29-view-as-recording': ['managers'], '2026-09-28-paste-notes': ['managers'],
+  '2026-09-28-potential-clients': ['managers'], '2026-09-28-plan-later': ['managers'], '2026-09-28-admin-name': ['managers'],
+  '2026-09-28-calendar-drag': ['managers'], '2026-09-28-team': ['managers'], '2026-09-28-signin-details': ['managers'],
+  '2026-10-07-my-work-redesign': ['writers', 'managers'], '2026-09-28-written-counter': ['writers', 'managers'], '2026-10-08-writers-never-miss': ['writers', 'managers'],
+  '2026-10-08-manager-editor-screens': ['managers', 'editors'],
+};
+/** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
+export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
+
 export interface ChangelogEntry {
   id: string;
   date: ISODate;
@@ -16,6 +34,24 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-08-phones-admin-polish',
+    date: '2026-10-08',
+    title: 'Chat removed, Overview numbers back on top, and phones, keyboard and setup polish',
+    summary: 'The last round of fixes from the site review, plus the chat bubble taken out.',
+    changes: [
+      { tag: 'improved', text: 'Messages and the chat bubble are gone from the site. Writers’ menu is My work, Calendar, Script bank, Resources and Clients; managers keep the Team page.' },
+      { tag: 'improved', text: 'Overview starts with the four summary cards, Work due by day and Upcoming shoots again, with Needs attention right below.' },
+      { tag: 'new', text: 'A new workspace asks for the organisation name, head office time zone and when deadlines end, and shows a three-step Get started card until the team, a client and a shoot are added.' },
+      { tag: 'improved', text: 'Signing in with a temporary password asks you to choose your own, and the temporary one can’t be kept. If you’re signed out because of a reset, the sign-in page says so.' },
+      { tag: 'improved', text: 'Settings: every time zone is in the list, unsaved changes show a bar with Save and Discard, and the browser asks before you leave. “Editors on the map” is clearly separate from editors who can sign in, and asks before removing anyone.' },
+      { tag: 'improved', text: 'View as says up front that it’s look-only. The Control Center explains its numbers in plain words. A calendar link that can’t be reached says how to fix it. What’s new shows the updates for your role first.' },
+      { tag: 'improved', text: 'Phones: the menu button shows when something inside needs you, Production filters fold behind one button and its table becomes cards, inputs no longer zoom on iPhone, dialogs keep their main button in reach, and long names wrap instead of pushing the page sideways.' },
+      { tag: 'improved', text: 'Tablets show a small label under each sidebar icon and real numbers. Buttons are easier to tap on touch screens, and the sidebar footer stays in view on short screens.' },
+      { tag: 'improved', text: 'Keyboard: a Skip to content link, dialogs start on their first field and return you to the button that opened them.' },
+      { tag: 'improved', text: 'Approve with a note, with or without your own version attached. A batch’s document history is grouped by document, each version with its decisions. “Their changes” now says whose. Singular and plural words are right on the cards and labels, and missing pages offer a way home.' },
+    ],
+  },
   {
     id: '2026-10-08-manager-editor-screens',
     date: '2026-10-08',

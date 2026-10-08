@@ -10,7 +10,7 @@ import './styles/app.css';
 import { api, queryClient } from './api';
 import type { Bootstrap } from '../../shared/types';
 import { AppShell } from './components/Shell';
-import { ErrorState, ToastProvider } from './components/ui';
+import { ErrorState, NotFound, ToastProvider } from './components/ui';
 import { Login, type AuthStatus } from './pages/Login';
 import { Overview } from './pages/Overview';
 import { MyWorkPage } from './pages/MyWork';
@@ -53,7 +53,13 @@ function Gate() {
     return <div className="loading-center" role="status"><span className="wordmark" style={{ fontSize: 28 }}>Scale&nbsp;<span>Media</span></span><span>Loading…</span></div>;
   }
   if (status.isError) return <main className="login"><ErrorState error={status.error} retry={() => status.refetch()} /></main>;
-  if (!status.data!.signedIn) return <Login status={status.data!} onDone={() => { queryClient.clear(); status.refetch(); }} />;
+  // signed out without pressing Sign out (a password reset, or the session ended): say so
+  let signedOut = false;
+  try {
+    if (status.data!.signedIn) localStorage.setItem('sm.signed-in', '1');
+    else signedOut = localStorage.getItem('sm.signed-in') === '1';
+  } catch { /* ignore */ }
+  if (!status.data!.signedIn) return <Login status={status.data!} signedOut={signedOut} onDone={() => { queryClient.clear(); status.refetch(); }} />;
   if (boot.isError || !boot.data) return <main className="login"><ErrorState error={boot.error} retry={() => boot.refetch()} /></main>;
   const role = boot.data.me.role;
   const home = isManager(role) ? '/overview' : role === 'editor' ? '/editor' : '/my-work';
@@ -76,11 +82,11 @@ function Gate() {
         <Route path="/review" element={managers(<ReviewPage />)} />
         <Route path="/resources" element={<ResourcesPage />} />
         <Route path="/scripts" element={<ScriptBankPage />} />
-        <Route path="/writers" element={<WritersPage />} />
+        <Route path="/writers" element={managers(<WritersPage />)} />
         <Route path="/settings" element={only(<SettingsPage />)} />
         <Route path="/log" element={only(<MasterLogPage />)} />
         <Route path="/whats-new" element={<WhatsNewPage />} />
-        <Route path="*" element={<div className="panel"><h2>Page not found</h2><p className="muted" style={{ marginTop: 8 }}>That page doesn’t exist.</p></div>} />
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
   );

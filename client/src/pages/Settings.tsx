@@ -19,7 +19,14 @@ import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps,
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const fmtHour = (h: number) => `${((h + 11) % 12) + 1}:00 ${h < 12 ? 'AM' : 'PM'}`;
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const ZONES = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Phoenix', 'America/Toronto', 'Europe/London', 'Europe/Dublin', 'Europe/Berlin', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Australia/Sydney', 'Pacific/Auckland', 'UTC'];
+// the common head-office zones first, then every zone there is
+const ZONES = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Toronto', 'Europe/London', 'Europe/Berlin', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Australia/Sydney'];
+
+/** Links like /settings#team land on that panel. */
+function SettingsHash() {
+  useEffect(() => { const id = window.location.hash.slice(1); if (id) setTimeout(() => document.getElementById(id)?.scrollIntoView({ block: 'start' }), 60); }, []);
+  return null;
+}
 
 export function SettingsPage() {
   const { me } = useBoot();
@@ -28,6 +35,7 @@ export function SettingsPage() {
   }
   return (
     <>
+      <SettingsHash />
       <PageHeader title="Settings" hideNewWork />
       {me.role === 'owner' && <div style={{ marginBottom: 'var(--gap)' }}><PalettePanel /></div>}
       <div className="grid g-2" style={{ alignItems: 'start' }}>
@@ -161,6 +169,14 @@ function RulesPanel() {
   const valid = !Object.keys(live).length;
   const example = valid ? computeDeadlines('2026-10-12', { ...DEFAULT_RULES, draftOffsetDays: v.draftOffsetDays, finalOffsetDays: v.finalOffsetDays, dayMode: v.dayMode, workingDays: v.workingDays }) : null;
   const changedRules = v.draftOffsetDays !== settings.draftOffsetDays || v.finalOffsetDays !== settings.finalOffsetDays || v.dayMode !== settings.dayMode || v.workingDays.join() !== settings.workingDays.join();
+  // nothing is lost by accident: the browser asks before leaving with unsaved changes
+  const dirty = (['orgName', 'timezone', 'cutoff', 'draftOffsetDays', 'finalOffsetDays', 'dayMode', 'reminderLeadDays', 'planReminderDays'] as const).some((k) => v[k] !== settings[k]) || v.workingDays.join() !== settings.workingDays.join();
+  useEffect(() => {
+    if (!dirty) return;
+    const h = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', h);
+    return () => window.removeEventListener('beforeunload', h);
+  }, [dirty]);
   const submit = () => {
     if (!valid) { toast('Some settings need fixing first', 'error'); revealError(form.current); return; }
     if (changedRules) setAsking('save'); else save.mutate(false);
@@ -193,7 +209,10 @@ function RulesPanel() {
         {example && <div className="banner"><CalendarClock aria-hidden /><div className="txt"><b>Example: shoot on Oct 12–13, 2026</b><span>Drafts due {fmtLong(example.draftDue)} · final delivery {fmtLong(example.finalDue)}</span></div></div>}
         <div className="form-grid">
           <Field label="HQ time zone" htmlFor={ids.tz} error={f.timezone ?? (isValidTimeZone(v.timezone) ? undefined : 'Unknown timezone')} help="Decides what “today” is and when a deadline passes. Existing deadlines keep their dates. Anyone in another time zone sees HQ time under their own clock.">
-            <select className="select" id={ids.tz} value={v.timezone} onChange={(e) => setV({ ...v, timezone: e.target.value })}>{[...new Set([v.timezone, ...ZONES])].map((z) => <option key={z} value={z}>{z.replace('_', ' ')}</option>)}</select>
+            <select className="select" id={ids.tz} value={v.timezone} onChange={(e) => setV({ ...v, timezone: e.target.value })}>
+              <optgroup label="Common">{[...new Set([v.timezone, ...ZONES])].map((z) => <option key={z} value={z}>{z.replace(/_/g, ' ')}</option>)}</optgroup>
+              <optgroup label="Every time zone">{timeZoneList().filter((z) => z !== v.timezone && !ZONES.includes(z)).map((z) => <option key={z} value={z}>{z.replace(/_/g, ' ')}</option>)}</optgroup>
+            </select>
           </Field>
           <Field label="Daily cutoff" htmlFor={ids.cut} error={f.cutoff} help={`Work is due by ${fmtCutoff(v.cutoff)} HQ time on the deadline day.`}><input className="input" type="time" value={v.cutoff} onChange={(e) => setV({ ...v, cutoff: e.target.value })} {...inputProps(ids.cut, f.cutoff)} /></Field>
           <Field label="Remind writers" htmlFor={ids.lead} error={f.reminderLeadDays} help="days before a deadline (plus on the day, and when overdue)"><input className="input num" type="number" min={0} max={14} value={shown(v.reminderLeadDays)} onChange={(e) => setV({ ...v, reminderLeadDays: num(e.target.value) })} {...inputProps(ids.lead, f.reminderLeadDays)} /></Field>
@@ -203,8 +222,10 @@ function RulesPanel() {
         <p className="muted" style={{ fontSize: 12.5 }}>{settings.remindersEnabled === false
           ? 'Reminders are turned off on this server.'
           : `Reminders appear in each person’s bell on the site (there’s no email). They run every 10 minutes${settings.remindersLastRunAt ? ` · last run ${fmtStamp(settings.remindersLastRunAt, settings.timezone)}` : ' · not run yet'}.`}</p>
-        <div className="form-actions">
+        <div className={`form-actions${dirty ? ' sticky-save' : ''}`}>
+          {dirty && <span className="unsaved"><i aria-hidden />Unsaved changes</span>}
           <Button variant="ghost" onClick={() => setAsking('existing')} disabled={!valid || changedRules}>Apply these rules to existing batches…</Button>
+          {dirty && <Button variant="ghost" onClick={() => setV(settings)}>Discard</Button>}
           <Button type="submit" variant="primary pill" busy={save.isPending && asking === null}>Save settings</Button>
         </div>
       </form>
@@ -250,7 +271,7 @@ function TeamPanel() {
   // the Admin's own account is the Admin's to change
   const locked = (u: UserSummary) => u.role === 'owner' && me.role !== 'owner';
   return (
-    <Panel title="Team" count={team.filter((u) => u.active).length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setAdding(true)}>Add person</Button>}>
+    <Panel id="team" title="Team" count={team.filter((u) => u.active).length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setAdding(true)}>Add person</Button>}>
       {q.isLoading && <Loading height={200} />}
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
       <div className="rows">
@@ -349,8 +370,8 @@ export function signInMessage(p: { name: string; email: string; password: string
     `Temporary password: ${p.password}`,
     '',
     p.reset
-      ? 'Once you’re in, set your own password: click your name at the bottom left → Change password.'
-      : `Once you’re in, set your own password: click your name at the bottom left → Change password. ${p.role === 'writer' ? 'Your scripts, deadlines and briefs are under “My work”.' : p.role === 'editor' ? 'Your home page shows upcoming shoots and the newest finished scripts; the Calendar, Script bank and client material are in the menu.' : ''}`.trim(),
+      ? 'Your password was reset, so you’ve been signed out. When you sign in with this one, the site asks you to choose your own.'
+      : `When you sign in, the site asks you to choose your own password (you can also change it any time from the menu under your name). ${p.role === 'writer' ? 'Your scripts, deadlines and briefs are under “My work”.' : p.role === 'editor' ? 'Your home page shows upcoming shoots and the newest finished scripts; the Calendar, Script bank and client material are in the menu.' : ''}`.trim(),
   ].join('\n');
 }
 
@@ -443,7 +464,7 @@ function PersonDialog({ user, team = [], preset, onCreated, onClose }: { user?: 
         {role !== 'editor' && <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates and over-capacity warnings."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>}
         <PlaceFields optional city={city} tz={tz} hours={hours} f={f}
           onChange={(v) => { if (save.error) save.reset(); if (v.city !== undefined) setCity(v.city); if (v.tz !== undefined) setTz(v.tz); if (v.hours) setHours(v.hours); }} />
-        <Field label={user ? 'Reset password' : 'Temporary password'} optional={!!user} htmlFor={ids.p} error={f.password} help={user ? 'Leave empty to keep their password. Set one and you’ll get a message to send them.' : 'At least 10 characters. After saving you’ll get a ready-to-send message with this and the sign-in link.'}>
+        <Field label={user ? 'Reset password' : 'Temporary password'} optional={!!user} htmlFor={ids.p} error={f.password} help={user ? 'Leave empty to keep their password. Setting one signs them out everywhere, and you’ll get a message to send them.' : 'At least 10 characters. After saving you’ll get a ready-to-send message with this and the sign-in link.'}>
           <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>
             <input className="input" type="text" autoComplete="new-password" spellCheck={false} value={password} onChange={(e) => setPassword(e.target.value)} {...inputProps(ids.p, f.password)} />
             <Button variant="sm" icon={<RefreshCw aria-hidden />} onClick={() => setPassword(generatePassword())}>Generate</Button>
@@ -467,12 +488,14 @@ function EditorsPanel() {
   const q = useQuery({ queryKey: ['editors'], queryFn: () => api<{ editors: Editor[] }>('/api/editors') });
   const [editing, setEditing] = useState<Editor | 'new' | null>(null);
   const toast = useToast();
-  const remove = useSave((id: number) => api(`/api/editors/${id}`, { method: 'DELETE' }), { onSuccess: () => toast('Editor removed') });
+  const remove = useSave((id: number) => api(`/api/editors/${id}`, { method: 'DELETE' }), { onSuccess: () => toast('Removed from the map') });
+  const { users } = useBoot();
+  const signedIn = users.filter((u) => u.role === 'editor' && u.active);
   // once they have a sign-in they're on the team (and in the Control Center from there), so the list entry goes
   const [inviting, setInviting] = useState<Editor | null>(null);
   const editors = q.data?.editors ?? [];
   return (
-    <Panel title="Editors" count={editors.length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setEditing('new')}>Add editor</Button>}>
+    <Panel title="Editors on the map" sub="no sign-in · shown in the Control Center" count={editors.length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setEditing('new')}>Add editor</Button>}>
       {q.isLoading && <Loading height={80} />}
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
       <div className="rows">
@@ -489,17 +512,27 @@ function EditorsPanel() {
               <div className="row-flex s2">
                 <Button variant="sm" icon={<KeyRound aria-hidden />} onClick={() => setInviting(e)}>Give site access</Button>
                 <Button variant="sm ghost" onClick={() => setEditing(e)}>Edit</Button>
-                <Button variant="sm ghost" busy={remove.isPending && remove.variables === e.id} onClick={() => remove.mutate(e.id)}>Remove</Button>
+                <Button variant="sm ghost" busy={remove.isPending && remove.variables === e.id} onClick={() => { if (window.confirm(`Remove ${e.name} from the map? They don’t have a sign-in, so nothing else changes.`)) remove.mutate(e.id); }}>Remove</Button>
               </div>
             </div>
           </div>
         ))}
       </div>
-      {q.data && !editors.length && <p className="muted" style={{ fontSize: 13 }}>No editors yet.</p>}
+      {signedIn.length > 0 && (
+        <div className="rows" style={{ marginTop: editors.length ? 10 : 0 }}>
+          {signedIn.map((u) => (
+            <div key={u.id} className="item" style={{ opacity: 0.85 }}>
+              <div className="row-flex" style={{ flexWrap: 'nowrap', minWidth: 0 }}><Avatar name={u.name} id={u.id} /><div className="body"><div className="title">{u.name}</div><div className="meta">{u.city ?? 'Editor'}</div></div></div>
+              <div className="side"><Chip color="mint" icon={<Check aria-hidden />}>Has site access</Chip></div>
+            </div>
+          ))}
+        </div>
+      )}
+      {q.data && !editors.length && !signedIn.length && <p className="muted" style={{ fontSize: 13 }}>No editors yet.</p>}
       <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>People here only appear in the Control Center, with their local time and working hours. To let one sign in and see the calendar and finished scripts, click Give site access: they move to the Team as an Editor. Only admins see this list.</p>
       {editing && <EditorDialog editor={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />}
       {inviting && <PersonDialog preset={{ name: inviting.name, role: 'editor', city: inviting.city, timezone: inviting.timezone, hours: inviting.workHours }}
-        onCreated={() => { const id = inviting.id; api(`/api/editors/${id}`, { method: 'DELETE' }).then(() => q.refetch(), () => {}); }} onClose={() => setInviting(null)} />}
+        onCreated={() => { const id = inviting.id; api(`/api/editors/${id}?reason=access`, { method: 'DELETE' }).then(() => q.refetch(), () => {}); }} onClose={() => setInviting(null)} />}
     </Panel>
   );
 }

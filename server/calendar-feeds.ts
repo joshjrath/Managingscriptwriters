@@ -125,7 +125,11 @@ export async function syncFeed(db: Db, feedId: number, fetchText: FetchText = fe
     });
     return { ok: true, count: events.length, error: null };
   } catch (err) {
-    const msg = err instanceof Error ? (err.name === 'TimeoutError' ? 'The calendar took too long to answer. It will try again in 15 minutes.' : err.message) : 'Could not read the calendar';
+    // say it in words people can act on, not "fetch failed"
+    const raw = err instanceof Error ? err.message : '';
+    const msg = err instanceof Error && err.name === 'TimeoutError' ? 'The calendar took too long to answer. It will try again in 15 minutes.'
+      : /fetch failed|ENOTFOUND|ECONNREFUSED|EAI_AGAIN|getaddrinfo|network/i.test(raw) ? 'Couldn’t reach that address. Check the link is the “Secret address in iCal format” from Google Calendar’s settings, and that it’s still valid.'
+        : raw || 'Could not read the calendar';
     await db.query(`update calendar_feeds set last_error = $2 where id = $1`, [feedId, msg.slice(0, 300)]);
     return { ok: false, count: Number(feed.event_count), error: msg };
   }

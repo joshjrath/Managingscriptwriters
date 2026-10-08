@@ -49,6 +49,7 @@ export function CalendarPage() {
   const writerId = writerParam === 'all' ? '' : writerParam ?? (!manager && !editor ? String(me.id) : '');
   const clientId = params.get('clientId') ?? '';
   const phone = window.matchMedia('(max-width: 760px)').matches;
+  const touch = window.matchMedia('(pointer: coarse)').matches;
   const view = (['days', 'month', 'list'] as const).find((v) => v === params.get('view')) ?? (phone ? 'list' : 'month');
   const n = (DAY_COUNTS.find((c) => String(c) === params.get('days')) ?? (phone ? 3 : 7)) as DayCount;
   // months slide in from the side you're heading towards
@@ -168,7 +169,7 @@ export function CalendarPage() {
 
   return (
     <>
-      <PageHeader title="Calendar" sub={editor ? 'Shoots, when each batch’s scripts are final, and synced calendars. Click a shoot to see its finished scripts.' : manager ? 'Writing periods, draft deadlines, final deliveries and shoots. Drag a shoot to another day to move it — its deadlines follow.' : 'Writing periods, draft deadlines, final deliveries and shoots.'}>
+      <PageHeader title="Calendar" sub={editor ? 'Shoots, when each batch’s scripts are final, and synced calendars. Click a shoot to see its finished scripts.' : manager ? `Writing periods, draft deadlines, final deliveries and shoots. ${touch ? 'Tap a shoot to change its dates' : 'Drag a shoot to another day to move it'} — its deadlines follow.` : 'Writing periods, draft deadlines, final deliveries and shoots.'}>
         <Seg role="group" aria-label="Calendar view">
           <button aria-pressed={view === 'days'} onClick={() => setView('days')}>Days</button>
           <button aria-pressed={view === 'month'} onClick={() => setView('month')}>Month</button>
@@ -186,7 +187,7 @@ export function CalendarPage() {
         {!editor && <select className="select sm" style={{ width: 'auto' }} value={writerId} onChange={(e) => setP('writerId', e.target.value || (manager ? '' : 'all'))} aria-label="Writer"><option value="">All writers</option>{users.filter((u) => u.active && u.role !== 'editor').map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>}
         <select className="select sm" style={{ width: 'auto', maxWidth: 220 }} value={clientId} onChange={(e) => setP('clientId', e.target.value)} aria-label="Client"><option value="">All clients</option>{clients.filter((c) => c.status !== 'archived').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
       </div>
-      <div className="quick" role="group" aria-label="Show event types">
+      <div className="quick cal-quick" role="group" aria-label="Show event types">
         {(Object.keys(TYPE) as CalendarEvent['type'][]).filter((t) => !editor || t === 'shoot' || t === 'final' || t === 'external').map((t) => {
           const T = TYPE[t];
           return (

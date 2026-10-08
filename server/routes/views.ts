@@ -151,13 +151,11 @@ export async function computeCounts(ctx: Ctx, me: Me, batches?: BatchSummary[], 
     if (isNewWork(mine.map((s) => ({ status: s.status, assignedAt: s.assigned_at ?? null })), written, now, seen.get(b.id) ?? null)) myNew++;
   }
   const unread = await ctx.db.one<{ n: number }>(`select count(*) as n from notifications where user_id = $1 and read_at is null`, [me.id]);
-  const msgs = await ctx.db.one<{ n: number }>(`select count(*) as n from messages m join users u on u.id = m.sender_id where m.recipient_id = $1 and m.read_at is null and u.active`, [me.id]);
   return {
     myOpenScripts: myOpen,
     myNewWork: myNew,
     reviewQueue: isManager(me.role) ? data.summaries.reduce((n, b) => n + b.progress.inReview, 0) : 0,
     unreadNotifications: unread?.n ?? 0,
-    unreadMessages: Number(msgs?.n ?? 0),
     attention: isManager(me.role) ? attentionFor(data.summaries, await inactivePeople(ctx.db)).length : attentionFor(data.summaries).length,
   };
 }
@@ -172,10 +170,13 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     const { summaries, scripts } = await loadBatches(ctx, {}, clock);
     const users = await loadUsers(db);
     const clients = await db.query<{ id: number; name: string; status: 'prospect' | 'active' | 'archived' }>(`select id, name, status from clients order by lower(name)`);
-    const seen = await db.one<{ whats_new_seen: string | null; timezone: string | null; timezone_confirmed_at: string | null }>(`select whats_new_seen, timezone, timezone_confirmed_at from users where id = $1`, [me.id]);
+    const seen = await db.one<{ whats_new_seen: string | null; timezone: string | null; timezone_confirmed_at: string | null; temp: boolean }>(
+      `select whats_new_seen, timezone, timezone_confirmed_at, temp_password is not null as temp from users where id = $1`, [me.id]);
     return {
       me, mode: sessionMode(req), notesImport: !!ctx.notesReader, whatsNewSeen: seen?.whats_new_seen ?? null,
       timezone: { mine: seen?.timezone ?? null, confirmed: !!seen?.timezone_confirmed_at },
+      // still on the temporary password someone gave them: ask for their own
+      mustChangePassword: !!seen?.temp && !sessionMode(req)?.viewingAs,
       settings, users, clients, clock, counts: await computeCounts(ctx, me, summaries, scripts),
     };
   });

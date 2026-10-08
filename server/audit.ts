@@ -63,7 +63,6 @@ const MUTATIONS: Record<string, string> = {
   '/api/calendar-feeds/:id': 'change a synced calendar',
   '/api/calendar-feeds/:id/sync': 'sync a calendar',
   '/api/calendar-shoots/dismiss': 'dismiss a calendar shoot',
-  '/api/messages/:userId': 'send a message',
   '/api/todos/:id': 'change a to-do',
   '/api/users': 'add a team member',
   '/api/users/:id': 'edit a team member',

@@ -179,12 +179,12 @@ function Portal({ status, onAuthorized, onDenied, onExit }: { status: ControlSta
       <form onSubmit={(e) => { e.preventDefault(); void submit(); }}>
         {needsEmail && (
           <div className="cc-field">
-            <label htmlFor="cc-op">OPERATOR</label>
+            <label htmlFor="cc-op">EMAIL</label>
             <input ref={emailRef} id="cc-op" type="email" autoComplete="username" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} disabled={busy} />
           </div>
         )}
         <div className="cc-field">
-          <label htmlFor="cc-key">{status.operator ? `KEY · ${status.operator.callsign}` : 'KEY'}</label>
+          <label htmlFor="cc-key">{status.operator ? `PASSWORD · ${status.operator.callsign}` : 'PASSWORD'}</label>
           <input ref={keyRef} id="cc-key" type="password" autoComplete="current-password" value={key} onChange={(e) => setKey(e.target.value)} disabled={busy} style={{ caretColor: 'var(--ice)' }} />
           <span className="scan" aria-hidden />
         </div>
@@ -195,7 +195,7 @@ function Portal({ status, onAuthorized, onDenied, onExit }: { status: ControlSta
         </div>
       </form>
       <div className="note">
-        {status.operator ? `OPERATOR ${status.operator.name.toUpperCase()} · CONFIRM WITH YOUR PASSWORD` : 'ADMIN ONLY · SIGN IN WITH YOUR PLATFORM ACCOUNT'}
+        {status.operator ? `${status.operator.name.toUpperCase()} · CONFIRM YOUR PASSWORD TO OPEN THE CONTROL CENTER` : 'ADMIN ONLY · SIGN IN WITH YOUR ACCOUNT ON THE SITE'}
         {status.demo ? <><br />DEMO WORKSPACE · THE DEMO PASSWORD WORKS HERE</> : null}
       </div>
     </div>

@@ -68,16 +68,26 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
   // First run only: creates the first manager when there are no users yet.
   app.post('/api/auth/setup', async (req, reply) => {
     if (!ctx.allowSetup) throw new HttpError(403, 'Setup from the browser is disabled here. Set MANAGER_EMAIL and MANAGER_PASSWORD on the server instead.');
-    const input = parse(z.object({ name: zs.name('Name', 120), email, password }), req.body);
+    const input = parse(z.object({
+      name: zs.name('Name', 120), email, password,
+      // the basics, asked once: the organisation's name, its HQ time zone and when deadlines end each day
+      orgName: z.string().trim().min(1, 'Enter your organisation’s name').max(120).optional(),
+      timezone: z.string().trim().refine(isValidTimeZone, 'Pick a time zone from the list').optional(),
+      cutoff: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a time like 17:00').optional(),
+    }), req.body);
     const pwErr = validatePassword(input.password);
     if (pwErr) throw new HttpError(400, pwErr, { password: pwErr });
     const id = await db.tx(async (t) => {
       const n = await t.one<{ n: number }>(`select count(*) as n from users`);
       if ((n?.n ?? 0) > 0) throw conflict('Setup has already been completed');
       const row = await t.one<{ id: number }>(
-        `insert into users (email, name, role, password_hash) values ($1, $2, 'owner', $3) returning id`,
-        [input.email, input.name, await hashPassword(input.password)],
+        `insert into users (email, name, role, password_hash, timezone) values ($1, $2, 'owner', $3, $4) returning id`,
+        [input.email, input.name, await hashPassword(input.password), input.timezone ?? null],
       );
+      if (input.orgName || input.timezone || input.cutoff) {
+        await t.query(`update settings set org_name = coalesce($1, org_name), timezone = coalesce($2, timezone), cutoff = coalesce($3, cutoff) where id = 1`,
+          [input.orgName ?? null, input.timezone ?? null, input.cutoff ?? null]);
+      }
       return row!.id;
     });
     setSessionCookie(reply, await createSession(db, id), ctx.secureCookies);
@@ -91,6 +101,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     if (!u || !(await verifyPassword(input.current, u.password_hash))) throw new HttpError(400, 'Current password is incorrect', { current: 'Current password is incorrect' });
     const err = validatePassword(input.next);
     if (err) throw new HttpError(400, err, { next: err });
+    if (input.next === input.current) throw new HttpError(400, 'Choose a new password, not the one you were given', { next: 'Choose a new password, not the one you were given' });
     await db.query(`update users set password_hash = $2, temp_password = null, updated_at = now() where id = $1`, [me.id, await hashPassword(input.next)]);
     await logActivity(db, { actor: me, action: 'user.password', entityType: 'user', entityId: me.id, summary: 'Changed their own password' });
     const token = req.cookies[SESSION_COOKIE];

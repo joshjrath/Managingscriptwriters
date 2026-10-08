@@ -10,7 +10,7 @@ import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight, Camera, Check, CheckCheck, ChevronDown, ClipboardCheck, Clock, FileText, PenLine, PlayCircle, Plus, RotateCcw, Send, Sparkles, Type } from 'lucide-react';
 import { api, useSave } from '../api';
 import type { MyWork, Script } from '../../../shared/types';
-import { compressRanges, isManager, isNewWork, newlyAdded, type Milestone } from '../../../shared/workflow';
+import { compressRanges, isManager, isNewWork, newlyAdded, scriptsLabel as scriptsWord, type Milestone } from '../../../shared/workflow';
 import { diffDays, type ISODate } from '../../../shared/dates';
 import { cutoffIn, fmtAgo, fmtCutoff, fmtDate, fmtStamp, fmtTimeZoneAbbr, fmtWeekday, plural } from '../../../shared/format';
 import { TodayPill } from '../components/TodayPill';
@@ -134,7 +134,7 @@ export function MyWorkPage() {
                     <div className="section-title" style={{ marginTop: by.done.length ? 18 : 0 }}>{self ? 'Your delivery confirmations' : 'Delivery confirmations'}</div>
                     <div className="rows">{q.data.recentDeliveries.map((d) => (
                       <div key={d.id} className="item edge-mint">
-                        <div className="body"><div className="top">{d.clientName}</div><div className="title">{d.batchTitle}</div><div className="meta">Scripts {compressRanges(d.scriptNumbers) || '—'} · {fmtStamp(d.confirmedAt, displayTz)}</div></div>
+                        <div className="body"><div className="top">{d.clientName}</div><div className="title">{d.batchTitle}</div><div className="meta">{d.scriptNumbers.length ? scriptsWord(d.scriptNumbers) : 'Scripts —'} · {fmtStamp(d.confirmedAt, displayTz)}</div></div>
                         <div className="side"><Chip color="mint">{d.forNames.length ? `For ${d.forNames.join(', ')}` : 'You confirmed'}</Chip></div>
                       </div>
                     ))}</div>

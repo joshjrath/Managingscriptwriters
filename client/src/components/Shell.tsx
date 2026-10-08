@@ -8,7 +8,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bell, Building2, CalendarDays, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
-  Circle, Eye, Globe2, Home, Library, MessageCircle, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
+  Circle, Eye, Globe2, Home, Library, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
 } from 'lucide-react';
 import { LayoutGroup, m } from 'framer-motion';
 import { api, queryClient, useSave } from '../api';
@@ -22,7 +22,6 @@ import { ModeBar, RecordingDialog, RecordingOffDialog, ViewAsDialog } from './Mo
 import { SPRING, setMotionEnabled, useMotionSetting } from '../motion';
 import { LATEST_CHANGE } from '../../../shared/changelog';
 import { ControlCenterLink } from '../control/Link';
-import { ChatProvider, useInbox } from './Chat';
 import { openTimezoneDialog, TimezonePrompt } from './TimezonePrompt';
 
 // ── bootstrap context ────────────────────────────────────────────────────
@@ -66,6 +65,21 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
   useEffect(() => { window.scrollTo(0, 0); }, [loc.pathname]);
   // every confirmation in Recording mode says it isn't kept
   useEffect(() => { setToastTag(boot.mode?.recording ? 'Practice copy · not kept' : null); }, [boot.mode?.recording]);
+  // View as is look-only: dialog save buttons say so up front instead of failing after the form is filled in
+  const viewOnly = !!boot.mode?.viewingAs && !boot.mode?.recording;
+  const toastVO = useToast();
+  useEffect(() => {
+    document.body.classList.toggle('view-only', viewOnly);
+    if (!viewOnly) return;
+    const stop = (e: MouseEvent) => {
+      const b = (e.target as HTMLElement).closest('.form-actions:not(.mode-ok) .btn.primary, .form-actions:not(.mode-ok) button[type=submit], .wc-task-actions .btn.primary');
+      if (!b) return;
+      e.preventDefault(); e.stopPropagation();
+      toastVO('View as is look-only. Turn on Recording mode to try changes.', 'error');
+    };
+    document.addEventListener('click', stop, true);
+    return () => { document.removeEventListener('click', stop, true); document.body.classList.remove('view-only'); };
+  }, [viewOnly, toastVO]);
 
   const toggle = () => {
     // at medium widths the rail starts collapsed; the toggle expands it instead
@@ -80,13 +94,24 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
   return (
     <BootCtx.Provider value={boot}>
       <NewWorkCtx.Provider value={(tab = 'shoot', preset) => setNewWork({ tab, preset })}>
-        <ChatProvider>
+        <a className="skip-link" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById('main'); m?.focus(); m?.scrollIntoView(); }}>Skip to content</a>
         <div className={`app${collapsed ? ' collapsed' : ''}${expanded ? ' expanded' : ''}${boot.mode?.recording ? ' recording' : ''}`}>
           <aside className="sidebar" aria-label="Main navigation">
             <Rail onToggle={toggle} collapsed={railCollapsed} />
           </aside>
           <div className="mobile-bar">
-            <button className="icon-btn" onClick={() => setDrawer(true)} aria-label="Open navigation"><Menu /></button>
+            {(() => {
+              // the menu says when something inside it wants you: new work, reviews, attention
+              const c = boot.counts;
+              const n = isManager(boot.me.role) ? c.reviewQueue + c.attention : 0;
+              const fresh = c.myNewWork > 0;
+              const what = [fresh && 'new work', isManager(boot.me.role) && c.reviewQueue && `${c.reviewQueue} in review`, isManager(boot.me.role) && c.attention && `${c.attention} need attention`].filter(Boolean).join(', ');
+              return (
+                <button className="icon-btn menu-btn" onClick={() => setDrawer(true)} aria-label={`Open navigation${what ? ` (${what})` : ''}`}>
+                  <Menu />{(fresh || n > 0) && <span className={`badge${fresh ? ' fresh' : ''}`} aria-hidden>{fresh ? 'New' : n > 99 ? '99+' : n}</span>}
+                </button>
+              );
+            })()}
             <span className="wordmark"><span className="full">Scale</span>&nbsp;<span>Media</span></span>
             <div className="end">
               {isManager(boot.me.role) && <button className="icon-btn" onClick={() => setNewWork({ tab: 'shoot' })} aria-label="Create a shoot, batch or client"><Plus /></button>}
@@ -94,15 +119,15 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
             </div>
           </div>
           {drawer && <MobileNav onClose={() => setDrawer(false)} />}
-          <main className="page-main" id="main">
+          <main className="page-main" id="main" tabIndex={-1}>
             <div key={loc.pathname} className="page-enter"><Outlet /></div>
           </main>
         </div>
         <NewWorkDialog state={newWork} onClose={() => setNewWork(null)} />
         <MomentsHost />
+        <FirstPassword />
         <TimezonePrompt />
         <ModeBar />
-        </ChatProvider>
       </NewWorkCtx.Provider>
     </BootCtx.Provider>
   );
@@ -122,8 +147,6 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
   const boot = useBoot();
   const { me, counts, settings, mode } = boot;
   const manager = isManager(me.role);
-  const inbox = useInbox();
-  const unreadMsgs = (inbox.data?.unread ?? counts.unreadMessages) || undefined;
   // editors get a focused site: what's coming up, finished scripts, and the client material they cut from
   const editorItems = [
     { to: '/editor', label: 'Home', icon: <Home /> },
@@ -131,13 +154,11 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
-    { to: '/writers', label: 'Messages', icon: <MessageCircle />, count: unreadMsgs, hot: !!unreadMsgs },
   ];
   // writers get the pages they use: their work first, then where to find things
   const writerItems = [
     { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 },
     { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
-    { to: '/writers', label: 'Messages', icon: <MessageCircle />, count: unreadMsgs, hot: !!unreadMsgs },
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
@@ -149,7 +170,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
     { to: '/review', label: 'Review queue', icon: <ClipboardCheck />, count: counts.reviewQueue || undefined },
-    { to: '/writers', label: 'Team', icon: <Users />, count: unreadMsgs, hot: !!unreadMsgs },
+    { to: '/writers', label: 'Team', icon: <Users /> },
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
   ];
@@ -175,7 +196,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
               {it.fresh && <span className="new-pill" aria-label="Has new work">New</span>}
               {it.count != null && !it.fresh && (() => {
                 // say what the number counts, the way the page it opens counts it
-                const what = it.to === '/review' ? `${it.count === 1 ? 'script' : 'scripts'} in review` : it.to === '/overview' ? `${it.count === 1 ? 'batch needs' : 'batches need'} attention` : it.to === '/writers' || it.to === '/editor' ? `unread ${it.count === 1 ? 'message' : 'messages'}` : `${it.count === 1 ? 'script' : 'scripts'} still to write, send or deliver`;
+                const what = it.to === '/review' ? `${it.count === 1 ? 'script' : 'scripts'} in review` : it.to === '/overview' ? `${it.count === 1 ? 'batch needs' : 'batches need'} attention` : `${it.count === 1 ? 'script' : 'scripts'} still to write, send or deliver`;
                 return <span className={`count${it.hot ? ' hot' : ''}`} title={`${it.count} ${what}`} aria-label={`${it.count} ${what}`}>{it.count}</span>;
               })()}
               {(it.hot || it.fresh) && <span className="dot-badge" aria-hidden />}
@@ -241,6 +262,7 @@ function UserMenu() {
   const ref = useRef<HTMLDivElement>(null);
   useOutside(ref, () => setOpen(false), open);
   const logout = async () => {
+    try { localStorage.removeItem('sm.signed-in'); } catch { /* ignore */ }
     await api('/api/auth/logout', { method: 'POST', body: {} }).catch(() => {});
     queryClient.clear();
     window.location.href = '/';
@@ -278,7 +300,15 @@ function UserMenu() {
   );
 }
 
-function PasswordDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+/** First sign-in with a temporary password: ask for their own, once per visit. */
+function FirstPassword() {
+  const { mustChangePassword, me } = useBoot();
+  const [open, setOpen] = useState(() => { try { return mustChangePassword && !sessionStorage.getItem(`sm.pw-later.${me.id}`); } catch { return mustChangePassword; } });
+  if (!open) return null;
+  return <PasswordDialog open first onClose={() => { try { sessionStorage.setItem(`sm.pw-later.${me.id}`, '1'); } catch { /* ignore */ } setOpen(false); }} />;
+}
+
+function PasswordDialog({ open, onClose, first }: { open: boolean; onClose: () => void; first?: boolean }) {
   const toast = useToast();
   const [current, setCurrent] = useState('');
   const [next, setNext] = useState('');
@@ -289,11 +319,12 @@ function PasswordDialog({ open, onClose }: { open: boolean; onClose: () => void 
   });
   const f = save.error?.fields ?? {};
   return (
-    <Dialog open={open} onClose={onClose} title="Change password" size="narrow"
-      footer={<div className="form-actions"><Button onClick={onClose} variant="ghost">Cancel</Button><Button variant="primary" busy={save.isPending} onClick={() => save.mutate({ current, next })}>Save password</Button></div>}>
+    <Dialog open={open} onClose={onClose} title={first ? 'Choose your own password' : 'Change password'} size="narrow"
+      sub={first ? 'You signed in with a temporary password. Pick one only you know.' : undefined}
+      footer={<div className="form-actions"><Button onClick={onClose} variant="ghost">{first ? 'Later' : 'Cancel'}</Button><Button variant="primary" busy={save.isPending} onClick={() => save.mutate({ current, next })}>Save password</Button></div>}>
       <form className="form" onSubmit={(e) => { e.preventDefault(); save.mutate({ current, next }); }}>
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
-        <Field label="Current password" htmlFor={a} error={f.current}><input className="input" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} {...inputProps(a, f.current)} /></Field>
+        <Field label={first ? 'Temporary password' : 'Current password'} htmlFor={a} error={f.current}><input className="input" type="password" autoComplete="current-password" value={current} onChange={(e) => setCurrent(e.target.value)} {...inputProps(a, f.current)} /></Field>
         <Field label="New password" htmlFor={b} error={f.next} help="At least 10 characters."><input className="input" type="password" autoComplete="new-password" value={next} onChange={(e) => setNext(e.target.value)} {...inputProps(b, f.next)} /></Field>
         <button type="submit" hidden />
       </form>
@@ -338,7 +369,7 @@ function SearchBox() {
     ...r.scripts.map((x) => ({ key: `s${x.batchId}-${x.number}`, group: 'Scripts', t: `#${x.number}${x.title ? ` · ${x.title}` : ''}`, s: `${x.clientName} · ${x.batchTitle}`, to: `/batches/${x.batchId}#scripts` })),
     ...r.batches.map((b) => ({ key: `b${b.id}`, group: 'Batches', t: b.title, s: b.clientName, to: `/batches/${b.id}` })),
     ...r.shoots.map((x) => ({ key: `h${x.id}`, group: 'Shoots', t: `${x.title} · ${fmtDate(x.startDate)}`, s: x.clientName, to: x.batchId ? `/batches/${x.batchId}` : editor ? `/scripts?clientId=${x.clientId}` : `/calendar?m=${x.startDate.slice(0, 7)}` })),
-    ...r.people.map((p) => ({ key: `p${p.id}`, group: 'People', t: p.name, s: ROLE_LABEL[p.role], to: manager ? `/my-work?userId=${p.id}` : '/writers' })),
+    ...(manager ? r.people : []).map((p) => ({ key: `p${p.id}`, group: 'People', t: p.name, s: ROLE_LABEL[p.role], to: p.role === 'editor' ? '/writers' : `/my-work?userId=${p.id}` })),
     ...r.briefings.map((x) => ({ key: `r${x.id}`, group: 'Briefing calls', t: x.title, s: `${x.clientName}${x.callDate ? ` · ${fmtDate(x.callDate)}` : ''}`, to: `/clients/${x.clientId}` })),
     ...r.resources.map((x) => ({ key: `f${x.id}`, group: 'Resources', t: x.title, s: x.clientName, to: `/resources?q=${encodeURIComponent(x.title)}` })),
   ];

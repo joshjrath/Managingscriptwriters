@@ -1,5 +1,5 @@
 // What an editor's sign-in may do. Editors cut the videos: they read the
-// calendar, finished scripts, clients and resources, and use messages and
+// calendar, finished scripts, clients and resources, and use
 // to-dos. Everything else is refused here, before any route runs, so a new
 // route is closed to editors until it's added to this list on purpose.
 // (An admin viewing the site as an editor gets exactly the same.)
@@ -12,12 +12,12 @@ const ALLOW: Record<string, ReadonlySet<string>> = {
     '/api/auth/status', '/api/bootstrap', '/api/counts', '/api/moments', '/api/notifications',
     '/api/calendar', '/api/script-bank', '/api/files/:id', '/api/shoot-readiness', '/api/search',
     '/api/clients', '/api/clients/:id', '/api/resources',
-    '/api/messages', '/api/messages/:userId', '/api/todos',
+    '/api/todos',
   ]),
   POST: new Set([
     '/api/auth/login', '/api/auth/logout', '/api/me/password', '/api/me/timezone', '/api/me/whats-new',
     '/api/moments/seen', '/api/notifications/read',
-    '/api/messages/:userId', '/api/messages/:userId/read', '/api/todos',
+    '/api/todos',
   ]),
   PATCH: new Set(['/api/todos/:id']),
   DELETE: new Set(['/api/todos/:id']),

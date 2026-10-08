@@ -105,8 +105,9 @@ function Title({ lines, k }: { lines: [string, string]; k: string }) {
   );
 }
 
-function Metric({ v, l, warn }: { v: ReactNode; l: string; warn?: boolean }) {
-  return <div className={warn ? 'warn' : ''}><b>{v}</b><span>{l}</span></div>;
+/** A big number with its HUD label and, under it, what it means in plain words. */
+function Metric({ v, l, warn, sub }: { v: ReactNode; l: string; warn?: boolean; sub?: string }) {
+  return <div className={warn ? 'warn' : ''} title={sub}><b>{v}</b><span>{l}</span>{sub && <small className="plain">{sub}</small>}</div>;
 }
 
 export function Statement({ mode, world, now, anomalies, onPeople }: { mode: Mode; world: ControlWorld; now: Date; anomalies: Anomaly[]; onPeople: () => void }) {
@@ -120,10 +121,10 @@ export function Statement({ mode, world, now, anomalies, onPeople }: { mode: Mod
   if (mode === 'world' || mode === 'system') {
     metrics = (
       <>
-        <Metric v={`${pad(m.onShift)} / ${pad(m.nodes)}`} l="ACTIVE NODES" />
-        <Metric v={pad(m.scriptsInMotion)} l="SCRIPTS IN MOTION" />
-        <Metric v={fmtHoursMinutes(cov.coveredMinutes)} l="COVERAGE" />
-        <Metric v={pad(anomalies.length)} l="PRESSURE POINTS" warn={anomalies.length > 0} />
+        <Metric v={`${pad(m.onShift)} / ${pad(m.nodes)}`} l="ACTIVE NODES" sub="people working right now" />
+        <Metric v={pad(m.scriptsInMotion)} l="SCRIPTS IN MOTION" sub="being written or in review" />
+        <Metric v={fmtHoursMinutes(cov.coveredMinutes)} l="COVERAGE" sub="hours today someone is working" />
+        <Metric v={pad(anomalies.length)} l="PRESSURE POINTS" warn={anomalies.length > 0} sub="overdue, blocked or without a writer" />
       </>
     );
     if (!m.onShift && cov.nextOnline) {
