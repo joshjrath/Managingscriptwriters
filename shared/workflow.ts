@@ -323,3 +323,46 @@ export function evenSplit(total: number, writers: number): number[] {
   const extra = total % writers;
   return Array.from({ length: writers }, (_, i) => base + (i < extra ? 1 : 0));
 }
+
+// ── Editing: where a video stands, read from Timeliner ───────────────────
+
+/** Timeliner's step groups (a task's `statusGroup`). */
+export const TIMELINER_STATUS_GROUPS = ['toDo', 'inProgress', 'inRevision', 'supervisorApproval', 'clientApproval', 'endClientApproval', 'approved', 'posted'] as const;
+export type TimelinerStatusGroup = (typeof TIMELINER_STATUS_GROUPS)[number];
+
+/** Where a video stands, in the site's few plain words. Timeliner's own step is shown underneath. */
+export type VideoState = 'to_edit' | 'revisions' | 'in_review' | 'with_client' | 'approved';
+
+export const VIDEO_STATE_LABEL: Record<VideoState, string> = {
+  to_edit: 'To edit',
+  revisions: 'Revisions',
+  in_review: 'In review',
+  with_client: 'With client',
+  approved: 'Approved',
+};
+
+/** Timeliner's step group → the site's state. "In progress" isn't used by the team, so it still counts as to edit. */
+export function videoState(group: string): VideoState {
+  switch (group) {
+    case 'inRevision': return 'revisions';
+    case 'supervisorApproval': return 'in_review';
+    case 'clientApproval': case 'endClientApproval': return 'with_client';
+    case 'approved': case 'posted': return 'approved';
+    default: return 'to_edit';
+  }
+}
+
+/** Timeliner's step in the team's words, when its exact name (from the task's history) isn't known. */
+export const TIMELINER_STEP_LABEL: Record<TimelinerStatusGroup, string> = {
+  toDo: 'To be edited',
+  inProgress: 'In progress',
+  inRevision: 'Revisions requested',
+  supervisorApproval: 'Needs review',
+  clientApproval: 'Awaiting client review',
+  endClientApproval: 'End-client review',
+  approved: 'Approved',
+  posted: 'Posted',
+};
+
+/** Videos an editor still has to work on (and so can say they're on). */
+export const isOnPlate = (s: VideoState) => s === 'to_edit' || s === 'revisions';

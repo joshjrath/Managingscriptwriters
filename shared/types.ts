@@ -2,7 +2,7 @@
 
 import type { Clock, DayMode, ISODate } from './dates';
 import type { WorkspaceTheme } from './palettes';
-import type { DocumentState, Milestone, Progress, Role, ScriptStatus, Stage } from './workflow';
+import type { DocumentState, Milestone, Progress, Role, ScriptStatus, Stage, VideoState } from './workflow';
 
 /** Every change request carries `x-scale-media: 1`; a page can't send it cross-site without a CORS preflight, which the server never grants. */
 export const CSRF_HEADER = 'x-scale-media';
@@ -799,3 +799,134 @@ export interface TimelinerStatus {
   /** batches with approved scripts not yet delivered, to place an upload that couldn't be matched */
   openBatches: { id: number; title: string; clientName: string; approved: number }[];
 }
+
+// ── Editing: the videos editors cut, read from Timeliner ─────────────────
+
+/** A script document an editor cuts from. */
+export interface ScriptDoc {
+  /** opens the file (/api/files/…) or the link */
+  href: string;
+  name: string | null;
+  /** the manager's edited version: the one to use */
+  edited: boolean;
+  /** which scripts it holds, "1–30" */
+  ranges: string;
+  batchId: number;
+  batchTitle: string;
+}
+
+/** One video (a Timeliner task) assigned to an editor. */
+export interface EditingVideo {
+  /** Timeliner's task id */
+  id: string;
+  /** as named in Timeliner ("Organic 05") */
+  title: string;
+  state: VideoState;
+  /** Timeliner's step in the team's words ("To be edited", "Needs review"…) */
+  step: string;
+  /** the Timeliner folder it sits in ("My Videos › Organic") */
+  folder: string | null;
+  client: { id: number; name: string } | null;
+  /** the batch whose scripts it's cut from, when it could be matched */
+  batch: { id: number; title: string; shootDate: ISODate | null } | null;
+  /** the script it's cut from: the number in its title, within that batch */
+  scriptNumber: number | null;
+  /** the document holding that script (the manager's edited version when there is one) */
+  script: ScriptDoc | null;
+  /** Timeliner's team deadline, else the client one */
+  due: ISODate | null;
+  /** revision rounds so far (team and client) */
+  revisionRound: number;
+  /** when it moved to its current step, as far as known */
+  movedAt: string | null;
+  /** the editor marked it done here; it moves on when Timeliner has it in review */
+  doneAt: string | null;
+}
+
+/** What an editor said they're on: the one tap Timeliner can't give. */
+export interface EditorFocus {
+  video: EditingVideo;
+  state: 'on' | 'paused';
+  /** when the current stretch began (the tap, or Resume) */
+  since: string;
+  /** time on it before the current stretch, in seconds */
+  workedSeconds: number;
+  pausedAt: string | null;
+}
+
+/** How many of an editor's videos are at each state. */
+export interface EditorPlate {
+  toEdit: number;
+  revisions: number;
+  inReview: number;
+  withClient: number;
+  /** approved in the last 7 days */
+  approvedWeek: number;
+}
+
+/** One editor on the Editors tab. */
+export interface EditorRow {
+  userId: number;
+  name: string;
+  city: string | null;
+  timezone: string | null;
+  workHours: [number, number] | null;
+  /** outside their working hours right now */
+  offHours: boolean;
+  focus: EditorFocus | null;
+  /** what's next by deadline (revisions first) */
+  nextUp: EditingVideo | null;
+  plate: EditorPlate;
+  /** videos still to edit or fix that are due today or earlier */
+  dueToday: number;
+  /** the last video that left their plate: marked done here, or moved on in Timeliner */
+  lastFinished: { title: string; at: string; onSite: boolean } | null;
+  /** the script documents for what they're working on */
+  scripts: ScriptDoc[];
+  /** their videos, for the drill-down: everything open, plus approved in the last 7 days */
+  videos: EditingVideo[];
+}
+
+/** How fresh the copy of Timeliner is. */
+export interface EditingSync {
+  /** TIMELINER_API_KEY is set on the server */
+  keySet: boolean;
+  /** the last complete read of Timeliner */
+  syncedAt: string | null;
+  /** why the last read failed, when it did */
+  error: string | null;
+}
+
+/** The managers' Editors tab. */
+export interface EditingBoard {
+  sync: EditingSync;
+  totals: {
+    editingNow: number;
+    paused: number;
+    dueToday: number;
+    revisions: number;
+    /** in review with Josh and Joshua (Timeliner's internal review steps) */
+    waitingOnYou: number;
+    notAssigned: number;
+  };
+  editors: EditorRow[];
+  /** videos still to be edited in Timeliner with nobody assigned, by folder */
+  unassigned: { folder: string; clientName: string | null; count: number; titles: string; due: ISODate | null }[];
+  /** people assigned in Timeliner whose email doesn't match anyone on the site */
+  unknownAssignees: { name: string; email: string | null; count: number }[];
+}
+
+/** An editor's own Home: their videos, straight from Timeliner. */
+export interface MyEditing {
+  sync: EditingSync;
+  focus: EditorFocus | null;
+  nextUp: EditingVideo | null;
+  revisions: EditingVideo[];
+  toEdit: EditingVideo[];
+  /** in review with the team or the client, or marked done here */
+  waiting: EditingVideo[];
+  approvedWeek: EditingVideo[];
+  scripts: ScriptDoc[];
+}
+
+export type FocusAction = 'start' | 'pause' | 'resume' | 'done';
