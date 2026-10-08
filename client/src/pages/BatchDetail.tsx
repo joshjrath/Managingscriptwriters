@@ -1,32 +1,35 @@
 // Batch page: brief, assignments, the script checklist (the source of truth),
 // progress, deadlines, review notes, delivery records and activity history.
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle, Archive, ArchiveRestore, Ban, CalendarClock, Camera, Check, CheckCheck, ChevronDown, ExternalLink, FileText,
-  Flag, Link2, ListTodo, OctagonAlert, Plus, Pencil, PlayCircle, RotateCcw, Send, SlidersHorizontal, Trash2, Upload, UserPlus,
+  Flag, Link2, ListTodo, OctagonAlert, Plus, Pencil, PenLine, PlayCircle, RotateCcw, Send, SlidersHorizontal, Trash2, Upload, UserPlus,
 } from 'lucide-react';
 import { api, useSave, type ApiError } from '../api';
-import type { BatchDetail, ClientDetail, Priority, ReschedulePreview, Resource, ResourceCategory, Script } from '../../../shared/types';
+import type { BatchDetail, ClientDetail, MyWork, Priority, ReschedulePreview, Resource, ResourceCategory, Script, Submission } from '../../../shared/types';
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
-import { ACTION_RULES, allowedFrom, canSendDocument, checkAction, compressRanges, parseRanges, STATUS_LABEL, type ScriptAction, type ScriptStatus, isManager } from '../../../shared/workflow';
+import { allowedFrom, canWrite, checkAction, compressRanges, parseRanges, ROLE_LABEL, scriptsLabel, STATUS_LABEL, type ScriptAction, type ScriptStatus, isManager } from '../../../shared/workflow';
 import { addDays, computeDeadlines, diffDays, draftFromFinal, isISODate, suggestStart, type ISODate } from '../../../shared/dates';
 import { cutoffIn, fmtBytes, fmtCutoff, fmtDate, fmtLong, fmtRange, fmtStamp, fmtTimeZoneAbbr, plural } from '../../../shared/format';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import {
   Avatar, BatchProgress, Button, Chip, CountUp, Dialog, DueChip, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel,
-  Ring, ringColor, StageChip, StatusChip, useFieldId, useToast, Seg,
+  NotFound, Ring, ringColor, StageChip, StatusChip, Term, useFieldId, useToast, Seg,
 } from '../components/ui';
 import { WrittenCounter } from '../components/WrittenCounter';
 import { PipLegend, ScriptPips, TodayBump } from '../components/WritingPulse';
 import { TodoDialog, TodoPanel } from '../components/Todos';
-import { CardList, DecisionDialog, DocumentHistory, SendDialog, SentBackCard, TitlesDialog, WaitingCard } from '../components/Review';
+import { WorkCard } from './MyWork';
+import { approvedSources, CardList, DecisionDialog, DocumentHistory, SendDialog, SentBackCard, SourceList, TitlesDialog, useUndoDecision, WaitingCard } from '../components/Review';
 
 export function BatchPage() {
   const { id } = useParams();
-  const q = useQuery({ queryKey: ['batch', Number(id)], queryFn: () => api<BatchDetail>(`/api/batches/${id}`) });
+  const bad = !/^\d+$/.test(id ?? '');
+  const q = useQuery({ queryKey: ['batch', Number(id)], queryFn: () => api<BatchDetail>(`/api/batches/${id}`), enabled: !bad });
+  if (bad || (q.error as ApiError | null)?.status === 404) return <NotFound what="batch" />;
   if (q.isLoading) return <><div style={{ height: 90 }} /><Loading height={520} /></>;
   if (q.isError) return <ErrorState error={q.error} retry={() => q.refetch()} />;
   return <BatchView b={q.data!} />;
@@ -44,13 +47,24 @@ function BatchView({ b }: { b: BatchDetail }) {
   const [addRes, setAddRes] = useState(false);
   const archive = useSave((archived: boolean) => api(`/api/batches/${b.id}/archive`, { body: { archived } }), { onSuccess: (_o, a) => toast(a ? 'Batch archived' : 'Batch restored') });
   const reviewed = useSave(() => api(`/api/batches/${b.id}/dates-reviewed`, { body: {} }), { onSuccess: () => toast('Deadlines confirmed') });
+  const datesOutOfOrder = !!(b.draftDue && b.finalDue && b.draftDue > b.finalDue);
   const unblock = useSave(() => api(`/api/batches/${b.id}/blocker`, { body: { blocked: false, note: null } }), { onSuccess: () => toast('Blocker cleared') });
   const canBlock = manager || b.isAssigned;
   // your own share of this batch, if you're writing some of it
   const mine = b.writers.find((w) => w.userId === me.id);
   const [todoFor, setTodoFor] = useState<number | null>(null);
   const [sendBack, setSendBack] = useState<number | null>(null);
+  const [moveFrom, setMoveFrom] = useState<number | null>(null);
   const tz = fmtTimeZoneAbbr(settings.timezone); // deadlines are the workspace's
+  // a writer opening a batch has seen what's new in it; their own scripts come first
+  const qc = useQueryClient();
+  const myWork = useQuery({ queryKey: ['my-work', me.id], queryFn: () => api<MyWork>('/api/my-work'), enabled: !!mine });
+  const myEntry = myWork.data?.batches.find((x) => x.batch.id === b.id);
+  const isMine = !!mine;
+  useEffect(() => {
+    if (!isMine) return;
+    api(`/api/batches/${b.id}/seen`, { body: {} }).then(() => qc.invalidateQueries({ queryKey: ['bootstrap'] })).catch(() => {});
+  }, [b.id, isMine, qc]);
 
   return (
     <>
@@ -68,22 +82,34 @@ function BatchView({ b }: { b: BatchDetail }) {
         {b.blocked && (
           <div className="banner red" role="status">
             <OctagonAlert aria-hidden />
-            <div className="txt"><b>Blocked: {b.blockerNote}</b><span>Flagged by {b.blockedByName ?? 'someone'} · {fmtStamp(b.blockedAt, displayTz)}. Workflow stage is still tracked separately.</span></div>
+            <div className="txt"><b>Blocked: {b.blockerNote}</b><span>{b.blockedBy === me.id ? 'You flagged this' : `Flagged by ${b.blockedByName ?? 'someone'}`} · {fmtStamp(b.blockedAt, displayTz)}.{manager ? ' Writers can keep working; clear it once it’s sorted.' : b.blockedBy === me.id ? ' A manager has been told.' : ' A manager is sorting this out.'}</span></div>
             {canBlock && <Button variant="sm" busy={unblock.isPending} onClick={() => unblock.mutate(undefined)}>Clear blocker</Button>}
           </div>
         )}
-        {b.needsDateReview && (
+        {manager && datesOutOfOrder && !b.needsDateReview && (
+          <div className="banner red" role="status"><CalendarClock aria-hidden /><div className="txt"><b>Drafts are due after final delivery</b><span>Drafts {fmtDate(b.draftDue)}, final delivery {fmtDate(b.finalDue)}.</span></div>
+            {manager && <Button variant="sm" onClick={() => setEdit(true)}>Edit deadlines</Button>}</div>
+        )}
+        {manager && b.needsDateReview && (
           <div className="banner yellow" role="status">
             <CalendarClock aria-hidden />
             <div className="txt"><b>Deadlines need a check</b><span>{b.dateReviewNote}</span></div>
-            {manager && <><Button variant="sm" onClick={() => setEdit(true)}>Change dates</Button><Button variant="sm primary" busy={reviewed.isPending} onClick={() => reviewed.mutate(undefined)}>Dates are fine</Button></>}
+            {manager && <><Button variant="sm" onClick={() => setEdit(true)}>Edit deadlines</Button>{datesOutOfOrder
+              ? <span className="muted" style={{ fontSize: 12.5 }}>Drafts are due after final delivery, so fix them first.</span>
+              : <Button variant="sm primary" busy={reviewed.isPending} onClick={() => reviewed.mutate(undefined)}>Dates are fine</Button>}</>}
           </div>
         )}
         {b.progress.unassigned > 0 && (
           <div className="banner pink"><UserPlus aria-hidden /><div className="txt"><b>{plural(b.progress.unassigned, 'script')} unassigned</b><span>{manager ? 'Select them in the checklist below and use “Assign to…”.' : 'A manager needs to assign these.'}</span></div></div>
         )}
 
-        <ReadyToDeliver b={b} />
+        {myEntry && (
+          <section className="mw-sec tone-todo batch-mine" aria-label="Your scripts">
+            <div className="mw-sec-head"><span className="ic"><PenLine aria-hidden /></span><h2>Your scripts</h2><span className="sub">What you need to do in this batch</span></div>
+            <WorkCard e={myEntry} writerId={me.id} standalone />
+          </section>
+        )}
+        {!myEntry && <ReadyToDeliver b={b} />}
 
         <div className="grid g-main-side">
           <Panel title="Progress" tools={manager ? <Button variant="sm ghost" icon={<SlidersHorizontal aria-hidden />} onClick={() => setTarget(true)}>Change script count</Button> : undefined}>
@@ -92,11 +118,11 @@ function BatchView({ b }: { b: BatchDetail }) {
               <div style={{ flex: 1, minWidth: 0 }}><BatchProgress p={b.progress} written={b.written} /></div>
             </div>
             <div className="triple">
-              <div style={{ ['--c' as string]: 'var(--lavender)' }}><span className="k"><i />Draft-ready</span><span className="v"><CountUp value={b.progress.draftReady} /><small>/ {b.progress.total}</small></span><span className="p">{b.progress.pctDraft}% · {b.progress.inReview} waiting for review</span></div>
+              <div style={{ ['--c' as string]: 'var(--lavender)' }}><span className="k"><i />Drafts sent</span><span className="v"><CountUp value={b.progress.draftReady} /><small>/ {b.progress.total}</small></span><span className="p">{b.progress.pctDraft}% · {b.progress.inReview} waiting for review</span></div>
               <div style={{ ['--c' as string]: 'color-mix(in srgb, var(--mint) 60%, var(--track))' }}><span className="k"><i />Approved</span><span className="v"><CountUp value={b.progress.approved} /><small>/ {b.progress.total}</small></span><span className="p">{b.progress.pctApproved}% · {b.progress.awaitingDelivery} to deliver</span></div>
-              <div style={{ ['--c' as string]: 'var(--mint)' }}><span className="k"><i />Delivered</span><span className="v"><CountUp value={b.progress.delivered} /><small>/ {b.progress.total}</small></span><span className="p">{b.progress.pctDelivered}% · writer-confirmed</span></div>
+              <div style={{ ['--c' as string]: 'var(--mint)' }}><span className="k"><i />Delivered</span><span className="v"><CountUp value={b.progress.delivered} /><small>/ {b.progress.total}</small></span><span className="p">{b.progress.pctDelivered}% · in Timeliner</span></div>
             </div>
-            {b.progress.revisions > 0 && <div className="banner pink" style={{ marginTop: 12 }}><RotateCcw aria-hidden /><div className="txt"><b>{plural(b.progress.revisions, 'script')} returned for revisions</b><span>These don’t count as draft-ready until they’re resubmitted.</span></div></div>}
+            {b.progress.revisions > 0 && <div className="banner pink" style={{ marginTop: 12 }}><RotateCcw aria-hidden /><div className="txt"><b>{plural(b.progress.revisions, 'script')} sent back</b><span>The writer is fixing these. They count as written and come back to review when resent.</span></div></div>}
             {mine && (
               <div style={{ marginTop: 18 }}>
                 <WrittenCounter key={b.id} batchId={b.id} writerId={me.id} forOther={false} total={mine.count} sent={mine.draftReady} written={Math.max(mine.written, mine.draftReady)} />
@@ -114,13 +140,16 @@ function BatchView({ b }: { b: BatchDetail }) {
                       <div className="row-flex s2" style={{ marginTop: 10 }}>
                         <Button variant="sm ghost" icon={<ListTodo aria-hidden />} onClick={() => setTodoFor(w.userId)}>Add to-do</Button>
                         {b.scripts.some((s) => s.assigneeId === w.userId && allowedFrom('request_revisions', s.status)) && (
-                          <Button variant="sm ghost" icon={<RotateCcw aria-hidden />} onClick={() => setSendBack(w.userId)}>Send back for revisions…</Button>
+                          <Button variant="sm ghost" icon={<RotateCcw aria-hidden />} onClick={() => setSendBack(w.userId)}>Send back…</Button>
+                        )}
+                        {b.scripts.some((s) => s.assigneeId === w.userId && (s.status === 'not_started' || s.status === 'in_progress' || s.status === 'revisions_needed')) && (
+                          <Button variant="sm ghost" icon={<UserPlus aria-hidden />} onClick={() => setMoveFrom(w.userId)}>Move scripts…</Button>
                         )}
                       </div>
                     )}
                   </div>
                   <div className="side">
-                    <span className="when num">{w.userId != null && w.written > w.draftReady + w.revisions ? `${w.written} / ${w.count} written` : `${w.draftReady} / ${w.count} drafts ready`}</span>
+                    <span className="when num">{w.userId != null && w.written > w.draftReady + w.revisions ? `${w.written} / ${w.count} written` : `${w.draftReady} / ${w.count} drafts sent`}</span>
                     <span className="muted num" style={{ fontSize: 12 }}>{w.revisions > 0 ? `${w.revisions} sent back · ` : ''}{w.written > w.draftReady + w.revisions ? `${w.draftReady} sent · ` : ''}{w.delivered} delivered{w.writtenAt ? ` · updated ${fmtStamp(w.writtenAt, displayTz)}` : ''}</span>
                     {manager && w.userId != null && w.userId !== me.id && w.draftReady < w.count && (
                       <WrittenCounter key={b.id} compact batchId={b.id} writerId={w.userId} forOther total={w.count} sent={w.draftReady} written={Math.max(w.written, w.draftReady)} />
@@ -137,7 +166,7 @@ function BatchView({ b }: { b: BatchDetail }) {
               <div className="deadline" style={{ ['--c' as string]: 'var(--salmon)' }}>
                 <span className="ic"><Camera /></span>
                 <div><div className="k">Shoot</div><div className="v">{b.shootStart ? fmtRange(b.shootStart, b.shootEnd) : 'No shoot'}</div>{b.shootStart && <div className="rule">Deadlines count back from {fmtDate(b.shootStart)}</div>}</div>
-                <div className="right">{manager && b.shootId && <Button variant="sm" onClick={() => setResched(true)}>Change dates</Button>}</div>
+                <div className="right">{manager && b.shootId && <Button variant="sm" icon={<Camera aria-hidden />} onClick={() => setResched(true)} title="Moves the shoot and every batch on it; writers are told">Move shoot…</Button>}</div>
               </div>
               <div className="deadline" style={{ ['--c' as string]: 'var(--cyan)' }}>
                 <span className="ic"><Pencil /></span>
@@ -150,11 +179,11 @@ function BatchView({ b }: { b: BatchDetail }) {
               </div>
               <div className="deadline" style={{ ['--c' as string]: 'var(--yellow)' }}>
                 <span className="ic"><Send /></span>
-                <div><div className="k">Final delivery to Timeliner</div><div className="v">{b.finalDue ? fmtLong(b.finalDue) : 'Not set'}</div><div className="rule">{b.finalRule ?? (b.finalDue ? (b.shootId ? 'Manual override' : 'Entered manually') : '')}</div></div>
+                <div><div className="k">Final delivery to <Term k="Timeliner" /></div><div className="v">{b.finalDue ? fmtLong(b.finalDue) : 'Not set'}</div><div className="rule">{b.finalRule ?? (b.finalDue ? (b.shootId ? 'Manual override' : 'Entered manually') : '')}</div></div>
                 <div className="right"><DueChip m={b.final} today={clock.today} prefix={false} />{b.finalDueMode === 'manual' && b.shootId && <Chip color="yellow">Override</Chip>}</div>
               </div>
             </div>
-            {b.nextAction && <><div className="section-title" style={{ marginTop: 20 }}>Next action</div><p className="prose">{b.nextAction}</p></>}
+            {manager && b.nextAction && <><div className="section-title" style={{ marginTop: 20 }}>Next action</div><p className="prose">{b.nextAction}</p></>}
             {manager && (
               <div className="row-flex s2" style={{ marginTop: 18 }}>
                 {b.archivedAt
@@ -196,6 +225,7 @@ function BatchView({ b }: { b: BatchDetail }) {
 
       {todoFor != null && <TodoDialog userId={todoFor} batchId={b.id} onClose={() => setTodoFor(null)} />}
       {sendBack != null && <SendBackDialog b={b} writerId={sendBack} onClose={() => setSendBack(null)} />}
+      {moveFrom != null && <MoveScriptsDialog b={b} fromId={moveFrom} onClose={() => setMoveFrom(null)} />}
       {manager && edit && <EditBatchDialog b={b} open onClose={() => setEdit(false)} />}
       {manager && target && <TargetDialog b={b} onClose={() => setTarget(false)} />}
       {manager && resched && b.shootId && <RescheduleDialog shootId={b.shootId} start={b.shootStart!} end={b.shootEnd} onClose={() => setResched(false)} />}
@@ -216,8 +246,8 @@ function ReadyToDeliver({ b }: { b: BatchDetail }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const ready = b.scripts.filter((s) => !checkAction('deliver', s, me));
-  const run = useSave((v: { url: string | null; note: string | null }) => api<{ changed: number[] }>(`/api/batches/${b.id}/scripts/action`, {
-    body: { action: 'deliver', scriptIds: ready.map((s) => s.id), timelinerUrl: v.url, note: v.note, versions: Object.fromEntries(ready.map((s) => [s.id, s.version])) },
+  const run = useSave((v: { url: string | null; note: string | null; ids: number[] }) => api<{ changed: number[] }>(`/api/batches/${b.id}/scripts/action`, {
+    body: { action: 'deliver', scriptIds: v.ids, timelinerUrl: v.url, note: v.note, versions: Object.fromEntries(ready.filter((s) => v.ids.includes(s.id)).map((s) => [s.id, s.version])) },
   }), { onSuccess: (o) => { toast(`Marked ${plural(o.changed.length, 'script')} delivered`); setOpen(false); } });
   if (!ready.length) return null;
   const nums = compressRanges(ready.map((s) => s.number));
@@ -236,15 +266,15 @@ function ReadyToDeliver({ b }: { b: BatchDetail }) {
         <div style={{ minWidth: 0 }}>
           <div className="t">{plural(ready.length, 'script')} approved <span className="muted num">({manager ? breakdown : nums})</span></div>
           <div className="s">{manager
-            ? `Add them to Timeliner, then confirm here. This marks all of them delivered for everyone${others.length ? `, including ${others.join(', ')}` : ''}.${notYet > 0 ? ` ${plural(notYet, 'script')} not approved yet will stay as they are.` : ''}`
+            ? `Add them to Timeliner, then confirm here.${others.length ? ` You confirm for ${others.join(', ')}.` : ''}${notYet > 0 ? ` The other ${plural(notYet, 'script')} in this batch aren’t approved yet and aren’t affected.` : ''}`
             : 'Add them to Timeliner, then confirm here.'}</div>
         </div>
-        <Button variant="primary pill" icon={<Send aria-hidden />} onClick={() => setOpen(true)}>
-          {manager && others.length ? 'Mark batch delivered' : `Mark ${plural(ready.length, 'script')} delivered`}
+        <Button variant="mint pill" icon={<CheckCheck aria-hidden />} onClick={() => setOpen(true)}>
+          {`Mark ${plural(ready.length, 'approved script')} delivered`}
         </Button>
       </div>
-      {open && <DeliverDialog count={ready.length} nums={nums} forName={manager && others.length ? others.join(', ') : null} busy={run.isPending} error={run.error}
-        onClose={() => setOpen(false)} onSubmit={(url, note) => run.mutate({ url, note })} />}
+      {open && <DeliverDialog scripts={ready} submissions={b.submissions} forName={manager && others.length ? others.join(', ') : null} pick={!manager} busy={run.isPending} error={run.error}
+        onClose={() => setOpen(false)} onSubmit={(url, note, ids) => run.mutate({ url, note, ids })} />}
     </>
   );
 }
@@ -252,11 +282,11 @@ function ReadyToDeliver({ b }: { b: BatchDetail }) {
 function DocumentsPanel({ b }: { b: BatchDetail }) {
   const { me } = useBoot();
   const manager = isManager(me.role);
-  const [dialog, setDialog] = useState<null | { kind: 'send'; preselect: number[]; resend?: boolean } | { kind: 'titles' }>(null);
+  const [dialog, setDialog] = useState<null | { kind: 'send'; preselect: number[]; resend?: boolean; replace?: boolean; feedback?: { note: string | null; byName: string } | null } | { kind: 'titles' }>(null);
   useEffect(() => { if (window.location.hash === '#documents') document.getElementById('documents')?.scrollIntoView(); }, []);
   const mine = b.scripts.filter((s) => s.assigneeId === me.id);
   // writers send their own scripts; managers can send any on a writer's behalf
-  const sendable = (manager ? b.scripts : mine).filter((s) => canSendDocument(s.status));
+  const sendable = (manager ? b.scripts : mine).filter((s) => s.status === 'not_started' || s.status === 'in_progress' || s.status === 'revisions_needed');
   const notSent = (manager && !mine.length ? b.scripts : mine).filter((s) => s.status === 'not_started' || s.status === 'in_progress');
   const waiting = b.groups.filter((g) => g.kind === 'waiting');
   const sentBack = b.groups.filter((g) => g.kind === 'sent_back');
@@ -265,7 +295,7 @@ function DocumentsPanel({ b }: { b: BatchDetail }) {
   const canResend = (writerId: number | null) => writerId === me.id;
   return (
     <Panel title="Drafts & documents" id="documents" count={waiting.length + sentBack.length || undefined}
-      sub={waiting.length || sentBack.length ? `${waiting.length} waiting for review · ${sentBack.length} sent back` : 'one PDF or link per writer, reviewed together'}
+      sub={waiting.length || sentBack.length ? `${waiting.length} in review · ${sentBack.length} sent back` : 'one PDF or link per writer, reviewed together'}
       tools={<>
         {titleable.length > 0 && <Button variant="sm ghost" icon={<Pencil aria-hidden />} onClick={() => setDialog({ kind: 'titles' })}>Titles</Button>}
         {sendable.length > 0 && <Button variant="sm primary" icon={<Upload aria-hidden />} onClick={() => setDialog({ kind: 'send', preselect: (notSent.length ? notSent : sendable).map((s) => s.id) })}>Send scripts for review</Button>}
@@ -277,8 +307,8 @@ function DocumentsPanel({ b }: { b: BatchDetail }) {
           </Empty>
         )}
         <CardList groups={[...waiting, ...sentBack]}>{(g) => g.kind === 'waiting'
-          ? <WaitingCard group={g} showBatch={false} onReplace={canResend(g.writerId) ? () => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id) }) : undefined} />
-          : <SentBackCard group={g} showBatch={false} onResend={canResend(g.writerId) ? () => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id), resend: true }) : undefined} />}
+          ? <WaitingCard group={g} showBatch={false} onReplace={canResend(g.writerId) ? () => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id), replace: true }) : undefined} />
+          : <SentBackCard group={g} showBatch={false} onResend={canResend(g.writerId) ? () => setDialog({ kind: 'send', preselect: g.scripts.map((s) => s.id), resend: true, feedback: g.review ? { note: g.review.note, byName: g.review.reviewedByName } : null }) : undefined} />}
         </CardList>
         {b.submissions.length > 0 && (
           <details className="details">
@@ -287,7 +317,8 @@ function DocumentsPanel({ b }: { b: BatchDetail }) {
           </details>
         )}
       </div>
-      {dialog?.kind === 'send' && <SendDialog batchId={b.id} batchTitle={b.title} candidates={sendable} preselect={dialog.preselect} resend={dialog.resend} onClose={() => setDialog(null)} />}
+      {dialog?.kind === 'send' && <SendDialog batchId={b.id} batchTitle={b.title} candidates={dialog.replace ? b.scripts.filter((s) => dialog.preselect.includes(s.id)) : sendable} preselect={dialog.preselect}
+        resend={dialog.resend} replace={dialog.replace} feedback={dialog.feedback} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'titles' && <TitlesDialog batchId={b.id} scripts={titleable} onClose={() => setDialog(null)} />}
     </Panel>
   );
@@ -295,10 +326,10 @@ function DocumentsPanel({ b }: { b: BatchDetail }) {
 
 // ── script checklist ─────────────────────────────────────────────────────
 
-const WRITER_ACTIONS: ScriptAction[] = ['start', 'submit', 'withdraw', 'deliver', 'reset'];
+const WRITER_ACTIONS: ScriptAction[] = ['start', 'submit', 'withdraw', 'deliver', 'reset', 'undo_delivery'];
 const MANAGER_ACTIONS: ScriptAction[] = ['start', 'submit', 'approve', 'request_revisions', 'deliver', 'withdraw', 'reset', 'undo_delivery'];
 const ACTION_STYLE: Partial<Record<ScriptAction, string>> = { submit: 'review', approve: 'mint', request_revisions: 'danger', deliver: 'primary', undo_delivery: 'ghost', reset: 'ghost', withdraw: 'ghost' };
-const ACTION_SHORT: Record<ScriptAction, string> = { start: 'Mark in progress', reset: 'Mark not started', submit: 'Send for review…', withdraw: 'Withdraw', approve: 'Approve', request_revisions: 'Send back…', deliver: 'Mark delivered to Timeliner', undo_delivery: 'Undo delivery' };
+const ACTION_SHORT: Record<ScriptAction, string> = { start: 'Start writing', reset: 'Mark not started', submit: 'Send for review…', withdraw: 'Withdraw', approve: 'Approve', request_revisions: 'Send back…', deliver: 'Mark delivered to Timeliner', undo_delivery: 'Undo delivery' };
 
 function ScriptChecklist({ b }: { b: BatchDetail }) {
   const { me, users } = useBoot();
@@ -310,7 +341,7 @@ function ScriptChecklist({ b }: { b: BatchDetail }) {
   const [rangeErr, setRangeErr] = useState('');
   const [filter, setFilter] = useState<'all' | 'mine' | ScriptStatus | 'unassigned'>(manager ? 'all' : b.isAssigned ? 'mine' : 'all');
   const [dialog, setDialog] = useState<null | { action: ScriptAction | 'assign'; ids: number[] }>(null);
-  const sendable = b.scripts.filter((s) => (manager || s.assigneeId === me.id) && canSendDocument(s.status));
+  const sendable = b.scripts.filter((s) => (manager || s.assigneeId === me.id) && (s.status === 'not_started' || s.status === 'in_progress' || s.status === 'revisions_needed'));
   const [open, setOpen] = useState<Script | null>(null);
   const actions = manager ? MANAGER_ACTIONS : WRITER_ACTIONS;
   // long checklists start folded; documents are the main way work moves now
@@ -325,13 +356,15 @@ function ScriptChecklist({ b }: { b: BatchDetail }) {
   const selected = b.scripts.filter((s) => sel.has(s.id));
   const eligible = (a: ScriptAction) => selected.filter((s) => !checkAction(a, s, me));
 
+  const undoable = useUndoDecision();
   const run = useSave((v: { action: ScriptAction; ids: number[]; note?: string | null; timelinerUrl?: string | null }) =>
-    api<{ changed: number[] }>(`/api/batches/${b.id}/scripts/action`, {
+    api<{ changed: number[]; reviewId?: number }>(`/api/batches/${b.id}/scripts/action`, {
       body: { action: v.action, scriptIds: v.ids, note: v.note ?? null, timelinerUrl: v.timelinerUrl ?? null, versions: Object.fromEntries(b.scripts.filter((s) => v.ids.includes(s.id)).map((s) => [s.id, s.version])) },
     }), {
     onSuccess: (o, v) => {
       const nums = compressRanges(b.scripts.filter((s) => o.changed.includes(s.id)).map((s) => s.number));
-      toast(`${ACTION_RULES[v.action].label}: script${o.changed.length > 1 ? 's' : ''} ${nums}`);
+      const text = `${DONE[v.action]} ${o.changed.length > 1 ? 'scripts' : 'script'} ${nums}`;
+      if (v.action === 'approve' || v.action === 'request_revisions') undoable(o.reviewId, text); else toast(text);
       setSel(new Set()); setDialog(null);
     },
   });
@@ -384,7 +417,7 @@ function ScriptChecklist({ b }: { b: BatchDetail }) {
 
   return (
     <Panel title="Script checklist" count={b.scripts.length} id="scripts"
-      sub={`${b.progress.draftReady} / ${b.progress.total} drafts ready · ${b.progress.pctDraft}%`}
+      sub={`${b.progress.draftReady} / ${b.progress.total} drafts sent · ${b.progress.pctDraft}%`}
       tools={b.scripts.length > 12 ? <Button variant="sm ghost" onClick={() => { setExpanded(false); setSel(new Set()); }}>Hide</Button> : undefined}>
       <div className="script-toolbar">
         <select className="select sm" style={{ width: 'auto' }} aria-label="Show scripts" value={filter} onChange={(e) => setFilter(e.target.value as typeof filter)}>
@@ -466,8 +499,10 @@ function ScriptChecklist({ b }: { b: BatchDetail }) {
 
       {dialog?.action === 'submit' && <SendDialog batchId={b.id} batchTitle={b.title} candidates={sendable} preselect={dialog.ids} onClose={() => { setDialog(null); setSel(new Set()); }} />}
       {dialog?.action === 'request_revisions' && <DecisionDialog batchId={b.id} scripts={b.scripts.filter((s) => dialog.ids.includes(s.id))} submissionId={null} mode="revisions" onClose={() => { setDialog(null); setSel(new Set()); }} />}
-      {dialog?.action === 'deliver' && <DeliverDialog count={dialog.ids.length} extra={manager ? b.progress.awaitingDelivery - dialog.ids.length : 0} nums={compressRanges(b.scripts.filter((s) => dialog.ids.includes(s.id)).map((s) => s.number))} busy={run.isPending} error={run.error}
-        onClose={() => setDialog(null)} onSubmit={(url, note) => run.mutate({ action: 'deliver', ids: dialog.ids, timelinerUrl: url, note })} />}
+      {dialog?.action === 'deliver' && <DeliverDialog scripts={b.scripts.filter((s) => dialog.ids.includes(s.id))} submissions={b.submissions} busy={run.isPending} error={run.error}
+        also={manager ? alsoDelivered(b.scripts.filter((s) => s.status === 'approved' && !dialog.ids.includes(s.id)), me.id) : null}
+        forName={manager ? othersOf(b.scripts.filter((s) => s.status === 'approved'), me.id) : null}
+        onClose={() => setDialog(null)} onSubmit={(url, note, ids) => run.mutate({ action: 'deliver', ids, timelinerUrl: url, note })} />}
       {dialog?.action === 'undo_delivery' && <NoteDialog title="Undo delivery?" label="Reason" busy={run.isPending} error={run.error} confirm="Move back to approved" variant="danger"
         scripts={compressRanges(b.scripts.filter((s) => dialog.ids.includes(s.id)).map((s) => s.number))}
         onClose={() => setDialog(null)} onSubmit={(note) => run.mutate({ action: 'undo_delivery', ids: dialog.ids, note })} />}
@@ -486,37 +521,50 @@ function ScriptLinks({ s }: { s: Script }) {
   );
 }
 
-/** Send a writer's approved (or in-review) scripts back for revisions, all or some of them. */
+/** Send a writer's approved (or in-review) scripts back for revisions: nothing is picked until you pick it. */
 function SendBackDialog({ b, writerId, onClose }: { b: BatchDetail; writerId: number; onClose: () => void }) {
-  const toast = useToast();
-  const eligible = b.scripts.filter((s) => s.assigneeId === writerId && allowedFrom('request_revisions', s.status));
+  const mine = b.scripts.filter((s) => s.assigneeId === writerId);
+  const approved = mine.filter((s) => s.status === 'approved');
+  const inReview = mine.filter((s) => s.status === 'ready_for_review');
+  const eligible = [...approved, ...inReview].sort((x, y) => x.number - y.number);
   const name = b.writers.find((w) => w.userId === writerId)?.name ?? 'the writer';
-  const [range, setRange] = useState(compressRanges(eligible.map((s) => s.number)));
+  const [range, setRange] = useState('');
   const [note, setNote] = useState('');
   const [err, setErr] = useState<{ range?: string; note?: string }>({});
   const ids = { r: useFieldId('sb-range'), n: useFieldId('sb-note') };
-  const run = useSave((v: { ids: number[]; note: string }) => api(`/api/batches/${b.id}/scripts/action`, {
+  const undoable = useUndoDecision();
+  const run = useSave((v: { ids: number[]; note: string }) => api<{ reviewId?: number }>(`/api/batches/${b.id}/scripts/action`, {
     body: { action: 'request_revisions', scriptIds: v.ids, note: v.note, timelinerUrl: null, versions: Object.fromEntries(b.scripts.filter((s) => v.ids.includes(s.id)).map((s) => [s.id, s.version])) },
-  }), { onSuccess: (_o, v) => { toast(`Sent ${plural(v.ids.length, 'script')} back to ${name}`); onClose(); } });
+  }), { onSuccess: (o, v) => { undoable(o.reviewId, `Sent ${plural(v.ids.length, 'script')} back to ${name}`); onClose(); } });
+  const max = Math.max(...b.scripts.map((s) => s.number), 0);
+  const nums = range.trim() ? parseRanges(range, max) : [];
+  const picked = nums ? eligible.filter((s) => nums.includes(s.number)) : [];
+  const unApproves = picked.filter((s) => s.status === 'approved');
   const submit = () => {
-    const max = Math.max(...b.scripts.map((s) => s.number), 0);
-    const nums = parseRanges(range, max);
-    const picked = nums ? eligible.filter((s) => nums.includes(s.number)) : [];
     const e: typeof err = {};
-    if (!nums || !picked.length) e.range = `Pick from ${compressRanges(eligible.map((s) => s.number))}`;
+    if (!nums || !picked.length) e.range = `Type the script numbers to send back, from ${compressRanges(eligible.map((s) => s.number))}`;
     if (!note.trim()) e.note = 'Add a note so they know what to change';
     setErr(e);
     if (Object.keys(e).length) return;
     run.mutate({ ids: picked.map((s) => s.id), note: note.trim() });
   };
+  const quick = (list: Script[]) => { setRange(compressRanges(list.map((s) => s.number))); setErr((x) => ({ ...x, range: undefined })); };
   return (
-    <Dialog open onClose={onClose} title={`Send back to ${name}`} sub="They’ll see your note on their My work and get a notification." size="narrow"
-      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="danger" busy={run.isPending} onClick={submit} icon={<RotateCcw aria-hidden />}>Send back for revisions</Button></div>}>
+    <Dialog open onClose={onClose} title={`Send scripts back to ${name}`} sub="Pick the scripts that need changes. They’ll see your note on My work and get a notification." size="narrow"
+      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="danger" busy={run.isPending} disabled={!picked.length} onClick={submit} icon={<RotateCcw aria-hidden />}>{picked.length ? `Send ${plural(picked.length, 'script')} back` : 'Send back'}</Button></div>}>
       <form className="form" onSubmit={(e) => { e.preventDefault(); submit(); }}>
         <FormError error={run.error} />
-        <Field label="Scripts" htmlFor={ids.r} error={err.range} help={`Approved or waiting for review: ${compressRanges(eligible.map((s) => s.number))}`}>
-          <input className="input num" value={range} onChange={(e) => setRange(e.target.value)} {...inputProps(ids.r, err.range)} />
+        <div className="field">
+          <span className="lbl">Their scripts</span>
+          <div className="row-flex s2">
+            {inReview.length > 0 && <Button variant="sm" onClick={() => quick(inReview)}>In review: {compressRanges(inReview.map((s) => s.number))}</Button>}
+            {approved.length > 0 && <Button variant="sm" onClick={() => quick(approved)}>Approved: {compressRanges(approved.map((s) => s.number))}</Button>}
+          </div>
+        </div>
+        <Field label="Scripts to send back" htmlFor={ids.r} error={err.range} help="Type numbers like 3 or 3–5, or use the buttons above.">
+          <input className="input num" value={range} placeholder="e.g. 3" onChange={(e) => { setRange(e.target.value); setErr((x) => ({ ...x, range: undefined })); }} {...inputProps(ids.r, err.range)} />
         </Field>
+        {unApproves.length > 0 && <div className="banner yellow"><AlertTriangle aria-hidden /><div className="txt"><b>This un-approves {plural(unApproves.length, 'script')} ({compressRanges(unApproves.map((s) => s.number))})</b><span>They’ll need to be reviewed and approved again before delivery.</span></div></div>}
         <Field label="What to change" htmlFor={ids.n} error={err.note}><textarea className="textarea" data-autofocus value={note} onChange={(e) => setNote(e.target.value)} {...inputProps(ids.n, err.note)} /></Field>
       </form>
     </Dialog>
@@ -529,7 +577,7 @@ export function NoteDialog({ title, label, required, busy, error, confirm, varia
   const id = useFieldId('note');
   const submit = () => { if (required && !note.trim()) { setErr('Add a note so the writer knows what to change'); return; } onSubmit(note.trim() || null); };
   return (
-    <Dialog open onClose={onClose} title={title} sub={`Scripts ${scripts}`} size="narrow"
+    <Dialog open onClose={onClose} title={title} sub={`${/[,–]/.test(scripts) ? 'Scripts' : 'Script'} ${scripts}`} size="narrow"
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant={variant} busy={busy} onClick={submit}>{confirm}</Button></div>}>
       <div className="form">
         <FormError error={error} />
@@ -539,28 +587,127 @@ export function NoteDialog({ title, label, required, busy, error, confirm, varia
   );
 }
 
-export function DeliverDialog({ count, nums, forName, extra = 0, busy, error, onClose, onSubmit }: { count: number; nums: string; forName?: string | null; extra?: number; busy: boolean; error: ApiError | null; onClose: () => void; onSubmit: (url: string | null, note: string | null) => void }) {
+/** What a toast says after an action on scripts: "Approved scripts 1–6". */
+const DONE: Record<ScriptAction, string> = {
+  start: 'Started writing:', reset: 'Marked not started:', submit: 'Sent for review:', withdraw: 'Took back from review:',
+  approve: 'Approved', request_revisions: 'Sent back', deliver: 'Delivered', undo_delivery: 'Moved back to approved:',
+};
+
+/** "script 4 (Marcus Webb)": approved scripts a manager's delivery takes along. */
+function alsoDelivered(rest: Script[], meId: number): { count: number; detail: string } | null {
+  if (!rest.length) return null;
+  const by = new Map<string, number[]>();
+  for (const s of rest) { const who = s.assigneeId === meId ? 'yours' : s.assigneeName ?? 'unassigned'; by.set(who, [...(by.get(who) ?? []), s.number]); }
+  return { count: rest.length, detail: [...by.entries()].map(([who, n]) => `${n.length === 1 ? 'script' : 'scripts'} ${compressRanges(n)} (${who})`).join(', ') };
+}
+const othersOf = (approved: Script[], meId: number) => [...new Set(approved.filter((s) => s.assigneeId != null && s.assigneeId !== meId).map((s) => s.assigneeName!))].join(', ') || null;
+
+/**
+ * Confirming that approved scripts are in Timeliner. Shows which version to paste (the manager's
+ * edited one when there is one), lets a writer tick off only the documents they've added, and says
+ * plainly when a manager's confirmation takes the rest of the batch's approved scripts along.
+ */
+export function DeliverDialog({ scripts, submissions = [], also = null, forName, pick = false, busy, error, onClose, onSubmit }: {
+  scripts: Script[]; submissions?: Submission[];
+  /** approved scripts a manager's confirmation also delivers (the whole batch goes) */
+  also?: { count: number; detail: string } | null;
+  /** set when a manager confirms for writers: their names */
+  forName?: string | null;
+  /** let the person untick documents they haven't added yet */
+  pick?: boolean;
+  busy: boolean; error: ApiError | null; onClose: () => void; onSubmit: (url: string | null, note: string | null, ids: number[]) => void;
+}) {
   const { me } = useBoot();
+  const sources = useMemo(() => approvedSources(scripts, submissions), [scripts, submissions]);
+  const [picked, setPicked] = useState<Set<string>>(() => new Set(sources.map((g) => g.key)));
   const [url, setUrl] = useState('');
   const [note, setNote] = useState('');
   const [err, setErr] = useState('');
   const a = useFieldId('tl');
   const c = useFieldId('dn');
+  const ids = sources.filter((g) => picked.has(g.key)).flatMap((g) => g.ids);
+  const nums = compressRanges(scripts.filter((x) => ids.includes(x.id)).map((x) => x.number));
+  const total = ids.length + (also?.count ?? 0);
   const submit = () => {
-    if (url && !/^https?:\/\/\S+$/i.test(url)) { setErr('Use a full link starting with https://'); return; }
-    onSubmit(url || null, note || null);
+    const link = url.trim() && !/^https?:\/\//i.test(url.trim()) ? `https://${url.trim()}` : url.trim();
+    if (link && !/^https?:\/\/\S+\.\S+$/i.test(link)) { setErr('That doesn’t look like a link. Paste the Timeliner address, or leave it empty.'); return; }
+    onSubmit(link || null, note || null, ids);
+  };
+  const toggle = (k: string) => { const x = new Set(picked); x.has(k) ? x.delete(k) : x.add(k); setPicked(x); };
+  return (
+    <Dialog open onClose={onClose} title="Confirm delivery to Timeliner" sub={`${plural(ids.length, 'script')}${nums ? `: ${nums}` : ''}${also?.count ? ` · plus ${also.count} more` : ''}`} size="narrow"
+      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="mint pill" busy={busy} disabled={!total} onClick={submit} icon={<CheckCheck aria-hidden />}>Mark {plural(total, 'script')} delivered</Button></div>}>
+      <div className="form">
+        {sources.length > 0 && (
+          <div className="field">
+            <span className="lbl">{pick && sources.length > 1 ? 'Tick what’s already in Timeliner' : 'Paste these into Timeliner'}</span>
+            <SourceList sources={sources} picked={picked} onToggle={pick && sources.length > 1 ? toggle : undefined} />
+          </div>
+        )}
+        <div className="banner"><Send aria-hidden /><div className="txt"><b>Add the scripts to <Term k="Timeliner" /> first.</b><span>{forName
+          ? `This records that ${me.name} confirmed delivery for ${forName}, with today’s time. ${forName} ${forName.includes(',') ? 'are' : 'is'} told.`
+          : 'This records that you added them to Timeliner, with today’s time. Managers are told.'}</span></div></div>
+        {also && also.count > 0 && <div className="banner yellow"><Send aria-hidden /><div className="txt"><b>Also delivers {also.detail}</b><span>When a manager confirms, every approved script in this batch is marked delivered, whoever wrote it. Scripts that aren’t approved yet stay as they are.</span></div></div>}
+        <FormError error={error} />
+        <Field label="Timeliner link" optional htmlFor={a} error={err || error?.fields.timelinerUrl}><input className="input" type="url" placeholder="https://" value={url} onChange={(e) => { setUrl(e.target.value); setErr(''); }} {...inputProps(a, err)} /></Field>
+        <Field label="Delivery note" optional htmlFor={c}><textarea className="textarea" id={c} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Scheduled for next Tuesday" /></Field>
+      </div>
+    </Dialog>
+  );
+}
+
+/**
+ * Hand some of a writer's unfinished scripts to someone else, saying what's being handed over
+ * (how far along they are, and whether their deadline has already passed).
+ */
+function MoveScriptsDialog({ b, fromId, onClose }: { b: BatchDetail; fromId: number; onClose: () => void }) {
+  const { users, clock } = useBoot();
+  const toast = useToast();
+  const from = b.writers.find((w) => w.userId === fromId);
+  const open = b.scripts.filter((s) => s.assigneeId === fromId && (s.status === 'not_started' || s.status === 'in_progress' || s.status === 'revisions_needed'));
+  // the last scripts first: they're the least likely to be under way
+  const [range, setRange] = useState(compressRanges(open.filter((s) => s.status === 'not_started').map((s) => s.number)) || compressRanges(open.map((s) => s.number)));
+  const [to, setTo] = useState('');
+  const [reset, setReset] = useState(false);
+  const [err, setErr] = useState('');
+  const ids = { r: useFieldId('mvr'), t: useFieldId('mvt') };
+  const nums = parseRanges(range, Math.max(0, ...open.map((s) => s.number)));
+  const picked = nums ? open.filter((s) => nums.includes(s.number)) : [];
+  const writing = picked.filter((s) => s.status === 'in_progress');
+  const back = picked.filter((s) => s.status === 'revisions_needed');
+  const late = b.draft.overdue && picked.length > 0;
+  const target = users.find((u) => u.id === Number(to));
+  const move = useSave(async () => {
+    await api(`/api/batches/${b.id}/scripts/assign`, { body: { scriptIds: picked.map((s) => s.id), assigneeId: Number(to) } });
+    if (reset && writing.length) await api(`/api/batches/${b.id}/scripts/action`, { body: { action: 'reset', scriptIds: writing.map((s) => s.id), note: null } });
+  }, { onSuccess: () => { toast(`Moved ${plural(picked.length, 'script')} (${compressRanges(picked.map((s) => s.number))}) to ${target?.name ?? 'them'}`); onClose(); } });
+  const submit = () => {
+    if (!picked.length) { setErr(`Use ${from?.name.split(' ')[0] ?? 'their'} unfinished scripts: ${compressRanges(open.map((s) => s.number))}`); return; }
+    if (!to) { setErr('Choose who gets them'); return; }
+    setErr('');
+    move.mutate(undefined);
   };
   return (
-    <Dialog open onClose={onClose} title={`Confirm delivery to Timeliner`} sub={`${plural(count, 'script')}: ${nums}`} size="narrow"
-      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={busy} onClick={submit} icon={<Send aria-hidden />}>Mark {plural(count, 'script')} delivered</Button></div>}>
+    <Dialog open onClose={onClose} title={`Move scripts from ${from?.name ?? 'this writer'}`} sub={`${b.title} · ${plural(open.length, 'unfinished script')}: ${compressRanges(open.map((s) => s.number))}`} size="narrow"
+      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={move.isPending} onClick={submit}>Move {plural(picked.length, 'script')}</Button></div>}>
       <div className="form">
-        <div className="banner"><Send aria-hidden /><div className="txt"><b>Add the scripts to Timeliner first.</b><span>{forName
-          ? `This records that ${me.name} confirmed delivery on behalf of ${forName}, with today’s time. ${forName} ${forName.includes(',') ? 'are' : 'is'} notified.`
-          : `This records a writer-confirmed delivery by ${me.name} with today’s time. It isn’t verified by Timeliner itself. Managers are notified.`}</span></div></div>
-        {extra > 0 && <div className="banner yellow"><Send aria-hidden /><div className="txt"><b>The whole batch is delivered</b><span>As a manager, confirming also marks the other {plural(extra, 'approved script')} in this batch delivered, for everyone working on it.</span></div></div>}
-        <FormError error={error} />
-        <Field label="Timeliner link" optional htmlFor={a} error={err || error?.fields.timelinerUrl}><input className="input" type="url" placeholder="https://" value={url} onChange={(e) => setUrl(e.target.value)} {...inputProps(a, err)} /></Field>
-        <Field label="Delivery note" optional htmlFor={c}><textarea className="textarea" id={c} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Scheduled for next Tuesday" /></Field>
+        <FormError error={move.error} />
+        <Field label="Which scripts" htmlFor={ids.r} error={err && !picked.length ? err : undefined} help="Unstarted ones are picked first. Approved and delivered scripts stay with who wrote them.">
+          <input className="input" id={ids.r} value={range} onChange={(e) => setRange(e.target.value)} />
+        </Field>
+        <Field label="Give them to" htmlFor={ids.t} error={err && picked.length && !to ? err : undefined}>
+          <select className="select" id={ids.t} value={to} onChange={(e) => setTo(e.target.value)}>
+            <option value="">Choose…</option>
+            {users.filter((u) => u.active && canWrite(u.role) && u.id !== fromId).map((u) => <option key={u.id} value={u.id}>{u.name}{u.role !== 'writer' ? ` (${ROLE_LABEL[u.role]})` : ''}</option>)}
+          </select>
+        </Field>
+        {picked.length > 0 && (writing.length > 0 || back.length > 0 || late) && (
+          <div className="banner yellow"><AlertTriangle aria-hidden /><div className="txt">
+            <b>You’re handing over {[writing.length && `${writing.length} already being written`, back.length && `${back.length} sent back with notes`].filter(Boolean).join(' and ') || plural(picked.length, 'script')}</b>
+            <span>{late ? `Drafts were due ${fmtDate(b.draftDue, clock.today)}, so ${target?.name.split(' ')[0] ?? 'they'} will start overdue. Consider new deadlines after moving them.` : 'Their notes and any documents stay on the batch.'}</span>
+          </div></div>
+        )}
+        {writing.length > 0 && <label className="check"><input type="checkbox" checked={reset} onChange={(e) => setReset(e.target.checked)} />Mark the {plural(writing.length, 'script')} being written as not started</label>}
       </div>
     </Dialog>
   );
@@ -578,7 +725,7 @@ function AssignDialog({ count, busy, error, onClose, onSubmit }: { count: number
         <Field label="Writer" htmlFor={id} help="Each script has exactly one writer, so moving scripts never double-counts them.">
           <select className="select" id={id} value={uid} onChange={(e) => setUid(e.target.value)}>
             <option value="">Choose…</option>
-            {users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}{u.role !== 'writer' ? ` (${u.role})` : ''}</option>)}
+            {users.filter((u) => u.active && canWrite(u.role)).map((u) => <option key={u.id} value={u.id}>{u.name}{u.role !== 'writer' ? ` (${ROLE_LABEL[u.role]})` : ''}</option>)}
             <option value="none">Unassigned</option>
           </select>
         </Field>
@@ -615,7 +762,7 @@ function ScriptDialog({ s, b, onClose }: { s: Script; b: BatchDetail; onClose: (
       footer={canEdit ? <div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={save.isPending} onClick={() => save.mutate(undefined)}>Save script</Button></div> : undefined}>
       <div className="form">
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
-        {s.openRevision && <div className="banner pink"><RotateCcw aria-hidden /><div className="txt"><b>Revisions requested</b><span>{s.openRevision.note} — {s.openRevision.requestedByName}, {fmtStamp(s.openRevision.requestedAt, displayTz)}</span></div></div>}
+        {s.openRevision && <div className="banner pink"><RotateCcw aria-hidden /><div className="txt"><b>Sent back</b><span>{s.openRevision.note} — {s.openRevision.requestedByName}, {fmtStamp(s.openRevision.requestedAt, displayTz)}</span></div></div>}
         <Field label="Title" optional htmlFor={ids.t}><input className="input" id={ids.t} value={title} onChange={(e) => setTitle(e.target.value)} disabled={!canEdit} placeholder={`Script ${s.number}`} /></Field>
         <Field label="Writing document link" optional htmlFor={ids.d} error={f.docUrl}><input className="input" type="url" placeholder="https://docs.google.com/…" value={docUrl} onChange={(e) => setDocUrl(e.target.value)} disabled={!canEdit} {...inputProps(ids.d, f.docUrl)} /></Field>
         <Field label="Timeliner link" optional htmlFor={ids.l} error={f.timelinerUrl}><input className="input" type="url" placeholder="https://" value={tl} onChange={(e) => setTl(e.target.value)} disabled={!canEdit} {...inputProps(ids.l, f.timelinerUrl)} /></Field>
@@ -624,7 +771,7 @@ function ScriptDialog({ s, b, onClose }: { s: Script; b: BatchDetail; onClose: (
         <dl className="kv">
           <dt>Submitted</dt><dd>{s.submittedAt ? fmtStamp(s.submittedAt, displayTz) : '—'}</dd>
           <dt>Approved</dt><dd>{s.approvedAt ? `${fmtStamp(s.approvedAt, displayTz)} by ${s.approvedByName}` : '—'}</dd>
-          <dt>Delivered</dt><dd>{s.deliveredAt ? `${fmtStamp(s.deliveredAt, displayTz)} by ${s.deliveredByName} (writer-confirmed)` : '—'}</dd>
+          <dt>Delivered</dt><dd>{s.deliveredAt ? `${fmtStamp(s.deliveredAt, displayTz)} · confirmed by ${s.deliveredByName}${s.deliveredByName !== s.assigneeName && s.assigneeName ? ` for ${s.assigneeName}` : ''}` : '—'}</dd>
         </dl>
         {history.length > 0 && (
           <div><div className="section-title">Revision history</div>
@@ -751,15 +898,15 @@ function ReviewNotes({ b }: { b: BatchDetail }) {
 function Deliveries({ b }: { b: BatchDetail }) {
   const displayTz = useDisplayTz();
   return (
-    <Panel title="Delivery records" sub="writer-confirmed">
+    <Panel title="Delivery records" sub="who confirmed each delivery to Timeliner">
       {b.progress.delivered < b.progress.total && b.progress.delivered > 0 && <div className="banner yellow" style={{ marginBottom: 12 }}><AlertTriangle aria-hidden /><div className="txt"><b>Partially delivered: {b.progress.delivered} / {b.progress.total}</b><span>The batch is complete only when every script is recorded as delivered.</span></div></div>}
       {!b.deliveries.length ? <Empty boxed icon={<Send />} title="Nothing delivered yet">Writers confirm delivery here after adding scripts to Timeliner.</Empty> : (
         <div className="rows">
           {b.deliveries.map((d) => (
             <div key={d.id} className="item edge-mint">
               <div className="body">
-                <div className="title">Scripts {compressRanges(d.scriptNumbers) || '—'}</div>
-                <div className="meta"><span>Writer-confirmed by <b style={{ color: 'var(--text)' }}>{d.confirmedByName}</b></span><span>{fmtStamp(d.confirmedAt, displayTz)}</span></div>
+                <div className="title">{d.scriptNumbers.length ? scriptsLabel(d.scriptNumbers) : 'Scripts —'}</div>
+                <div className="meta"><span>{d.forNames.length ? <>Confirmed by <b style={{ color: 'var(--text)' }}>{d.confirmedByName}</b> for {d.forNames.join(', ')}</> : <>Confirmed by the writer, <b style={{ color: 'var(--text)' }}>{d.confirmedByName}</b></>}</span><span>{fmtStamp(d.confirmedAt, displayTz)}</span></div>
                 {d.note && <div className="muted" style={{ fontSize: 13 }}>{d.note}</div>}
                 {d.scriptNumbers.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>These scripts were later moved back to approved.</div>}
               </div>
@@ -902,7 +1049,7 @@ function TargetDialog({ b, onClose }: { b: BatchDetail; onClose: () => void }) {
         {p && p.target > p.current && (
           <>
             <p>Adds {plural(p.add, 'script')}{p.restore.length ? ` (restoring removed scripts ${compressRanges(p.restore)} first)` : ''}.</p>
-            <Field label="Assign the new scripts to" optional htmlFor="tgt-a"><select id="tgt-a" className="select" value={assignee} onChange={(e) => setAssignee(e.target.value)}><option value="">Leave unassigned</option>{users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
+            <Field label="Assign the new scripts to" optional htmlFor="tgt-a"><select id="tgt-a" className="select" value={assignee} onChange={(e) => setAssignee(e.target.value)}><option value="">Leave unassigned</option>{users.filter((u) => u.active && canWrite(u.role)).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select></Field>
           </>
         )}
         {p && shrinking && (
@@ -939,6 +1086,7 @@ export function RescheduleDialog({ shootId, start, end, initialStart, initialEnd
   const [s, setS] = useState(initialStart ?? start);
   const [e, setE] = useState((initialStart ? initialEnd : end) ?? '');
   const [shiftManual, setShiftManual] = useState(false);
+  const [autoShifted, setAutoShifted] = useState(false);
   const [preview, setPreview] = useState<ReschedulePreview | null>(null);
   // A preview changes nothing, so it doesn't refresh the rest of the page (useSave would). Its result
   // is taken in mutate's own onSuccess, which only runs for the latest request: an older preview
@@ -947,7 +1095,13 @@ export function RescheduleDialog({ shootId, start, end, initialStart, initialEnd
   const load = useMutation<ReschedulePreview, ApiError, Dates>({
     mutationFn: (v) => api<ReschedulePreview>(`/api/shoots/${shootId}/reschedule-preview`, { body: { startDate: v.s, endDate: v.e || null, shiftManual: v.shiftManual } }),
   });
-  const loadPreview = (v: Dates) => load.mutate(v, { onSuccess: setPreview });
+  const loadPreview = (v: Dates): void => load.mutate(v, {
+    onSuccess: (p) => {
+      setPreview(p);
+      // keeping a manual date would put drafts after final delivery: move it too, unless they untick it
+      if (p.outOfOrder.length && p.manualCount > 0 && !v.shiftManual && !autoShifted) { setAutoShifted(true); setShiftManual(true); loadPreview({ ...v, shiftManual: true }); }
+    },
+  });
   const apply = useSave(() => api(`/api/shoots/${shootId}/reschedule`, { body: { startDate: s, endDate: e || null, shiftManual } }), { onSuccess: () => { toast(`Shoot moved to ${fmtRange(s, e || null)} — everything updated`); onClose(); } });
   // dragged on the calendar: show what will change straight away
   useEffect(() => { if (initialStart) loadPreview({ s, e, shiftManual }); }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -982,6 +1136,15 @@ export function RescheduleDialog({ shootId, start, end, initialStart, initialEnd
             <input type="checkbox" checked={shiftManual} onChange={(x) => { setShiftManual(x.target.checked); reload({ shiftManual: x.target.checked }); }} />
             Move {preview.manualCount === 1 ? 'the manually set deadline' : `the ${preview.manualCount} manually set deadlines`} by the same number of days too
           </label>
+        )}
+        {preview && autoShifted && shiftManual && !preview.outOfOrder.length && (
+          <p className="muted" style={{ fontSize: 13 }}>Ticked for you: keeping the manual date would have put drafts after final delivery.</p>
+        )}
+        {preview && preview.outOfOrder.length > 0 && (
+          <div className="banner red" role="alert"><AlertTriangle aria-hidden /><div className="txt">
+            <b>Drafts would be due after final delivery</b>
+            <span>{preview.outOfOrder.map((o) => `${o.batchTitle}: drafts ${fmtDate(o.draftDue)}, final ${fmtDate(o.finalDue)}`).join(' · ')}. {preview.manualCount ? 'Tick “Move the manually set deadline” above, or fix the dates on the batch after moving.' : 'Fix the dates on the batch after moving.'}</span>
+          </div></div>
         )}
         {preview && (
           <div style={{ opacity: load.isPending ? 0.55 : 1, transition: 'opacity 200ms ease' }}>

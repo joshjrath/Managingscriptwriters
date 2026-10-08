@@ -464,7 +464,79 @@ alter table users add column timezone_confirmed_at timestamptz;
 `,
   // 18 · batches with only drafts due or only final delivery get the other date
   fillMissingDeadlines,
-  // 19 · the Master log and the Control Center read the newest changes across the whole workspace, and each person's latest
+  // 19 · synced calendars (a Google Calendar's secret iCal address) shown on the Calendar
+  `
+create table calendar_feeds (
+  id bigint generated always as identity primary key,
+  name text not null,
+  url text not null,
+  color text not null default '#9CC7F7',
+  visibility text not null default 'managers' check (visibility in ('managers', 'everyone')),
+  created_by bigint not null references users(id),
+  created_at timestamptz not null default now(),
+  last_synced_at timestamptz,
+  last_error text,
+  event_count int not null default 0
+);
+create table calendar_events (
+  id bigint generated always as identity primary key,
+  feed_id bigint not null references calendar_feeds(id) on delete cascade,
+  uid text not null,
+  title text not null,
+  location text,
+  description text,
+  all_day boolean not null,
+  start_at timestamptz not null,
+  end_at timestamptz not null,
+  start_date date,
+  end_date date
+);
+create index calendar_events_feed_idx on calendar_events (feed_id);
+create index calendar_events_when_idx on calendar_events (start_at, end_at);
+`,
+  // 20 · shoots found on a synced calendar: ones a manager dismissed, and ones they've been told about
+  `
+create table calendar_shoot_marks (
+  uid text primary key,
+  dismissed_at timestamptz,
+  dismissed_by bigint references users(id),
+  notified_at timestamptz
+);
+`,
+  // 21 · editors: people who cut the videos sign in to see the calendar and finished scripts;
+  // a synced calendar can be shown to them without showing it to writers
+  `
+alter table users drop constraint if exists users_role_check;
+alter table users add constraint users_role_check check (role in ('owner', 'manager', 'writer', 'editor'));
+alter table calendar_feeds drop constraint if exists calendar_feeds_visibility_check;
+alter table calendar_feeds add constraint calendar_feeds_visibility_check check (visibility in ('managers', 'editors', 'everyone'));
+`,
+  // 22 · when each script was given to its writer, so My work can put new work first
+  `
+alter table scripts add column assigned_at timestamptz;
+update scripts set assigned_at = created_at where assignee_id is not null;
+`,
+  // 23 · a shoot planned from a synced-calendar event remembers which one, so it's never offered again
+  `
+alter table shoots add column calendar_uid text;
+create index shoots_calendar_uid_idx on shoots (calendar_uid);
+`,
+  // 24 · the decision a notification or celebration came from, so undoing the decision takes it back
+  `
+alter table notifications add column review_id bigint;
+alter table moments add column review_id bigint;
+`,
+  // 25 · when each writer last looked at their work in a batch ("Got it", opening it, or sending),
+  // so scripts added after that still show as new
+  `
+create table work_seen (
+  user_id bigint not null references users(id) on delete cascade,
+  batch_id bigint not null references batches(id) on delete cascade,
+  seen_at timestamptz not null default now(),
+  primary key (user_id, batch_id)
+);
+`,
+  // 26 · the Master log and the Control Center read the newest changes across the whole workspace, and each person's latest
   `
 create index if not exists activity_created_idx on activity (created_at desc);
 create index if not exists activity_actor_idx on activity (actor_id, created_at desc);

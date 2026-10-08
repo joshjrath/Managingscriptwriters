@@ -1,20 +1,21 @@
 // Calendar: writing periods, draft deadlines, final delivery deadlines and
-// shoot dates, each with its own colour, icon and label. Click an event to
-// open its batch. Managers can drag a shoot to another day (or click it and
+// shoot dates, each with its own colour, icon and label, plus events from synced
+// calendars (Google Calendar) in each calendar's colour. Click an event to
+// open its batch, or a synced event to see its details. Managers can drag a shoot to another day (or click it and
 // choose "Change dates"); a preview shows everything that moves with it
 // before anything changes. Month grid on desktop, agenda list on phones.
 
-import { useMemo, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, m } from 'framer-motion';
-import { AlertTriangle, ArrowRight, CalendarClock, Camera, Check, ChevronLeft, ChevronRight, FileText, GripVertical, PenLine, Send } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CalendarClock, CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, GripVertical, PenLine, Send } from 'lucide-react';
 import { api, qs } from '../api';
 import type { CalendarEvent } from '../../../shared/types';
 import { addDays, addMonths, diffDays, eachDay, startOfMonth, startOfWeek, type ISODate } from '../../../shared/dates';
 import { isManager } from '../../../shared/workflow';
-import { fmtMonth, fmtWeekday, fmtDate, fmtRange } from '../../../shared/format';
-import { PageHeader, useBoot, useNewWork } from '../components/Shell';
+import { fmtMonth, fmtWeekday, fmtDate, fmtRange, plural } from '../../../shared/format';
+import { PageHeader, useBoot, useDisplayTz, useNewWork } from '../components/Shell';
 import { Button, Dialog, Empty, ErrorState, Loading, Seg } from '../components/ui';
 import { SOFT } from '../motion';
 import { RescheduleDialog } from './BatchDetail';
@@ -23,9 +24,15 @@ import { DAY_COUNTS, DaysTimeline, type DayCount } from '../components/DaysTimel
 const TYPE = {
   writing: { label: 'Writing', icon: PenLine, c: 'var(--cyan)' },
   draft: { label: 'Drafts due', icon: FileText, c: 'var(--lavender)' },
-  final: { label: 'Final → Timeliner', icon: Send, c: 'var(--yellow)' },
+  final: { label: 'Final delivery', icon: Send, c: 'var(--yellow)' },
   shoot: { label: 'Shoot', icon: Camera, c: 'var(--salmon)' },
+  external: { label: 'Google Calendar', icon: CalendarDays, c: 'var(--text-2)' },
 } as const;
+
+/** "10:00 AM" in the viewer's time zone, or null for all-day events. */
+const timeOf = (e: CalendarEvent, tz: string) => (e.external && !e.external.allDay
+  ? new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(new Date(e.external.startAt)).replace(':00', '').replace(' ', '').toLowerCase()
+  : null);
 
 /** A shoot being moved: where it is now, and (when dragged) where it's going. */
 interface Move { shootId: number; start: ISODate; end: ISODate | null; toStart?: ISODate; toEnd?: ISODate | null }
@@ -33,22 +40,30 @@ interface Move { shootId: number; start: ISODate; end: ISODate | null; toStart?:
 export function CalendarPage() {
   const { clock, users, clients, me } = useBoot();
   const manager = isManager(me.role);
+  const editor = me.role === 'editor';
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   const month = params.get('m') && /^\d{4}-\d{2}$/.test(params.get('m')!) ? `${params.get('m')}-01` : startOfMonth(clock.today);
-  const writerId = params.get('writerId') ?? '';
+  // writers start on their own work; "all" shows everyone's
+  const writerParam = params.get('writerId');
+  const writerId = writerParam === 'all' ? '' : writerParam ?? (!manager && !editor ? String(me.id) : '');
   const clientId = params.get('clientId') ?? '';
   const phone = window.matchMedia('(max-width: 760px)').matches;
+  const touch = window.matchMedia('(pointer: coarse)').matches;
   const view = (['days', 'month', 'list'] as const).find((v) => v === params.get('view')) ?? (phone ? 'list' : 'month');
   const n = (DAY_COUNTS.find((c) => String(c) === params.get('days')) ?? (phone ? 3 : 7)) as DayCount;
   // months slide in from the side you're heading towards
   const lastMonth = useRef(month);
   const dir = month > lastMonth.current ? 1 : month < lastMonth.current ? -1 : 0;
   lastMonth.current = month;
-  const [hidden, setHidden] = useState<Set<CalendarEvent['type']>>(new Set());
+  // writing periods are long stripes that crowd the month grid, so they start hidden there
+  const [hidden, setHidden] = useState<Set<CalendarEvent['type']>>(() => new Set(view === 'month' ? ['writing'] : []));
+  const [dayOpen, setDayOpen] = useState<ISODate | null>(null);
   const [drag, setDrag] = useState<{ e: CalendarEvent; offset: number; over: ISODate | null } | null>(null);
   const [move, setMove] = useState<Move | null>(null);
   const [picked, setPicked] = useState<CalendarEvent | null>(null);
+  const [synced, setSynced] = useState<CalendarEvent | null>(null);
+  const tz = useDisplayTz();
   const openNew = useNewWork();
   const gridStart = startOfWeek(month);
   const gridEnd = addDays(startOfWeek(addDays(addMonths(month, 1), -1)), 6);
@@ -59,19 +74,29 @@ export function CalendarPage() {
   });
   const setP = (k: string, v: string) => { const p = new URLSearchParams(params); if (v) p.set(k, v); else p.delete(k); setParams(p, { replace: true }); };
   const setView = (v: 'days' | 'month' | 'list') => setP('view', v);
-  const events = (q.data?.events ?? []).filter((e) => !hidden.has(e.type));
+  // a calendar event that a shoot was planned from shows once, as the shoot
+  const shootIds = new Set((q.data?.events ?? []).filter((e) => e.type === 'shoot' && e.shootId != null).map((e) => e.shootId));
+  const events = (q.data?.events ?? []).filter((e) => !hidden.has(e.type) && !(e.external?.linkedShootId && !hidden.has('shoot') && shootIds.has(e.external.linkedShootId)));
   const byDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
-    const order = { shoot: 0, final: 1, draft: 2, writing: 3 };
+    const order = { shoot: 0, final: 1, draft: 2, writing: 3, external: 4 };
     for (const e of events) for (const d of eachDay(e.start > gridStart ? e.start : gridStart, e.end < gridEnd ? e.end : gridEnd)) map.set(d, [...(map.get(d) ?? []), e]);
-    for (const list of map.values()) list.sort((a, b) => order[a.type] - order[b.type]);
+    for (const list of map.values()) list.sort((a, b) => order[a.type] - order[b.type] || (a.external?.startAt ?? '').localeCompare(b.external?.startAt ?? ''));
     return map;
   }, [events, gridStart, gridEnd]);
   const days = eachDay(gridStart, gridEnd);
+  // the list starts at today, not the 1st
+  useEffect(() => {
+    if (view !== 'list' || !q.data || month.slice(0, 7) !== clock.today.slice(0, 7)) return;
+    const el = document.querySelector('.agenda-day.is-today, .agenda-day.after-today');
+    if (el) el.scrollIntoView({ block: 'start', behavior: 'auto' });
+  }, [view, q.data, month, clock.today]);
 
   const canMove = (e: CalendarEvent) => manager && e.type === 'shoot' && e.shootId != null;
   const open = (e: CalendarEvent) => {
-    if (canMove(e)) setPicked(e);
+    if (e.external) setSynced(e);
+    else if (editor) { const id = clients.find((c) => c.name === e.clientName)?.id; if (id) nav(`/scripts?clientId=${id}`); }
+    else if (canMove(e)) setPicked(e);
     else if (e.batchId) nav(`/batches/${e.batchId}`);
     else if (e.shootId) nav('/production');
   };
@@ -101,6 +126,21 @@ export function CalendarPage() {
   };
 
   const ev = (e: CalendarEvent, day: ISODate, detail = false) => {
+    if (e.external) {
+      const x = e.external;
+      const time = day === e.start ? timeOf(e, tz) : null;
+      const first = day === e.start || new Date(day + 'T00:00:00Z').getUTCDay() === 1;
+      return (
+        <m.div key={`${e.id}:${day}`} className="ev-wrap" layout="position" transition={SOFT}>
+          <button className={`ev external${x.allDay ? ' allday' : ''}${first ? '' : ' cont'}${e.complete ? ' done' : ''}`} style={{ ['--c' as string]: x.color }} onClick={() => open(e)}
+            title={`${x.feedName}: ${e.title}${time ? ` · ${time}` : ''}${x.location ? ` · ${x.location}` : ''}`}
+            aria-label={`${x.feedName}: ${e.title}${time ? ` at ${time}` : x.allDay ? ', all day' : ''}`}>
+            {x.allDay ? <CalendarDays aria-hidden /> : <i className="ev-dot" aria-hidden />}
+            <span>{first ? <>{time && <b className="ev-time">{time}</b>}{e.title}</> : ' '}{detail && first && <small className="ev-sub">{x.feedName}{x.location ? ` · ${x.location}` : ''}</small>}</span>
+          </button>
+        </m.div>
+      );
+    }
     const T = TYPE[e.type];
     const Icon = e.overdue && e.type !== 'writing' ? AlertTriangle : e.complete && e.type !== 'writing' ? Check : T.icon;
     const showLabel = e.type !== 'writing' || day === e.start || new Date(day + 'T00:00:00Z').getUTCDay() === 1;
@@ -129,7 +169,7 @@ export function CalendarPage() {
 
   return (
     <>
-      <PageHeader title="Calendar" sub={manager ? 'Writing periods, draft deadlines, final deliveries and shoots. Drag a shoot to another day to move it — its deadlines follow.' : 'Writing periods, draft deadlines, final deliveries and shoots.'}>
+      <PageHeader title="Calendar" sub={editor ? 'Shoots, when each batch’s scripts are final, and synced calendars. Click a shoot to see its finished scripts.' : manager ? `Writing periods, draft deadlines, final deliveries and shoots. ${touch ? 'Tap a shoot to change its dates' : 'Drag a shoot to another day to move it'} — its deadlines follow.` : 'Writing periods, draft deadlines, final deliveries and shoots.'}>
         <Seg role="group" aria-label="Calendar view">
           <button aria-pressed={view === 'days'} onClick={() => setView('days')}>Days</button>
           <button aria-pressed={view === 'month'} onClick={() => setView('month')}>Month</button>
@@ -144,11 +184,11 @@ export function CalendarPage() {
         <Button variant="sm ghost" onClick={() => setP('m', '')}>Today</Button>
         </>}
         <span className="spacer" />
-        <select className="select sm" style={{ width: 'auto' }} value={writerId} onChange={(e) => setP('writerId', e.target.value)} aria-label="Writer"><option value="">All writers</option>{users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>
+        {!editor && <select className="select sm" style={{ width: 'auto' }} value={writerId} onChange={(e) => setP('writerId', e.target.value || (manager ? '' : 'all'))} aria-label="Writer"><option value="">All writers</option>{users.filter((u) => u.active && u.role !== 'editor').map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>}
         <select className="select sm" style={{ width: 'auto', maxWidth: 220 }} value={clientId} onChange={(e) => setP('clientId', e.target.value)} aria-label="Client"><option value="">All clients</option>{clients.filter((c) => c.status !== 'archived').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
       </div>
-      <div className="quick" role="group" aria-label="Show event types">
-        {(Object.keys(TYPE) as CalendarEvent['type'][]).map((t) => {
+      <div className="quick cal-quick" role="group" aria-label="Show event types">
+        {(Object.keys(TYPE) as CalendarEvent['type'][]).filter((t) => !editor || t === 'shoot' || t === 'final' || t === 'external').map((t) => {
           const T = TYPE[t];
           return (
             <button key={t} aria-pressed={!hidden.has(t)} style={{ ['--c' as string]: T.c }} onClick={() => setHidden((h) => { const n = new Set(h); n.has(t) ? n.delete(t) : n.add(t); return n; })}>
@@ -183,7 +223,7 @@ export function CalendarPage() {
                   <span className="dn"><span>{Number(d.slice(8))}</span>{d === clock.today && <span style={{ fontSize: 10, letterSpacing: '.12em', textTransform: 'uppercase' }}>Today</span>}</span>
                   {land && landing && d === landing.from && <span className="landing-tag"><Camera aria-hidden />{drag ? 'Drop to move here' : 'Moving here…'}</span>}
                   {list.slice(0, 5).map((e) => ev(e, d))}
-                  {list.length > 5 && <button className="more" onClick={() => setView('list')}>+{list.length - 5} more</button>}
+                  {list.length > 5 && <button className="more" onClick={() => setDayOpen(d)}>+{list.length - 5} more</button>}
                 </div>
               );
             })}
@@ -197,10 +237,22 @@ export function CalendarPage() {
           {!events.length ? <Empty title="Nothing scheduled this month" /> : (
             <div className="agenda">
               {days.filter((d) => d.slice(0, 7) === month.slice(0, 7) && (byDay.get(d)?.some((e) => e.type !== 'writing' || e.start === d) ?? false)).map((d) => (
-                <div key={d} className="agenda-day">
+                <div key={d} className={`agenda-day${d === clock.today ? ' is-today' : ''}${d > clock.today ? ' after-today' : ''}`}>
                   <h3>{fmtWeekday(d)}{d === clock.today && <span>today</span>}</h3>
                   <div className="rows">
                     {(byDay.get(d) ?? []).filter((e) => e.type !== 'writing' || e.start === d).map((e) => {
+                      if (e.external) {
+                        const x = e.external;
+                        return (
+                          <button key={e.id} className="item clickable" style={{ border: 0, textAlign: 'left', color: 'inherit', font: 'inherit', boxShadow: `inset 3px 0 0 ${x.color}` }} onClick={() => open(e)}>
+                            <div className="body">
+                              <div className="top" style={{ color: x.color, fontWeight: 700 }}><CalendarDays size={14} aria-hidden />{x.feedName}</div>
+                              <div className="title">{e.title}</div>
+                              <div className="meta">{whenText(e, tz)}{x.location ? ` · ${x.location}` : ''}</div>
+                            </div>
+                          </button>
+                        );
+                      }
                       const T = TYPE[e.type];
                       return (
                         <button key={e.id} className={`item clickable ${e.overdue ? 'edge-red' : ''}`} style={{ border: 0, textAlign: 'left', color: 'inherit', font: 'inherit' }} onClick={() => open(e)}>
@@ -231,7 +283,43 @@ export function CalendarPage() {
           <p className="muted" style={{ fontSize: 13.5 }}>Changing the dates moves the draft and final delivery deadlines and the planned writing start with it. You’ll see every change before it’s applied. You can also drag the shoot to another day on the calendar.</p>
         </Dialog>
       )}
+      {synced?.external && (
+        <Dialog open onClose={() => setSynced(null)} size="narrow" title={synced.title} sub={`${synced.external.feedName} · ${whenText(synced, tz)}`}
+          footer={<div className="form-actions">
+            <Button variant="ghost" onClick={() => setSynced(null)}>Close</Button>
+            {manager && synced.external.linkedBatchId && <Button variant="primary pill" icon={<ArrowRight aria-hidden />} onClick={() => { const id = synced.external!.linkedBatchId; setSynced(null); nav(`/batches/${id}`); }}>Open its batch</Button>}
+            {manager && !synced.external.linkedShootId && <Button variant="primary pill" icon={<Camera aria-hidden />} onClick={() => { const e = synced; setSynced(null); openNew('shoot', { start: e.start, end: e.end !== e.start ? e.end : null, title: e.title, calendarUid: e.external!.uid }); }}>Plan scripts for it</Button>}
+          </div>}>
+          <div className="stack s3 synced-ev">
+            <span className="chip" style={{ ['--c' as string]: synced.external.color, alignSelf: 'flex-start' }}><i className="d" aria-hidden />{synced.external.feedName}</span>
+            {synced.external.location && <div><div className="section-title">Where</div><p className="prose"><Linked text={synced.external.location} /></p></div>}
+            {synced.external.description && <div><div className="section-title">Details</div><p className="prose" style={{ whiteSpace: 'pre-wrap' }}><Linked text={synced.external.description} /></p></div>}
+            {synced.external.linkedShootId && <p style={{ fontSize: 13.5 }}><b>Planned on the site.</b> This event has a shoot{synced.external.linkedBatchId ? ' with scripts' : ', no scripts yet'}.</p>}
+            <p className="muted" style={{ fontSize: 12.5 }}>From Google Calendar. Change it there; it updates here within 15 minutes.</p>
+          </div>
+        </Dialog>
+      )}
+      {dayOpen && (
+        <Dialog open onClose={() => setDayOpen(null)} size="narrow" title={fmtWeekday(dayOpen)} sub={plural((byDay.get(dayOpen) ?? []).length, 'thing', 'things') + ' on this day'}
+          footer={<div className="form-actions"><Button variant="ghost" onClick={() => setDayOpen(null)}>Close</Button></div>}>
+          <div className="day-pop">{(byDay.get(dayOpen) ?? []).map((e) => <div key={e.id} onClickCapture={() => setDayOpen(null)}>{ev(e, dayOpen, true)}</div>)}</div>
+        </Dialog>
+      )}
       {move && <RescheduleDialog shootId={move.shootId} start={move.start} end={move.end} initialStart={move.toStart} initialEnd={move.toEnd} onClose={() => setMove(null)} />}
     </>
   );
+}
+
+/** "Thu, Oct 8 · 10:00–10:30 AM", or the dates for all-day events, in the viewer's zone. */
+function whenText(e: CalendarEvent, tz: string): string {
+  const x = e.external!;
+  if (x.allDay) return e.end !== e.start ? `${fmtDate(e.start)} – ${fmtDate(e.end)} · all day` : `${fmtWeekday(e.start)} · all day`;
+  const t = (iso: string) => new Intl.DateTimeFormat('en-US', { timeZone: tz, hour: 'numeric', minute: '2-digit' }).format(new Date(iso));
+  return `${fmtWeekday(e.start)} · ${t(x.startAt)}–${t(x.endAt)}${e.end !== e.start ? ` (${fmtDate(e.end)})` : ''}`;
+}
+
+/** Text with its links clickable (meeting links in calendar invites). */
+function Linked({ text }: { text: string }) {
+  const parts = text.split(/(https?:\/\/[^\s<>"]+)/g);
+  return <>{parts.map((p, i) => (/^https?:\/\//.test(p) ? <a key={i} href={p} target="_blank" rel="noopener noreferrer">{p}</a> : p))}</>;
 }

@@ -6,7 +6,7 @@ import { LayoutGroup, m } from 'framer-motion';
 import { isManager } from '../../../shared/workflow';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Archive, ArchiveRestore, Building2, Camera, FileText, GripVertical, Link2, Pencil, PlayCircle, Plus, Sparkles, UserPlus, Wand2 } from 'lucide-react';
+import { AlertTriangle, Archive, ArrowRight, ArchiveRestore, Building2, Camera, FileText, GripVertical, Link2, Pencil, PlayCircle, Plus, Sparkles, UserPlus, Wand2 } from 'lucide-react';
 import { api, useSave, type ApiError } from '../api';
 import { confetti } from '../fx';
 import { SOFT } from '../motion';
@@ -15,7 +15,7 @@ import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
 import { nowInZone } from '../../../shared/dates';
 import { PageHeader, useBoot, useNewWork, useDisplayTz } from '../components/Shell';
 import { BatchItem } from '../components/BatchBits';
-import { Button, Chip, DateTile, Dialog, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, Panel, Seg, useFieldId, useToast } from '../components/ui';
+import { Button, Chip, DateTile, Dialog, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, NotFound, Panel, Seg, Term, useFieldId, useToast } from '../components/ui';
 import { RescheduleDialog, ResourceDialog, ResourceRow } from './BatchDetail';
 
 export function ClientsPage() {
@@ -89,16 +89,23 @@ export function ClientsPage() {
                       <Link to={`/clients/${c.id}`} className="client-card" draggable={false}>
                         <div className="row-flex s2" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'nowrap' }}>
                           <h3>{c.name}</h3>
-                          {c.overdueBatches > 0 && <Chip color="red" icon={<AlertTriangle aria-hidden />}>{c.overdueBatches} overdue</Chip>}
+                          {c.overdueBatches > 0 && me.role !== 'editor' && <Chip color="red" icon={<AlertTriangle aria-hidden />}>{c.overdueBatches} overdue</Chip>}
                           {c.becameClientAt && Date.now() - Date.parse(c.becameClientAt) < 7 * 86400_000 && !c.overdueBatches && <Chip color="mint" icon={<Sparkles aria-hidden />}>New client</Chip>}
                         </div>
                         {c.description ? <p className="desc">{c.description}</p> : <p className="desc">No description yet.</p>}
-                        <span className="muted" style={{ fontSize: 12.5 }}>Owner: {c.ownerName ?? '—'}</span>
-                        <div className="stats">
-                          <div><b>{c.activeBatches}</b><span>active batches</span></div>
-                          <div><b className="num">{c.scriptsDelivered}/{c.scriptsTotal}</b><span>delivered</span></div>
-                          <div><b>{c.nextShoot ? fmtDate(c.nextShoot) : '—'}</b><span>next shoot</span></div>
-                        </div>
+                        <span className="muted" style={{ fontSize: 12.5 }}>Account lead: {c.ownerName ?? '—'}</span>
+                        {me.role === 'editor' ? (
+                          <div className="stats">
+                            <div><b>{c.nextShoot ? fmtDate(c.nextShoot) : '—'}</b><span>next shoot</span></div>
+                            <div><b className="num">{c.scriptsDelivered}</b><span>{c.scriptsDelivered === 1 ? 'finished script' : 'finished scripts'}</span></div>
+                          </div>
+                        ) : (
+                          <div className="stats">
+                            <div><b>{c.activeBatches}</b><span>{c.activeBatches === 1 ? 'active batch' : 'active batches'}</span></div>
+                            <div><b className="num">{c.scriptsDelivered}/{c.scriptsTotal}</b><span>delivered</span></div>
+                            <div><b>{c.nextShoot ? fmtDate(c.nextShoot) : '—'}</b><span>next shoot</span></div>
+                          </div>
+                        )}
                       </Link>
                       </div>
                     </m.div>
@@ -122,7 +129,7 @@ export function ClientsPage() {
                         <div className="pbody">
                           <Link to={`/clients/${c.id}`} className="pname" draggable={false}>{c.name}</Link>
                           {c.description && <p className="desc">{c.description}</p>}
-                          <span className="meta">{c.ownerName ?? 'No owner'} · added {fmtDate(nowInZone(displayTz, new Date(c.createdAt)).date)}</span>
+                          <span className="meta">{c.ownerName ?? 'No account lead'} · added {fmtDate(nowInZone(displayTz, new Date(c.createdAt)).date)}</span>
                         </div>
                         {manager && <Button variant="sm mint" busy={move.isPending && move.variables?.id === c.id} onClick={(x) => { if (move.isPending) return; const r = (x.currentTarget as HTMLElement).getBoundingClientRect(); move.mutate({ id: c.id, to: 'active', at: { x: r.left + r.width / 2, y: r.top } }); }}>Mark as client</Button>}
                       </div>
@@ -144,9 +151,11 @@ export function ClientPage() {
   const { id } = useParams();
   const { me, users, clock } = useBoot();
   const manager = isManager(me.role);
+  const editor = me.role === 'editor';
   const openNew = useNewWork();
   const toast = useToast();
-  const q = useQuery({ queryKey: ['client', Number(id)], queryFn: () => api<ClientDetail>(`/api/clients/${id}`) });
+  const bad = !/^\d+$/.test(id ?? '');
+  const q = useQuery({ queryKey: ['client', Number(id)], queryFn: () => api<ClientDetail>(`/api/clients/${id}`), enabled: !bad });
   const [edit, setEdit] = useState(false);
   const [brief, setBrief] = useState<Briefing | 'new' | null>(null);
   const [res, setRes] = useState<{ briefingId?: number } | null>(null);
@@ -158,6 +167,7 @@ export function ClientPage() {
   const convert = useSave(() => api(`/api/clients/${id}/stage`, { body: { stage: 'client' } }), {
     onSuccess: () => { confetti({ ...(convertAt.current ?? {}), count: 90, spread: 100, power: 13 }); toast(`${q.data?.name ?? 'They'} ${q.data?.name ? 'is' : 'are'} now a client`); },
   });
+  if (bad || (q.error as { status?: number } | null)?.status === 404) return <NotFound what="client" />;
   if (q.isLoading) return <><div style={{ height: 90 }} /><Loading height={480} /></>;
   if (q.isError) return <ErrorState error={q.error} retry={() => q.refetch()} />;
   const c = q.data!;
@@ -170,7 +180,7 @@ export function ClientPage() {
   return (
     <>
       <PageHeader title={c.name} crumbs={<Link to="/clients">Clients</Link>}
-        sub={<span className="row-flex s2">{c.status === 'archived' ? <Chip icon={<Archive aria-hidden />}>Archived</Chip> : c.status === 'prospect' ? <Chip color="yellow" icon={<UserPlus aria-hidden />}>Potential client</Chip> : <Chip color="mint" dot>Active</Chip>}<span>Owner: {c.ownerName ?? '—'}</span></span>} hideNewWork>
+        sub={<span className="row-flex s2">{c.status === 'archived' ? <Chip icon={<Archive aria-hidden />}>Archived</Chip> : c.status === 'prospect' ? <Chip color="yellow" icon={<UserPlus aria-hidden />}>Potential client</Chip> : <Chip color="mint" dot>Active</Chip>}<span>Account lead: {c.ownerName ?? '—'}</span></span>} hideNewWork>
         {manager && c.status === 'prospect' && <Button variant="mint" icon={<Sparkles aria-hidden />} busy={convert.isPending} onClick={(x) => { const r = (x.currentTarget as HTMLElement).getBoundingClientRect(); convertAt.current = { x: r.left + r.width / 2, y: r.top }; convert.mutate(undefined); }}>Mark as client</Button>}
         {manager && c.status !== 'archived' && <><Button icon={<Camera aria-hidden />} onClick={() => openNew('shoot', { clientId: c.id })}>New shoot</Button><Button icon={<Plus aria-hidden />} onClick={() => openNew('batch', { clientId: c.id })}>New batch</Button></>}
         {manager && <Button icon={<Pencil aria-hidden />} onClick={() => setEdit(true)}>Edit</Button>}
@@ -188,60 +198,65 @@ export function ClientPage() {
               <div><div className="section-title">Description</div><p className={`prose${c.description ? '' : ' muted'}`}>{c.description ?? 'No description yet.'}</p></div>
               <div><div className="section-title">Brand voice</div><p className={`prose${c.brandVoice ? '' : ' muted'}`}>{c.brandVoice ?? 'Not written yet.'}</p></div>
               <div><div className="section-title">Writing guidance</div><p className={`prose${c.guidance ? '' : ' muted'}`}>{c.guidance ?? 'Not written yet.'}</p></div>
+              {c.briefings.filter((b) => b.instructions).map((b) => (
+                <div key={b.id}><div className="section-title">From the {b.title} call{b.callDate ? ` · ${fmtDate(b.callDate)}` : ''}</div><p className="prose">{b.instructions}</p></div>
+              ))}
             </div>
           </Panel>
-          <Panel title="Shoots" count={upcoming.length || undefined} sub={upcoming.length ? 'upcoming' : undefined}>
+          <Panel title="Shoots" count={upcoming.length || undefined} sub={upcoming.length ? 'upcoming' : undefined}
+            tools={<Link to={`/scripts?clientId=${c.id}`} className="btn sm">{editor ? 'Finished scripts' : 'Scripts'} <ArrowRight size={14} aria-hidden /></Link>}>
             {!c.shoots.length ? <Empty boxed icon={<Camera />} title="No shoots" action={manager && c.status !== 'archived' ? <Button variant="sm" onClick={() => openNew('shoot', { clientId: c.id })}>Schedule a shoot</Button> : undefined} /> : (
               <div className="rows">
                 {[...upcoming, ...past.slice(-3).reverse()].map((s) => (
                   <div key={s.id} className="item with-tile">
                     <DateTile date={s.startDate} color={(s.endDate ?? s.startDate) < today ? 'var(--text-3)' : undefined} />
-                    <div className="body"><div className="title">{s.title ?? 'Shoot'}</div><div className="meta"><span>{fmtRange(s.startDate, s.endDate)}</span>{s.location && <span>{s.location}</span>}<span>{s.batchIds.length ? plural(s.batchIds.length, 'batch', 'batches') : 'No scripts planned yet'}</span></div></div>
+                    <div className="body"><div className="title">{s.batchIds.length ? <Link className="link" to={`/scripts?shootId=${s.id}`} title="This shoot’s scripts in the Script bank">{s.title ?? 'Shoot'}</Link> : (s.title ?? 'Shoot')}</div><div className="meta"><span>{fmtRange(s.startDate, s.endDate)}</span>{s.location && <span>{s.location}</span>}<span>{s.batchIds.length ? plural(s.batchIds.length, 'batch', 'batches') : 'No scripts planned yet'}</span></div></div>
                     <div className="side">{(s.endDate ?? s.startDate) < today ? <Chip>Past</Chip> : manager ? <div className="row-flex s2">
                       {!s.batchIds.length && <Button variant="sm salmon" onClick={() => openNew('batch', { clientId: c.id, shootId: s.id })}>Add scripts</Button>}
-                      <Button variant="sm" onClick={() => setResched({ id: s.id, start: s.startDate, end: s.endDate })}>Change dates</Button>
+                      <Button variant="sm" onClick={() => setResched({ id: s.id, start: s.startDate, end: s.endDate })}>Move shoot…</Button>
                     </div> : null}</div>
                   </div>
                 ))}
               </div>
             )}
           </Panel>
-          <Panel title="History">
+          {manager && <Panel title="History">
             {!c.activity.length ? <Empty title="No history yet" /> : (
               <div className="timeline" style={{ maxHeight: 460, overflowY: 'auto' }}>
                 {c.activity.map((a) => <div key={a.id} className="tl"><span className="d" /><div><div className="s">{a.summary}{a.batchTitle && <span className="muted"> · {a.batchTitle}</span>}</div><div className="w">{a.actorName ?? 'System'} · {fmtStamp(a.createdAt, displayTz)}</div></div></div>)}
               </div>
             )}
-          </Panel>
+          </Panel>}
         </div>
         <div className="stack" style={{ gap: 'var(--gap)' }}>
           {/* recordings and documents live in Resources now; older briefing records still show here */}
-          {c.briefings.length > 0 && <Panel title="Briefing calls" count={c.briefings.length}>
-            {(
-              <div className="stack s2">
-                {c.briefings.map((b) => (
-                  <div key={b.id} className="brief">
-                    <div className="row-flex s2"><h4>{b.title}</h4>{b.callDate && <Chip color="plain">Call {fmtDate(b.callDate)}</Chip>}<span className="spacer" />{manager && <Button variant="sm ghost" onClick={() => setBrief(b)}>Edit</Button>}{manager && <Button variant="sm ghost" onClick={() => setRes({ briefingId: b.id })}>Attach file</Button>}</div>
-                    <div className="links">
-                      {b.recordingUrl && <ExtLink href={b.recordingUrl} className="btn sm salmon"><PlayCircle aria-hidden />Recording</ExtLink>}
-                      {b.documentUrl && <ExtLink href={b.documentUrl} className="btn sm"><FileText aria-hidden />Document</ExtLink>}
-                      {b.resources.map((r) => <a key={r.id} className="btn sm" href={r.kind === 'file' ? `/api/files/${r.fileId}` : r.url!} target="_blank" rel="noopener noreferrer"><FileText aria-hidden />{r.title}</a>)}
-                    </div>
-                    {b.summary && <p className="prose" style={{ fontSize: 13.5 }}>{b.summary}</p>}
-                    {b.instructions && <div><div className="section-title">Writing instructions</div><p className="prose" style={{ fontSize: 13.5 }}>{b.instructions}</p></div>}
-                    <div className="muted" style={{ fontSize: 12 }}>{b.batchIds.length ? `Applies to ${plural(b.batchIds.length, 'batch', 'batches')}: ${c.batches.filter((x) => b.batchIds.includes(x.id)).map((x) => x.title).join(', ')}` : 'Not attached to a batch yet'}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Panel>}
-          <Panel title="Batches" tools={<Seg role="group" aria-label="Batches"><button aria-pressed={tab === 'active'} onClick={() => setTab('active')}>Active {active.length}</button><button aria-pressed={tab === 'done'} onClick={() => setTab('done')}>Completed {done.length}</button></Seg>}>
+
+          {!editor && <Panel title="Batches" tools={<Seg role="group" aria-label="Batches"><button aria-pressed={tab === 'active'} onClick={() => setTab('active')}>Active {active.length}</button><button aria-pressed={tab === 'done'} onClick={() => setTab('done')}>Completed {done.length}</button></Seg>}>
             {(tab === 'active' ? active : done).length === 0 ? <Empty boxed title={tab === 'active' ? 'No active batches' : 'Nothing completed yet'} /> : (
               <div className="rows">{(tab === 'active' ? active : done).map((b) => <BatchItem key={b.id} b={b} ring />)}</div>
             )}
-          </Panel>
+          </Panel>}
           <Panel title="Resources" tools={manager ? <Button variant="sm" icon={<Link2 aria-hidden />} onClick={() => setRes({})}>Add</Button> : undefined}>
-            {!c.resources.length ? <Empty boxed title="No folders, examples or assets yet" /> : (
+            {c.briefings.length > 0 && (
+              <div className="stack s2" style={{ marginBottom: c.resources.length ? 18 : 0 }}>
+                <div className="section-title">Briefing calls</div>
+                <div className="stack s2">
+                  {c.briefings.map((b) => (
+                    <div key={b.id} className="brief">
+                      <div className="row-flex s2"><h4>{b.title}</h4>{b.callDate && <Chip color="plain">Call {fmtDate(b.callDate)}</Chip>}<span className="spacer" />{manager && <Button variant="sm ghost" onClick={() => setBrief(b)}>Edit</Button>}{manager && <Button variant="sm ghost" onClick={() => setRes({ briefingId: b.id })}>Attach file</Button>}</div>
+                      <div className="links">
+                        {b.recordingUrl && <ExtLink href={b.recordingUrl} className="btn sm salmon"><PlayCircle aria-hidden />Recording</ExtLink>}
+                        {b.documentUrl && <ExtLink href={b.documentUrl} className="btn sm"><FileText aria-hidden />Document</ExtLink>}
+                        {b.resources.map((r) => <a key={r.id} className="btn sm" href={r.kind === 'file' ? `/api/files/${r.fileId}` : r.url!} target="_blank" rel="noopener noreferrer"><FileText aria-hidden />{r.title}</a>)}
+                      </div>
+                      {b.summary && <p className="prose" style={{ fontSize: 13.5 }}>{b.summary}</p>}
+                      {!editor && <div className="muted" style={{ fontSize: 12 }}>{b.batchIds.length ? `Applies to ${plural(b.batchIds.length, 'batch', 'batches')}: ${c.batches.filter((x) => b.batchIds.includes(x.id)).map((x) => x.title).join(', ')}` : 'Not attached to a batch yet'}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!c.resources.length ? (!c.briefings.length && <Empty boxed title="No folders, examples, assets or call recordings yet" />) : (
               <div className="stack s4">
                 {(['folder', 'example', 'asset', 'document', 'recording', 'other'] as const).filter((k) => byCat(k).length).map((k) => (
                   <div key={k} className="stack s2">
@@ -296,7 +311,7 @@ function EditClientDialog({ c, open, onClose, managers }: { c: ClientDetail; ope
       <div className="form">
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
         <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} /></Field>
-        <Field label="Internal owner" htmlFor={ids.o}><select className="select" id={ids.o} value={ownerId} onChange={(e) => setOwnerId(e.target.value ? Number(e.target.value) : '')}><option value="">No owner</option>{managers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Field>
+        <Field label="Account lead" htmlFor={ids.o}><select className="select" id={ids.o} value={ownerId} onChange={(e) => setOwnerId(e.target.value ? Number(e.target.value) : '')}><option value="">No owner</option>{managers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Field>
         <Field label="Description" optional htmlFor={ids.d}><textarea className="textarea" id={ids.d} value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
         <Field label="Brand voice" optional htmlFor={ids.v}><textarea className="textarea" id={ids.v} value={brandVoice} onChange={(e) => setBrandVoice(e.target.value)} /></Field>
         <Field label="Writing guidance" optional htmlFor={ids.g}><textarea className="textarea" id={ids.g} value={guidance} onChange={(e) => setGuidance(e.target.value)} style={{ minHeight: 160 }} /></Field>
@@ -324,7 +339,7 @@ function BriefingDialog({ clientId, briefing, batches, onClose }: { clientId: nu
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
         <Field label="Title" htmlFor={ids.t} error={f.title}><input className="input" value={v.title} onChange={(e) => setV({ ...v, title: e.target.value })} {...inputProps(ids.t, f.title)} /></Field>
         <Field label="Call date" optional htmlFor={ids.d}><input className="input" type="date" id={ids.d} value={v.callDate} onChange={(e) => setV({ ...v, callDate: e.target.value })} /></Field>
-        <Field label="Recording link" optional htmlFor={ids.r} error={f.recordingUrl} help="e.g. the Phantom recording URL"><input className="input" type="url" placeholder="https://" value={v.recordingUrl} onChange={(e) => setV({ ...v, recordingUrl: e.target.value })} {...inputProps(ids.r, f.recordingUrl)} /></Field>
+        <Field label="Recording link" optional htmlFor={ids.r} error={f.recordingUrl} help={<>e.g. the <Term k="Phantom" /> call recording link</>}><input className="input" type="url" placeholder="https://" value={v.recordingUrl} onChange={(e) => setV({ ...v, recordingUrl: e.target.value })} {...inputProps(ids.r, f.recordingUrl)} /></Field>
         <Field label="Document link" optional htmlFor={ids.doc} error={f.documentUrl} help="To upload a file instead, save this and use “Attach file”."><input className="input" type="url" placeholder="https://" value={v.documentUrl} onChange={(e) => setV({ ...v, documentUrl: e.target.value })} {...inputProps(ids.doc, f.documentUrl)} /></Field>
         <Field label="Summary" optional htmlFor={ids.s}><textarea className="textarea" id={ids.s} value={v.summary} onChange={(e) => setV({ ...v, summary: e.target.value })} /></Field>
         <Field label="Writing instructions" optional htmlFor={ids.i}><textarea className="textarea" id={ids.i} value={v.instructions} onChange={(e) => setV({ ...v, instructions: e.target.value })} /></Field>

@@ -51,6 +51,21 @@ export function registerTodayRoutes(app: FastifyInstance, ctx: Ctx) {
       const delivered = r.status === 'delivered';
       if (r.final_due && (r.final_due === today || (r.final_due < today && (!delivered || on(r.delivered_at))))) add(r, 'final', delivered, dueState(r.final_due, clock).overdue);
     }
+    // to-dos with a date count too, so an overdue one never hides behind "All done"
+    if (uid) {
+      const todos = await ctx.db.query<{ id: number; batch_id: number | null; text: string; due: string; done_at: string | null; title: string | null; client_name: string | null }>(
+        `select t.id, t.batch_id, t.text, t.due::text as due, t.done_at, b.title, c.name as client_name
+           from todos t left join batches b on b.id = t.batch_id left join clients c on c.id = b.client_id
+          where t.user_id = $1 and t.removed_at is null and t.due is not null and t.due <= $2 order by t.due, t.id`, [uid, today],
+      );
+      for (const td of todos) {
+        if (td.done_at && !on(td.done_at)) continue;
+        items.set(`todo:${td.id}`, {
+          batchId: td.batch_id == null ? null : Number(td.batch_id), batchTitle: td.title ?? '', clientName: td.client_name ?? '', kind: 'todo', text: td.text,
+          total: 1, done: td.done_at ? 1 : 0, overdue: td.due < today,
+        });
+      }
+    }
     const list = [...items.values()].sort((a, b) => Number(a.done === a.total) - Number(b.done === b.total) || Number(b.overdue) - Number(a.overdue));
     return {
       date: today,

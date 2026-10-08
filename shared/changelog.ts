@@ -7,6 +7,24 @@ import type { ISODate } from './dates';
 
 export type ChangeTag = 'new' | 'improved' | 'fixed';
 
+/** Who an update matters to. Entries not listed in ONLY_FOR are for everyone. */
+export type Audience = 'managers' | 'writers' | 'editors';
+
+/** Updates that only matter to some people (Admins count as managers). */
+export const ONLY_FOR: Record<string, Audience[]> = {
+  '2026-10-07-calendar-shoots-match': ['managers'], '2026-10-07-editors': ['managers', 'editors'], '2026-10-07-calendar-shoots': ['managers'],
+  '2026-10-07-calendar-embed': ['managers'], '2026-10-02-fill-missing-deadlines': ['managers'], '2026-10-02-drafts-from-final': ['managers'],
+  '2026-10-01-palettes': ['managers'], '2026-09-30-control-center-people': ['managers'], '2026-09-30-control-center-admin-editors': ['managers'],
+  '2026-09-30-control-center': ['managers'], '2026-09-30-batch-delivery-catch-up': ['managers'], '2026-09-30-batch-delivery': ['managers'],
+  '2026-09-29-potential-label': ['managers'], '2026-09-29-view-as-recording': ['managers'], '2026-09-28-paste-notes': ['managers'],
+  '2026-09-28-potential-clients': ['managers'], '2026-09-28-plan-later': ['managers'], '2026-09-28-admin-name': ['managers'],
+  '2026-09-28-calendar-drag': ['managers'], '2026-09-28-team': ['managers'], '2026-09-28-signin-details': ['managers'],
+  '2026-10-07-my-work-redesign': ['writers', 'managers'], '2026-09-28-written-counter': ['writers', 'managers'], '2026-10-08-writers-never-miss': ['writers', 'managers'],
+  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'],
+};
+/** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
+export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
+
 export interface ChangelogEntry {
   id: string;
   date: ISODate;
@@ -17,8 +35,8 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    id: '2026-10-04-control-center-rests-more',
-    date: '2026-10-04',
+    id: '2026-10-08-control-center-rests-more',
+    date: '2026-10-08',
     title: 'The Control Center rests even more',
     summary: 'Follow-ups from checking the lighter Control Center side by side with the old one.',
     changes: [
@@ -30,8 +48,8 @@ export const CHANGELOG: ChangelogEntry[] = [
     ],
   },
   {
-    id: '2026-10-03-control-center-lighter',
-    date: '2026-10-03',
+    id: '2026-10-08-control-center-lighter',
+    date: '2026-10-08',
     title: 'The Control Center is lighter on battery and memory',
     summary: 'It looks the same, does far less work while you watch, and rests while the tab is in the background.',
     changes: [
@@ -47,8 +65,8 @@ export const CHANGELOG: ChangelogEntry[] = [
     ],
   },
   {
-    id: '2026-10-03-faster-large-uploads',
-    date: '2026-10-03',
+    id: '2026-10-08-faster-large-uploads',
+    date: '2026-10-08',
     title: 'Large uploads save faster',
     summary: 'Big files are saved in one go instead of piece by piece.',
     changes: [
@@ -56,30 +74,29 @@ export const CHANGELOG: ChangelogEntry[] = [
     ],
   },
   {
-    id: '2026-10-03-safer-accounts-recording-uploads',
-    date: '2026-10-03',
+    id: '2026-10-08-safer-accounts-recording-uploads',
+    date: '2026-10-08',
     title: 'Safer admin accounts, Recording mode and uploads',
     summary: 'Admin powers stay with admins, Recording mode can never touch real work, and uploads and Paste notes have firmer limits.',
     changes: [
-      { tag: 'improved', text: 'Only an admin can make someone an admin, or change an admin’s role, password or access. There’s always at least one active admin, and an admin’s temporary password is shown only to admins. Managers keep every other team power.' },
+      { tag: 'improved', text: 'There’s always at least one active admin, and an admin’s temporary password is shown only to admins.' },
       { tag: 'fixed', text: 'If the server restarts, or a practice copy is closed, while a page is still in Recording mode, changes from that page are refused with “Recording mode has ended… nothing was saved” instead of going to the real workspace. Reload to carry on.' },
-      { tag: 'improved', text: 'Turning off Recording mode from the account menu now asks first, like the bar does, because it throws the practice copy away.' },
       { tag: 'improved', text: 'Wrong passwords are now limited per account as well (30 in 15 minutes), not only per connection.' },
       { tag: 'fixed', text: 'A very long file name ending in something like “.exe.pdf” could be shortened into a blocked program type. Names are now shortened without losing their type, and a few more program types are refused.' },
       { tag: 'improved', text: 'Paste notes: text files count toward the same 60,000-character limit as pasted text, each person runs one read at a time (up to 30 an hour), and when two teammates share the first name in the notes, those scripts are left unassigned with a warning naming both instead of guessing.' },
       { tag: 'fixed', text: 'Past-document links must be web links (https://), like every other link.' },
+      { tag: 'fixed', text: 'Editors’ read-only access can’t be got round by writing a page’s web address in a different form: they still only see finished scripts.' },
       { tag: 'improved', text: 'Control Center (admins): old batches with open work stay on the globe, up to 128 people show, the view recovers by itself if the graphics stop, the sound stops when you leave, and NETWORK reflects the latest refresh.' },
       { tag: 'improved', text: 'Behind the scenes: the server keeps running if its database connection drops for a moment, two copies starting at once no longer clash, and expired sign-ins are cleared out.' },
     ],
   },
   {
-    id: '2026-10-03-batches-reviews-forms',
-    date: '2026-10-03',
+    id: '2026-10-08-batches-reviews-forms',
+    date: '2026-10-08',
     title: 'Fixes for batches, reviews and forms',
-    summary: 'Review notes stay on their own batch, decisions apply to the latest document, and Edit batch and Edit client keep what you type.',
+    summary: 'Review notes stay on their own batch, script counts change safely, and Edit batch and Edit client keep what you type.',
     changes: [
       { tag: 'fixed', text: 'A batch page could list revision notes from a different batch. It now shows only its own.' },
-      { tag: 'fixed', text: 'Approving or sending back a document the writer has replaced since you opened it now asks you to look again, so a decision always applies to the latest version.' },
       { tag: 'fixed', text: 'Raising a batch’s script count brings back removed scripts to the writer you pick in “Assign the new scripts to” (or to their old writer if still on the team), never to someone who has left.' },
       { tag: 'improved', text: 'Lowering a batch’s script count tells the writers whose scripts were taken off.' },
       { tag: 'fixed', text: 'Edit batch and Edit client keep what you’re typing when the page refreshes in the background, and save only the fields you changed, so they can’t undo a date someone else just moved. Settings no longer resets a form you’re editing.' },
@@ -89,9 +106,180 @@ export const CHANGELOG: ChangelogEntry[] = [
       { tag: 'fixed', text: 'The Today pill counts a script as overdue once the daily cutoff passes, like everywhere else, and keeps an archived client’s unfinished batches.' },
       { tag: 'fixed', text: 'A double click can’t send “Approve selected” or “Mark as client” twice, and a “written so far” tap isn’t lost when you change page.' },
       { tag: 'fixed', text: 'Review notes, sending scripts back, blockers and to-dos now really start with the cursor in their text box, and script titles in a batch’s checklist open from the keyboard.' },
-      { tag: 'fixed', text: 'What’s new keeps its “New for you” highlight while you’re on the page, chat’s “Earlier messages” can’t load the same messages twice, and the search boxes on Resources and Script bank keep a filter picked while typing.' },
+      { tag: 'fixed', text: 'What’s new keeps its “New for you” highlight while you’re on the page, and the search boxes on Resources and Script bank keep a filter picked while typing.' },
       { tag: 'fixed', text: 'The Master log no longer skips entries saved at the same moment, and its “Today” uses your time zone.' },
       { tag: 'improved', text: 'Upload help shows the server’s real file size limit, and something too big to send now says what was too big.' },
+    ],
+  },
+  {
+    id: '2026-10-08-writers-overview-back',
+    date: '2026-10-08',
+    title: 'Writers have Overview and Production back',
+    summary: 'Writers’ menu has their Overview and the Production board again, next to My work.',
+    changes: [
+      { tag: 'fixed', text: 'Writers see Overview (counting only their own scripts) and the Production board again. Their menu is My work, Overview, Production, Calendar, Script bank, Resources and Clients. The Review queue stays with managers.' },
+      { tag: 'improved', text: 'A writer’s Needs attention leaves out deadline checks only a manager can confirm.' },
+    ],
+  },
+  {
+    id: '2026-10-08-overview-cards',
+    date: '2026-10-08',
+    title: 'New summary cards on the Overview',
+    summary: 'The four cards at the top of the Overview have a new look, and each one now says what’s behind its number.',
+    changes: [
+      { tag: 'improved', text: 'Overdue batches always has its warm gradient. When something is late it says “Needs you” and names the batches and how many days late; when nothing is, it says “All clear” and shows the next deadline.' },
+      { tag: 'improved', text: 'Batches due today always has its yellow gradient too. When something is due it shows the cutoff time and a bar for how much of today’s work is done; otherwise it says “Nothing due” and shows what’s due next.' },
+      { tag: 'improved', text: 'Scripts in review shows how long the oldest one has been waiting and which batches they’re in. Delivered this week has a small bar for each day, Monday to Sunday.' },
+      { tag: 'fixed', text: 'Under More on the Overview, Active batches and Writing progress sit side by side again instead of being pushed apart.' },
+    ],
+  },
+  {
+    id: '2026-10-08-phones-admin-polish',
+    date: '2026-10-08',
+    title: 'Chat removed, Overview numbers back on top, and phones, keyboard and setup polish',
+    summary: 'The last round of fixes from the site review, plus the chat bubble taken out.',
+    changes: [
+      { tag: 'improved', text: 'Messages and the chat bubble are gone from the site. Writers’ menu is My work, Calendar, Script bank, Resources and Clients; managers keep the Team page.' },
+      { tag: 'improved', text: 'Overview starts with the four summary cards, Work due by day and Upcoming shoots again, with Needs attention right below.' },
+      { tag: 'new', text: 'A new workspace asks for the organisation name, head office time zone and when deadlines end, and shows a three-step Get started card until the team, a client and a shoot are added.' },
+      { tag: 'improved', text: 'Signing in with a temporary password asks you to choose your own, and the temporary one can’t be kept. If you’re signed out because of a reset, the sign-in page says so.' },
+      { tag: 'improved', text: 'Settings: every time zone is in the list, unsaved changes show a bar with Save and Discard, and the browser asks before you leave. “Editors on the map” is clearly separate from editors who can sign in, and asks before removing anyone.' },
+      { tag: 'improved', text: 'View as says up front that it’s look-only. The Control Center explains its numbers in plain words. A calendar link that can’t be reached says how to fix it. What’s new shows the updates for your role first.' },
+      { tag: 'improved', text: 'Phones: the menu button shows when something inside needs you, Production filters fold behind one button and its table becomes cards, inputs no longer zoom on iPhone, dialogs keep their main button in reach, and long names wrap instead of pushing the page sideways.' },
+      { tag: 'improved', text: 'Tablets show a small label under each sidebar icon and real numbers. Buttons are easier to tap on touch screens, and the sidebar footer stays in view on short screens.' },
+      { tag: 'improved', text: 'Keyboard: a Skip to content link, dialogs start on their first field and return you to the button that opened them.' },
+      { tag: 'improved', text: 'Approve with a note, with or without your own version attached. A batch’s document history is grouped by document, each version with its decisions. “Their changes” now says whose. Singular and plural words are right on the cards and labels, and missing pages offer a way home.' },
+    ],
+  },
+  {
+    id: '2026-10-08-manager-editor-screens',
+    date: '2026-10-08',
+    title: 'Clearer Overview, Production, Calendar and search, and a better editor home',
+    summary: 'The third round of fixes: manager and editor screens show what needs you first and say the same thing everywhere.',
+    changes: [
+      { tag: 'improved', text: 'Overview starts with Needs attention, at full height, with Today and the team’s to-dos beside it. Shoots to plan is one list for calendar events and site shoots with no scripts, and offers to link a batch that has no shoot. Active batches and writing progress fold away under More.' },
+      { tag: 'improved', text: 'When drafts and final delivery are both missed, every page says both: “Drafts 4 days overdue · Final delivery 2 days overdue”. The chart says it counts scripts.' },
+      { tag: 'improved', text: 'Production board: columns show how many scripts are at each stage, and batches that have scripts further along are listed there too, so In review is never empty while scripts wait. The table shows flags under each batch name and fits on smaller screens.' },
+      { tag: 'improved', text: 'On a batch page, “Change dates” for the shoot is now “Move shoot…”, and each writer row has “Move scripts…”, which says what you’re handing over and can mark half-written scripts as not started.' },
+      { tag: 'improved', text: 'Deadline fields point out weekends and say when drafts come from the final delivery date. The shoot and batch names are on the main form, defaulting to the client and date or the calendar event’s title.' },
+      { tag: 'improved', text: 'Calendar: writing periods start hidden in Month view, names wrap instead of being cut off, “+N more” opens that day, List starts at today, writers start on their own work, and a Google event can be planned from the calendar (and shows once when it already has a shoot).' },
+      { tag: 'improved', text: 'Search finds people, shoots, briefing calls, recordings and script numbers (“#12”), opens the first result on Enter, and its results are no longer cut off by the sidebar. Editors can search too.' },
+      { tag: 'improved', text: 'To-dos say who they’re for and can be tied to one of the person’s batches. Writers is now Team: anyone writing scripts is listed (the Admin included), with editors in their own section.' },
+      { tag: 'improved', text: 'Sidebar numbers say what they count when you hover them, and the Review queue counts scripts the same way. Celebrations about the whole team are a short notice instead of a full-screen pop-up. The Master log opens on Changes and names the document version a decision was made on. Paste notes is hidden until it’s set up.' },
+      { tag: 'new', text: 'Editors: the home page lists each upcoming shoot with “6 of 10 scripts final” and Ready, On track or Late, opening just that shoot’s scripts. Editors are notified when a shoot’s scripts are all final or a shoot moves.' },
+      { tag: 'improved', text: 'Client pages: briefing calls sit with the other Resources and their writing instructions move to About & guidance. Everyone gets a Scripts link, and shoot names open their scripts. Editors see next shoot and finished scripts on client cards, and no links that send them home.' },
+    ],
+  },
+  {
+    id: '2026-10-08-writers-never-miss',
+    date: '2026-10-08',
+    title: 'Writers never miss new work, and one set of words everywhere',
+    summary: 'The second round of fixes: new work and send-backs are impossible to miss, deadlines are each writer’s own, and every page uses the same words for where a script is.',
+    changes: [
+      { tag: 'new', text: 'New work stays at the top of My work until you press “Got it”, open the batch or send something. Scripts added to a batch you’ve already started show as new too, with their numbers.' },
+      { tag: 'new', text: 'A “Due now” strip at the top of My work lists anything due today, tomorrow or overdue. Tap a line to jump to it.' },
+      { tag: 'improved', text: 'Deadlines on My work are your own: your drafts are done when your scripts are sent, whoever else is still writing. Each one says the time it’s due in your time zone.' },
+      { tag: 'improved', text: 'Sent-back scripts are counted in the page header, tagged on their batch and listed first. The pop-up when you come back leads with them, and approvals that were sent back since aren’t celebrated.' },
+      { tag: 'improved', text: 'Cards stay where they are while you update Written so far, instead of jumping to another section.' },
+      { tag: 'improved', text: 'The Today pill says how many tasks are done and how many are overdue in plain words, counts to-dos with a date, and takes you to the work when you tap it.' },
+      { tag: 'improved', text: 'One word for each step, on every page: Not started, Writing, In review, Sent back, Approved, Delivered. Progress reads “drafts sent”, and the last deadline is “Final delivery”.' },
+      { tag: 'improved', text: 'Writers’ menu has just what they use: My work, Calendar, Messages, Script bank, Resources and Clients. A batch page starts with “Your scripts”.' },
+      { tag: 'improved', text: 'Writers can undo their own delivery on the same day, from the confirmation or the batch page. Managers are told.' },
+      { tag: 'improved', text: 'Sending a revised version shows the feedback you’re answering, and the reviewer sees it next to the new version. “Replace document” is now “Send a newer version”.' },
+      { tag: 'improved', text: 'Script numbers can be typed the way people write them: “1 to 5”, “1 - 5 and 8”, “scripts 2–4”. Examples use your own numbers, and only scripts you can send are offered.' },
+      { tag: 'improved', text: 'The time zone question lets you search by city, preselects a zone an Admin set for you, waits until other pop-ups are closed, and “Not now” holds for 30 days.' },
+      { tag: 'improved', text: '“Owner” on clients is now “Account lead”, the first sign-up creates the “admin account”, and “New work” is “+ Create”. Hover or tap Timeliner and Phantom for a short explanation.' },
+      { tag: 'fixed', text: 'Writers and editors no longer see notes about potential clients or a client’s internal history. Date checks and the next action on a batch are for managers only, and a blocker says who flagged it.' },
+    ],
+  },
+  {
+    id: '2026-10-08-safety-fixes',
+    date: '2026-10-08',
+    title: 'Safer approvals, a Script bank that keeps everything, and other fixes',
+    summary: 'The first round of fixes from a full review of the site: the problems that could lose work, give the wrong access, or do more than a button said.',
+    changes: [
+      { tag: 'fixed', text: 'Only the Admin can make someone an Admin, or change the Admin’s account. Managers no longer see the Admin option.' },
+      { tag: 'fixed', text: 'The Script bank keeps every finished script. When a writer resends only some scripts from a document, the others stay findable under the earlier one. Scripts finished without any document get a row of their own too.' },
+      { tag: 'fixed', text: 'You can’t approve a version you haven’t seen: if a writer sends a newer version while the Review queue is open, the site asks you to open it first.' },
+      { tag: 'new', text: 'Approving or sending back now has an Undo on the confirmation for a few minutes. It puts the scripts back in review and takes back the notification.' },
+      { tag: 'new', text: 'When you approve with your own edits, the writer sees “Final version (your edits) · use this one” on My work and when they mark scripts delivered. In the Script bank, “Final version” is the main button.' },
+      { tag: 'fixed', text: 'Adding a second writer to a new shoot or batch splits the scripts evenly, and you can’t create work with a writer who has no scripts.' },
+      { tag: 'fixed', text: 'Moving a shoot warns when drafts would end up due after final delivery, and moves the manual date too unless you untick it. “Dates are fine” is off while the order is wrong.' },
+      { tag: 'improved', text: 'Shoots that need writers: a shoot you plan from the list stays linked to its calendar event, so it never shows up again. You can create the client right there, hide a shoot with “Not ours” (with Undo), and bring hidden ones back.' },
+      { tag: 'improved', text: 'Deactivating someone lets you hand their unfinished scripts to someone else. Scripts left with someone who can’t sign in show up in Needs attention.' },
+      { tag: 'fixed', text: 'Recording mode labels every confirmation “Practice copy · not kept”, shows a badge in the sidebar, keeps its dot clear of the chat button, and always asks before turning off. Password and time zone changes are off while it’s on.' },
+      { tag: 'fixed', text: 'Settings checks deadline rules as you type, says what’s wrong in plain words, and asks whether new rules should also update existing batches.' },
+      { tag: 'improved', text: 'Sending scripts back from a writer’s row starts with nothing picked and warns before un-approving anything.' },
+      { tag: 'improved', text: 'Delivering as a manager says exactly which scripts it marks delivered, and records it as “confirmed by Josh for Priya” rather than writer-confirmed. Writers can tick which documents they’ve added to Timeliner.' },
+      { tag: 'fixed', text: 'Notifications only list each writer’s own scripts, and include the reviewer’s note.' },
+      { tag: 'improved', text: 'Send for review starts with the scripts your Written so far count says are written. Batches without a shoot name are named after the client. Form errors disappear as soon as you fix the field.' },
+    ],
+  },
+  {
+    id: '2026-10-07-my-work-redesign',
+    date: '2026-10-07',
+    title: 'My work, rebuilt: new work first',
+    summary: 'New assignments are at the very top of My work, and every batch is easier to read on a phone, tablet or computer.',
+    changes: [
+      { tag: 'new', text: 'Work given to you in the last week sits at the top of My work under “New work”, marked New, until you start it. The My work link in the menu says New, and your Overview shows a banner, so you can’t miss it.' },
+      { tag: 'improved', text: 'The rest is grouped by what you need to do: To do (sent back, to write, to deliver), soonest deadline first, then Waiting on review, folded away. Finished work is at the bottom.' },
+      { tag: 'improved', text: 'Each batch leads with the client’s name and its next deadline in big type. Then one bar shows where your scripts are, each job has its button (write and send, revise, mark delivered), the dates are in the order they happen, and the brief, recording and files are together.' },
+      { tag: 'improved', text: 'On phones the buttons are full width and easier to tap, and the page is about a third shorter.' },
+      { tag: 'improved', text: 'If a batch you’re already writing gets more scripts for you, it says how many are new.' },
+    ],
+  },
+  {
+    id: '2026-10-07-calendar-shoots-match',
+    date: '2026-10-07',
+    title: 'Fewer false “Shoots that need writers”',
+    summary: 'Shoots you’ve already planned stop showing up in the list on the Overview.',
+    changes: [
+      { tag: 'fixed', text: 'Google adds the calendar owner’s name to booked events (“Shimonov Law Filming Session and Joshua Shalamov”), so they were being matched to the client named after Joshua instead of the real one. The real client now comes first.' },
+      { tag: 'fixed', text: 'A shoot counts as planned when that client has a batch without a booked shoot that’s due in the 3 weeks before it, with every script assigned.' },
+    ],
+  },
+  {
+    id: '2026-10-07-editors',
+    date: '2026-10-07',
+    title: 'Editors get their own sign-in',
+    summary: 'Video editors can sign in to see the shoot calendar, the finished scripts to cut from, and each client’s resources. They can’t change anything.',
+    changes: [
+      { tag: 'new', text: 'There’s a new Editor role. Add an editor in Settings → Team → Add person, or use Give site access next to them in Settings → Editors. They get a sign-in message to send, the same as writers.' },
+      { tag: 'new', text: 'Editors land on their own Home page: shoots and final-script dates for the next 4 weeks, the newest finished scripts, and their to-dos. Their menu has Calendar, Script bank, Clients, Resources and Messages.' },
+      { tag: 'new', text: 'Editors only see scripts once they’re approved or delivered, never drafts or reviews in progress. On Clients they see the guidance, shoots and resources, but not batches or history.' },
+      { tag: 'new', text: 'Synced calendars have a new “+ Editors” option, so a calendar like Joshua’s can be shown to editors without showing it to writers.' },
+      { tag: 'improved', text: 'Editors are never offered as writers when you split, assign or reassign scripts.' },
+    ],
+  },
+  {
+    id: '2026-10-07-calendar-shoots',
+    date: '2026-10-07',
+    title: 'Shoots on Joshua’s calendar that need writers',
+    summary: 'The Overview now lists shoots from your synced Google Calendar that don’t have writers yet, with one click to plan them.',
+    changes: [
+      { tag: 'new', text: 'Admins and managers get a “Shoots that need writers” list at the top of the Overview. It reads synced calendars for events that look like shoots (shoot, filming, content day…), works out the client from the title, and checks the site: not booked yet, booked with no scripts, or scripts without a writer.' },
+      { tag: 'new', text: 'Plan scripts opens New shoot (or New batch) already filled in with the client, the shoot dates, and last time’s script count and writers for that client, so it’s usually just a check and Create. If only writers are missing, Assign writers opens the batch.' },
+      { tag: 'new', text: 'A notification goes out once when new ones appear after a sync. Hide one with × if it isn’t a shoot you write for.' },
+    ],
+  },
+  {
+    id: '2026-10-07-calendar-embed',
+    date: '2026-10-07',
+    title: 'Add a calendar from its embed code',
+    summary: 'Synced calendars also take a Google Calendar’s embed code, embed link or email address.',
+    changes: [
+      { tag: 'improved', text: 'In Settings → Synced calendars, you can paste a Google Calendar’s embed code (<iframe …>), its embed or share link, or just its address (name@gmail.com) instead of the secret iCal address. That works when the calendar is public in Google; if it isn’t, the site says so and asks for the secret address.' },
+    ],
+  },
+  {
+    id: '2026-10-07-google-calendar',
+    date: '2026-10-07',
+    title: 'Google Calendar on the Calendar',
+    summary: 'Show a Google Calendar’s shoots and calls on the site’s Calendar. It stays in sync on its own.',
+    changes: [
+      { tag: 'new', text: 'Settings → Synced calendars → Add calendar: paste a Google Calendar’s “Secret address in iCal format” (the steps are in the dialog), pick a colour and who sees it. Its events show on the Calendar in that colour, with times in your own time zone, alongside shoots and deadlines.' },
+      { tag: 'new', text: 'It re-reads the calendar every 15 minutes, or straight away with Sync now, so new, moved and cancelled events (repeating ones too) update here by themselves. Click an event to see its time, place, notes and meeting link.' },
+      { tag: 'new', text: 'By default only admins and managers see a synced calendar; choose “Everyone” to show it to writers too. It’s read-only: nothing is changed in Google.' },
     ],
   },
   {

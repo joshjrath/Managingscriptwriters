@@ -140,12 +140,12 @@ export function LiquidBar({ total, segs, thin }: { total: number; segs: { n: num
 }
 
 /**
- * "20 / 45 drafts ready · 44%" with a liquid bar: delivered, approved, in review,
+ * "20 / 45 drafts sent · 44%" with a liquid bar: delivered, approved, in review,
  * and (lighter) what writers say they've written but not sent yet.
  */
 export function BatchProgress({ p, thin, showSecondary = true, written = 0 }: { p: Progress; thin?: boolean; showSecondary?: boolean; written?: number }) {
   const extra = Math.max(0, Math.min(p.total, written) - p.draftReady);
-  const label = `${p.draftReady} / ${p.total} drafts ready · ${p.pctDraft}%${extra ? ` · ${p.draftReady + extra} written` : ''}`;
+  const label = `${p.draftReady} / ${p.total} drafts sent · ${p.pctDraft}%${extra ? ` · ${p.draftReady + extra} written` : ''}`;
   return (
     <div className="prog" role="group" aria-label={`${label}. ${p.approved} approved, ${p.delivered} delivered.`}>
       <LiquidBar total={p.total} thin={thin} segs={[
@@ -155,7 +155,7 @@ export function BatchProgress({ p, thin, showSecondary = true, written = 0 }: { 
         { n: extra, c: 'color-mix(in srgb, var(--cyan) 70%, var(--track))' },
       ]} />
       <div className="label">
-        <span><b>{p.draftReady} / {p.total}</b> drafts ready · <span className="n">{p.pctDraft}%</span>{extra > 0 && <span className="written-tag"> · {p.draftReady + extra} written</span>}</span>
+        <span><b>{p.draftReady} / {p.total}</b> drafts sent · <span className="n">{p.pctDraft}%</span>{extra > 0 && <span className="written-tag"> · {p.draftReady + extra} written</span>}</span>
         {showSecondary && <span className="n">{p.approved} approved · {p.delivered} delivered{p.revisions ? ` · ${p.revisions} revisions` : ''}</span>}
       </div>
     </div>
@@ -293,6 +293,21 @@ export function ErrorState({ error, retry }: { error: unknown; retry?: () => voi
   );
 }
 
+/** A page or record that isn't there, with a way back instead of a dead end. */
+export function NotFound({ what = 'page' }: { what?: string }) {
+  useEffect(() => { const t = document.title; document.title = `Not found · Scale Media`; return () => { document.title = t; }; }, []);
+  return (
+    <div className="panel not-found">
+      <h1>That {what} isn’t here</h1>
+      <p className="muted">It may have been removed, or the link is mistyped.</p>
+      <div className="row-flex s2" style={{ marginTop: 16 }}>
+        <a className="btn primary pill" href="/">Go home</a>
+        <button type="button" className="btn ghost" onClick={() => history.back()}>Go back</button>
+      </div>
+    </div>
+  );
+}
+
 export function Loading({ label = 'Loading…', height = 320 }: { label?: string; height?: number }) {
   return <div className="skel" style={{ height }} role="status" aria-label={label} />;
 }
@@ -332,17 +347,28 @@ export const inputProps = (id: string, error?: string) => ({ id, 'aria-invalid':
 /** Native <dialog>: focus trapping, Escape and backdrop come from the browser. */
 export function Dialog({ open, onClose, title, sub, children, footer, kind = 'modal', size = '' }: { open: boolean; onClose: () => void; title: ReactNode; sub?: ReactNode; children: ReactNode; footer?: ReactNode; kind?: 'modal' | 'drawer'; size?: '' | 'wide' | 'narrow' }) {
   const ref = useRef<HTMLDialogElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
   const hid = useId();
   useEffect(() => {
     const d = ref.current;
     if (!d) return;
     if (open && !d.open) {
+      // keyboard users keep their place: remember what opened it, start on the first field
+      opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
       d.showModal();
-      // React focuses autoFocus fields before the dialog opens, when they can't take focus; opening
-      // then focuses the close button. So fields to start in are marked data-autofocus instead.
-      d.querySelector<HTMLElement>('[data-autofocus]')?.focus();
+      requestAnimationFrame(() => {
+        if (d.contains(document.activeElement) && document.activeElement !== d.querySelector('.sheet-head .icon-btn')) return;
+        // on touch screens, don't pop the keyboard open uninvited
+        if (window.matchMedia('(pointer: coarse)').matches) return;
+        // a field marked to start focused first (data-autofocus), else the first field
+        const first = d.querySelector<HTMLElement>('[data-autofocus]') ?? d.querySelector<HTMLElement>('.sheet-body input:not([type=hidden]):not([disabled]), .sheet-body select:not([disabled]), .sheet-body textarea:not([disabled])');
+        (first ?? d.querySelector<HTMLElement>('.sheet-foot .btn.primary, .sheet-foot button'))?.focus();
+      });
     }
     if (!open && d.open) d.close();
+    const back = () => { const o = opener.current; opener.current = null; if (o && o.isConnected) requestAnimationFrame(() => o.focus()); };
+    if (!open) back();
+    return () => { if (open) back(); };
   }, [open]);
   return (
     <dialog
@@ -372,15 +398,21 @@ export function Dialog({ open, onClose, title, sub, children, footer, kind = 'mo
 
 // ── toasts (only after a save has actually succeeded) ────────────────────
 
-interface Toast { id: number; text: ReactNode; kind: 'ok' | 'error' }
-const ToastCtx = createContext<(text: ReactNode, kind?: 'ok' | 'error') => void>(() => {});
+interface ToastAction { label: string; run: () => void }
+interface Toast { id: number; text: ReactNode; kind: 'ok' | 'error'; action?: ToastAction; tag?: string }
+type Push = (text: ReactNode, kind?: 'ok' | 'error', action?: ToastAction) => void;
+const ToastCtx = createContext<Push>(() => {});
+
+// a label added to every toast while it applies (Recording mode: nothing is really saved)
+let toastTag: string | null = null;
+export const setToastTag = (tag: string | null) => { toastTag = tag; };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const push = useCallback((text: ReactNode, kind: 'ok' | 'error' = 'ok') => {
+  const push = useCallback<Push>((text, kind = 'ok', action) => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t.slice(-3), { id, text, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 9000 : 4500);
+    setToasts((t) => [...t.slice(-3), { id, text, kind, action, tag: kind === 'ok' ? toastTag ?? undefined : undefined }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 9000 : action ? 9000 : 4500);
   }, []);
   return (
     <ToastCtx.Provider value={push}>
@@ -391,7 +423,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <m.div key={t.id} layout className={`toast ${t.kind === 'error' ? 'error' : ''}`}
               initial={{ opacity: 0, y: 18, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, x: 40, transition: { duration: 0.16, ease: [0.32, 0, 0.67, 0] } }} transition={SPRING}>
               {t.kind === 'error' ? <CircleAlert aria-hidden /> : <Check aria-hidden className="toast-check" />}
-              <span>{t.text}</span>
+              <span>{t.text}{t.tag && <em className="toast-tag">{t.tag}</em>}</span>
+              {t.action && <button type="button" className="toast-act" onClick={() => { t.action!.run(); setToasts((all) => all.filter((x) => x.id !== t.id)); }}>{t.action.label}</button>}
               <button className="x" onClick={() => setToasts((all) => all.filter((x) => x.id !== t.id))} aria-label="Dismiss"><X size={15} /></button>
             </m.div>
           ))}
@@ -414,6 +447,17 @@ export function DateTile({ date, color }: { date: string; color?: string }) {
       <span className="d">{d.getUTCDate()}</span>
     </div>
   );
+}
+
+/** Words the team uses that newcomers might not know. */
+export const GLOSSARY = {
+  Timeliner: 'Timeliner is the client’s editing app. Finished scripts are pasted in there; “delivered” means they’re in Timeliner.',
+  Phantom: 'Phantom is the tool that records our calls. Paste the link to the call recording.',
+} as const;
+
+/** A jargon word with a short explanation on hover, focus or tap. */
+export function Term({ k, children }: { k: keyof typeof GLOSSARY; children?: ReactNode }) {
+  return <span className="term" tabIndex={0} data-tip={GLOSSARY[k]} title={GLOSSARY[k]}>{children ?? k}</span>;
 }
 
 export function ExtLink({ href, children, className = 'link' }: { href: string; children: ReactNode; className?: string }) {

@@ -7,7 +7,7 @@ import type { FastifyReply, FastifyRequest } from 'fastify';
 import type { Db } from './db';
 import type { Me } from '../shared/types';
 import { HttpError } from './http';
-import { isAdmin, isManager } from '../shared/workflow';
+import { isAdmin, isManager, type Role } from '../shared/workflow';
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
 
@@ -53,7 +53,7 @@ interface UserRow {
   id: number;
   name: string;
   email: string;
-  role: 'owner' | 'manager' | 'writer';
+  role: Role;
   capacity_per_day: number | null;
   active: boolean;
   last_seen_at: string;

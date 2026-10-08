@@ -3,15 +3,15 @@
 // URL so dashboard cards can link straight to filtered views.
 
 import { useMemo, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowDownUp, Ban, Camera, Columns3, RotateCcw, Rows3, UserPlus } from 'lucide-react';
+import { ArrowDownUp, Ban, Camera, Columns3, RotateCcw, Rows3, SlidersHorizontal, UserPlus } from 'lucide-react';
 import { api, qs } from '../api';
 import type { BatchSummary } from '../../../shared/types';
-import { STAGES, STAGE_LABEL, type Stage } from '../../../shared/workflow';
-import { fmtDate, fmtRange } from '../../../shared/format';
+import { bothLate, STAGES, STAGE_LABEL, type Stage } from '../../../shared/workflow';
+import { fmtDate, fmtRange, plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
-import { BatchDrawer, writersText } from '../components/BatchBits';
+import { BatchDrawer, BatchItem, writersText } from '../components/BatchBits';
 import { BatchProgress, Chip, DueChip, edgeFor, Empty, ErrorState, Loading, Seg, StageChip } from '../components/ui';
 import { TodayBump } from '../components/WritingPulse';
 
@@ -21,7 +21,7 @@ const FLAGS = [
   { id: 'blocked', label: 'Blocked', c: 'var(--red)' },
   { id: 'unassigned', label: 'Unassigned scripts', c: 'var(--pink)' },
   { id: 'review', label: 'In review', c: 'var(--lavender)' },
-  { id: 'revisions', label: 'Revisions', c: 'var(--pink)' },
+  { id: 'revisions', label: 'Sent back', c: 'var(--pink)' },
   { id: 'date_review', label: 'Dates to check', c: 'var(--yellow)' },
 ] as const;
 
@@ -32,6 +32,7 @@ type SortKey = 'next' | 'client' | 'progress' | 'shoot';
 export function Production() {
   const { clients, users, clock } = useBoot();
   const [params, setParams] = useSearchParams();
+  const nav = useNavigate();
   const [inspect, setInspect] = useState<number | null>(null);
   const [sort, setSort] = useState<{ key: SortKey; dir: 1 | -1 }>({ key: 'next', dir: 1 });
   const view = params.get('view') === 'table' ? 'table' : 'board';
@@ -62,6 +63,10 @@ export function Production() {
     <button onClick={() => setSort((s) => ({ key, dir: s.key === key ? (s.dir === 1 ? -1 : 1) : 1 }))} aria-label={`Sort by ${label}`}>{label}{sort.key === key && <ArrowDownUp size={12} aria-hidden />}</button>
   );
   const anyFilter = Object.entries(filters).some(([k, v]) => v && k !== 'completed');
+  const activeFilters = Object.entries(filters).filter(([k, v]) => v && k !== 'completed').length;
+  // on a phone the filters fold behind one button, and the table becomes a list of cards
+  const [showFilters, setShowFilters] = useState(false);
+  const phone = typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches;
 
   return (
     <>
@@ -72,7 +77,10 @@ export function Production() {
         </Seg>
       </PageHeader>
 
-      <div className="filters" role="search">
+      <button type="button" className="btn filters-toggle" aria-expanded={showFilters} onClick={() => setShowFilters(!showFilters)}>
+        <SlidersHorizontal aria-hidden />Filters{activeFilters ? ` (${activeFilters})` : ''}
+      </button>
+      <div className={`filters prod-filters${showFilters ? ' open' : ''}`} role="search">
         <input className="input search" type="search" placeholder="Search batches or clients" value={filters.q} onChange={(e) => set('q', e.target.value)} aria-label="Search batches" />
         <select className="select" value={filters.clientId} onChange={(e) => set('clientId', e.target.value)} aria-label="Client">
           <option value="">All clients</option>
@@ -81,7 +89,7 @@ export function Production() {
         <select className="select" value={filters.writerId} onChange={(e) => set('writerId', e.target.value)} aria-label="Writer">
           <option value="">All writers</option>
           <option value="unassigned">Has unassigned scripts</option>
-          {users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          {users.filter((u) => u.active && u.role !== 'editor').map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
         <select className="select" value={filters.stage} onChange={(e) => set('stage', e.target.value)} aria-label="Stage">
           <option value="">All stages</option>
@@ -92,7 +100,7 @@ export function Production() {
         <label className="check" style={{ fontSize: 13 }}><input type="checkbox" checked={filters.completed === '1'} onChange={(e) => set('completed', e.target.checked ? '1' : '')} />Include older delivered</label>
         {anyFilter && <button className="btn sm ghost" onClick={() => setParams(view === 'table' ? { view: 'table' } : {})}>Clear filters</button>}
       </div>
-      <div className="quick" role="group" aria-label="Quick filters">
+      <div className={`quick prod-quick${showFilters ? ' open' : ''}`} role="group" aria-label="Quick filters">
         {FLAGS.map((f) => (
           <button key={f.id} aria-pressed={filters.flag === f.id} style={{ ['--c' as string]: f.c }} onClick={() => set('flag', filters.flag === f.id ? '' : f.id)}>
             <i className="d" aria-hidden />{f.label}<span className="n">{flagCounts[f.id] ?? 0}</span>
@@ -102,19 +110,24 @@ export function Production() {
 
       {q.isLoading && <Loading height={420} />}
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
-      {q.data && !batches.length && <div className="panel"><Empty title={anyFilter ? 'No batches match these filters' : 'No batches yet'}>{anyFilter ? 'Try clearing a filter.' : 'Create a shoot or batch with “New work”.'}</Empty></div>}
+      {q.data && !batches.length && <div className="panel"><Empty title={anyFilter ? 'No batches match these filters' : 'No batches yet'}>{anyFilter ? 'Try clearing a filter.' : 'Create a shoot or batch with “+ Create”.'}</Empty></div>}
 
       {q.data && batches.length > 0 && view === 'board' && (
         <div className="board-scroll" tabIndex={0} aria-label="Production board — scroll sideways for more stages">
           <div className="board">
             {STAGES.map((stage) => {
               const col = sorted.filter((b) => b.stage === stage);
+              // a batch sits in the column of its least advanced script; the scripts further along show here too
+              const here = (b: BatchSummary) => (stage === 'in_review' ? b.progress.inReview : stage === 'approved' ? b.progress.awaitingDelivery : stage === 'delivered' ? b.progress.delivered : 0);
+              const also = stage === 'delivered' ? [] : sorted.filter((b) => b.stage !== stage && here(b) > 0);
+              const scripts = [...col, ...also].reduce((n, b) => n + here(b), 0);
               return (
-                <section key={stage} className="col" aria-label={`${STAGE_LABEL[stage]}: ${col.length}`}>
-                  <div className="col-head" style={{ ['--c' as string]: STAGE_C[stage] }}><i aria-hidden /><h3>{STAGE_LABEL[stage]}</h3><span className="n">{col.length}</span></div>
-                  {!col.length && <div className="empty-col">Nothing here</div>}
+                <section key={stage} className="col" aria-label={`${STAGE_LABEL[stage]}: ${plural(col.length, 'batch', 'batches')}${scripts ? `, ${plural(scripts, 'script')}` : ''}`}>
+                  <div className="col-head" style={{ ['--c' as string]: STAGE_C[stage] }}><i aria-hidden /><h3>{STAGE_LABEL[stage]}</h3><span className="n" title={`${plural(col.length, 'batch', 'batches')} whose every script is at least this far`}>{col.length}</span>
+                    {scripts > 0 && stage !== 'delivered' && <span className="col-scripts num">{plural(scripts, 'script')}</span>}</div>
+                  {!col.length && !also.length && <div className="empty-col">Nothing here</div>}
                   {col.map((b) => (
-                    <button key={b.id} className={`bcard ${edgeFor(b.next, b.blocked)}`} onClick={() => setInspect(b.id)} aria-label={`${b.clientName}: ${b.title}. ${b.progress.draftReady} of ${b.progress.total} drafts ready.`}>
+                    <button key={b.id} className={`bcard ${edgeFor(b.next, b.blocked)}`} onClick={() => setInspect(b.id)} aria-label={`${b.clientName}: ${b.title}. ${b.progress.draftReady} of ${b.progress.total} drafts sent.`}>
                       <span className="client ellipsis">{b.clientName}</span>
                       <span className="t">{b.title}</span>
                       <span className="muted ellipsis" style={{ fontSize: 12 }}>{writersText(b)}</span>
@@ -124,7 +137,7 @@ export function Production() {
                         <span className="row-flex s2">
                           <TodayBump n={b.writtenToday} />
                           {b.blocked && <Chip color="red" icon={<Ban aria-hidden />}>Blocked</Chip>}
-                          {b.progress.inReview > 0 && <Chip color="lavender" dot title={`${b.progress.inReview} scripts waiting for review`}>{b.progress.inReview} in review</Chip>}
+                          {b.progress.inReview > 0 && <Chip color="lavender" dot title={`${b.progress.inReview} scripts in review`}>{b.progress.inReview} in review</Chip>}
                           {b.progress.unassigned > 0 && <Chip color="pink" icon={<UserPlus aria-hidden />} title={`${b.progress.unassigned} unassigned scripts`}>{b.progress.unassigned}</Chip>}
                           {b.progress.revisions > 0 && <Chip color="pink" icon={<RotateCcw aria-hidden />}>{b.progress.revisions}</Chip>}
                         </span>
@@ -132,6 +145,16 @@ export function Production() {
                       {b.shootStart && <span className="muted" style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5 }}><Camera size={12} aria-hidden />Shoot {fmtRange(b.shootStart, b.shootEnd)}</span>}
                     </button>
                   ))}
+                  {also.length > 0 && (
+                    <div className="col-also">
+                      <div className="lbl">{col.length ? 'Also has scripts here' : 'Scripts here from batches in other columns'}</div>
+                      {also.map((b) => (
+                        <button key={b.id} type="button" className="also-row" onClick={() => (stage === 'in_review' ? nav('/review') : setInspect(b.id))}>
+                          <span className="ellipsis"><b>{b.clientName}</b> · {b.title}</span><span className="num">{here(b)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </section>
               );
             })}
@@ -139,31 +162,37 @@ export function Production() {
         </div>
       )}
 
-      {q.data && batches.length > 0 && view === 'table' && (
+      {q.data && batches.length > 0 && view === 'table' && phone && (
+        <div className="panel"><div className="rows">{sorted.map((b) => <BatchItem key={b.id} b={b} onOpen={() => setInspect(b.id)} />)}</div></div>
+      )}
+      {q.data && batches.length > 0 && view === 'table' && !phone && (
         <div className="panel" style={{ padding: '14px 16px' }}>
           <div className="table-scroll" tabIndex={0} aria-label="Batches table">
-            <table className="tbl" style={{ minWidth: 980 }}>
+            <table className="tbl" style={{ minWidth: 860 }}>
               <thead>
                 <tr>
                   <th>{sortBtn('client', 'Client · batch')}</th>
                   <th>Writers</th>
-                  <th style={{ minWidth: 220 }}>{sortBtn('progress', 'Progress')}</th>
+                  <th style={{ minWidth: 150 }}>{sortBtn('progress', 'Progress')}</th>
                   <th>{sortBtn('next', 'Next deadline')}</th>
                   <th>{sortBtn('shoot', 'Shoot')}</th>
                   <th>Stage</th>
-                  <th>Flags</th>
                 </tr>
               </thead>
               <tbody>
                 {sorted.map((b) => (
                   <tr key={b.id} className="clickable" onClick={() => setInspect(b.id)}>
-                    <td style={{ maxWidth: 280 }}><div className="sub ellipsis">{b.clientName}</div><Link to={`/batches/${b.id}`} className="strong" onClick={(e) => e.stopPropagation()}>{b.title}</Link></td>
+                    <td style={{ maxWidth: 300 }}>
+                      <div className="sub ellipsis">{b.clientName}</div><Link to={`/batches/${b.id}`} className="strong" onClick={(e) => e.stopPropagation()}>{b.title}</Link>
+                      {(b.blocked || b.progress.unassigned > 0 || b.needsDateReview || b.archivedAt || b.progress.revisions > 0) && (
+                        <div className="row-flex s2 tbl-flags">{b.blocked && <Chip color="red" icon={<Ban aria-hidden />}>Blocked</Chip>}{b.needsDateReview && <Chip color="yellow">Check dates</Chip>}{b.progress.unassigned > 0 && <Chip color="pink">{b.progress.unassigned} unassigned</Chip>}{b.progress.revisions > 0 && <Chip color="pink">{b.progress.revisions} sent back</Chip>}{b.archivedAt && <Chip>Archived</Chip>}</div>
+                      )}
+                    </td>
                     <td style={{ maxWidth: 220 }}>{b.writers.map((w) => <div key={String(w.userId)} className={`nowrap ${w.userId == null ? '' : ''}`} style={{ fontSize: 12.5, color: w.userId == null ? '#F7B8D8' : undefined }}>{w.name} <span className="sub">{w.ranges}</span></div>)}</td>
                     <td><BatchProgress p={b.progress} written={b.written} thin /></td>
-                    <td className="nowrap"><DueChip m={b.next} today={clock.today} />{b.next?.date && <div className="sub" style={{ marginTop: 4 }}>{b.next.kind === 'draft' ? 'Drafts' : 'Final'} {fmtDate(b.next.date, clock.today)}</div>}</td>
+                    <td className="nowrap"><DueChip m={b.next} today={clock.today} /><div className="sub" style={{ marginTop: 4 }}>{bothLate(b.draft, b.final) ?? (b.next?.date ? `${b.next.kind === 'draft' ? 'Drafts' : 'Final delivery'} · ${fmtDate(b.next.date, clock.today)}` : '')}</div></td>
                     <td className="nowrap">{b.shootStart ? fmtRange(b.shootStart, b.shootEnd) : <span className="sub">No shoot</span>}</td>
                     <td><StageChip stage={b.stage} /></td>
-                    <td><div className="row-flex s2">{b.blocked && <Chip color="red">Blocked</Chip>}{b.progress.unassigned > 0 && <Chip color="pink">{b.progress.unassigned} unassigned</Chip>}{b.needsDateReview && <Chip color="yellow">Check dates</Chip>}{b.archivedAt && <Chip>Archived</Chip>}</div></td>
                   </tr>
                 ))}
               </tbody>

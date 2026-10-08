@@ -1,22 +1,23 @@
-// Script bank: every deliverable ever sent, across every client and batch.
+// Script bank: every document ever sent, across every client and batch.
 // One row per document (a writer's PDF or link covering, say, scripts 1–45),
-// newest version only, with the manager's approved edit beside it.
+// each script under the newest document it was sent in. When a manager
+// approved with edits, their version is the one to open.
 
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, ExternalLink, FileText, Library, Link2, PenLine, Trash2, Upload, X } from 'lucide-react';
 import { api, qs, useSave, type ApiError } from '../api';
-import type { Deliverable, DeliverableState, ScriptBankPage } from '../../../shared/types';
+import type { Deliverable, DeliverableState, ScriptBankPage, ShootReadiness } from '../../../shared/types';
 import { fmtDate, fmtStamp, plural } from '../../../shared/format';
-import { STATUS_SHORT, isManager, type ScriptStatus } from '../../../shared/workflow';
+import { STATUS_SHORT, compressRanges, isManager, type ScriptStatus } from '../../../shared/workflow';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import { Button, Chip, Dialog, Empty, ErrorState, Field, FormError, Loading, Panel, Seg, inputProps, useFieldId, useToast } from '../components/ui';
 
 const STATE: Record<DeliverableState, { label: string; color: string }> = {
-  in_progress: { label: 'In progress', color: 'cyan' },
+  in_progress: { label: 'Writing', color: 'cyan' },
   in_review: { label: 'In review', color: 'lavender' },
-  revisions: { label: 'Revisions', color: 'pink' },
+  revisions: { label: 'Sent back', color: 'pink' },
   approved: { label: 'Approved', color: 'mint' },
   delivered: { label: 'Delivered', color: 'mint' },
 };
@@ -27,6 +28,7 @@ export function ScriptBankPage() {
   const displayTz = useDisplayTz();
   const { clients, users, me } = useBoot();
   const manager = isManager(me.role);
+  const editor = me.role === 'editor';
   const [adding, setAdding] = useState(false);
   const [params, setParams] = useSearchParams();
   const [text, setText] = useState(params.get('q') ?? '');
@@ -35,6 +37,7 @@ export function ScriptBankPage() {
   const clientId = params.get('clientId') ?? '';
   const writerId = params.get('writerId') ?? '';
   const status = params.get('status') ?? '';
+  const shootId = params.get('shootId') ?? '';
   const sort = params.get('sort') ?? 'recent';
   // the search box writes to the address a moment after typing stops (on top of whatever filters
   // it has by then); when the address changes from elsewhere, the box follows
@@ -57,26 +60,40 @@ export function ScriptBankPage() {
   const set = (k: string, v: string) => { const p = new URLSearchParams(params); if (v) p.set(k, v); else p.delete(k); setParams(p, { replace: true }); };
 
   const bank = useInfiniteQuery({
-    queryKey: ['script-bank', q, clientId, writerId, status, sort],
+    queryKey: ['script-bank', q, clientId, writerId, status, shootId, sort],
     initialPageParam: 0,
-    queryFn: ({ pageParam }) => api<ScriptBankPage>(`/api/script-bank${qs({ q, clientId, writerId, status, sort: sort === 'recent' ? null : sort, offset: pageParam || null })}`),
+    queryFn: ({ pageParam }) => api<ScriptBankPage>(`/api/script-bank${qs({ q, clientId, writerId, status, shootId, sort: sort === 'recent' ? null : sort, offset: pageParam || null })}`),
     getNextPageParam: (last) => last.nextOffset,
     placeholderData: keepPreviousData,
   });
   const items = bank.data?.pages.flatMap((p) => p.deliverables) ?? [];
   const first = bank.data?.pages[0];
-  const filtered = !!(q || clientId || writerId || status);
-  const people = users.filter((u) => !u.removed).sort((a, b) => a.name.localeCompare(b.name));
+  const filtered = !!(q || clientId || writerId || status || shootId);
+  // for editors, say where the client's (or shoot's) scripts are instead of a generic empty page
+  const readiness = useQuery({ queryKey: ['shoot-readiness'], queryFn: () => api<{ shoots: ShootReadiness[] }>('/api/shoot-readiness'), enabled: editor && !!(clientId || shootId) });
+  const editorWhy = (() => {
+    const rs = (readiness.data?.shoots ?? []).filter((r) => (shootId ? String(r.shoot.id) === shootId : String(r.shoot.clientId) === clientId) && r.total > 0);
+    if (!rs.length) return null;
+    const total = rs.reduce((n, r) => n + r.total, 0);
+    const done = rs.reduce((n, r) => n + r.finished, 0);
+    const due = rs.map((r) => r.finalDue).filter((d): d is string => !!d).sort()[0];
+    return `${done} of ${total} scripts for the upcoming ${rs.length === 1 ? 'shoot' : 'shoots'} approved so far${due ? ` · final delivery due ${fmtDate(due)}` : ''}. They appear here once approved.`;
+  })();
+  const clientName = clients.find((c) => String(c.id) === clientId)?.name;
+  const people = users.filter((u) => !u.removed && u.role !== 'editor').sort((a, b) => a.name.localeCompare(b.name));
   const num = scriptNumber(q);
 
   return (
     <>
-      <PageHeader title="Script bank" sub="Every document your writers have sent, for every client, plus past scripts from before. Search a client, batch, writer, title or script number.">
+      <PageHeader title="Script bank" sub={editor
+        ? 'Every finished script (approved or delivered), for every client, plus past scripts. Search a client, writer, title or script number.'
+        : manager ? 'Every script document your writers have sent, for every client, plus past scripts from before. Search a client, batch, writer, title or script number.'
+          : 'Every script document the team has sent, for every client, plus past scripts. Use it for examples and to find your own. Search a client, batch, writer, title or script number.'}>
         {manager && <Button icon={<Upload aria-hidden />} onClick={() => setAdding(true)}>Add past scripts</Button>}
       </PageHeader>
       {manager && <PastDialog open={adding} onClose={() => setAdding(false)} />}
       <div className="filters bank-filters" role="search">
-        <input ref={search} className="input search" type="search" autoFocus placeholder="Search, or #12 for script 12…" title="Press / to jump here" value={text}
+        <input ref={search} className="input search" type="search" autoFocus={matchMedia('(pointer: fine)').matches} placeholder="Search, or #12 for script 12…" title="Press / to jump here" value={text}
           onChange={(e) => setText(e.target.value)} aria-label="Search by client, batch, writer, title or script number" />
         <select className="select" value={clientId} onChange={(e) => set('clientId', e.target.value)} aria-label="Client">
           <option value="">All clients</option>
@@ -86,30 +103,36 @@ export function ScriptBankPage() {
           <option value="">All writers</option>
           {people.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
         </select>
-        <select className="select" value={status} onChange={(e) => set('status', e.target.value)} aria-label="Status">
+        {!editor && <select className="select" value={status} onChange={(e) => set('status', e.target.value)} aria-label="Status">
           <option value="">Any status</option>
           <option value="finished">Finished (approved or delivered)</option>
           <option value="in_review">In review</option>
-          <option value="revisions">Sent back for revisions</option>
+          <option value="revisions">Sent back</option>
           <option value="open">Not finished yet</option>
-        </select>
+        </select>}
         <select className="select" value={sort} onChange={(e) => set('sort', e.target.value === 'recent' ? '' : e.target.value)} aria-label="Order">
           <option value="recent">Newest first</option>
+          <option value="shoot">Soonest shoot first</option>
           <option value="client">By client</option>
         </select>
+        {shootId && <Chip color="salmon">One shoot only <button type="button" className="chip-x" aria-label="Show every shoot" onClick={() => set('shootId', '')}><X aria-hidden /></button></Chip>}
         {filtered && <Button variant="ghost sm" onClick={() => { setText(''); setParams(new URLSearchParams(sort !== 'recent' ? { sort } : {}), { replace: true }); }}>Clear</Button>}
       </div>
       {bank.isLoading && <Loading />}
       {bank.isError && <ErrorState error={bank.error} retry={() => bank.refetch()} />}
       {first && (
-        <Panel title="Deliverables" count={first.total} sub={first.scriptCount ? plural(first.scriptCount, 'script') : undefined} className={bank.isPlaceholderData ? 'is-refreshing' : ''}>
+        <Panel title="Documents" count={first.total} sub={first.scriptCount ? plural(first.scriptCount, 'script') : undefined} className={bank.isPlaceholderData ? 'is-refreshing' : ''}>
           {!items.length ? (
-            <Empty boxed icon={<Library />} title={filtered ? 'Nothing matches' : 'Nothing sent yet'}>
-              {filtered ? 'Try fewer words, or clear the filters.' : 'Documents appear here as soon as a writer sends their scripts for review.'}
+            <Empty boxed icon={<Library />} title={editor
+              ? (clientName ? `No finished scripts for ${clientName} yet` : filtered ? 'No finished scripts match' : 'No finished scripts yet')
+              : filtered ? 'Nothing matches' : 'Nothing sent yet'}>
+              {editor
+                ? (q ? 'Try fewer words, or clear the filters.' : editorWhy ?? 'Scripts show up here as soon as a manager approves them. The Calendar shows when each shoot’s scripts are due.')
+                : q ? 'Try fewer words, or clear the filters.' : filtered ? 'Nothing here with these filters. Clear them to see everything.' : 'Documents appear here as soon as a writer sends their scripts for review.'}
             </Empty>
           ) : (
             <div className="rows bank">
-              {items.map((d) => (d.past ? <PastRow key={d.key} d={d} manager={manager} /> : <DeliverableRow key={d.key} d={d} tz={displayTz} num={num} />))}
+              {items.map((d) => (d.past ? <PastRow key={d.key} d={d} manager={manager} /> : <DeliverableRow key={d.key} d={d} tz={displayTz} num={num} linkBatch={!editor} finishedView={editor} />))}
             </div>
           )}
           {bank.hasNextPage && (
@@ -131,10 +154,14 @@ function breakdown(scripts: Deliverable['scripts']): string {
   return [...counts.entries()].map(([s, n]) => `${n} ${STATUS_SHORT[s].toLowerCase()}`).join(' · ');
 }
 
-function DeliverableRow({ d, tz, num }: { d: Deliverable; tz: string; num: number | null }) {
-  const st = STATE[d.state];
+export function DeliverableRow({ d, tz, num, linkBatch = true, finishedView = false }: { d: Deliverable; tz: string; num: number | null; linkBatch?: boolean; finishedView?: boolean }) {
+  const partly = d.finished > 0 && d.finished < d.scripts.length;
+  const st = partly ? { label: `${d.finished} of ${d.scripts.length} finished`, color: 'mint' } : STATE[d.state];
   const hit = num != null ? d.scripts.find((s) => s.number === num) : null;
   const mix = breakdown(d.scripts);
+  const done = d.scripts.filter((s) => s.status === 'approved' || s.status === 'delivered');
+  const notDone = d.scripts.filter((s) => s.status !== 'approved' && s.status !== 'delivered');
+  const icon = d.kind === 'file' ? <FileText aria-hidden /> : <Link2 aria-hidden />;
   return (
     <div className="bank-row">
       <span className="bank-num" aria-label={plural(d.scripts.length, 'script')}>
@@ -142,15 +169,20 @@ function DeliverableRow({ d, tz, num }: { d: Deliverable; tz: string; num: numbe
       </span>
       <div style={{ minWidth: 0 }}>
         <div className="t">
-          <Link className="link" to={`/clients/${d.clientId}`}>{d.clientName}</Link> <span className="dim">›</span> <Link className="link" to={`/batches/${d.batchId}`}>{d.batchTitle}</Link>
+          <Link className="link" to={`/clients/${d.clientId}`}>{d.clientName}</Link> <span className="dim">›</span> {linkBatch ? <Link className="link" to={`/batches/${d.batchId}`}>{d.batchTitle}</Link> : <span>{d.batchTitle}</span>}
           {d.batchArchived && <span className="dim"> (archived)</span>}
         </div>
         <div className="s">
-          Scripts {d.ranges} · {d.writerName ?? 'Unassigned'}{d.shootDate && <> · shoot {fmtDate(d.shootDate)}</>}
-          {' · '}{d.version > 1 ? `version ${d.version}, ` : ''}sent {fmtStamp(d.sentAt, tz)}
-          {d.name && <> · {d.name}</>}
+          {d.scripts.length === 1 ? 'Script' : 'Scripts'} {d.ranges} · {d.writerName ?? 'Unassigned'}{d.shootDate && <> · shoot {fmtDate(d.shootDate)}</>}
+          {d.kind === 'none' ? ' · no document attached' : <>{' · '}{d.version > 1 ? `version ${d.version}, ` : ''}sent {fmtStamp(d.sentAt, tz)}{d.name && <> · {d.name}</>}</>}
         </div>
-        {(hit || mix) && (
+        {finishedView && partly && (
+          <div className="s"><b className="bank-hit">Scripts {compressRanges(done.map((s) => s.number))} final</b> · {compressRanges(notDone.map((s) => s.number))} still being worked on</div>
+        )}
+        {d.edited && (
+          <div className="s"><b className="bank-edit">Use {d.edited.by.split(' ')[0]}’s edited version for {d.edited.ranges.includes('–') || d.edited.ranges.includes(',') ? 'scripts' : 'script'} {d.edited.ranges}</b>{d.edited.note ? ` · “${d.edited.note}”` : ''}</div>
+        )}
+        {(hit || (mix && !(finishedView && partly))) && (
           <div className="s">
             {hit && <b className="bank-hit">Script {hit.number}{hit.title ? ` “${hit.title}”` : ''} is in here{mix ? ' · ' : ''}</b>}
             {mix}
@@ -159,15 +191,18 @@ function DeliverableRow({ d, tz, num }: { d: Deliverable; tz: string; num: numbe
       </div>
       <div className="bank-tools">
         <Chip color={st.color} dot>{st.label}</Chip>
-        <a className="btn sm primary" href={d.href} target="_blank" rel="noopener noreferrer">
-          {d.kind === 'file' ? <FileText aria-hidden /> : <Link2 aria-hidden />}Open
-        </a>
         {d.edited && (
-          <a className="btn sm mint" href={d.edited.href} target="_blank" rel="noopener noreferrer" title={`Approved with edits ${fmtStamp(d.edited.at, tz)}`}>
-            <PenLine aria-hidden />Approved edit
+          <a className="btn sm primary" href={d.edited.href} target="_blank" rel="noopener noreferrer" title={`Approved with ${d.edited.by}’s edits ${fmtStamp(d.edited.at, tz)}`}>
+            <PenLine aria-hidden />Final version
           </a>
         )}
-        {d.timelinerUrl && <a className="btn sm" href={d.timelinerUrl} target="_blank" rel="noopener noreferrer">Timeliner<ExternalLink aria-hidden /></a>}
+        {d.href && (
+          <a className={`btn sm${d.edited ? '' : ' primary'}`} href={d.href} target="_blank" rel="noopener noreferrer">
+            {icon}{d.edited ? 'Writer’s draft' : 'Open'}
+          </a>
+        )}
+        {!d.href && !d.edited && linkBatch && <Link className="btn sm" to={`/batches/${d.batchId}`}>Open batch</Link>}
+        {d.timelinerUrl && <a className="btn sm" href={d.timelinerUrl} target="_blank" rel="noopener noreferrer">Open in Timeliner<ExternalLink aria-hidden /></a>}
       </div>
     </div>
   );
@@ -194,7 +229,7 @@ function PastRow({ d, manager }: { d: Deliverable; manager: boolean }) {
       </div>
       <div className="bank-tools">
         <Chip color="neutral" icon={<Archive aria-hidden />}>Past script</Chip>
-        <a className="btn sm primary" href={d.href} target="_blank" rel="noopener noreferrer">
+        <a className="btn sm primary" href={d.href ?? undefined} target="_blank" rel="noopener noreferrer">
           {d.kind === 'file' ? <FileText aria-hidden /> : <Link2 aria-hidden />}Open
         </a>
         {manager && (
@@ -226,7 +261,7 @@ function PastDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [error, setError] = useState<ApiError | null>(null);
   const [fieldErr, setFieldErr] = useState<Record<string, string>>({});
   const ids = { c: useFieldId('pc'), f: useFieldId('pf'), u: useFieldId('pu'), lt: useFieldId('plt'), w: useFieldId('pw'), d: useFieldId('pd'), n: useFieldId('pn'), no: useFieldId('pno') };
-  const people = users.filter((u) => !u.removed).map((u) => u.name).sort();
+  const people = users.filter((u) => !u.removed && u.role !== 'editor').map((u) => u.name).sort();
   const sorted = [...clients].sort((a, b) => a.name.localeCompare(b.name));
 
   const reset = () => { setFiles([]); setUrl(''); setLinkTitle(''); setWriterName(''); setWrittenOn(''); setScriptCount(''); setNote(''); setError(null); setFieldErr({}); };

@@ -4,18 +4,18 @@
 import type { FastifyInstance } from 'fastify';
 import { isManager } from '../../shared/workflow';
 import { z } from 'zod';
-import { clockFor, lastDeliveredAt, loadBatches, loadSettings, loadUsers, type Ctx, type ScriptLiteRow } from '../core';
+import { clockFor, lastDeliveredAt, loadBatches, loadSeen, loadSettings, loadUsers, type Ctx, type ScriptLiteRow } from '../core';
 import { requireUser } from '../auth';
 import { buildGroups, loadReviewQueue, publicSubmission } from '../submissions';
 import { parse, zs } from '../http';
 import { loadBriefings, loadDeliveries, loadResources, loadScripts, loadShoots } from '../records';
 import { addDays, diffDays, nowInZone, startOfWeek, workingDaysBetween, type Clock, type ISODate } from '../../shared/dates';
-import { isDraftReady, summarize, type ScriptStatus } from '../../shared/workflow';
+import { bothLate, isDraftReady, isNewWork, milestone, nextMilestone, summarize, type Milestone, type ScriptStatus } from '../../shared/workflow';
 import { plural } from '../../shared/format';
 import { sessionMode } from '../recording';
 import type {
   AttentionItem, AttentionKind, BatchSummary, Bootstrap, CalendarEvent, Counts, Dashboard, DueCategory, DueDay, Me,
-  MyWork, ReviewQueue, WriterLoad,
+  MyWork, ReviewQueue, ShootReadiness, WriterLoad,
 } from '../../shared/types';
 
 const emptyCats = (): Record<DueCategory, number> => ({ not_started: 0, writing: 0, in_review: 0, to_deliver: 0 });
@@ -65,19 +65,32 @@ function dueByDay(kind: 'draft' | 'final', batches: BatchSummary[], scripts: Map
 
 const RANK: Record<AttentionKind, number> = { overdue: 0, blocked: 1, due_today: 2, date_review: 3, unassigned: 4, revisions: 5 };
 
-export function attentionFor(batches: BatchSummary[]): AttentionItem[] {
+/** People who can't sign in any more (deactivated or removed), by id. */
+export async function inactivePeople(db: Ctx['db']): Promise<Map<number, string>> {
+  const rows = await db.query<{ id: number; name: string }>(`select id, name from users where not active or removed_at is not null`);
+  return new Map(rows.map((r) => [r.id, r.name]));
+}
+
+export function attentionFor(batches: BatchSummary[], inactive: Map<number, string> = new Map()): AttentionItem[] {
   const out: AttentionItem[] = [];
   for (const b of batches) {
     if (b.stage === 'delivered') continue;
     const issues: AttentionItem['issues'] = [];
-    if (b.final.overdue) issues.push({ kind: 'overdue', text: `Final delivery ${b.final.label.toLowerCase()} · ${plural(b.final.remaining, 'script')} not delivered` });
-    else if (b.draft.overdue) issues.push({ kind: 'overdue', text: `Drafts ${b.draft.label.toLowerCase()} · ${plural(b.draft.remaining, 'script')} not draft-ready` });
+    // scripts left with someone who can't sign in any more
+    for (const w of b.writers) {
+      const left = w.count - w.delivered;
+      if (w.userId != null && inactive.has(w.userId) && left > 0) issues.push({ kind: 'unassigned', text: `${plural(left, 'script')} still with ${w.name}, who’s deactivated · reassign them` });
+    }
+    const both = bothLate(b.draft, b.final);
+    if (both) issues.push({ kind: 'overdue', text: `${both} · ${plural(b.final.remaining, 'script')} not delivered` });
+    else if (b.final.overdue) issues.push({ kind: 'overdue', text: `Final delivery ${b.final.label.toLowerCase()} · ${plural(b.final.remaining, 'script')} not delivered` });
+    else if (b.draft.overdue) issues.push({ kind: 'overdue', text: `Drafts ${b.draft.label.toLowerCase()} · ${plural(b.draft.remaining, 'script')} with drafts not sent` });
     if (b.blocked) issues.push({ kind: 'blocked', text: `Blocked: ${b.blockerNote ?? 'no details'}` });
     if (b.final.dueToday) issues.push({ kind: 'due_today', text: `Final delivery due today · ${b.final.remaining} left` });
     else if (b.draft.dueToday) issues.push({ kind: 'due_today', text: `Drafts due today · ${b.draft.remaining} left` });
     if (b.needsDateReview) issues.push({ kind: 'date_review', text: b.dateReviewNote ?? 'Deadlines need review' });
     if (b.progress.unassigned) issues.push({ kind: 'unassigned', text: `${plural(b.progress.unassigned, 'script')} unassigned` });
-    if (b.progress.revisions) issues.push({ kind: 'revisions', text: `${plural(b.progress.revisions, 'script')} returned for revisions` });
+    if (b.progress.revisions) issues.push({ kind: 'revisions', text: `${plural(b.progress.revisions, 'script')} sent back` });
     if (!issues.length) continue;
     issues.sort((a, c) => RANK[a.kind] - RANK[c.kind]);
     out.push({ kind: issues[0].kind, batch: b, issues });
@@ -89,7 +102,7 @@ export function workloadFor(batches: BatchSummary[], scripts: Map<number, Script
   const active = batches.filter((b) => b.stage !== 'delivered');
   const horizon = addDays(clock.today, 6);
   const loads: WriterLoad[] = [];
-  for (const u of users.filter((x) => x.active)) {
+  for (const u of users.filter((x) => x.active && x.role !== 'editor')) {
     let assigned = 0, remaining = 0, toDeliver = 0, overdueScripts = 0, dueNext7 = 0;
     const batchIds = new Set<number>();
     let blocked = 0;
@@ -126,19 +139,24 @@ export function workloadFor(batches: BatchSummary[], scripts: Map<number, Script
 export async function computeCounts(ctx: Ctx, me: Me, batches?: BatchSummary[], scripts?: Map<number, ScriptLiteRow[]>): Promise<Counts> {
   const data = batches && scripts ? { summaries: batches, scripts } : await loadBatches(ctx);
   let myOpen = 0;
+  let myNew = 0;
+  const now = ctx.now();
+  const seen = await loadSeen(ctx.db, me.id);
   for (const b of data.summaries) {
-    for (const s of data.scripts.get(b.id) ?? []) {
-      if (s.assignee_id === me.id && s.status !== 'delivered' && s.status !== 'ready_for_review') myOpen++;
+    const mine = (data.scripts.get(b.id) ?? []).filter((s) => s.assignee_id === me.id);
+    for (const s of mine) {
+      if (s.status !== 'delivered' && s.status !== 'ready_for_review') myOpen++;
     }
+    const written = b.writers.find((w) => w.userId === me.id)?.written ?? 0;
+    if (isNewWork(mine.map((s) => ({ status: s.status, assignedAt: s.assigned_at ?? null })), written, now, seen.get(b.id) ?? null)) myNew++;
   }
   const unread = await ctx.db.one<{ n: number }>(`select count(*) as n from notifications where user_id = $1 and read_at is null`, [me.id]);
-  const msgs = await ctx.db.one<{ n: number }>(`select count(*) as n from messages m join users u on u.id = m.sender_id where m.recipient_id = $1 and m.read_at is null and u.active`, [me.id]);
   return {
     myOpenScripts: myOpen,
+    myNewWork: myNew,
     reviewQueue: isManager(me.role) ? data.summaries.reduce((n, b) => n + b.progress.inReview, 0) : 0,
     unreadNotifications: unread?.n ?? 0,
-    unreadMessages: Number(msgs?.n ?? 0),
-    attention: attentionFor(data.summaries).length,
+    attention: isManager(me.role) ? attentionFor(data.summaries, await inactivePeople(ctx.db)).length : attentionFor(data.summaries).length,
   };
 }
 
@@ -152,10 +170,13 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     const { summaries, scripts } = await loadBatches(ctx, {}, clock);
     const users = await loadUsers(db);
     const clients = await db.query<{ id: number; name: string; status: 'prospect' | 'active' | 'archived' }>(`select id, name, status from clients order by lower(name)`);
-    const seen = await db.one<{ whats_new_seen: string | null; timezone: string | null; timezone_confirmed_at: string | null }>(`select whats_new_seen, timezone, timezone_confirmed_at from users where id = $1`, [me.id]);
+    const seen = await db.one<{ whats_new_seen: string | null; timezone: string | null; timezone_confirmed_at: string | null; temp: boolean }>(
+      `select whats_new_seen, timezone, timezone_confirmed_at, temp_password is not null as temp from users where id = $1`, [me.id]);
     return {
       me, mode: sessionMode(req), notesImport: !!ctx.notesReader, uploadLimitMb: Math.round(ctx.uploadLimitBytes / 1024 / 1024), whatsNewSeen: seen?.whats_new_seen ?? null,
       timezone: { mine: seen?.timezone ?? null, confirmed: !!seen?.timezone_confirmed_at },
+      // still on the temporary password someone gave them: ask for their own
+      mustChangePassword: !!seen?.temp && !sessionMode(req)?.viewingAs,
       settings, users, clients, clock, counts: await computeCounts(ctx, me, summaries, scripts),
     };
   });
@@ -176,14 +197,26 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     const weekStart = startOfWeek(clock.today);
     let deliveredWeek = 0;
     const deliveredBatches = new Set<number>();
+    // scripts delivered each day of this week, Monday first, for the card's little bars
+    const deliveredByDay = [0, 0, 0, 0, 0, 0, 0];
     for (const b of summaries) {
       for (const s of scripts.get(b.id) ?? []) {
-        if (s.status === 'delivered' && s.delivered_at && nowInZone(clock.timezone, new Date(s.delivered_at)).date >= weekStart) {
+        const day = s.status === 'delivered' && s.delivered_at ? nowInZone(clock.timezone, new Date(s.delivered_at)).date : null;
+        const i = day ? diffDays(day, weekStart) : -1;
+        if (i >= 0 && i < 7) {
           deliveredWeek++;
           deliveredBatches.add(b.id);
+          deliveredByDay[i]++;
         }
       }
     }
+    // how long the review queue has been waiting, and when someone last reviewed
+    const ids = summaries.map((b) => b.id);
+    const oldest = ids.length ? await db.one<{ at: string | null }>(
+      `select min(submitted_at) as at from scripts where status = 'ready_for_review' and removed_at is null and batch_id = any($1)${mine ? ' and assignee_id = $2' : ''}`,
+      mine ? [ids, me.id] : [ids]) : null;
+    const lastReview = ids.length ? await db.one<{ at: string | null }>(`select max(created_at) as at from reviews where batch_id = any($1)`, [ids]) : null;
+    const iso = (x: string | Date | null | undefined) => (x ? new Date(x).toISOString() : null);
     const shoots = (await loadShoots(db, { from: clock.today, to: addDays(clock.today, 45), activeClientsOnly: true }))
       .filter((s) => !s.cancelledAt && (!mine || summaries.some((b) => b.shootId === s.id)))
       .slice(0, 6)
@@ -205,9 +238,16 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
         awaitingReviewBatches: summaries.filter((b) => b.progress.inReview > 0).length,
         deliveredThisWeekScripts: deliveredWeek,
         deliveredThisWeekBatches: deliveredBatches.size,
+        deliveredByDay,
+        oldestInReviewAt: iso(oldest?.at),
+        lastReviewAt: iso(lastReview?.at),
       },
       due: { draft: dueByDay('draft', summaries, scripts, clock), final: dueByDay('final', summaries, scripts, clock) },
-      attention: attentionFor(summaries),
+      // a writer can't confirm or change deadlines, so their list leaves that check out
+      attention: mine
+        ? attentionFor(summaries).map((a) => ({ ...a, issues: a.issues.filter((i) => i.kind !== 'date_review') })).filter((a) => a.issues.length)
+          .map((a) => ({ ...a, kind: a.issues[0].kind }))
+        : attentionFor(summaries, await inactivePeople(db)),
       upcomingShoots: shoots,
       activeBatches: summaries
         .filter((b) => b.stage !== 'delivered')
@@ -218,8 +258,49 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     };
   });
 
+  /** Events from synced calendars (Google Calendar), on the days they fall in the viewer's own time zone. */
+  const syncedEvents = async (me: Me, from: ISODate, to: ISODate, today: ISODate): Promise<CalendarEvent[]> => {
+    const tzRow = await db.one<{ timezone: string | null }>(`select timezone from users where id = $1`, [me.id]);
+    const tz = tzRow?.timezone ?? (await loadSettings(db)).timezone;
+    // a day either side catches events that land on a different date in someone's own zone
+    const rows = await db.query<{ id: number; feed_id: number; feed_name: string; color: string; uid: string; title: string; location: string | null; description: string | null; all_day: boolean; start_at: string; end_at: string; start_date: string | null; end_date: string | null }>(
+      `select e.id, e.feed_id, f.name as feed_name, f.color, e.uid, e.title, e.location, e.description, e.all_day, e.start_at, e.end_at, e.start_date::text as start_date, e.end_date::text as end_date
+         from calendar_events e join calendar_feeds f on f.id = e.feed_id
+        where e.start_at < ($2::date + 2)::timestamptz and e.end_at > ($1::date - 1)::timestamptz ${isManager(me.role) ? '' : me.role === 'editor' ? `and f.visibility in ('editors', 'everyone')` : `and f.visibility = 'everyone'`}
+        order by e.start_at limit 2000`, [from, to],
+    );
+    const dayIn = (at: string | Date) => nowInZone(tz, new Date(at)).date;
+    // shoots planned from these events, so the calendar can show them as one
+    const uids = [...new Set(rows.map((r) => r.uid))];
+    const linked = new Map<string, { shoot: number; batch: number | null }>();
+    if (uids.length) {
+      const ls = await db.query<{ id: number; calendar_uid: string; batch_id: number | null }>(
+        `select s.id, s.calendar_uid, (select min(b.id) from batches b where b.shoot_id = s.id and b.archived_at is null) as batch_id
+           from shoots s where s.calendar_uid = any($1) and s.cancelled_at is null`, [uids],
+      );
+      for (const l of ls) linked.set(l.calendar_uid, { shoot: Number(l.id), batch: l.batch_id == null ? null : Number(l.batch_id) });
+    }
+    const out: CalendarEvent[] = [];
+    for (const r of rows) {
+      const start = r.all_day ? r.start_date! : dayIn(r.start_at);
+      // an event ending exactly at midnight belongs to the day before
+      const end = r.all_day ? r.end_date! : dayIn(new Date(Math.max(new Date(r.start_at).getTime(), new Date(r.end_at).getTime() - 1)));
+      if (end < from || start > to) continue;
+      out.push({
+        id: `x${r.id}`, type: 'external', start, end, title: r.title, clientName: r.feed_name, batchId: null, shootId: null,
+        overdue: false, complete: end < today,
+        external: {
+          feedId: Number(r.feed_id), feedName: r.feed_name, color: r.color, allDay: r.all_day,
+          startAt: new Date(r.start_at).toISOString(), endAt: new Date(r.end_at).toISOString(), location: r.location, description: r.description,
+          uid: r.uid, linkedShootId: linked.get(r.uid)?.shoot ?? null, linkedBatchId: linked.get(r.uid)?.batch ?? null,
+        },
+      });
+    }
+    return out;
+  };
+
   app.get('/api/calendar', async (req) => {
-    requireUser(req);
+    const me = requireUser(req);
     const q = parse(z.object({ from: zs.date, to: zs.date, writerId: zs.id.optional(), clientId: zs.id.optional() }), req.query);
     const clock = await clockFor(ctx);
     const { summaries } = await loadBatches(ctx, { clientId: q.clientId }, clock);
@@ -247,12 +328,34 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
         batchId: s.batchIds[0] ?? null, shootId: s.id, overdue: false, complete: (s.endDate ?? s.startDate) < clock.today,
       });
     }
+    events.push(...(await syncedEvents(me, q.from, q.to, clock.today)));
+    // editors plan around shoots and when scripts are final, not the writing in between
+    if (me.role === 'editor') return { events: events.filter((e) => e.type === 'shoot' || e.type === 'final' || e.type === 'external'), clock };
     return { events, clock };
   });
 
   app.get('/api/review', async (req): Promise<ReviewQueue> => {
     requireUser(req);
     return loadReviewQueue(ctx);
+  });
+
+  // editors: each upcoming shoot and how many of its scripts are final
+  app.get('/api/shoot-readiness', async (req): Promise<{ shoots: ShootReadiness[] }> => {
+    requireUser(req);
+    const clock = await clockFor(ctx);
+    const shoots = (await loadShoots(db, { from: addDays(clock.today, -2), to: addDays(clock.today, 42), activeClientsOnly: true })).filter((s) => !s.cancelledAt);
+    const { summaries } = await loadBatches(ctx, {}, clock);
+    const out: ShootReadiness[] = shoots.map((s) => {
+      const bs = summaries.filter((b) => b.shootId === s.id);
+      const total = bs.reduce((n, b) => n + b.progress.total, 0);
+      const finished = bs.reduce((n, b) => n + b.progress.approved, 0);
+      const finals = bs.map((b) => b.finalDue).filter((d): d is ISODate => !!d).sort();
+      const finalDue = finals[0] ?? null;
+      const state: ShootReadiness['state'] = !total ? 'no_scripts' : finished >= total ? 'ready'
+        : (finalDue && finalDue < clock.today) || s.startDate <= clock.today ? 'late' : 'on_track';
+      return { shoot: s, total, finished, finalDue, state };
+    }).sort((a, b) => a.shoot.startDate.localeCompare(b.shoot.startDate));
+    return { shoots: out };
   });
 
   app.get('/api/my-work', async (req): Promise<MyWork> => {
@@ -274,14 +377,24 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     const allScripts = await loadScripts(db, { assigneeId: uid });
     const briefings = await Promise.all(mineBatches.map((b) => loadBriefings(db, { batchId: b.id })));
     const resources = await Promise.all(mineBatches.map((b) => loadResources(db, { batchId: b.id, includeArchivedClients: true })));
-    const rank = (b: BatchSummary) => (b.next?.overdue ? 0 : b.next?.dueToday ? 1 : 2);
+    const seen = await loadSeen(db, uid);
+    // the writer's own deadlines: drafts are done when *their* scripts are sent, not the whole batch's
+    const rank = (m: Milestone | null) => (m?.overdue ? 0 : m?.dueToday ? 1 : 2);
     const list = mineBatches.map((b, i) => {
       const mine = allScripts.filter((s) => s.batchId === b.id);
-      return { batch: b, mine, myProgress: summarize(mine.map((s) => ({ status: s.status, assigneeId: s.assigneeId }))), briefings: briefings[i], resources: resources[i] };
+      const myProgress = summarize(mine.map((s) => ({ status: s.status, assigneeId: s.assigneeId })));
+      const myDraft = milestone('draft', b.draftDue, myProgress, clock);
+      const myFinal = milestone('final', b.finalDue, myProgress, clock);
+      return {
+        batch: b, mine, myProgress, myDraft, myFinal, myNext: nextMilestone(myDraft, myFinal), seenAt: seen.get(b.id) ?? null,
+        briefings: briefings[i], resources: resources[i],
+      };
     }).sort((a, b) => {
       const doneA = a.myProgress.delivered === a.myProgress.total ? 1 : 0;
       const doneB = b.myProgress.delivered === b.myProgress.total ? 1 : 0;
-      return doneA - doneB || rank(a.batch) - rank(b.batch) || (a.batch.next?.date ?? '9999').localeCompare(b.batch.next?.date ?? '9999');
+      const backA = a.myProgress.revisions > 0 ? 0 : 1;
+      const backB = b.myProgress.revisions > 0 ? 0 : 1;
+      return doneA - doneB || backA - backB || rank(a.myNext) - rank(b.myNext) || (a.myNext?.date ?? '9999').localeCompare(b.myNext?.date ?? '9999');
     });
     const { groups, data } = await buildGroups(db, mineBatches, { assigneeId: uid });
     const withDocs = list.map((e) => {

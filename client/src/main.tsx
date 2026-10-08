@@ -1,4 +1,4 @@
-import { lazy, StrictMode, Suspense, useEffect } from 'react';
+import { lazy, StrictMode, Suspense, useEffect, type ReactElement } from 'react';
 import { isManager } from '../../shared/workflow';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
@@ -10,7 +10,7 @@ import './styles/app.css';
 import { api, queryClient, setRecordingMode } from './api';
 import type { Bootstrap } from '../../shared/types';
 import { AppShell } from './components/Shell';
-import { ErrorState, ToastProvider } from './components/ui';
+import { ErrorState, NotFound, ToastProvider } from './components/ui';
 import { Login, type AuthStatus } from './pages/Login';
 import { Overview } from './pages/Overview';
 import { MyWorkPage } from './pages/MyWork';
@@ -22,6 +22,7 @@ import { ReviewPage } from './pages/Review';
 import { ResourcesPage } from './pages/Resources';
 import { ScriptBankPage } from './pages/ScriptBank';
 import { WritersPage } from './pages/Writers';
+import { EditorHome } from './pages/EditorHome';
 import { SettingsPage } from './pages/Settings';
 import { MasterLogPage } from './pages/MasterLog';
 import { WhatsNewPage } from './pages/WhatsNew';
@@ -59,28 +60,40 @@ function Gate() {
     return <div className="loading-center" role="status"><span className="wordmark" style={{ fontSize: 28 }}>Scale&nbsp;<span>Media</span></span><span>Loading…</span></div>;
   }
   if (status.isError) return <main className="login"><ErrorState error={status.error} retry={() => status.refetch()} /></main>;
-  if (!status.data!.signedIn) return <Login status={status.data!} onDone={() => { setRecordingMode(null); queryClient.clear(); void status.refetch(); }} />;
+  // signed out without pressing Sign out (a password reset, or the session ended): say so
+  let signedOut = false;
+  try {
+    if (status.data!.signedIn) localStorage.setItem('sm.signed-in', '1');
+    else signedOut = localStorage.getItem('sm.signed-in') === '1';
+  } catch { /* ignore */ }
+  if (!status.data!.signedIn) return <Login status={status.data!} signedOut={signedOut} onDone={() => { setRecordingMode(null); queryClient.clear(); void status.refetch(); }} />;
   if (boot.isError || !boot.data) return <main className="login"><ErrorState error={boot.error} retry={() => boot.refetch()} /></main>;
-  const home = isManager(boot.data.me.role) ? '/overview' : '/my-work';
+  const role = boot.data.me.role;
+  const home = isManager(role) ? '/overview' : role === 'editor' ? '/editor' : '/my-work';
+  // editors only have their own pages; anything else takes them home
+  const only = (el: ReactElement) => (role === 'editor' ? <Navigate to="/editor" replace /> : el);
+  // the review queue (other writers' feedback) and the team page are for managers
+  const managers = (el: ReactElement) => (isManager(role) ? el : <Navigate to={home} replace />);
   return (
     <Routes>
       <Route element={<AppShell boot={boot.data} />}>
         <Route index element={<Navigate to={home} replace />} />
-        <Route path="/overview" element={<Overview />} />
-        <Route path="/my-work" element={<MyWorkPage />} />
-        <Route path="/production" element={<Production />} />
+        <Route path="/editor" element={role === 'editor' || isManager(role) ? <EditorHome /> : <Navigate to={home} replace />} />
+        <Route path="/overview" element={only(<Overview />)} />
+        <Route path="/my-work" element={only(<MyWorkPage />)} />
+        <Route path="/production" element={only(<Production />)} />
         <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/clients" element={<ClientsPage />} />
         <Route path="/clients/:id" element={<ClientPage />} />
-        <Route path="/batches/:id" element={<BatchPage />} />
-        <Route path="/review" element={<ReviewPage />} />
+        <Route path="/batches/:id" element={only(<BatchPage />)} />
+        <Route path="/review" element={managers(<ReviewPage />)} />
         <Route path="/resources" element={<ResourcesPage />} />
         <Route path="/scripts" element={<ScriptBankPage />} />
-        <Route path="/writers" element={<WritersPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/log" element={<MasterLogPage />} />
+        <Route path="/writers" element={managers(<WritersPage />)} />
+        <Route path="/settings" element={only(<SettingsPage />)} />
+        <Route path="/log" element={only(<MasterLogPage />)} />
         <Route path="/whats-new" element={<WhatsNewPage />} />
-        <Route path="*" element={<div className="panel"><h2>Page not found</h2><p className="muted" style={{ marginTop: 8 }}>That page doesn’t exist.</p></div>} />
+        <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
   );

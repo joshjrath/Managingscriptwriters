@@ -378,7 +378,8 @@ export function registerNotesImportRoutes(app: FastifyInstance, ctx: Ctx) {
     const clock = await clockFor(ctx, settings);
     const rules = rulesOf(settings);
     const clients = await ctx.db.query<{ name: string; status: string }>(`select name, status from clients order by lower(name)`);
-    const team = (await loadUsers(ctx.db)).filter((u) => u.active && !u.removed).map((u) => ({ name: u.name, role: u.role }));
+    // editors don't write, so they're never suggested as writers
+    const team = (await loadUsers(ctx.db)).filter((u) => u.active && !u.removed && u.role !== 'editor').map((u) => ({ name: u.name, role: u.role }));
     allowRead(userId);
     const raw = await reader.read(input, {
       today: clock.today, weekday: new Date(`${clock.today}T00:00:00Z`).toLocaleDateString('en-US', { weekday: 'long', timeZone: 'UTC' }), timezone: settings.timezone,

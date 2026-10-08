@@ -257,6 +257,13 @@ export function describeDue(state: DueState): string {
   return `Due in ${state.daysUntil} days`;
 }
 
+/** "Saturday" or "Sunday" when a date falls on a weekend, so forms can point it out. */
+export function weekendName(date: string): 'Saturday' | 'Sunday' | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return null;
+  const dow = new Date(`${date}T12:00:00Z`).getUTCDay();
+  return dow === 6 ? 'Saturday' : dow === 0 ? 'Sunday' : null;
+}
+
 // ── capacity estimates ───────────────────────────────────────────────────
 
 /** Working days in the inclusive range [from, to]. */

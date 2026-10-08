@@ -5,7 +5,7 @@ import type { Db } from './db';
 import { makeClock, type Clock, type DeadlineRules, type ISODate } from '../shared/dates';
 import {
   compressRanges, deriveStage, milestone, nextMilestone, summarize,
-  type ScriptLite, type ScriptStatus,
+  type ScriptLite, type ScriptStatus, type Role,
 } from '../shared/workflow';
 import type { WorkspaceTheme } from '../shared/palettes';
 import type { BatchSummary, Me, Priority, Settings, UserSummary, WriterShare, DateMode } from '../shared/types';
@@ -20,6 +20,8 @@ export interface Ctx {
   setupHint?: string;
   /** reads pasted notes into an import plan (Claude); absent when no API key is configured */
   notesReader?: import('./notes-import').NotesReader | null;
+  /** reads a synced calendar's iCal link (tests pass a stand-in) */
+  fetchCalendar?: (url: string) => Promise<string>;
   /** the real workspace; `db` points at a practice copy for requests made in Recording mode */
   realDb?: Db;
   /** the database this request is using right now (for work that outlives the handler, like streaming a file) */
@@ -44,7 +46,7 @@ export async function loadSettings(db: Db): Promise<Settings> {
     orgName: r.org_name, timezone: r.timezone, cutoff: r.cutoff,
     draftOffsetDays: r.draft_offset_days, finalOffsetDays: r.final_offset_days,
     dayMode: r.day_mode, workingDays: wd, reminderLeadDays: r.reminder_lead_days, planReminderDays: r.plan_reminder_days ?? 14,
-    isDemo: r.is_demo, remindersLastRunAt: r.reminders_last_run_at,
+    isDemo: r.is_demo, remindersLastRunAt: r.reminders_last_run_at, remindersEnabled: process.env.REMINDERS !== 'off',
     theme: typeof r.theme === 'string' ? JSON.parse(r.theme) : r.theme ?? null,
   };
 }
@@ -61,7 +63,7 @@ export async function clockFor(ctx: Ctx, settings?: Settings): Promise<Clock> {
 // ── users ────────────────────────────────────────────────────────────────
 
 interface UserRow {
-  id: number; name: string; email: string; role: 'owner' | 'manager' | 'writer'; active: boolean; capacity_per_day: number | null;
+  id: number; name: string; email: string; role: Role; active: boolean; capacity_per_day: number | null;
   removed_at: string | null; temp_password: string | null; city: string | null; country: string | null; timezone: string | null; work_start: number | null; work_end: number | null;
 }
 
@@ -74,6 +76,11 @@ export async function loadUsers(db: Db): Promise<UserSummary[]> {
     timezone: r.timezone,
     workHours: r.work_start != null && r.work_end != null ? [r.work_start, r.work_end] : null,
   }));
+}
+
+/** Editors who can sign in: they hear when a shoot's scripts are final, or the shoot moves. */
+export async function editorIds(db: Db): Promise<number[]> {
+  return (await db.query<{ id: number }>(`select id from users where role = 'editor' and active and removed_at is null`)).map((r) => r.id);
 }
 
 export async function managerIds(db: Db): Promise<number[]> {
@@ -136,7 +143,7 @@ export interface BatchRow {
   shoot_start: ISODate | null; shoot_end: ISODate | null; title: string; brief: string | null; target_count: number;
   priority: Priority; planned_start: ISODate | null; draft_due: ISODate | null; draft_due_mode: DateMode;
   final_due: ISODate | null; final_due_mode: DateMode; needs_date_review: boolean; date_review_note: string | null;
-  blocked: boolean; blocker_note: string | null; blocked_at: string | null; blocked_by_name: string | null;
+  blocked: boolean; blocker_note: string | null; blocked_at: string | null; blocked_by: number | null; blocked_by_name: string | null;
   next_action: string | null; archived_at: string | null; updated_at: string; open_revisions: number;
   brand_voice: string | null; guidance: string | null;
 }
@@ -145,7 +152,7 @@ export const BATCH_SELECT = `
   select b.id, b.client_id, c.name as client_name, b.shoot_id, s.title as shoot_title, s.start_date as shoot_start,
          s.end_date as shoot_end, b.title, b.brief, b.target_count, b.priority, b.planned_start, b.draft_due,
          b.draft_due_mode, b.final_due, b.final_due_mode, b.needs_date_review, b.date_review_note, b.blocked,
-         b.blocker_note, b.blocked_at, bu.name as blocked_by_name, b.next_action, b.archived_at, b.updated_at,
+         b.blocker_note, b.blocked_at, b.blocked_by, bu.name as blocked_by_name, b.next_action, b.archived_at, b.updated_at,
          c.brand_voice, c.guidance,
          (select count(*) from revision_requests r where r.batch_id = b.id and r.resolved_at is null) as open_revisions
     from batches b
@@ -153,13 +160,13 @@ export const BATCH_SELECT = `
     left join shoots s on s.id = b.shoot_id
     left join users bu on bu.id = b.blocked_by`;
 
-export interface ScriptLiteRow { id: number; batch_id: number; number: number; status: ScriptStatus; assignee_id: number | null; delivered_at: string | null }
+export interface ScriptLiteRow { id: number; batch_id: number; number: number; status: ScriptStatus; assignee_id: number | null; delivered_at: string | null; assigned_at?: string | null }
 
 export async function loadScriptsFor(db: Db, batchIds: number[]): Promise<Map<number, ScriptLiteRow[]>> {
   const map = new Map<number, ScriptLiteRow[]>();
   if (!batchIds.length) return map;
   const rows = await db.query<ScriptLiteRow>(
-    `select id, batch_id, number, status, assignee_id, delivered_at from scripts
+    `select id, batch_id, number, status, assignee_id, delivered_at, assigned_at from scripts
       where removed_at is null and batch_id in (${batchIds.map((_, i) => `$${i + 1}`).join(',')})
       order by batch_id, number`,
     batchIds,
@@ -187,6 +194,16 @@ export async function loadWritten(db: Db, batchIds: number[]): Promise<WrittenMa
   return map;
 }
 
+/** When a writer last looked at their work in each batch (Got it, opening it, sending or updating the counter). */
+export async function loadSeen(db: Db, userId: number): Promise<Map<number, string>> {
+  const rows = await db.query<{ batch_id: number; seen_at: string }>(`select batch_id, seen_at from work_seen where user_id = $1`, [userId]);
+  return new Map(rows.map((r) => [Number(r.batch_id), new Date(r.seen_at).toISOString()]));
+}
+
+export async function markSeen(db: Db, userId: number, batchId: number): Promise<void> {
+  await db.query(`insert into work_seen (user_id, batch_id) values ($1, $2) on conflict (user_id, batch_id) do update set seen_at = now()`, [userId, batchId]);
+}
+
 export function buildSummary(row: BatchRow, scriptRows: ScriptLiteRow[], names: Map<number, string>, clock: Clock, written: WrittenMap = new Map()): BatchSummary {
   const scripts = scriptRows.map(lite);
   const progress = summarize(scripts);
@@ -203,7 +220,7 @@ export function buildSummary(row: BatchRow, scriptRows: ScriptLiteRow[], names: 
     .map(([uid, list]) => {
       const p = summarize(list);
       const rep = uid == null ? undefined : written.get(`${row.id}:${uid}`);
-      const writtenNow = Math.min(list.length, Math.max(p.draftReady, rep?.written ?? 0));
+      const writtenNow = Math.min(list.length, Math.max(p.draftReady + p.revisions, rep?.written ?? 0));
       return {
         userId: uid, name: uid == null ? 'Unassigned' : names.get(uid) ?? 'Unknown',
         count: list.length, ranges: compressRanges(list.map((s) => s.number)),
@@ -221,7 +238,7 @@ export function buildSummary(row: BatchRow, scriptRows: ScriptLiteRow[], names: 
     shootId: row.shoot_id, shootTitle: row.shoot_title, shootStart: row.shoot_start, shootEnd: row.shoot_end,
     targetCount: row.target_count, priority: row.priority, plannedStart: row.planned_start,
     draftDue: row.draft_due, draftDueMode: row.draft_due_mode, finalDue: row.final_due, finalDueMode: row.final_due_mode,
-    blocked: row.blocked, blockerNote: row.blocker_note, blockedAt: row.blocked_at, blockedByName: row.blocked_by_name,
+    blocked: row.blocked, blockerNote: row.blocker_note, blockedAt: row.blocked_at, blockedBy: row.blocked_by == null ? null : Number(row.blocked_by), blockedByName: row.blocked_by_name,
     nextAction: row.next_action, needsDateReview: row.needs_date_review, dateReviewNote: row.date_review_note,
     archivedAt: row.archived_at, progress, written: writers.reduce((n, w) => n + w.written, 0), writtenToday: writers.reduce((n, w) => n + w.writtenToday, 0), stage: deriveStage(progress), writers,
     draft, final, next: nextMilestone(draft, final),

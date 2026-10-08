@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  allowedFrom, canSendDocument, checkAction, compressRanges, deriveStage, documentState, evenSplit, isAdmin, isManager, milestone, parseRanges, parseTitleLines, progressLabel, splitAssignments, summarize,
+  allowedFrom, canSendDocument, checkAction, compressRanges, deriveStage, documentState, evenSplit, isAdmin, isManager, isNewWork, milestone, newlyAdded, parseRanges, parseTitleLines, progressLabel, splitAssignments, summarize,
   type ScriptStatus,
 } from '../shared/workflow';
 import { makeClock } from '../shared/dates';
@@ -10,11 +10,11 @@ const scripts = (spec: [ScriptStatus, number][], assignee: number | null = 1) =>
   spec.flatMap(([status, n]) => Array.from({ length: n }, () => ({ status, assigneeId: assignee })));
 
 describe('progress', () => {
-  it('shows 20 of 45 draft-ready as “20 / 45 drafts ready · 44%”', () => {
+  it('shows 20 of 45 draft-ready as “20 / 45 drafts sent · 44%”', () => {
     const p = summarize(scripts([['ready_for_review', 12], ['approved', 8], ['not_started', 25]]));
     expect(p.draftReady).toBe(20);
     expect(p.pctDraft).toBe(44);
-    expect(progressLabel(p.draftReady, p.total)).toBe('20 / 45 drafts ready · 44%');
+    expect(progressLabel(p.draftReady, p.total)).toBe('20 / 45 drafts sent · 44%');
   });
 
   it('counts approved and delivered cumulatively and separately', () => {
@@ -185,5 +185,46 @@ describe('What’s new', () => {
     expect([...dates].sort().reverse()).toEqual(dates);
     expect(CHANGELOG.at(-1)!.title).toMatch(/launches/);
     for (const e of CHANGELOG) expect(e.changes.length).toBeGreaterThan(0);
+    // who-it's-for tags only name real entries
+    const { ONLY_FOR, TECHNICAL } = await import('../shared/changelog');
+    const ids = new Set(CHANGELOG.map((e) => e.id));
+    for (const id of [...Object.keys(ONLY_FOR), ...TECHNICAL]) expect(ids.has(id)).toBe(true);
+  });
+});
+
+describe('new work', () => {
+  const now = new Date('2026-10-07T12:00:00Z');
+  const day = 86400_000;
+  const at = (daysAgo: number) => new Date(now.getTime() - daysAgo * day).toISOString();
+  it('is work given in the last week that nothing has happened to yet', () => {
+    expect(isNewWork([{ status: 'not_started', assignedAt: at(2) }], 0, now)).toBe(true);
+    expect(isNewWork([{ status: 'not_started', assignedAt: at(8) }], 0, now)).toBe(false);
+    expect(isNewWork([{ status: 'not_started', assignedAt: at(1) }], 1, now)).toBe(false);
+    expect(isNewWork([{ status: 'not_started', assignedAt: at(1) }, { status: 'ready_for_review', assignedAt: at(1) }], 0, now)).toBe(false);
+    expect(isNewWork([{ status: 'not_started', assignedAt: null }], 0, now)).toBe(false);
+    expect(isNewWork([], 0, now)).toBe(false);
+  });
+});
+
+describe('new work, seen', () => {
+  const now = new Date('2026-10-08T12:00:00Z');
+  const s = (assignedAt: string, status: 'not_started' | 'in_progress' | 'approved' = 'not_started') => ({ status, assignedAt });
+  it('stops being new once the writer has seen it, and counts later additions', () => {
+    expect(isNewWork([s('2026-10-07T10:00:00Z')], 0, now, null)).toBe(true);
+    expect(isNewWork([s('2026-10-07T10:00:00Z')], 0, now, '2026-10-07T11:00:00Z')).toBe(false);
+    expect(isNewWork([s('2026-10-07T10:00:00Z'), s('2026-10-08T09:00:00Z')], 0, now, '2026-10-07T11:00:00Z')).toBe(true);
+    const added = newlyAdded([s('2026-10-01T10:00:00Z', 'in_progress'), s('2026-10-08T09:00:00Z'), s('2026-10-08T09:00:00Z', 'approved')], now, '2026-10-05T00:00:00Z');
+    expect(added).toHaveLength(1);
+  });
+});
+
+describe('script numbers people type', () => {
+  it('reads spaces, “to”, “and”, semicolons and the word scripts', () => {
+    expect(parseRanges('1 - 3, 5', 10)).toEqual([1, 2, 3, 5]);
+    expect(parseRanges('1 to 3 and 6', 10)).toEqual([1, 2, 3, 6]);
+    expect(parseRanges('scripts 2–4; 7', 10)).toEqual([2, 3, 4, 7]);
+    expect(parseRanges('#4', 10)).toEqual([4]);
+    expect(parseRanges('1-30', 10)).toBeNull();
+    expect(parseRanges('one', 10)).toBeNull();
   });
 });

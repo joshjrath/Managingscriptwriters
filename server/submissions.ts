@@ -126,7 +126,12 @@ export async function loadSubmissionData(db: Db, batchIds: number[]): Promise<Su
     }
     const state: SubmissionState = !currentIds.length ? 'superseded' : SUBMISSION_STATE[documentState(currentIds.map((id) => numbers.get(id)!.status))];
     const num = (ids: number[]) => ids.map((id) => numbers.get(id)!.number).sort((a, b) => a - b);
+    // the send-back this document answers: the latest one on any of its scripts before it was sent
+    const mineNums = new Set(num(scriptIds));
+    const sentAt = new Date(s.created_at).getTime();
+    const fb = [...reviews].reverse().find((r) => r.action === 'revisions' && new Date(r.createdAt).getTime() <= sentAt && r.scriptNumbers.some((x) => mineNums.has(x)));
     return {
+      afterFeedback: fb ? { note: fb.note, byName: fb.reviewedByName, at: fb.createdAt } : null,
       id: s.id, batchId: s.batch_id, writerId: s.writer_id, writerName: s.writer_name, submittedByName: s.submitted_by_name, version: s.version,
       previousId: s.previous_id, url: s.url, fileId: s.file_id, fileName: s.file_name, fileSize: s.file_size, note: s.note, createdAt: s.created_at,
       scriptNumbers: num(scriptIds), currentNumbers: num(currentIds), counts, state,
@@ -298,6 +303,17 @@ export function registerSubmissionRoutes(app: FastifyInstance, ctx: Ctx) {
       submissionId: zs.id.nullable().optional(),
     }), { action: fields.action, scriptIds: jsonField(fields.scriptIds), note: emptyToNull(fields.note), url: emptyToNull(fields.url), submissionId: emptyToNull(fields.submissionId) });
     if (input.action === 'revisions' && !input.note) throw new HttpError(400, 'Add a note so the writer knows what to change', { note: 'Add a note so the writer knows what to change' });
+    // never decide on a version the reviewer hasn't seen: a newer document for any of these scripts wins
+    if (input.submissionId) {
+      const newer = await db.one<{ id: number; version: number; name: string | null }>(
+        `select s.id, s.version, u.name from submission_scripts ss join submissions s on s.id = ss.submission_id
+           left join users u on u.id = coalesce(s.writer_id, s.submitted_by)
+          where ss.script_id = any($1::bigint[]) and s.id <> $2
+            and (s.created_at, s.id) > (select created_at, id from submissions where id = $2)
+          order by s.created_at desc, s.id desc limit 1`, [input.scriptIds, input.submissionId],
+      );
+      if (newer) throw conflict(`${newer.name ?? 'The writer'} sent a newer version (version ${newer.version}) of ${input.scriptIds.length === 1 ? 'this script' : 'these scripts'} a moment ago. The queue has been refreshed: open the new version before deciding.`, 'stale');
+    }
     const result = await db.tx(async (t) => {
       const fileId = file ? await storeFile(t, me, file) : null;
       return applyScriptAction({ ...ctx, db: t }, me, id, input.action === 'approve' ? 'approve' : 'request_revisions', input.scriptIds, {
@@ -305,6 +321,48 @@ export function registerSubmissionRoutes(app: FastifyInstance, ctx: Ctx) {
       });
     });
     return { ...result, batch: await loadBatchDetail(ctx, id, me) };
+  });
+
+  // Undo a decision made a moment ago: approved or sent-back scripts go back to "in review", as if it
+  // never happened. Only while nothing else has touched them, and only for 15 minutes.
+  app.post('/api/reviews/:id/undo', async (req) => {
+    const me = requireManager(req);
+    const { id } = parse(z.object({ id: zs.id }), req.params);
+    const out = await db.tx(async (t) => {
+      const r = await t.one<{ batch_id: number; action: 'approved' | 'revisions'; script_ids: number[]; created_at: string; client_id: number; title: string }>(
+        `select r.batch_id, r.action, r.script_ids, r.created_at, b.client_id, b.title from reviews r join batches b on b.id = r.batch_id where r.id = $1 for update of r`, [id],
+      );
+      if (!r) throw notFound('Decision');
+      if (ctx.now().getTime() - new Date(r.created_at).getTime() > 15 * 60_000) throw new HttpError(409, 'It’s been more than 15 minutes, so this can’t be undone here. Use the batch page instead.', undefined, 'too_late');
+      const ids = (Array.isArray(r.script_ids) ? r.script_ids : []).map(Number);
+      const want = r.action === 'approved' ? 'approved' : 'revisions_needed';
+      const rows = await t.query<{ id: number; number: number; status: ScriptStatus; assignee_id: number | null }>(
+        `select id, number, status, assignee_id from scripts where id = any($1::bigint[]) and removed_at is null for update`, [ids],
+      );
+      if (rows.length !== ids.length || rows.some((x) => x.status !== want)) throw conflict('These scripts have changed since, so the decision can’t be undone. Refresh to see where they are now.', 'stale');
+      const later = await t.one<{ id: number }>(
+        `select id from reviews where batch_id = $1 and id > $2 and exists (select 1 from jsonb_array_elements_text(script_ids) x where x::bigint = any($3::bigint[])) limit 1`, [r.batch_id, id, ids],
+      );
+      if (later) throw conflict('There’s been another decision on these scripts since, so this one can’t be undone.', 'stale');
+      await t.query(
+        `update scripts set status = 'ready_for_review', approved_at = case when $2 then null else approved_at end, approved_by = case when $2 then null else approved_by end, version = version + 1, updated_at = now() where id = any($1::bigint[])`,
+        [ids, r.action === 'approved'],
+      );
+      // the send-back requests it made go away; an approval re-opens the requests it resolved
+      await t.query(`delete from revision_requests where review_id = $1`, [id]);
+      if (r.action === 'approved') await t.query(`update revision_requests set resolved_at = null, resolved_by = null, resolution = null where resolution = 'approved' and resolved_at >= $2::timestamptz - interval '2 seconds' and script_id = any($1::bigint[])`, [ids, r.created_at]);
+      // what the writers were told and shown about it, if they haven't seen it yet
+      await t.query(`delete from notifications where review_id = $1 and read_at is null`, [id]);
+      await t.query(`delete from moments where review_id = $1 and seen_at is null`, [id]);
+      await t.query(`delete from reviews where id = $1`, [id]);
+      const nums = compressRanges(rows.map((x) => x.number));
+      await logActivity(t, {
+        actor: me, action: 'scripts.undo_review', entityType: 'batch', entityId: r.batch_id, batchId: r.batch_id, clientId: r.client_id,
+        summary: `Undid ${r.action === 'approved' ? 'the approval of' : 'sending back'} script${rows.length > 1 ? 's' : ''} ${nums}: back in review`,
+      });
+      return { batchId: r.batch_id, changed: ids };
+    });
+    return { ...out, batch: await loadBatchDetail(ctx, out.batchId, me) };
   });
 
   // titles for many scripts at once

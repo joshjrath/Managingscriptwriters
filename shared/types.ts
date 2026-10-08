@@ -60,6 +60,8 @@ export interface Settings {
   planReminderDays: number;
   isDemo: boolean;
   remindersLastRunAt: string | null;
+  /** false when reminders are switched off on this server */
+  remindersEnabled: boolean;
   /** the colour palette the admin picked for the whole site (null = the original) */
   theme: WorkspaceTheme | null;
 }
@@ -73,9 +75,10 @@ export interface ClientLite {
 
 export interface Counts {
   myOpenScripts: number;
+  /** batches with work given to me this week that I haven't started */
+  myNewWork: number;
   reviewQueue: number;
   unreadNotifications: number;
-  unreadMessages: number;
   attention: number;
 }
 
@@ -85,11 +88,12 @@ export type DeliverableState = DocumentState;
 /** One document (a PDF or a link) covering a writer's scripts for a batch: one entry in the Script bank. */
 export interface Deliverable {
   key: string;
-  kind: 'file' | 'link';
-  href: string;
+  /** none: scripts that were sent or finished without any document attached */
+  kind: 'file' | 'link' | 'none';
+  href: string | null;
   name: string | null;
   note: string | null;
-  /** the newest version is listed; older ones are on the batch page */
+  /** each script is listed under the newest document it was sent in; older versions are on the batch page */
   version: number;
   sentAt: string;
   writerId: number | null;
@@ -101,15 +105,18 @@ export interface Deliverable {
   batchArchived: boolean;
   clientId: number;
   clientName: string;
+  shootId: number | null;
   shootDate: string | null;
   scripts: { id: number; number: number; title: string | null; status: ScriptStatus }[];
+  /** how many of its scripts are approved or delivered */
+  finished: number;
   /** set for scripts from before the platform, uploaded straight to the Script bank */
   past: { id: number; scriptCount: number | null; writtenOn: string | null } | null;
   /** "1–45" */
   ranges: string;
   state: DeliverableState;
-  /** the version a manager approved with their own edits */
-  edited: { kind: 'file' | 'link'; href: string; name: string | null; at: string } | null;
+  /** the version a manager approved with their own edits: the one to use, for the scripts in `ranges` */
+  edited: { kind: 'file' | 'link'; href: string; name: string | null; at: string; by: string; note: string | null; ranges: string } | null;
   timelinerUrl: string | null;
 }
 
@@ -128,7 +135,8 @@ export interface TodayTasks {
   scope: 'me' | 'person' | 'team';
   total: number;
   done: number;
-  items: { batchId: number; batchTitle: string; clientName: string; kind: 'draft' | 'final'; total: number; done: number; overdue: boolean }[];
+  /** script deadlines per batch, plus to-dos due today or overdue (kind 'todo', one each) */
+  items: { batchId: number | null; batchTitle: string; clientName: string; kind: 'draft' | 'final' | 'todo'; text?: string; total: number; done: number; overdue: boolean }[];
 }
 
 /** An admin's View as / Recording mode state (null for everyone else). */
@@ -156,6 +164,8 @@ export interface Bootstrap {
   whatsNewSeen: string | null;
   /** this person's own time zone (times across the site show in it) and whether they've confirmed it */
   timezone: { mine: string | null; confirmed: boolean };
+  /** signed in with a temporary password an admin or manager set */
+  mustChangePassword: boolean;
   settings: Settings;
   users: UserSummary[];
   clients: ClientLite[];
@@ -200,6 +210,7 @@ export interface BatchSummary {
   blocked: boolean;
   blockerNote: string | null;
   blockedAt: string | null;
+  blockedBy: number | null;
   blockedByName: string | null;
   nextAction: string | null;
   needsDateReview: boolean;
@@ -238,6 +249,8 @@ export interface Script {
   deliveredByName: string | null;
   deliveryId: number | null;
   openRevision: RevisionRequest | null;
+  /** when it was given to its current writer */
+  assignedAt: string | null;
   updatedAt: string;
 }
 
@@ -310,6 +323,20 @@ export interface Shoot {
   notes: string | null;
   batchIds: number[];
   cancelledAt: string | null;
+  /** the synced-calendar event it was planned from */
+  calendarUid: string | null;
+}
+
+/** Editors' view of a shoot: are its scripts ready to cut from? */
+export interface ShootReadiness {
+  shoot: Shoot;
+  total: number;
+  /** approved or delivered */
+  finished: number;
+  /** the earliest final-delivery date among its batches */
+  finalDue: ISODate | null;
+  /** ready = every script finished; late = final delivery has passed (or the shoot is here) without them; on_track otherwise */
+  state: 'ready' | 'on_track' | 'late' | 'no_scripts';
 }
 
 export interface Delivery {
@@ -322,6 +349,8 @@ export interface Delivery {
   note: string | null;
   scriptNumbers: number[];
   verification: 'writer_confirmed';
+  /** writers it was confirmed for, when someone else (a manager) confirmed it */
+  forNames: string[];
 }
 
 export interface Activity {
@@ -456,6 +485,11 @@ export interface Dashboard {
     awaitingReviewBatches: number;
     deliveredThisWeekScripts: number;
     deliveredThisWeekBatches: number;
+    /** scripts delivered on each day of this week, Monday first */
+    deliveredByDay: number[];
+    /** when the longest-waiting script in review was sent */
+    oldestInReviewAt: string | null;
+    lastReviewAt: string | null;
   };
   due: { draft: DueDay[]; final: DueDay[] };
   attention: AttentionItem[];
@@ -468,7 +502,7 @@ export interface Dashboard {
 
 export interface CalendarEvent {
   id: string;
-  type: 'writing' | 'draft' | 'final' | 'shoot';
+  type: 'writing' | 'draft' | 'final' | 'shoot' | 'external';
   start: ISODate;
   end: ISODate;
   title: string;
@@ -477,6 +511,37 @@ export interface CalendarEvent {
   shootId: number | null;
   overdue: boolean;
   complete: boolean;
+  /** an event from a synced calendar (Google Calendar) */
+  external?: ExternalEventInfo;
+}
+
+export interface ExternalEventInfo {
+  feedId: number;
+  feedName: string;
+  color: string;
+  allDay: boolean;
+  startAt: string;
+  endAt: string;
+  location: string | null;
+  description: string | null;
+  /** the event's id in its calendar */
+  uid: string;
+  /** the site shoot planned from this event, if any (and its first batch) */
+  linkedShootId: number | null;
+  linkedBatchId: number | null;
+}
+
+/** A synced calendar, as managers see it in Settings (the secret address is never sent back in full). */
+export interface CalendarFeed {
+  id: number;
+  name: string;
+  urlHint: string;
+  color: string;
+  /** managers: admins and managers · editors: and editors · everyone: and writers too */
+  visibility: 'managers' | 'editors' | 'everyone';
+  lastSyncedAt: string | null;
+  lastError: string | null;
+  eventCount: number;
 }
 
 /** A document (PDF upload or link) a writer sent for a set of their scripts. */
@@ -517,6 +582,8 @@ export interface Submission extends Attachment {
   counts: { inReview: number; approved: number; delivered: number; revisions: number; notSubmitted: number };
   state: SubmissionState;
   reviews: ReviewRecord[];
+  /** when this is a revised version: the send-back it answers */
+  afterFeedback: { note: string | null; byName: string; at: string } | null;
 }
 
 /** Scripts reviewed together: everything one writer sent as one document, or sent back in one go. */
@@ -539,7 +606,14 @@ export interface ReviewQueue {
 }
 
 export interface MyWork {
-  batches: { batch: BatchSummary; mine: Script[]; myProgress: Progress; briefings: Briefing[]; resources: Resource[]; groups: ReviewGroup[]; submissions: Submission[] }[];
+  batches: {
+    batch: BatchSummary; mine: Script[]; myProgress: Progress;
+    /** deadlines measured on this writer's own scripts */
+    myDraft: Milestone; myFinal: Milestone; myNext: Milestone | null;
+    /** when the writer last looked at this batch (Got it, opened it, sent or updated the counter) */
+    seenAt: string | null;
+    briefings: Briefing[]; resources: Resource[]; groups: ReviewGroup[]; submissions: Submission[];
+  }[];
   sentBack: ReviewGroup[];
   recentDeliveries: (Delivery & { batchTitle: string; clientName: string })[];
 }
@@ -632,12 +706,19 @@ export interface ReschedulePreview {
     inPast: boolean;
   }[];
   affectedWriters: string[];
+  /** batches where drafts would be due after final delivery */
+  outOfOrder: { batchId: number; batchTitle: string; draftDue: ISODate; finalDue: ISODate }[];
 }
 
 export interface SearchResults {
   clients: ClientLite[];
   batches: { id: number; title: string; clientName: string }[];
   resources: { id: number; title: string; clientName: string; url: string | null; fileId: number | null }[];
+  people: { id: number; name: string; role: Role }[];
+  shoots: { id: number; title: string; clientId: number; clientName: string; startDate: string; batchId: number | null }[];
+  /** "#12" or "script 12": that script number in every active batch */
+  scripts: { batchId: number; batchTitle: string; clientName: string; number: number; title: string | null }[];
+  briefings: { id: number; title: string; clientId: number; clientName: string; callDate: string | null }[];
 }
 
 export interface ApiErrorBody {
@@ -662,26 +743,23 @@ export interface Todo {
   canEdit: boolean;
 }
 
-/** A direct message between two team members. */
-export interface ChatMessage {
-  id: number;
-  fromId: number;
-  toId: number;
-  body: string;
-  createdAt: string;
-  readAt: string | null;
-}
-
-/** One conversation in the list: the other person, the latest message and how many you haven't read. */
-export interface ChatThread {
-  userId: number;
-  name: string;
-  role: Role;
-  last: ChatMessage;
-  unread: number;
-}
-
-export interface ChatInbox {
-  threads: ChatThread[];
-  unread: number;
+/** A shoot on a synced calendar (e.g. Joshua's Google Calendar) that still needs planning on the site. */
+export interface CalendarShoot {
+  uid: string;
+  feedName: string;
+  color: string;
+  title: string;
+  start: ISODate;
+  end: ISODate;
+  location: string | null;
+  /** the client it seems to be for, from the event's title */
+  client: { id: number; name: string } | null;
+  /** no_shoot: not on the site yet · no_scripts: on the site, no scripts planned · unassigned: scripts without a writer */
+  status: 'no_shoot' | 'no_scripts' | 'unassigned';
+  shootId: number | null;
+  batchId: number | null;
+  unassigned: number;
+  total: number;
+  /** what this client's last batch had, to start from */
+  suggested: { count: number; split: { writerId: number; name: string; count: number }[] } | null;
 }

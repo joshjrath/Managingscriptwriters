@@ -8,7 +8,7 @@ is for whoever changes the code next (a person or an AI agent).
 
 A script-production workspace for one team: clients → shoots → script batches →
 scripts, with writers, reviews, deadlines, reminders and delivery records.
-Roles are **Admin** (`owner` in code), **Manager** and **Writer**.
+Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (video editors: read-only, never given scripts).
 
 - **Server:** Fastify 5 on Node 22 in `server/`. It serves the JSON API under `/api/` and, in production, the built client.
 - **Database:** PostgreSQL via `pg` in production. Locally, in the demo and in tests it uses PGlite, an embedded Postgres. Both engines run the same SQL and the same migrations.
@@ -35,7 +35,9 @@ Roles are **Admin** (`owner` in code), **Manager** and **Writer**.
 | Shoots | `server/routes/shoots.ts` |
 | Read-only screens (overview, calendar, bootstrap…) | `server/routes/views.ts` |
 | Sending documents and reviews | `server/submissions.ts` |
-| Script bank, Today, to-dos, messages, celebrations | `server/script-bank.ts`, `today.ts`, `todos.ts`, `messages.ts`, `moments.ts` |
+| Script bank, Today, to-dos, celebrations | `server/script-bank.ts`, `today.ts`, `todos.ts`, `moments.ts` |
+| Synced calendars (Google Calendar iCal), and shoots found on them | `server/calendar-feeds.ts`, `server/ical.ts`, `server/calendar-shoots.ts` |
+| What an editor may call (an allowlist checked before every route) | `server/editor-access.ts` |
 | Master log (activity and audit) | `server/audit.ts` |
 | Reminders (in-process timer, or `npm run reminders` from cron) | `server/reminders.ts`, `server/reminders-cli.ts` |
 | Paste notes (Anthropic API) | `server/notes-import.ts` |
@@ -93,10 +95,11 @@ Roles are **Admin** (`owner` in code), **Manager** and **Writer**.
   | `requireManager` | Admin or Manager |
   | `requireAdmin` | Admin only |
 
-  Role checks use `isManager` and `isAdmin` from `shared/workflow.ts`. Never compare role strings in routes.
+  Role checks use `isManager`, `isAdmin`, `isEditor` and `canWrite` from `shared/workflow.ts`. Never compare role strings in routes.
+- **Editors** get only the routes listed in `server/editor-access.ts`; every other route is refused before it runs, so a new route is closed to editors until it's added there on purpose. Their reads are also scoped to finished (approved or delivered) work.
 - **Script actions:** every status change goes through `applyScriptAction`. It locks the rows and checks each one with `checkAction` and `ACTION_RULES`. Writers can act only on their own scripts.
 - **Ownership checks** live in the route: the assignee on a script edit, `isAssignedTo` for blockers and resources. A personal view (My work, Today, to-dos) always gives a writer their own data, from the session. A manager may name someone with `?userId=`, and may ask for the whole team on Today (no `userId`) and to-dos (`?all=1`). Notifications always use the session user.
-- **Admin protection:** only an Admin can grant the Admin role, or change an Admin's password, access or role. The last Admin can't be removed or demoted. Temporary passwords are shown only to managers, and never an Admin's to a non-admin.
+- **Admin protection:** only an Admin can grant the Admin role or change anything on an Admin's account. The last Admin can't be removed or demoted. Temporary passwords are shown only to managers, and never an Admin's to a non-admin.
 - **Control Center:** an Admin re-enters their password, which sets `sessions.control_until` (12 hours). This is checked against `realUser`.
 - **Sign-in throttle:** 8 wrong passwords per address and account, and 30 per account from any address, in 15 minutes. The address comes from `X-Forwarded-For`, trusted as far as `TRUST_PROXY` allows.
 
@@ -118,6 +121,7 @@ Roles are **Admin** (`owner` in code), **Manager** and **Writer**.
 - **Reminders** (`server/reminders.ts`):
   - They run every `REMINDER_INTERVAL_MINUTES` inside the server (`REMINDERS=off` turns them off), or from `npm run reminders` on a cron, which needs `DATABASE_URL`.
   - Each run takes `LOCKS.reminders`, and notifications are de-duplicated by key, so overlapping runs are harmless.
+- **Calendar sync** re-reads each synced calendar every `CALENDAR_SYNC_MINUTES` (15) inside the server (`CALENDAR_SYNC=off` turns it off), and tells managers once about each new shoot it finds.
 - **Paste notes** calls the Anthropic API, only when `ANTHROPIC_API_KEY` is set. Each person can run one read at a time and 30 an hour. If the API fails, the person gets a clear message and nothing is created.
 - **No email:** the app never sends email. Sign-in details are copied by hand.
 

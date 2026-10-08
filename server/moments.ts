@@ -83,13 +83,31 @@ export function registerMomentRoutes(app: FastifyInstance, ctx: Ctx) {
     const rows = await ctx.db.query<{ id: number; kind: MomentKind; batch_id: number | null; payload: Payload | string; created_at: string }>(
       `select id, kind, batch_id, payload, created_at from moments where user_id = $1 and seen_at is null order by created_at, id limit 30`, [me.id],
     );
-    return rows.map((r) => {
+    // an approval that has since been sent back isn't news any more: drop those scripts (or the whole moment)
+    const batchIds = [...new Set(rows.filter((r) => r.kind === 'approved' && r.batch_id != null).map((r) => Number(r.batch_id)))];
+    const live = new Set<string>();
+    if (batchIds.length) {
+      const ok = await ctx.db.query<{ batch_id: number; number: number }>(
+        `select batch_id, number from scripts where batch_id = any($1) and removed_at is null and status in ('approved', 'delivered')`, [batchIds],
+      );
+      for (const s of ok) live.add(`${s.batch_id}:${s.number}`);
+    }
+    const out: Moment[] = [];
+    for (const r of rows) {
       const p = (typeof r.payload === 'string' ? JSON.parse(r.payload) : r.payload) as Payload;
-      return {
-        id: r.id, kind: r.kind, batchId: r.batch_id, batchTitle: p.batchTitle, clientName: p.clientName, numbers: p.numbers ?? [], count: p.count ?? p.numbers?.length ?? 0,
+      let numbers = p.numbers ?? [];
+      let count = p.count ?? numbers.length;
+      if (r.kind === 'approved' && r.batch_id != null && numbers.length) {
+        const kept = numbers.filter((n) => live.has(`${r.batch_id}:${n}`));
+        if (!kept.length) continue;
+        if (kept.length < numbers.length) { numbers = kept; count = kept.length; }
+      }
+      out.push({
+        id: r.id, kind: r.kind, batchId: r.batch_id, batchTitle: p.batchTitle, clientName: p.clientName, numbers, count,
         byName: p.byName ?? null, note: p.note ?? null, allMine: !!p.allMine, withAttachment: !!p.withAttachment, self: !!p.self, createdAt: r.created_at,
-      };
-    });
+      });
+    }
+    return out;
   });
 
   app.post('/api/moments/seen', async (req) => {

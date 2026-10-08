@@ -80,9 +80,11 @@ export function registerEditorRoutes(app: FastifyInstance, ctx: Ctx) {
   app.delete('/api/editors/:id', async (req) => {
     const me = requireAdmin(req, 'Only admins can manage editors');
     const { id } = parse(z.object({ id: zs.id }), req.params);
+    // ?reason=access: they were given a sign-in, so they're on the team now rather than removed
+    const access = (req.query as { reason?: string } | undefined)?.reason === 'access';
     const r = await db.one<{ name: string }>(`update editors set removed_at = now() where id = $1 and removed_at is null returning name`, [id]);
     if (!r) throw notFound('Editor');
-    await logActivity(db, { actor: me, action: 'editor.removed', entityType: 'editor', entityId: id, summary: `Removed editor ${r.name}` });
+    await logActivity(db, { actor: me, action: access ? 'editor.access' : 'editor.removed', entityType: 'editor', entityId: id, summary: access ? `Gave ${r.name} site access (now on the team as an editor)` : `Removed editor ${r.name}` });
     return list();
   });
 }

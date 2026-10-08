@@ -9,6 +9,7 @@ import { databaseProblem, loadConfig, type Config } from './config';
 import { openDb } from './db';
 import { hashPassword, validatePassword } from './auth';
 import { startReminderScheduler } from './reminders';
+import { startCalendarSync } from './calendar-feeds';
 import { seedDemo } from './seed-demo';
 import { claudeNotesReader } from './notes-import';
 import type { Ctx } from './core';
@@ -45,6 +46,8 @@ async function main() {
   const app = await buildApp(ctx, { staticDir: config.staticDir, logger: config.production, trustProxy: config.trustProxy });
 
   const stopReminders = config.remindersEnabled ? startReminderScheduler(ctx, config.reminderIntervalMinutes, (m) => console.log(m)) : () => {};
+  // synced calendars (Google Calendar iCal links) are re-read every CALENDAR_SYNC_MINUTES
+  const stopCalendars = config.calendarSyncEnabled ? startCalendarSync(ctx, config.calendarSyncMinutes, (m) => console.log(m)) : () => {};
 
   await app.listen({ port: config.port, host: config.host });
   console.log(`Scale Media scripts listening on :${config.port}`);
@@ -54,6 +57,7 @@ async function main() {
     if (stopping) return;
     stopping = true;
     stopReminders();
+    stopCalendars();
     app.close().then(() => db.close()).then(
       () => process.exit(0),
       (err: unknown) => { console.error('shutdown failed', err); process.exit(1); },

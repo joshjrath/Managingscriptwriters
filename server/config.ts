@@ -29,6 +29,9 @@ export interface Config {
   staticDir: string | undefined;
   remindersEnabled: boolean;
   reminderIntervalMinutes: number;
+  /** synced calendars are re-read on a timer (CALENDAR_SYNC=off turns it off) */
+  calendarSyncEnabled: boolean;
+  calendarSyncMinutes: number;
   port: number;
   host: string;
   /**
@@ -106,6 +109,8 @@ export function loadConfig(
     staticDir: env.STATIC_DIR !== undefined ? env.STATIC_DIR || undefined : defaults.staticDir,
     remindersEnabled: flag('REMINDERS', true),
     reminderIntervalMinutes: number('REMINDER_INTERVAL_MINUTES', 10, 1, 24 * 60),
+    calendarSyncEnabled: flag('CALENDAR_SYNC', true),
+    calendarSyncMinutes: number('CALENDAR_SYNC_MINUTES', 15, 1, 24 * 60),
     port: number('PORT', 3001, 1, 65535, { integer: true }),
     host: set(env.HOST) ?? '0.0.0.0',
     trustProxy: trustProxy(set(env.TRUST_PROXY), warn),

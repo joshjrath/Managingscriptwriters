@@ -1,7 +1,7 @@
 // Compact nested rows for batches, and the quick-inspect drawer.
 
 import type { ReactNode } from 'react';
-import { isManager } from '../../../shared/workflow';
+import { bothLate, isManager } from '../../../shared/workflow';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight, Ban, CalendarClock, Camera, ClipboardCheck, OctagonAlert, RotateCcw, UserPlus } from 'lucide-react';
@@ -37,7 +37,7 @@ export function BatchItem({ b, action, extra, onOpen, ring }: { b: BatchSummary;
           {b.blocked && <Chip color="red" icon={<Ban aria-hidden />}>Blocked</Chip>}
           {b.progress.unassigned > 0 && <Chip color="pink" icon={<UserPlus aria-hidden />}>{b.progress.unassigned} unassigned</Chip>}
           {b.progress.inReview > 0 && <Chip color="lavender" dot>{b.progress.inReview} in review</Chip>}
-          {b.progress.revisions > 0 && <Chip color="pink" icon={<RotateCcw aria-hidden />}>{b.progress.revisions} revisions</Chip>}
+          {b.progress.revisions > 0 && <Chip color="pink" icon={<RotateCcw aria-hidden />}>{b.progress.revisions} sent back</Chip>}
           {b.priority === 'urgent' || b.priority === 'high' ? <Chip color={b.priority === 'urgent' ? 'red' : 'salmon'}>{PRIORITY_LABEL[b.priority]}</Chip> : null}
         </div>
         {extra}
@@ -45,7 +45,9 @@ export function BatchItem({ b, action, extra, onOpen, ring }: { b: BatchSummary;
       </div>
       <div className="side">
         <DueChip m={b.next} today={clock.today} />
-        {b.next?.date && (b.next.overdue || b.next.dueToday) && <span className="muted nowrap" style={{ fontSize: 12 }}>{b.next.kind === 'draft' ? 'Drafts' : 'Final'} {fmtDate(b.next.date, clock.today)}</span>}
+        {bothLate(b.draft, b.final)
+          ? <span className="late-both">{bothLate(b.draft, b.final)}</span>
+          : b.next?.date && (b.next.overdue || b.next.dueToday) && <span className="muted nowrap" style={{ fontSize: 12 }}>{b.next.kind === 'draft' ? 'Drafts' : 'Final'} {fmtDate(b.next.date, clock.today)}</span>}
         <span onClick={(e) => e.stopPropagation()}>{action ?? <Link to={`/batches/${b.id}`} className="btn sm">Open batch</Link>}</span>
       </div>
     </div>
@@ -79,7 +81,7 @@ export function AttentionRow({ a }: { a: AttentionItem }) {
         <ul className="issues">
           {a.issues.map((i, k) => <li key={k}>{ISSUE_ICON[i.kind]}<span><b>{i.text}</b></span></li>)}
         </ul>
-        <div className="meta"><span className="ellipsis">{writersText(b)}</span><span className="num">{b.progress.draftReady} / {b.progress.total} drafts ready · {b.progress.pctDraft}%</span></div>
+        <div className="meta"><span className="ellipsis">{writersText(b)}</span><span className="num">{b.progress.draftReady} / {b.progress.total} drafts sent · {b.progress.pctDraft}%</span></div>
       </div>
       <div className="side">
         {b.next?.date && <span className="when">{b.next.kind === 'draft' ? 'Drafts' : 'Final'} {fmtDate(b.next.date)}</span>}
@@ -93,7 +95,7 @@ export function AttentionRow({ a }: { a: AttentionItem }) {
 
 export function BatchDrawer({ id, onClose }: { id: number | null; onClose: () => void }) {
   const displayTz = useDisplayTz();
-  const { clock } = useBoot();
+  const { clock, me } = useBoot();
   const nav = useNavigate();
   const q = useQuery({ queryKey: ['batch', id], queryFn: () => api<BatchDetail>(`/api/batches/${id}`), enabled: id != null });
   const b = q.data;
@@ -123,7 +125,7 @@ export function BatchDrawer({ id, onClose }: { id: number | null; onClose: () =>
               ))}
             </div>
           </div>
-          {b.nextAction && <div><div className="section-title">Next action</div><p className="prose">{b.nextAction}</p></div>}
+          {b.nextAction && isManager(me.role) && <div><div className="section-title">Next action</div><p className="prose">{b.nextAction}</p></div>}
           <div>
             <div className="section-title">Recent activity</div>
             <div className="timeline">

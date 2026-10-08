@@ -41,7 +41,7 @@ export function DueChart({ draft, final, today }: { draft: DueDay[]; final: DueD
           <div className="due-total" aria-hidden><CountUp value={upcoming} /></div>
           <div className="due-total-sub">
             scripts due for {noun} in the next 14 days
-            {overdue.total > 0 && <> · <b>{overdue.total} overdue</b></>}
+            {overdue.total > 0 && <> · <b>{plural(overdue.total, 'script')} overdue</b></>}
           </div>
         </div>
         <Seg role="group" aria-label="Deadline type">

@@ -5,6 +5,7 @@
 // work completes gets a one-time burst of confetti.
 
 import { useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCheck, Sun } from 'lucide-react';
 import { api, qs } from '../api';
@@ -28,9 +29,16 @@ function remainingText(t: TodayTasks): string {
   const open = t.items.filter((i) => i.done < i.total);
   if (!open.length) return '';
   const first = open[0];
-  const what = `${first.kind === 'draft' ? 'Drafts' : 'Final delivery'} · ${first.clientName}, ${first.batchTitle}`;
-  const left = `${first.total - first.done} left${first.overdue ? ' (overdue)' : ''}`;
-  return `${what} · ${left}${open.length > 1 ? ` · +${plural(open.length - 1, 'more batch', 'more batches')}` : ''}`;
+  const what = first.kind === 'todo'
+    ? `To-do: ${first.text}`
+    : `${first.kind === 'draft' ? 'Drafts' : 'Final delivery'} · ${first.clientName}, ${first.batchTitle} · ${plural(first.total - first.done, 'script')} left`;
+  return `${first.overdue ? 'Overdue · ' : ''}${what}${open.length > 1 ? ` · and ${open.length - 1} more` : ''}`;
+}
+
+/** "2 of 5 done · 1 overdue" in words. */
+function countText(t: TodayTasks): string {
+  const overdue = t.items.filter((i) => i.overdue && i.done < i.total).length;
+  return `${t.done} of ${t.total} done${overdue ? ` · ${overdue} overdue` : ''}`;
 }
 
 export function TodayPill({ userId }: { userId?: number }) {
@@ -64,12 +72,17 @@ export function TodayPill({ userId }: { userId?: number }) {
   const who = t.scope === 'team' ? 'the team' : t.scope === 'person' ? 'them' : 'you';
   const label = clear
     ? `Nothing due today for ${who}. All clear.`
-    : allDone ? `All done for today. ${plural(total, 'task')} finished.` : `Today: ${done} of ${plural(total, 'task')} done.`;
+    : allDone ? `All done for today. ${plural(total, 'task')} finished.` : `Today: ${countText(t)}. ${remainingText(t)}`;
+  const firstOpen = t.items.find((i) => i.done < i.total);
+  const to = t.scope === 'team' ? '/production?flag=due_today&view=table' : firstOpen?.batchId ? `/batches/${firstOpen.batchId}` : t.scope === 'me' ? '/my-work' : undefined;
+  const late = t.items.some((i) => i.overdue && i.done < i.total);
 
   return (
-    <section
+    <Link
+      to={to ?? '#'}
+      onClick={(e) => { if (!to) e.preventDefault(); }}
       ref={(el) => { ref.current = el; pill.current = el; }}
-      className={`today-pill${allDone ? ' done' : ''}`}
+      className={`today-pill${allDone ? ' done' : ''}${late ? ' late' : ''}`}
       data-live={on && allowed ? '' : undefined}
       aria-label={label}
       style={{ ['--p' as string]: shown }}
@@ -85,12 +98,12 @@ export function TodayPill({ userId }: { userId?: number }) {
         <span className="tp-ic" aria-hidden>{allDone ? <CheckCheck /> : <Sun />}</span>
         <span className="tp-main">
           <span className="tp-k">Today{t.scope === 'team' ? ' · whole team' : ''}</span>
-          <b>{clear ? 'Nothing due today' : allDone ? 'All done for today' : <><CountUp value={done} /> / {total} done</>}</b>
+          <b>{clear ? 'Nothing due today' : allDone ? 'All done for today' : <><CountUp value={done} /> of {total} done{late && <span className="tp-late"> · overdue</span>}</>}</b>
         </span>
         <span className="tp-sub">
           {clear ? 'All clear · enjoy the waves' : allDone ? `${plural(total, 'script task')} finished · enjoy the waves` : remainingText(t)}
         </span>
       </div>
-    </section>
+    </Link>
   );
 }

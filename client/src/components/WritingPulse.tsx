@@ -11,7 +11,7 @@ type PipCounts = Pick<WriterShare, 'count' | 'draftReady' | 'approved' | 'delive
 
 const KINDS = ['delivered', 'approved', 'sent', 'back', 'written', 'todo'] as const;
 type Kind = (typeof KINDS)[number];
-const KIND_LABEL: Record<Kind, string> = { delivered: 'Delivered', approved: 'Approved', sent: 'Sent for review', back: 'Sent back for revisions', written: 'Written, not sent', todo: 'Still to write' };
+const KIND_LABEL: Record<Kind, string> = { delivered: 'Delivered', approved: 'Approved', sent: 'Sent for review', back: 'Sent back', written: 'Written, not sent', todo: 'Still to write' };
 
 export function ScriptPips({ w, large }: { w: PipCounts; large?: boolean }) {
   const back = w.revisions ?? 0;

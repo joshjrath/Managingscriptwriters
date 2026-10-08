@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Check, Minus, Plus } from 'lucide-react';
 import { api, queryClient, useSave } from '../api';
 
-export function WrittenCounter({ batchId, writerId, forOther, total, sent, written, compact }: { batchId: number; writerId: number; forOther: boolean; total: number; sent: number; written: number; compact?: boolean }) {
+export function WrittenCounter({ batchId, writerId, forOther, total, sent, written, compact, inline }: { batchId: number; writerId: number; forOther: boolean; total: number; sent: number; written: number; compact?: boolean; inline?: boolean }) {
   const [value, setValue] = useState(written);
   const [state, setState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const timer = useRef<number | undefined>(undefined);
@@ -45,6 +45,20 @@ export function WrittenCounter({ batchId, writerId, forOther, total, sent, writt
   );
   const status = <span className="save-state" role="status">{save.isError ? 'Not saved. Try again.' : state === 'saving' ? 'Saving…' : state === 'saved' ? <><Check aria-hidden /> Saved</> : ''}</span>;
   if (compact) return <div className="counter-compact" role="group" aria-label="Written so far">{stepper}{status}</div>;
+  // inside a "write these scripts" task: a labelled stepper that sits beside the Send button
+  if (inline) {
+    return (
+      <div className="counter-inline" role="group" aria-label="Written so far">
+        <div className="lbl">
+          <b>Written so far</b>
+          <span role="status" className={save.isError ? 'err' : state === 'saved' ? 'ok' : undefined}>
+            {save.isError ? 'Not saved. Try again.' : state === 'saving' ? 'Saving…' : state === 'saved' ? <><Check aria-hidden /> Saved</> : forOther ? 'Updates their progress for managers' : 'Keeps your manager posted'}
+          </span>
+        </div>
+        {stepper}
+      </div>
+    );
+  }
   return (
     <div className="counter-block" role="group" aria-label="Written so far">
       <div style={{ minWidth: 0, flex: '1 1 220px' }}>

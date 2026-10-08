@@ -2,12 +2,12 @@
 // review, delivery confirmation, blockers and target changes.
 
 import type { FastifyInstance } from 'fastify';
-import { isManager } from '../../shared/workflow';
+import { canWrite, isManager } from '../../shared/workflow';
 import { z } from 'zod';
 import type { Db } from '../db';
 import {
   assigneesOf, batchLink, buildSummary, clockFor, isAssignedTo, lastDeliveredAt, loadBatch, loadBatches,
-  loadSettings, loadUsers, loadWritten, logActivity, managerIds, notify, rulesOf, type BatchRow, type Ctx, BATCH_SELECT, loadScriptsFor,
+  editorIds, loadSettings, loadUsers, loadWritten, logActivity, managerIds, markSeen, notify, rulesOf, type BatchRow, type Ctx, BATCH_SELECT, loadScriptsFor,
 } from '../core';
 import { requireManager, requireUser } from '../auth';
 import { buildGroups, publicSubmission } from '../submissions';
@@ -108,10 +108,14 @@ export async function insertBatch(
   // writers
   const users = await loadUsers(t);
   const active = new Map(users.filter((u) => u.active).map((u) => [u.id, u]));
+  // a writer picked with no scripts is a mistake, not a choice: say so instead of dropping them
+  const empty = input.split.find((s) => s.count === 0);
+  if (empty) fields.split = `${active.get(empty.writerId)?.name ?? 'One of the writers'} has no scripts. Give them some, split evenly, or remove them.`;
   const split = input.split.filter((s) => s.count > 0);
   const seen = new Set<number>();
   for (const s of split) {
     if (!active.has(s.writerId)) fields.split = 'One of the writers is not an active team member';
+    else if (!canWrite(active.get(s.writerId)!.role)) fields.split = `${active.get(s.writerId)!.name} is an editor, so they can’t be given scripts`;
     if (seen.has(s.writerId)) fields.split = 'Each writer can appear only once — combine their counts';
     seen.add(s.writerId);
   }
@@ -183,9 +187,9 @@ async function insertPlaceholders(t: Db, batchId: number, items: { number: numbe
     const params: unknown[] = [];
     const values = chunk.map((it) => {
       params.push(batchId, it.number, it.assignee);
-      return `($${params.length - 2}, $${params.length - 1}, $${params.length})`;
+      return `($${params.length - 2}, $${params.length - 1}, $${params.length}, case when $${params.length}::bigint is null then null else now() end)`;
     });
-    await t.query(`insert into scripts (batch_id, number, assignee_id) values ${values.join(',')}`, params);
+    await t.query(`insert into scripts (batch_id, number, assignee_id, assigned_at) values ${values.join(',')}`, params);
   }
 }
 
@@ -421,6 +425,10 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
     const me = requireManager(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
     await db.tx(async (t) => {
+      // checked under the batch's lock, so the dates can't change between the check and the confirmation
+      const cur = await t.one<{ draft_due: string | null; final_due: string | null }>(`select draft_due::text, final_due::text from batches where id = $1 for no key update`, [id]);
+      if (!cur) throw notFound('Batch');
+      if (cur.draft_due && cur.final_due && cur.draft_due > cur.final_due) throw new HttpError(400, 'Drafts are due after final delivery. Change the deadlines before confirming them.');
       const b = await t.one<{ client_id: number }>(`update batches set needs_date_review = false, date_review_note = null, updated_at = now() where id = $1 returning client_id`, [id]);
       if (!b) throw notFound('Batch');
       await logActivity(t, { actor: me, action: 'batch.dates_reviewed', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id, summary: 'Confirmed deadlines after shoot change' });
@@ -499,7 +507,7 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       if (input.targetCount > current) {
         let need = input.targetCount - current;
         if (input.assigneeId) {
-          const u = await t.one(`select 1 from users where id = $1 and active`, [input.assigneeId]);
+          const u = await t.one(`select 1 from users where id = $1 and active and role <> 'editor'`, [input.assigneeId]);
           if (!u) throw new HttpError(400, 'Choose an active writer', { assigneeId: 'Choose an active writer' });
         }
         // restore previously removed scripts first so their numbers and history return; they go to the
@@ -586,8 +594,9 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       if (!b) throw notFound('Batch');
       let name = 'Unassigned';
       if (input.assigneeId) {
-        const u = await t.one<{ name: string }>(`select name from users where id = $1 and active`, [input.assigneeId]);
+        const u = await t.one<{ name: string; role: string }>(`select name, role from users where id = $1 and active`, [input.assigneeId]);
         if (!u) throw new HttpError(400, 'Choose an active team member', { assigneeId: 'Choose an active team member' });
+        if (u.role === 'editor') throw new HttpError(400, `${u.name} is an editor, so they can’t be given scripts`, { assigneeId: 'Choose a writer' });
         name = u.name;
       }
       const rows = await t.query<{ id: number; number: number; assignee_id: number | null }>(
@@ -598,7 +607,7 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       const moving = rows.filter((r) => r.assignee_id !== input.assigneeId);
       if (!moving.length) return;
       await t.query(
-        `update scripts set assignee_id = $1, version = version + 1, updated_at = now() where id in (${moving.map((_, i) => `$${i + 2}`).join(',')})`,
+        `update scripts set assignee_id = $1, assigned_at = case when $1::bigint is null then null else now() end, version = version + 1, updated_at = now() where id in (${moving.map((_, i) => `$${i + 2}`).join(',')})`,
         [input.assigneeId, ...moving.map((r) => r.id)],
       );
       const nums = compressRanges(moving.map((r) => r.number));
@@ -686,6 +695,16 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       return { written, total: mine.length, sent };
     });
   });
+
+  // "Got it": the writer has seen their new work here (also sent when they open the batch)
+  app.post('/api/batches/:id/seen', async (req) => {
+    const me = requireUser(req);
+    const { id } = parse(z.object({ id: zs.id }), req.params);
+    const mine = await db.one<{ n: number }>(`select count(*)::int as n from scripts where batch_id = $1 and assignee_id = $2 and removed_at is null`, [id, me.id]);
+    if (!mine?.n) return { ok: true, seen: false };
+    await markSeen(db, me.id, id);
+    return { ok: true, seen: true };
+  });
 }
 
 // ── the one place script status changes happen ───────────────────────────
@@ -727,6 +746,16 @@ export async function applyScriptAction(
     if (opts.versions) {
       const stale = rows.filter((r) => opts.versions![String(r.id)] !== undefined && opts.versions![String(r.id)] !== r.version);
       if (stale.length) throw conflict(`Script${stale.length > 1 ? 's' : ''} ${compressRanges(stale.map((r) => r.number))} changed since you loaded this page. Refresh and try again.`, 'stale');
+    }
+    if (action === 'undo_delivery' && !isManager(me.role)) {
+      // "the same day" on the workspace's calendar, both times as the database recorded them
+      const tz = (await loadSettings(t)).timezone;
+      const late = await t.query<{ number: number }>(
+        `select number from scripts where id = any($1) and (delivered_by is distinct from $2 or delivered_at is null
+           or (delivered_at at time zone $3)::date <> (now() at time zone $3)::date) order by number`,
+        [ids, me.id, tz],
+      );
+      if (late.length) throw forbidden(`Only a manager can undo delivery of script${late.length > 1 ? 's' : ''} ${compressRanges(late.map((r) => r.number))}. You can undo your own delivery on the day you made it.`);
     }
     const problems = new Map<string, number[]>();
     for (const r of rows) {
@@ -814,56 +843,101 @@ export async function applyScriptAction(
       onBehalf = ` (on behalf of ${named.map((n) => n.name).join(', ')})`;
     }
     const verb: Record<ScriptAction, string> = {
-      start: 'Started', reset: 'Marked not started', submit: 'Submitted for review', withdraw: 'Withdrew from review',
-      approve: 'Approved', request_revisions: 'Requested revisions on', deliver: 'Confirmed delivery to Timeliner for', undo_delivery: 'Undid delivery of',
+      start: 'Started', reset: 'Marked not started', submit: 'Sent for review', withdraw: 'Withdrew from review',
+      approve: 'Approved', request_revisions: 'Sent back', deliver: 'Confirmed delivery to Timeliner for', undo_delivery: 'Undid delivery of',
     };
     const scriptsWord = `script${rows.length > 1 ? 's' : ''} ${nums}`;
+    // a decision on a document names which version it was
+    const decided = opts.review?.submissionId && (action === 'approve' || action === 'request_revisions')
+      ? await t.one<{ version: number }>(`select version from submissions where id = $1`, [opts.review.submissionId]) : null;
+    const versionNote = decided ? ` (document version ${decided.version})` : '';
     const summary = action === 'submit' && opts.submission
       ? `Sent ${scriptsWord} for review as one document: “${opts.submission.label}”${opts.submission.version > 1 ? ` (version ${opts.submission.version})` : ''}${onBehalf}`
-      : `${verb[action]} ${scriptsWord}${onBehalf}${opts.note && action !== 'deliver' ? ` — “${opts.note}”` : ''}${attached ? (action === 'approve' ? ' (edited version attached)' : ' (changes attached)') : ''}`;
+      : `${verb[action]} ${scriptsWord}${versionNote}${onBehalf}${opts.note && action !== 'deliver' ? ` — “${opts.note}”` : ''}${attached ? (action === 'approve' ? ' (edited version attached)' : ' (changes attached)') : ''}`;
     await logActivity(t, {
       actor: me, action: `scripts.${action}`, entityType: 'batch', entityId: batchId, batchId, clientId: b.client_id,
       summary,
       detail: { action, scripts: rows.map((r) => r.number), note: opts.note, timelinerUrl: opts.timelinerUrl, deliveryId: deliveryId ?? null },
     });
 
-    // notifications
+    if (action === 'submit' && rows.some((r) => r.assignee_id === me.id)) await markSeen(t, me.id, batchId);
+
+    // notifications: each writer hears about their own scripts only
     const link = batchLink(batchId);
     const writers = [...new Set(rows.map((r) => r.assignee_id).filter((x): x is number => x != null))];
+    const theirs = (uid: number) => {
+      const n = rows.filter((r) => r.assignee_id === uid).map((r) => r.number);
+      return { n: n.length, word: `script${n.length > 1 ? 's' : ''} ${compressRanges(n)}`, them: n.length > 1 ? 'them' : 'it' };
+    };
     if (action === 'submit') {
       const today = (await clockFor({ ...ctx, db: t })).today;
       const waiting = await t.query<{ number: number }>(`select number from scripts where batch_id = $1 and status = 'ready_for_review' and removed_at is null order by number`, [batchId]);
       if (opts.submission) {
         await notify(t, await managerIds(t), {
-          type: 'review_request', title: `Ready for review · ${b.client_name}`,
+          type: 'review_request', title: `To review · ${b.client_name}`,
           body: `${me.name} sent ${scriptsWord} of ${b.title} as one document (“${opts.submission.label}”${opts.submission.version > 1 ? `, version ${opts.submission.version}` : ''}).`,
           link: `/review`,
         }, me.id);
       } else {
         await notify(t, await managerIds(t), {
-          type: 'review_request', title: `Ready for review · ${b.client_name}`,
+          type: 'review_request', title: `To review · ${b.client_name}`,
           body: `${b.title}: ${plural(waiting.length, 'script')} waiting (${compressRanges(waiting.map((w) => w.number))}). Latest from ${me.name}.`,
           link: `/review`, dedupeKey: `review:${batchId}:${today}`, refresh: true,
         }, me.id);
       }
     } else if (action === 'approve') {
-      await notify(t, writers, { type: 'approval', title: `Approved · ${b.title}`, body: `${me.name} approved ${scriptsWord}.${attached ? ' They attached their edited version — use that one.' : ''} Add ${rows.length > 1 ? 'them' : 'it'} to Timeliner and confirm delivery.`, link: '/my-work' }, me.id);
+      for (const uid of writers) {
+        const w = theirs(uid);
+        await notify(t, [uid], {
+          type: 'approval', title: `Approved · ${b.client_name} · ${b.title}`,
+          body: `${me.name} approved your ${w.word}.${attached ? ` Use ${me.name.split(' ')[0]}’s edited version: it’s linked on My work.` : ''}${opts.note ? ` Note: “${opts.note}”` : ''} Add ${w.them} to Timeliner, then mark ${w.them} delivered.`,
+          link: '/my-work',
+        }, me.id);
+      }
     } else if (action === 'request_revisions') {
-      await notify(t, writers, { type: 'revision_request', title: `Revisions requested · ${b.title}`, body: `${scriptsWord}: ${opts.note}${attached ? ' (their changes are attached)' : ''}`, link: '/my-work' }, me.id);
+      for (const uid of writers) {
+        const w = theirs(uid);
+        await notify(t, [uid], { type: 'revision_request', title: `Sent back · ${b.client_name} · ${b.title}`, body: `${me.name} sent your ${w.word} back: “${opts.note}”${attached ? ' Their changes are attached.' : ''}`, link: '/my-work' }, me.id);
+      }
     } else if (action === 'deliver') {
       const mgrs = await managerIds(t);
       await notify(t, mgrs, {
-        type: 'delivery', title: `Delivered to Timeliner · ${b.client_name}`,
-        body: `${me.name} confirmed script${rows.length > 1 ? 's' : ''} ${nums} of ${b.title}${onBehalf || ' (writer-confirmed)'}.`, link,
+        type: 'delivery', title: `Delivered · ${b.client_name}`,
+        body: `${me.name} confirmed script${rows.length > 1 ? 's' : ''} ${nums} of ${b.title} in Timeliner${onBehalf}.`, link,
       }, me.id);
-      const told = others.filter((id) => !mgrs.includes(id));
-      if (told.length) {
-        await notify(t, told, { type: 'delivery', title: `Delivered to Timeliner · ${b.title}`, body: `${me.name} marked your script${rows.length > 1 ? 's' : ''} ${nums} delivered.`, link }, me.id);
+      for (const uid of others.filter((id) => !mgrs.includes(id))) {
+        const w = theirs(uid);
+        await notify(t, [uid], { type: 'delivery', title: `Delivered · ${b.client_name} · ${b.title}`, body: `${me.name} marked your ${w.word} delivered to Timeliner for you. Nothing left to do for ${w.them}.`, link: '/my-work' }, me.id);
       }
     } else if (action === 'undo_delivery') {
-      await notify(t, writers, { type: 'delivery', title: `Delivery undone · ${b.title}`, body: `${me.name} moved script${rows.length > 1 ? 's' : ''} ${nums} back to approved.`, link }, me.id);
+      if (!isManager(me.role)) {
+        await notify(t, await managerIds(t), { type: 'delivery', title: `Delivery undone · ${b.client_name}`, body: `${me.name} took back their delivery of ${scriptsWord} of ${b.title}. They’re approved again.${opts.note ? ` “${opts.note}”` : ''}`, link }, me.id);
+      }
+      for (const uid of writers) {
+        const w = theirs(uid);
+        await notify(t, [uid], { type: 'delivery', title: `Delivery undone · ${b.client_name} · ${b.title}`, body: `${me.name} moved your ${w.word} back to approved.${opts.note ? ` “${opts.note}”` : ''}`, link: '/my-work' }, me.id);
+      }
+    }
+    // editors hear when every script for a shoot is final, so they can start cutting
+    if (action === 'approve') {
+      const left = await t.one<{ n: number; shoot: string | null }>(
+        `select (select count(*)::int from scripts where batch_id = $1 and removed_at is null and status not in ('approved', 'delivered')) as n,
+                (select sh.start_date::text from batches bb join shoots sh on sh.id = bb.shoot_id where bb.id = $1) as shoot`, [batchId]);
+      if (left && left.n === 0) {
+        await notify(t, await editorIds(t), {
+          type: 'approval', title: `Scripts final · ${b.client_name}`,
+          body: `Every script in ${b.title} is approved${left.shoot ? ` for the ${fmtDate(left.shoot as ISODate)} shoot` : ''}. They’re in the Script bank.`,
+          link: '/scripts', dedupeKey: `final:${batchId}`,
+        }, me.id);
+      }
     }
     await recordMoments(t, me, batchId, action, rows, b, { note: opts.note, attached });
+    // tie what this decision told the writers to the decision, so undoing it can take them back
+    // (everything inserted in this transaction has the transaction's timestamp)
+    if (reviewId && writers.length) {
+      await t.query(`update notifications set review_id = $1 where review_id is null and user_id = any($2::bigint[]) and created_at = now() and type in ('approval', 'revision_request')`, [reviewId, writers]);
+      await t.query(`update moments set review_id = $1 where review_id is null and user_id = any($2::bigint[]) and created_at = now() and batch_id = $3`, [reviewId, writers, batchId]);
+    }
     await t.query(`update batches set updated_at = now() where id = $1`, [batchId]);
     return { changed: idList, deliveryId, reviewId };
   });

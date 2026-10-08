@@ -231,7 +231,7 @@ describe('progress, review and Timeliner delivery', () => {
     expect(b.deliveries[0]).toMatchObject({ confirmedByName: 'Sarah Chen', scriptNumbers: [1, 2, 3, 4, 5], timelinerUrl: 'https://timeliner.io/x', verification: 'writer_confirmed' });
     expect(new Date(b.deliveries[0].confirmedAt).getTime()).toBeGreaterThan(0);
     const notes = (await manager.get('/api/notifications')).body.notifications;
-    expect(notes.some((n: any) => n.type === 'delivery' && /writer-confirmed/.test(n.body))).toBe(true);
+    expect(notes.some((n: any) => n.type === 'delivery' && /Sarah Chen confirmed scripts .* in Timeliner\./.test(n.body))).toBe(true);
   });
 
   it('cannot deliver scripts that are not approved', async () => {
@@ -284,19 +284,19 @@ describe('moving a shoot', () => {
     expect(created.status).toBe(200);
     const id = created.body.batchId as number;
     const shootId = created.body.shootId as number;
-    expect(created.body.batch.title).toBe('Shoot · Nov 10–11, 2026');
+    expect(created.body.batch.title).toBe('Acme Outdoor Co. · Nov 10–11, 2026'); // named after the client when the shoot has no name
     const pv = (await manager.post(`/api/shoots/${shootId}/reschedule-preview`, { startDate: '2026-11-17', endDate: '2026-11-18' })).body;
     expect(pv).toMatchObject({ days: 7, manualCount: 1 });
     expect(pv.plannedStarts).toEqual([expect.objectContaining({ batchId: id, from: '2026-11-01', to: '2026-11-08' })]);
-    expect(pv.renames).toEqual([{ batchId: id, from: 'Shoot · Nov 10–11, 2026', to: 'Shoot · Nov 17–18, 2026' }]);
+    expect(pv.renames).toEqual([{ batchId: id, from: 'Acme Outdoor Co. · Nov 10–11, 2026', to: 'Acme Outdoor Co. · Nov 17–18, 2026' }]);
     expect(pv.changes.find((c: any) => c.field === 'finalDue')).toMatchObject({ kept: true, to: '2026-11-06' });
     const withManual = (await manager.post(`/api/shoots/${shootId}/reschedule-preview`, { startDate: '2026-11-17', endDate: '2026-11-18', shiftManual: true })).body;
     expect(withManual.changes.find((c: any) => c.field === 'finalDue')).toMatchObject({ kept: false, mode: 'manual', to: '2026-11-13' });
 
     expect((await manager.post(`/api/shoots/${shootId}/reschedule`, { startDate: '2026-11-17', endDate: '2026-11-18', shiftManual: true })).status).toBe(200);
     const b = (await manager.get(`/api/batches/${id}`)).body as BatchDetail;
-    expect(b).toMatchObject({ title: 'Shoot · Nov 17–18, 2026', plannedStart: '2026-11-08', draftDue: '2026-11-12', finalDue: '2026-11-13', finalDueMode: 'manual', needsDateReview: false });
-    expect(b.activity[0].summary).toMatch(/Writing start Nov 1 → Nov 8.*Renamed to “Shoot · Nov 17–18, 2026”/);
+    expect(b).toMatchObject({ title: 'Acme Outdoor Co. · Nov 17–18, 2026', plannedStart: '2026-11-08', draftDue: '2026-11-12', finalDue: '2026-11-13', finalDueMode: 'manual', needsDateReview: false });
+    expect(b.activity[0].summary).toMatch(/Writing start Nov 1 → Nov 8.*Renamed to “Acme Outdoor Co. · Nov 17–18, 2026”/);
   });
 });
 
@@ -508,39 +508,47 @@ describe('persistence', () => {
 });
 
 describe('team: roles, temporary passwords, removal', () => {
-  it('the first account is the owner, and owners and managers have the same permissions', async () => {
+  it('the first account is the Admin; managers run the team but can’t take over the Admin role', async () => {
     const team = (await manager.get('/api/users')).body.users;
     expect(team.find((u: any) => u.id === ids.josh).role).toBe('owner');
     const add = await manager.post('/api/users', { name: 'Mia Park', email: 'mia@scale.test', role: 'manager', password: 'manager-temp-1' });
     expect(add.status).toBe(200);
     const mia = as(await login('mia@scale.test', 'manager-temp-1'));
-    // a manager can do owner things, including managing the team and settings
+    const miaId = add.body.users.find((u: any) => u.email === 'mia@scale.test').id;
+    // a manager manages the team and settings…
     expect((await mia.patch('/api/settings', { reminderLeadDays: 3 })).status).toBe(200);
-    expect((await mia.post('/api/users', { name: 'Mo Writer', email: 'mo@scale.test', role: 'writer', password: 'writer-temp-mo' })).status).toBe(200);
-    // …except making admins, which only an admin can do
+    expect((await mia.post('/api/users', { name: 'Writer Two', email: 'w2@scale.test', role: 'writer', password: 'writer-two-temp' })).status).toBe(200);
+    // …but can't make an Admin, promote themselves, or change the Admin's account
     expect((await mia.post('/api/users', { name: 'Owner Two', email: 'o2@scale.test', role: 'owner', password: 'owner-two-temp' })).status).toBe(403);
-    expect((await manager.post('/api/users', { name: 'Owner Two', email: 'o2@scale.test', role: 'owner', password: 'owner-two-temp' })).status).toBe(200);
+    expect((await mia.patch(`/api/users/${miaId}`, { role: 'owner' })).status).toBe(403);
+    expect((await mia.patch(`/api/users/${ids.josh}`, { role: 'writer' })).status).toBe(403);
+    expect((await mia.patch(`/api/users/${ids.josh}`, { password: 'taken-over-pass' })).status).toBe(403);
+    expect((await mia.post(`/api/users/${ids.josh}/remove`, {})).status).toBe(403);
+    expect((await mia.get('/api/users')).body.users.find((u: any) => u.id === ids.josh).tempPassword).toBeNull();
+    // the Admin can make another Admin, and the log says what changed
+    const o2 = await manager.post('/api/users', { name: 'Owner Two', email: 'o2@scale.test', role: 'owner', password: 'owner-two-temp' });
+    expect(o2.status).toBe(200);
+    expect((await manager.patch(`/api/users/${miaId}`, { role: 'writer' })).status).toBe(200);
+    const log = (await db.query<{ summary: string }>(`select summary from activity where action = 'user.updated' order by id desc limit 1`))[0];
+    expect(log.summary).toBe('Mia Park: role Manager → Writer');
+    await manager.patch(`/api/users/${miaId}`, { role: 'manager' });
   });
 
   it('only an admin can make or change an admin, so the admin-only tools stay admin-only', async () => {
     const mia = as(await login('mia@scale.test', 'manager-temp-1'));
     const team = async (who = manager) => (await who.get('/api/users')).body.users as any[];
     const miaId = (await team()).find((u) => u.email === 'mia@scale.test').id;
-    // a manager can't promote themselves, or take over, lock out, demote or remove the admin
-    expect((await mia.patch(`/api/users/${miaId}`, { role: 'owner' })).status).toBe(403);
-    expect((await mia.patch(`/api/users/${ids.josh}`, { password: 'taken-over-123' })).status).toBe(403);
+    // a manager can't take over, lock out, demote or remove the admin, or open the admin-only tools
     expect((await mia.patch(`/api/users/${ids.josh}`, { active: false })).status).toBe(403);
     expect((await mia.patch(`/api/users/${ids.josh}`, { role: 'manager' })).status).toBe(403);
-    expect((await mia.post(`/api/users/${ids.josh}/remove`, {})).status).toBe(403);
+    expect((await mia.patch(`/api/users/${miaId}`, { role: 'owner' })).status).toBe(403);
     expect((await mia.get('/api/audit')).status).toBe(403);
     expect((await manager.get('/api/bootstrap')).status).toBe(200); // still signed in
-    // the edit form sends every field: an unchanged role and access still save
-    expect((await mia.patch(`/api/users/${ids.josh}`, { name: 'Josh Rath', role: 'owner', active: true, capacityPerDay: null })).status).toBe(200);
-    // an admin's temporary password is only readable by admins
+    // an admin's temporary password is only readable by admins; other people's stay readable to managers
     const o2 = (await team()).find((u) => u.email === 'o2@scale.test');
     expect(o2.tempPassword).toBe('owner-two-temp');
     expect((await team(mia)).find((u) => u.id === o2.id).tempPassword).toBeNull();
-    expect((await team(mia)).find((u) => u.email === 'mo@scale.test').tempPassword).toBe('writer-temp-mo');
+    expect((await team(mia)).find((u) => u.email === 'w2@scale.test').tempPassword).toBe('writer-two-temp');
     // an admin can, and there's always an admin left
     expect((await manager.patch(`/api/users/${o2.id}`, { role: 'manager' })).status).toBe(200);
     const last = await manager.patch(`/api/users/${ids.josh}`, { role: 'manager' });
@@ -549,13 +557,42 @@ describe('team: roles, temporary passwords, removal', () => {
     expect((await manager.patch(`/api/users/${o2.id}`, { role: 'owner' })).status).toBe(200);
   });
 
+  it('deactivating someone can hand their unfinished scripts to someone else, and flags any left behind', async () => {
+    const add = await manager.post('/api/users', { name: 'Dee Active', email: 'dee@scale.test', role: 'writer', password: 'dee-temp-pass1' });
+    const deeId = add.body.users.find((u: any) => u.email === 'dee@scale.test').id;
+    const b1 = await manager.post('/api/batches', { clientId: acmeId, title: 'Dee hand-over', targetCount: 2, split: [{ writerId: deeId, count: 2 }] });
+    const r = await manager.patch(`/api/users/${deeId}`, { active: false, reassignTo: ids.marcus });
+    expect(r.status).toBe(200);
+    expect(r.body.moved).toBe(2);
+    const d1 = (await manager.get(`/api/batches/${b1.body.batchId}`)).body as BatchDetail;
+    expect(d1.writers.map((w) => w.name)).toEqual(['Marcus Webb']);
+    // no one chosen: they're unassigned, which Needs attention shows
+    await manager.patch(`/api/users/${deeId}`, { active: true });
+    const b2 = await manager.post('/api/batches', { clientId: acmeId, title: 'Dee left behind', targetCount: 1, split: [{ writerId: deeId, count: 1 }] });
+    await manager.patch(`/api/users/${deeId}`, { active: false });
+    let item = (await manager.get('/api/dashboard')).body.attention.find((a: any) => a.batch.id === b2.body.batchId);
+    expect(item.issues.map((i: any) => i.text)).toContain('1 script unassigned');
+    // scripts still held by someone who can't sign in (older data) are flagged by name
+    await manager.patch(`/api/users/${deeId}`, { active: true });
+    const b3 = await manager.post('/api/batches', { clientId: acmeId, title: 'Dee legacy', targetCount: 1, split: [{ writerId: deeId, count: 1 }] });
+    await db.query(`update users set active = false where id = $1`, [deeId]);
+    item = (await manager.get('/api/dashboard')).body.attention.find((a: any) => a.batch.id === b3.body.batchId);
+    expect(item.issues.map((i: any) => i.text)).toContain('1 script still with Dee Active, who’s deactivated · reassign them');
+  });
+
   it('keeps the temporary password readable for managers until the person sets their own', async () => {
     await manager.post('/api/users', { name: 'Tess Lane', email: 'tess@scale.test', role: 'writer', password: 'tess-temp-pass' });
     const find = async (who = manager) => (await who.get('/api/users')).body.users.find((u: any) => u.email === 'tess@scale.test');
     expect((await find()).tempPassword).toBe('tess-temp-pass');
     expect((await find(sarah)).tempPassword).toBeNull(); // writers never see it
     const tess = as(await login('tess@scale.test', 'tess-temp-pass'));
+    // first sign-in asks for their own password, and the temporary one can't be kept
+    expect((await tess.get('/api/bootstrap')).body.mustChangePassword).toBe(true);
+    const same = await tess.post('/api/me/password', { current: 'tess-temp-pass', next: 'tess-temp-pass' });
+    expect(same.status).toBe(400);
+    expect(same.body.error.fields.next).toMatch(/new password/);
     expect((await tess.post('/api/me/password', { current: 'tess-temp-pass', next: 'tess-own-password' })).status).toBe(200);
+    expect((await tess.get('/api/bootstrap')).body.mustChangePassword).toBe(false);
     expect((await find()).tempPassword).toBeNull();
     // a reset makes a new readable temporary password
     await manager.patch(`/api/users/${(await find()).id}`, { password: 'tess-reset-pass' });
@@ -1190,22 +1227,17 @@ describe('view as and recording mode', () => {
     expect(latest).toMatchObject({ userId: ids.josh });
   });
 
-  it('viewing as someone leaves their messages and notifications unread', async () => {
-    await marcus.post(`/api/messages/${ids.sarah}`, { body: 'Ping from Marcus' });
-    const before = (await sarah.get('/api/messages')).body.unread;
-    const unreadNotes = async () => (await sarah.get('/api/notifications')).body.notifications.filter((n: any) => !n.readAt).length;
-    const notesBefore = await unreadNotes();
+  it('viewing as someone leaves their notifications unread', async () => {
+    const unread = async () => (await sarah.get('/api/notifications')).body.unread as number;
+    const before = await unread();
     expect(before).toBeGreaterThan(0);
     await manager.post('/api/admin/view-as', { userId: ids.sarah });
     try {
-      expect((await manager.post(`/api/messages/${ids.marcus}/read`)).status).toBe(200);
       expect((await manager.post('/api/notifications/read', { all: true })).status).toBe(200);
     } finally {
       await manager.post('/api/admin/view-as/stop');
     }
-    expect((await sarah.get('/api/messages')).body.unread).toBe(before);
-    expect(await unreadNotes()).toBe(notesBefore);
-    await sarah.post(`/api/messages/${ids.marcus}/read`); // tidy up for the messages tests further down
+    expect(await unread()).toBe(before);
   });
 
   it('keeps uploads made in Recording mode in the practice copy', async () => {
@@ -1365,25 +1397,20 @@ describe('batch integrity', () => {
 });
 
 describe('script bank', () => {
-  it('lists one entry per document (newest version), not one per script, and searches inside it', async () => {
+  it('lists one entry per document, each script under the newest document it was sent in', async () => {
     const all = (await sarah.get('/api/script-bank?limit=200')).body;
-    // one entry per newest submission that still covers scripts
-    const newest = await db.query<{ id: number; version: number; n: number }>(
-      `select s.id, s.version, count(ss.script_id)::int as n from submissions s join submission_scripts ss on ss.submission_id = s.id
-        join scripts sc on sc.id = ss.script_id and sc.removed_at is null
-        where not exists (select 1 from submissions later where later.previous_id = s.id) group by s.id, s.version`,
+    // every script sits under the newest document that includes it
+    const current = await db.query<{ submission_id: number; n: number }>(
+      `select latest as submission_id, count(*)::int as n from (
+         select sc.id, (select s.id from submission_scripts ss2 join submissions s on s.id = ss2.submission_id
+                         where ss2.script_id = sc.id order by s.created_at desc, s.id desc limit 1) as latest
+           from scripts sc where sc.removed_at is null) x
+        where latest is not null group by latest`,
     );
     const fromSubs = all.deliverables.filter((d: any) => d.key.startsWith('s'));
-    expect(fromSubs.length).toBe(newest.length);
-    expect(newest.length).toBeGreaterThan(0);
-    for (const n of newest) {
-      const d = fromSubs.find((x: any) => x.key === `s${n.id}`);
-      expect(d.scripts.length).toBe(n.n);
-      expect(d.version).toBe(n.version);
-    }
-    // an older version of a revised document isn't listed on its own
-    const older = await db.one<{ id: number }>(`select previous_id as id from submissions where previous_id is not null limit 1`);
-    if (older) expect(all.deliverables.some((d: any) => d.key === `s${older.id}`)).toBe(false);
+    expect(fromSubs.length).toBe(current.length);
+    expect(current.length).toBeGreaterThan(0);
+    for (const c of current) expect(fromSubs.find((x: any) => x.key === `s${c.submission_id}`).scripts.length).toBe(c.n);
     expect(all.scriptCount).toBe(all.deliverables.reduce((n: number, d: any) => n + d.scripts.length, 0));
 
     // "#N" finds the document the script is in
@@ -1399,10 +1426,48 @@ describe('script bank', () => {
     const hers = (await manager.get(`/api/script-bank?writerId=${ids.sarah}&limit=200`)).body;
     expect(hers.deliverables.every((d: any) => d.writerId === ids.sarah)).toBe(true);
     const done = (await manager.get('/api/script-bank?status=finished&limit=200')).body;
-    expect(done.deliverables.every((d: any) => d.scripts.every((s: any) => s.status === 'approved' || s.status === 'delivered'))).toBe(true);
+    expect(done.deliverables.every((d: any) => d.past || d.scripts.some((s: any) => s.status === 'approved' || s.status === 'delivered'))).toBe(true);
     const byName = (await manager.get(`/api/script-bank?q=${encodeURIComponent(d0.clientName.toLowerCase())}`)).body;
     expect(byName.deliverables.some((d: any) => d.key === d0.key)).toBe(true);
     expect((await call('GET', '/api/script-bank')).status).toBe(401);
+  });
+
+  it('keeps finished scripts findable after a partial resend, lists scripts with no document, and puts the edited version first', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Bank keeps everything', targetCount: 4, split: [{ writerId: ids.sarah, count: 4 }] });
+    const id = b.body.batchId;
+    const sc = (await manager.get(`/api/batches/${id}`)).body.scripts as { id: number; number: number }[];
+    const [s1, s2, s3, s4] = sc.map((x) => x.id);
+    const v1 = await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: [s1, s2, s3], url: 'https://docs.google.com/document/d/bank-v1' });
+    expect(v1.status).toBe(200);
+    // approve 1–2 with an edited version, send 3 back, and the writer resends only 3
+    expect((await manager.post(`/api/batches/${id}/review`, { action: 'approve', scriptIds: [s1, s2], submissionId: v1.body.submissionId, url: 'https://docs.google.com/document/d/bank-edit', note: 'Tightened the hooks' })).status).toBe(200);
+    await manager.post(`/api/batches/${id}/review`, { action: 'revisions', scriptIds: [s3], submissionId: v1.body.submissionId, note: 'Rework the ending' });
+    expect((await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: [s3], url: 'https://docs.google.com/document/d/bank-v2' })).status).toBe(200);
+    // script 4 is marked ready without any document, then approved
+    await manager.post(`/api/batches/${id}/scripts/action`, { action: 'submit', scriptIds: [s4], timelinerUrl: null, note: null });
+    await manager.post(`/api/batches/${id}/scripts/action`, { action: 'approve', scriptIds: [s4], timelinerUrl: null, note: null });
+
+    const list = (await manager.get(`/api/script-bank?clientId=${acmeId}&limit=200`)).body.deliverables.filter((d: any) => d.batchId === id);
+    const byKind = (k: string) => list.filter((d: any) => d.kind === k);
+    const first = list.find((d: any) => d.href === 'https://docs.google.com/document/d/bank-v1');
+    expect(first.scripts.map((x: any) => x.number)).toEqual([1, 2]); // still here after the resend of 3
+    expect(first.edited).toMatchObject({ href: 'https://docs.google.com/document/d/bank-edit', by: 'Josh Rath', note: 'Tightened the hooks', ranges: '1–2' });
+    expect(list.find((d: any) => d.href === 'https://docs.google.com/document/d/bank-v2').scripts.map((x: any) => x.number)).toEqual([3]);
+    expect(byKind('none')).toHaveLength(1);
+    expect(byKind('none')[0]).toMatchObject({ ranges: '4', href: null, finished: 1 });
+    // "#1" still finds script 1
+    const hit = (await manager.get(`/api/script-bank?q=%231&clientId=${acmeId}&limit=200`)).body.deliverables;
+    expect(hit.some((d: any) => d.key === first.key)).toBe(true);
+
+    // an editor sees finished scripts even when others in the same document aren't
+    const ed = await manager.post('/api/users', { name: 'Bank Editor', email: 'bank-editor@scale.test', role: 'editor', password: 'bank-editor-pass' });
+    expect(ed.status).toBe(200);
+    const editor = as(await login('bank-editor@scale.test', 'bank-editor-pass'));
+    await manager.post(`/api/batches/${id}/review`, { action: 'revisions', scriptIds: [s1], note: 'One more pass' });
+    const seen = (await editor.get(`/api/script-bank?clientId=${acmeId}&limit=200`)).body.deliverables.filter((d: any) => d.batchId === id);
+    const v1Row = seen.find((d: any) => d.href === 'https://docs.google.com/document/d/bank-v1');
+    expect(v1Row).toMatchObject({ finished: 1 });
+    expect(seen.some((d: any) => d.href === 'https://docs.google.com/document/d/bank-v2')).toBe(false); // nothing finished in it
   });
 });
 
@@ -1543,8 +1608,10 @@ describe('a manager delivering a shared batch', () => {
     expect(after.find((s) => s.assigneeId === ids.marcus)!.status).toBe('not_started');
     expect(r.body.batch.activity[0].summary).toMatch(/on behalf of Sarah Chen/);
     const notes = (await sarah.get('/api/notifications')).body.notifications;
-    expect(notes[0]).toMatchObject({ title: 'Delivered to Timeliner · Shared delivery' });
-    expect(notes[0].body).toMatch(/Josh Rath marked your scripts .* delivered/);
+    expect(notes[0].title).toMatch(/^Delivered · .+ · Shared delivery$/);
+    // only Sarah's own scripts, not Josh's
+    const sarahNums = scripts.filter((s) => s.assigneeId === ids.sarah).map((s) => s.number);
+    expect(notes[0].body).toContain(`Josh Rath marked your scripts ${sarahNums[0]}–${sarahNums[sarahNums.length - 1]} delivered`);
     // a writer confirming delivers only their own
     const b2 = await manager.post('/api/batches', { clientId: acmeId, title: 'Writer delivery', targetCount: 2, finalDue: '2026-10-21', split: [{ writerId: ids.sarah, count: 1 }, { writerId: ids.marcus, count: 1 }] });
     const s2 = (await manager.get(`/api/batches/${b2.body.batchId}`)).body.scripts as { id: number; assigneeId: number }[];
@@ -1654,36 +1721,6 @@ describe('to-dos', () => {
   });
 });
 
-describe('messages', () => {
-  it('sends, lists conversations with unread counts, fetches only newer, and marks read', async () => {
-    const a = await manager.post(`/api/messages/${ids.sarah}`, { body: 'Hey Sarah, can you look at script 4?' });
-    expect(a.status).toBe(200);
-    expect(a.body.message).toMatchObject({ fromId: ids.josh, toId: ids.sarah, readAt: null });
-    await manager.post(`/api/messages/${ids.sarah}`, { body: 'No rush' });
-    // her inbox shows one thread with 2 unread, and her counts know
-    let inbox = (await sarah.get('/api/messages')).body;
-    expect(inbox.unread).toBe(2);
-    expect(inbox.threads[0]).toMatchObject({ userId: ids.josh, name: 'Josh Rath', unread: 2, last: { body: 'No rush' } });
-    expect((await sarah.get('/api/bootstrap')).body.counts.unreadMessages).toBe(2);
-    // the thread, oldest first; then only what's newer
-    const thread = (await sarah.get(`/api/messages/${ids.josh}`)).body.messages;
-    expect(thread.map((m: any) => m.body)).toEqual(['Hey Sarah, can you look at script 4?', 'No rush']);
-    const reply = await sarah.post(`/api/messages/${ids.josh}`, { body: 'On it!' });
-    const newer = (await manager.get(`/api/messages/${ids.sarah}?after=${thread[1].id}`)).body.messages;
-    expect(newer).toEqual([expect.objectContaining({ id: reply.body.message.id, body: 'On it!' })]);
-    // reading clears her unread; his message shows as seen
-    expect((await sarah.post(`/api/messages/${ids.josh}/read`)).status).toBe(200);
-    inbox = (await sarah.get('/api/messages')).body;
-    expect(inbox.unread).toBe(0);
-    expect((await manager.get(`/api/messages/${ids.sarah}`)).body.messages[0].readAt).toBeTruthy();
-    // Marcus can't see their conversation
-    expect((await marcus.get('/api/messages')).body.threads.some((t: any) => t.userId === ids.josh && t.last.body === 'On it!')).toBe(false);
-    expect((await marcus.get(`/api/messages/${ids.josh}`)).body.messages.some((m: any) => m.body === 'On it!')).toBe(false);
-    // no empty messages, none to yourself
-    expect((await sarah.post(`/api/messages/${ids.josh}`, { body: '   ' })).status).toBe(400);
-    expect((await sarah.post(`/api/messages/${ids.sarah}`, { body: 'hi me' })).status).toBe(400);
-  });
-});
 
 describe('client resources picked for a batch', () => {
   it('picked on creation, shown to the writers on My work, and attachable or detachable later', async () => {
@@ -1787,5 +1824,481 @@ describe('filling in missing deadlines on existing batches', () => {
     const before = (await db.query(`select count(*)::int as n from activity where action = 'batch.deadlines_filled'`))[0];
     await db.tx((t) => fillMissingDeadlines(t));
     expect((await db.query(`select count(*)::int as n from activity where action = 'batch.deadlines_filled'`))[0]).toEqual(before);
+  });
+});
+
+describe('synced Google Calendars', () => {
+  const ICS = (summary: string) => ['BEGIN:VCALENDAR', 'VERSION:2.0',
+    'BEGIN:VEVENT', 'UID:shoot@g', 'DTSTART;VALUE=DATE:20261015', 'DTEND;VALUE=DATE:20261017', `SUMMARY:${summary}`, 'END:VEVENT',
+    'BEGIN:VEVENT', 'UID:call@g', 'DTSTART;TZID=America/New_York:20261014T100000', 'DTEND;TZID=America/New_York:20261014T103000', 'SUMMARY:Ideation call', 'LOCATION:https://meet.google.com/x', 'END:VEVENT',
+    'END:VCALENDAR'].join('\r\n');
+  const URL_OK = 'https://calendar.google.com/calendar/ical/joshua%40example.com/private-abc123/basic.ics';
+  let feedText = ICS('Shoot – Dentist Mike');
+
+  it('adds a calendar by its secret address, shows its events, and keeps them in sync', async () => {
+    ctx.fetchCalendar = async (u) => { if (u !== URL_OK) throw new Error('Google refused the link.'); return feedText; };
+    // the page link and private addresses are refused; writers can't add one
+    expect((await manager.post('/api/calendar-feeds', { name: 'Joshua', url: 'https://calendar.google.com/calendar/r' })).body.error.fields.url).toMatch(/Secret address/);
+    expect((await manager.post('/api/calendar-feeds', { name: 'Joshua', url: 'http://127.0.0.1/x.ics' })).status).toBe(400);
+    // an embed code (or link, or the address) reads the calendar's public iCal address; a private calendar says what to do
+    const asked: string[] = [];
+    ctx.fetchCalendar = async (u) => { asked.push(u); if (u === URL_OK) return feedText; throw new Error('That calendar isn’t public, so Google won’t share it this way.'); };
+    const embed = await manager.post('/api/calendar-feeds', { name: 'Joshua', url: '<iframe src="https://calendar.google.com/calendar/embed?src=jshalamov4%40gmail.com&amp;ctz=America%2FToronto" style="border: 0"></iframe>' });
+    expect(asked).toEqual(['https://calendar.google.com/calendar/ical/jshalamov4%40gmail.com/public/basic.ics']);
+    expect(embed.status).toBe(400);
+    expect(embed.body.error.fields.url).toMatch(/isn’t public/);
+    expect((await sarah.post('/api/calendar-feeds', { name: 'Joshua', url: URL_OK })).status).toBe(403);
+    const add = await manager.post('/api/calendar-feeds', { name: 'Joshua’s calendar', url: URL_OK.replace('https://', 'webcal://'), color: '#60D1BE' });
+    expect(add.status).toBe(200);
+    expect(add.body.result).toMatchObject({ ok: true, count: 2 });
+    expect(add.body.feed.urlHint).toBe('calendar.google.com · joshua@example.com');
+    expect(JSON.stringify(add.body)).not.toContain('private-abc123'); // the secret isn't sent back
+    const id = add.body.feed.id;
+    // managers see the events on the Calendar
+    let cal = (await manager.get('/api/calendar?from=2026-10-01&to=2026-10-31')).body.events.filter((e: any) => e.type === 'external');
+    expect(cal.map((e: any) => [e.title, e.start, e.end])).toEqual([['Ideation call', '2026-10-14', '2026-10-14'], ['Shoot – Dentist Mike', '2026-10-15', '2026-10-16']]);
+    expect(cal[0].external).toMatchObject({ feedName: 'Joshua’s calendar', color: '#60D1BE', allDay: false, startAt: '2026-10-14T14:00:00.000Z', location: 'https://meet.google.com/x' });
+    // writers don't, until it's shared with everyone
+    expect((await sarah.get('/api/calendar?from=2026-10-01&to=2026-10-31')).body.events.some((e: any) => e.type === 'external')).toBe(false);
+    await manager.patch(`/api/calendar-feeds/${id}`, { visibility: 'everyone' });
+    expect((await sarah.get('/api/calendar?from=2026-10-01&to=2026-10-31')).body.events.filter((e: any) => e.type === 'external')).toHaveLength(2);
+    // a change in Google shows up on the next sync
+    feedText = ICS('Shoot – Dentist Mike (moved to studio B)');
+    expect((await manager.post(`/api/calendar-feeds/${id}/sync`)).body.result).toMatchObject({ ok: true, count: 2 });
+    cal = (await manager.get('/api/calendar?from=2026-10-01&to=2026-10-31')).body.events.filter((e: any) => e.type === 'external');
+    expect(cal.map((e: any) => e.title)).toContain('Shoot – Dentist Mike (moved to studio B)');
+    // a failed sync keeps the last events and says why
+    ctx.fetchCalendar = async () => { throw new Error('Google refused the link. It may have been reset: copy the secret address again.'); };
+    const bad = (await manager.post(`/api/calendar-feeds/${id}/sync`)).body;
+    expect(bad.result.ok).toBe(false);
+    expect(bad.feed.lastError).toMatch(/reset/);
+    expect((await manager.get('/api/calendar?from=2026-10-01&to=2026-10-31')).body.events.filter((e: any) => e.type === 'external')).toHaveLength(2);
+    // removing it removes its events
+    expect((await manager.del(`/api/calendar-feeds/${id}`)).status).toBe(200);
+    expect((await manager.get('/api/calendar?from=2026-10-01&to=2026-10-31')).body.events.some((e: any) => e.type === 'external')).toBe(false);
+    expect((await db.query(`select count(*)::int as n from calendar_events`))[0]).toEqual({ n: 0 });
+  });
+});
+
+describe('shoots on a synced calendar that need writers', () => {
+  it('finds them, prompts managers once, and drops each one as it gets planned', async () => {
+    const ICS = ['BEGIN:VCALENDAR', 'VERSION:2.0',
+      'BEGIN:VEVENT', 'UID:a@g', 'DTSTART;VALUE=DATE:20270112', 'DTEND;VALUE=DATE:20270114', 'SUMMARY:Shoot – Acme Outdoor', 'END:VEVENT',
+      'BEGIN:VEVENT', 'UID:b@g', 'DTSTART;VALUE=DATE:20270118', 'DTEND;VALUE=DATE:20270119', 'SUMMARY:Shoot – mystery brand', 'END:VEVENT',
+      'BEGIN:VEVENT', 'UID:c@g', 'DTSTART:20270113T170000Z', 'DTEND:20270113T180000Z', 'SUMMARY:Lunch with Mike', 'END:VEVENT',
+      'END:VCALENDAR'].join('\r\n');
+    ctx.fetchCalendar = async () => ICS;
+    const before = (await manager.get('/api/notifications')).body.notifications.length;
+    const add = await manager.post('/api/calendar-feeds', { name: 'Joshua’s calendar', url: 'https://calendar.google.com/calendar/ical/j%40example.com/private-x/basic.ics' });
+    expect(add.status).toBe(200);
+    let list = (await manager.get('/api/calendar-shoots')).body.shoots;
+    expect(list.map((s: any) => [s.title, s.client?.name ?? null, s.status, s.start, s.end])).toEqual([
+      ['Shoot – Acme Outdoor', 'Acme Outdoor Co.', 'no_shoot', '2027-01-12', '2027-01-13'],
+      ['Shoot – mystery brand', null, 'no_shoot', '2027-01-18', '2027-01-18'],
+    ]);
+    expect(list[0].suggested.count).toBeGreaterThan(0); // last time's numbers to start from
+    // managers were told once
+    const notes = (await manager.get('/api/notifications')).body.notifications;
+    expect(notes.length).toBe(before + 1);
+    expect(notes[0]).toMatchObject({ type: 'planning', title: '2 shoots on Joshua’s calendar need writers' });
+    expect((await sarah.get('/api/calendar-shoots')).status).toBe(403);
+    // the shoot is booked on the site, scripts not planned yet
+    const sh = await manager.post('/api/shoots', { clientId: acmeId, startDate: '2027-01-12', endDate: '2027-01-13' });
+    list = (await manager.get('/api/calendar-shoots')).body.shoots;
+    expect(list[0]).toMatchObject({ status: 'no_scripts', shootId: sh.body.shootId });
+    // scripts planned but nobody writing them
+    const b = await manager.post('/api/batches', { clientId: acmeId, shootId: sh.body.shootId, title: 'Dec shoot', targetCount: 4, split: [{ writerId: ids.sarah, count: 1 }] });
+    list = (await manager.get('/api/calendar-shoots')).body.shoots;
+    expect(list[0]).toMatchObject({ status: 'unassigned', unassigned: 3, total: 4, batchId: b.body.batchId });
+    // all assigned: it's done
+    const scripts = (await manager.get(`/api/batches/${b.body.batchId}`)).body.scripts.filter((s: any) => !s.assigneeId).map((s: any) => s.id);
+    await manager.post(`/api/batches/${b.body.batchId}/scripts/assign`, { scriptIds: scripts, assigneeId: ids.marcus });
+    list = (await manager.get('/api/calendar-shoots')).body.shoots;
+    expect(list.map((s: any) => s.title)).toEqual(['Shoot – mystery brand']);
+    // not ours: hide it
+    await manager.post('/api/calendar-shoots/dismiss', { uid: list[0].uid });
+    expect((await manager.get('/api/calendar-shoots')).body.shoots).toEqual([]);
+    // syncing again doesn't notify again
+    await manager.post(`/api/calendar-feeds/${add.body.feed.id}/sync`);
+    expect((await manager.get('/api/notifications')).body.notifications.length).toBe(before + 1);
+    await manager.del(`/api/calendar-feeds/${add.body.feed.id}`);
+  });
+
+  it('counts a batch planned without a shoot, and looks past the calendar owner’s name', async () => {
+    const owner = await manager.post('/api/clients', { name: 'Joshua Shalamov' });
+    const lawId = (await db.query<{ id: number }>(`select id from clients where name = 'Shimonov Law'`))[0].id; // from the notes import above
+    ctx.fetchCalendar = async () => ['BEGIN:VCALENDAR', 'VERSION:2.0',
+      'BEGIN:VEVENT', 'UID:law@g', 'DTSTART;VALUE=DATE:20270208', 'DTEND;VALUE=DATE:20270209', 'SUMMARY:Shimonov Law Filming Session and Joshua Shalamov', 'END:VEVENT',
+      'END:VCALENDAR'].join('\r\n');
+    const add = await manager.post('/api/calendar-feeds', { name: 'Joshua Shalamov’s Calendar', url: 'https://calendar.google.com/calendar/ical/j%40example.com/private-y/basic.ics' });
+    let list = (await manager.get('/api/calendar-shoots')).body.shoots;
+    expect(list.map((s: any) => [s.client?.name, s.status])).toEqual([['Shimonov Law', 'no_shoot']]);
+    // scripts planned as a batch on its own, due before the filming, everyone writing: nothing to do
+    const b = await manager.post('/api/batches', { clientId: lawId, title: 'February filming', targetCount: 3, finalDue: '2027-02-04', split: [{ writerId: ids.sarah, count: 3 }] });
+    expect(b.status).toBe(200);
+    list = (await manager.get('/api/calendar-shoots')).body.shoots;
+    expect(list).toEqual([]);
+    await manager.del(`/api/calendar-feeds/${add.body.feed.id}`);
+    expect(owner.status).toBe(200);
+  });
+});
+
+describe('editors', () => {
+  const pdf = async (cookie: string, url: string, fields: Record<string, string>) => {
+    const boundary = '----smed' + Math.random().toString(16).slice(2);
+    const parts = Object.entries(fields).map(([k, v]) => `--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}`);
+    parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="scripts.pdf"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4 draft`);
+    const r = await app.inject({ method: 'POST', url, headers: { 'x-scale-media': '1', cookie, 'content-type': `multipart/form-data; boundary=${boundary}` }, payload: parts.join('\r\n') + `\r\n--${boundary}--\r\n` });
+    return JSON.parse(r.body);
+  };
+
+  it('can’t get round the editor rules by spelling the address differently', async () => {
+    const add = await manager.post('/api/users', { name: 'Ezra Encoded', email: 'ezra@scale.test', role: 'editor', password: 'editor-password-2' });
+    expect(add.status).toBe(200);
+    const ezra = as(await login('ezra@scale.test', 'editor-password-2'));
+    // the batch list shows work in progress, which editors never see
+    expect((await ezra.get('/api/batches')).status).toBe(403);
+    // the router decodes %61 to "a": the same route, so the same rule
+    expect((await ezra.get('/%61pi/batches')).status).toBe(403);
+    expect((await ezra.get('/api/batches/')).status).toBe(403);
+  });
+
+  it('sign in to a read-only view: calendar, finished scripts, clients, resources and to-dos', async () => {
+    const add = await manager.post('/api/users', { name: 'Eddie Cut', email: 'eddie@scale.test', role: 'editor', password: 'editor-password-1' });
+    expect([add.status, add.body?.error]).toEqual([200, undefined]);
+    const eddieId = add.body.users.find((u: any) => u.name === 'Eddie Cut').id;
+    const eddie = as(await login('eddie@scale.test', 'editor-password-1'));
+    expect((await eddie.get('/api/bootstrap')).body.me.role).toBe('editor');
+
+    // a batch with one finished document and one still in review
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Editor batch', targetCount: 4, finalDue: '2026-11-25', split: [{ writerId: ids.sarah, count: 4 }] });
+    const s = (await manager.get(`/api/batches/${b.body.batchId}`)).body.scripts as { id: number }[];
+    const done = await pdf(sarah.cookie, `/api/batches/${b.body.batchId}/submissions`, { scriptIds: JSON.stringify([s[0].id, s[1].id]) });
+    await pdf(sarah.cookie, `/api/batches/${b.body.batchId}/submissions`, { scriptIds: JSON.stringify([s[2].id, s[3].id]) });
+    await manager.post(`/api/batches/${b.body.batchId}/review`, { action: 'approve', scriptIds: [s[0].id, s[1].id] });
+    const subs = (await manager.get(`/api/batches/${b.body.batchId}`)).body.submissions as any[];
+    const draftFile = subs.find((x) => x.scriptNumbers.includes(3))?.fileId;
+    const doneFile = subs.find((x) => x.scriptNumbers.includes(1))?.fileId;
+    expect(done).toBeTruthy();
+
+    // Script bank: only the finished document
+    const bank = (await eddie.get(`/api/script-bank?clientId=${acmeId}&q=Editor%20batch`)).body.deliverables;
+    expect(bank).toHaveLength(1);
+    expect(bank[0].state).toBe('approved');
+    expect((await manager.get(`/api/script-bank?clientId=${acmeId}&q=Editor%20batch`)).body.deliverables).toHaveLength(2);
+    // and only that document's file opens
+    expect(doneFile && draftFile).toBeTruthy();
+    expect((await app.inject({ method: 'GET', url: `/api/files/${doneFile}`, headers: { cookie: eddie.cookie } })).statusCode).toBe(200);
+    expect((await app.inject({ method: 'GET', url: `/api/files/${draftFile}`, headers: { cookie: eddie.cookie } })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: `/api/files/${draftFile}`, headers: { cookie: manager.cookie } })).statusCode).toBe(200);
+
+    // Calendar: shoots and final delivery, not the writing in between
+    const cal = (await eddie.get('/api/calendar?from=2026-11-01&to=2026-11-30')).body.events as any[];
+    expect(cal.some((e) => e.type === 'final' && e.batchId === b.body.batchId)).toBe(true);
+    expect(cal.every((e) => ['shoot', 'final', 'external'].includes(e.type))).toBe(true);
+    // Clients: the brand material, not the team's history
+    const client = (await eddie.get(`/api/clients/${acmeId}`)).body;
+    expect(client.brandVoice).toBeTruthy();
+    expect(client.activity).toEqual([]);
+    expect(client.batches).toEqual([]);
+    expect((await eddie.get('/api/resources')).status).toBe(200);
+    // their own to-dos work
+    expect((await manager.post('/api/todos', { userId: eddieId, text: 'Cut the Acme reels by Friday' })).status).toBe(200);
+    expect((await eddie.get('/api/todos')).body.todos.map((t: any) => t.text)).toContain('Cut the Acme reels by Friday');
+
+    // everything else is closed, whatever the address
+    for (const [method, url] of [['GET', '/api/dashboard'], ['GET', '/api/batches'], ['GET', `/api/batches/${b.body.batchId}`], ['GET', '/api/review'], ['GET', '/api/my-work'],
+      ['GET', '/api/settings'], ['GET', '/api/users'], ['GET', '/api/calendar-shoots'], ['POST', '/api/resources'],
+      ['POST', `/api/batches/${b.body.batchId}/scripts/action`], ['PATCH', `/api/clients/${acmeId}`], ['POST', '/api/clients']] as const) {
+      const r = await call(method, url, { cookie: eddie.cookie, body: method === 'GET' ? undefined : {} });
+      expect([method, url, r.status]).toEqual([method, url, 403]);
+    }
+  });
+
+  it('are never given scripts, and see a synced calendar only when it’s shared with editors', async () => {
+    const eddieId = (await manager.get('/api/users')).body.users.find((u: any) => u.name === 'Eddie Cut').id;
+    const bad = await manager.post('/api/batches', { clientId: acmeId, title: 'No editors', targetCount: 2, split: [{ writerId: eddieId, count: 2 }] });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.message).toMatch(/editor/);
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Assign test', targetCount: 1, split: [] });
+    const sid = (await manager.get(`/api/batches/${b.body.batchId}`)).body.scripts[0].id;
+    expect((await manager.post(`/api/batches/${b.body.batchId}/scripts/assign`, { scriptIds: [sid], assigneeId: eddieId })).status).toBe(400);
+    // a writer with unfinished scripts can't become an editor until they're moved
+    await manager.post(`/api/batches/${b.body.batchId}/scripts/assign`, { scriptIds: [sid], assigneeId: ids.marcus });
+    expect((await manager.patch(`/api/users/${ids.marcus}`, { role: 'editor' })).status).toBe(400);
+
+    const eddie = as(await login('eddie@scale.test', 'editor-password-1'));
+    ctx.fetchCalendar = async () => ['BEGIN:VCALENDAR', 'BEGIN:VEVENT', 'UID:ed@g', 'DTSTART;VALUE=DATE:20261118', 'DTEND;VALUE=DATE:20261119', 'SUMMARY:Shoot – Acme Outdoor', 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+    const feed = (await manager.post('/api/calendar-feeds', { name: 'Joshua', url: 'https://calendar.google.com/calendar/ical/j%40example.com/private-ed/basic.ics' })).body.feed;
+    const has = async (who: typeof eddie) => (await who.get('/api/calendar?from=2026-11-01&to=2026-11-30')).body.events.some((e: any) => e.type === 'external');
+    expect(await has(eddie)).toBe(false);
+    await manager.patch(`/api/calendar-feeds/${feed.id}`, { visibility: 'editors' });
+    expect(await has(eddie)).toBe(true);
+    expect(await has(sarah)).toBe(false);
+    await manager.del(`/api/calendar-feeds/${feed.id}`);
+  });
+});
+
+describe('new work on My work', () => {
+  it('marks work given to a writer this week as new until they start it, and counts it for the menu', async () => {
+    const before = (await sarah.get('/api/counts')).body.myNewWork;
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Fresh batch', targetCount: 4, finalDue: '2027-03-05', split: [{ writerId: ids.sarah, count: 4 }] });
+    expect(b.status).toBe(200);
+    const id = b.body.batchId;
+    expect((await sarah.get('/api/counts')).body.myNewWork).toBe(before + 1);
+    const entry = (await sarah.get('/api/my-work')).body.batches.find((e: any) => e.batch.id === id);
+    expect(entry.mine).toHaveLength(4);
+    expect(entry.mine.every((s: any) => typeof s.assignedAt === 'string')).toBe(true);
+    // once they put a number on the counter it isn't new any more
+    expect((await sarah.post(`/api/batches/${id}/written`, { written: 1 })).status).toBe(200);
+    expect((await sarah.get('/api/counts')).body.myNewWork).toBe(before);
+    // scripts handed to someone else are new for them, with a fresh assignment time
+    const scripts = (await manager.get(`/api/batches/${id}`)).body.scripts;
+    const first = scripts.find((s: any) => s.number === 4);
+    const was = first.assignedAt;
+    const mBefore = (await marcus.get('/api/counts')).body.myNewWork;
+    await new Promise((r) => setTimeout(r, 15));
+    expect((await manager.post(`/api/batches/${id}/scripts/assign`, { scriptIds: [first.id], assigneeId: ids.marcus })).status).toBe(200);
+    const moved = (await manager.get(`/api/batches/${id}`)).body.scripts.find((s: any) => s.id === first.id);
+    expect(moved.assigneeId).toBe(ids.marcus);
+    expect(Date.parse(moved.assignedAt)).toBeGreaterThan(Date.parse(was));
+    expect((await marcus.get('/api/counts')).body.myNewWork).toBe(mBefore + 1);
+    // unassigned scripts have no assignment time
+    await manager.post(`/api/batches/${id}/scripts/assign`, { scriptIds: [first.id], assigneeId: null });
+    expect((await manager.get(`/api/batches/${id}`)).body.scripts.find((s: any) => s.id === first.id).assignedAt).toBeNull();
+  });
+});
+
+describe('round 1 safety checks', () => {
+  it('refuses a decision on a version that has been replaced, and can undo a decision', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Stale and undo', targetCount: 2, split: [{ writerId: ids.sarah, count: 2 }] });
+    const id = b.body.batchId;
+    const sc = (await manager.get(`/api/batches/${id}`)).body.scripts.map((s: any) => s.id);
+    const v1 = await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: sc, url: 'https://docs.google.com/document/d/stale-v1' });
+    const v2 = await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: sc, url: 'https://docs.google.com/document/d/stale-v2' });
+    expect(v2.status).toBe(200);
+    const stale = await manager.post(`/api/batches/${id}/review`, { action: 'approve', scriptIds: sc, submissionId: v1.body.submissionId });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.message).toMatch(/newer version \(version 2\)/);
+    const ok = await manager.post(`/api/batches/${id}/review`, { action: 'approve', scriptIds: sc, submissionId: v2.body.submissionId });
+    expect(ok.status).toBe(200);
+    expect(ok.body.reviewId).toBeTruthy();
+    // counted in the database: the notifications list only shows the latest 60
+    const approvalNotices = async () => Number((await db.one<{ n: number }>(`select count(*) as n from notifications where user_id = $1 and type = 'approval' and review_id = $2`, [ids.sarah, ok.body.reviewId]))!.n);
+    expect(await approvalNotices()).toBe(1);
+    const undo = await manager.post(`/api/reviews/${ok.body.reviewId}/undo`, {});
+    expect(undo.status).toBe(200);
+    expect(undo.body.batch.scripts.every((s: any) => s.status === 'ready_for_review')).toBe(true);
+    // the approval notice the writer hadn't read is gone, and it can't be undone twice
+    expect(await approvalNotices()).toBe(0);
+    expect((await manager.post(`/api/reviews/${ok.body.reviewId}/undo`, {})).status).toBe(404);
+    expect((await sarah.post(`/api/reviews/1/undo`, {})).status).toBe(403);
+    // a send-back undone takes its revision requests with it
+    const back = await manager.post(`/api/batches/${id}/review`, { action: 'revisions', scriptIds: [sc[0]], submissionId: v2.body.submissionId, note: 'Shorter' });
+    await manager.post(`/api/reviews/${back.body.reviewId}/undo`, {});
+    const after = (await manager.get(`/api/batches/${id}`)).body.scripts;
+    expect(after.find((s: any) => s.id === sc[0])).toMatchObject({ status: 'ready_for_review', openRevision: null });
+  });
+
+  it('says when a chosen writer has no scripts instead of dropping them', async () => {
+    const r = await manager.post('/api/batches', { clientId: acmeId, title: 'Zero writer', targetCount: 4, split: [{ writerId: ids.sarah, count: 4 }, { writerId: ids.marcus, count: 0 }] });
+    expect(r.status).toBe(400);
+    expect(r.body.error.fields.split).toBe('Marcus Webb has no scripts. Give them some, split evenly, or remove them.');
+  });
+
+  it('won’t confirm deadlines that put drafts after final delivery, and previews rule changes before saving', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Out of order', targetCount: 1, draftDue: '2027-04-10', finalDue: '2027-04-12' });
+    await db.query(`update batches set draft_due = '2027-04-14', needs_date_review = true where id = $1`, [b.body.batchId]);
+    const r = await manager.post(`/api/batches/${b.body.batchId}/dates-reviewed`, {});
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/Drafts are due after final delivery/);
+    const bad = await manager.patch('/api/settings', { draftOffsetDays: 3, finalOffsetDays: 5 });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.fields.finalOffsetDays).toMatch(/Use 3 or fewer/);
+    const p = await manager.post('/api/settings/recalculate-preview', { draftOffsetDays: 9, finalOffsetDays: 4 });
+    expect(p.status).toBe(200);
+    expect(typeof p.body.batches).toBe('number');
+    expect((await sarah.post('/api/settings/recalculate-preview', {})).status).toBe(403);
+  });
+
+  it('remembers which calendar event a shoot was planned from, can create the client with it, and keeps hidden ones', async () => {
+    ctx.fetchCalendar = async () => ['BEGIN:VCALENDAR', 'VERSION:2.0',
+      'BEGIN:VEVENT', 'UID:planned@g', 'DTSTART;VALUE=DATE:20270310', 'DTEND;VALUE=DATE:20270311', 'SUMMARY:Shoot – Fresh Faces Studio', 'END:VEVENT',
+      'BEGIN:VEVENT', 'UID:other@g', 'DTSTART;VALUE=DATE:20270320', 'DTEND;VALUE=DATE:20270321', 'SUMMARY:Shoot – Not Ours', 'END:VEVENT',
+      'END:VCALENDAR'].join('\r\n');
+    const feed = await manager.post('/api/calendar-feeds', { name: 'Planning calendar', url: 'https://calendar.google.com/calendar/ical/p%40example.com/private-z/basic.ics' });
+    expect(feed.status).toBe(200);
+    let res = (await manager.get('/api/calendar-shoots')).body;
+    const fresh = res.shoots.find((s: any) => s.uid.startsWith('planned@g'));
+    const other = res.shoots.find((s: any) => s.uid.startsWith('other@g')).uid;
+    expect(fresh).toMatchObject({ status: 'no_shoot', client: null });
+    // planned under a brand-new client straight from the event
+    const made = await manager.post('/api/shoots', { newClientName: 'Bright Smiles Dental', calendarUid: fresh.uid, startDate: '2027-03-10', endDate: null, batch: { targetCount: 3, split: [{ writerId: ids.sarah, count: 3 }] } });
+    expect(made.status).toBe(200);
+    expect((await manager.get(`/api/clients/${made.body.clientId}`)).body.name).toBe('Bright Smiles Dental');
+    expect(made.body.batch.title).toBe('Bright Smiles Dental · Mar 10, 2027');
+    res = (await manager.get('/api/calendar-shoots')).body;
+    expect(res.shoots.some((s: any) => s.uid === fresh.uid)).toBe(false); // planned, even though the title names no client
+    // hiding one keeps it in the hidden list, and it can come back
+    await manager.post('/api/calendar-shoots/dismiss', { uid: other });
+    res = (await manager.get('/api/calendar-shoots')).body;
+    expect(res.shoots.some((s: any) => s.uid === other)).toBe(false);
+    expect(res.hidden.map((s: any) => s.uid)).toContain(other);
+    await manager.post('/api/calendar-shoots/dismiss', { uid: other, undo: true });
+    expect((await manager.get('/api/calendar-shoots')).body.shoots.some((s: any) => s.uid === other)).toBe(true);
+    await manager.del(`/api/calendar-feeds/${feed.body.feed.id}`);
+  });
+});
+
+describe('round 2: writers never miss work', () => {
+  it('remembers when a writer has seen new work, and shows scripts added after that as new', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Seen work', targetCount: 2, draftDue: '2026-10-20', finalDue: '2026-10-22', split: [{ writerId: ids.sarah, count: 2 }] });
+    const id = b.body.batchId;
+    const before = (await sarah.get('/api/bootstrap')).body.counts.myNewWork;
+    let mine = (await sarah.get('/api/my-work')).body.batches.find((e: any) => e.batch.id === id);
+    expect(mine.seenAt).toBeNull();
+    expect(mine.myNext).toMatchObject({ kind: 'draft', date: '2026-10-20', remaining: 2 });
+    const seen = await sarah.post(`/api/batches/${id}/seen`, {});
+    expect(seen.body).toMatchObject({ ok: true, seen: true });
+    expect((await sarah.get('/api/bootstrap')).body.counts.myNewWork).toBe(before - 1);
+    mine = (await sarah.get('/api/my-work')).body.batches.find((e: any) => e.batch.id === id);
+    expect(mine.seenAt).toBeTruthy();
+    // someone not on the batch can't mark it
+    expect((await marcus.post(`/api/batches/${id}/seen`, {})).body.seen).toBe(false);
+  });
+
+  it('measures deadlines on the writer’s own scripts and puts sent-back work first', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Own deadlines', targetCount: 2, draftDue: '2026-10-25', finalDue: '2026-10-28', split: [{ writerId: ids.sarah, count: 1 }, { writerId: ids.marcus, count: 1 }] });
+    const id = b.body.batchId;
+    const sc = (await manager.get(`/api/batches/${id}`)).body.scripts;
+    const hers = sc.find((s: any) => s.assigneeId === ids.sarah).id;
+    const sent = await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: [hers], url: 'https://docs.google.com/document/d/own-v1' });
+    let e = (await sarah.get('/api/my-work')).body.batches.find((x: any) => x.batch.id === id);
+    // her drafts are done even though Marcus hasn't sent his
+    expect(e.myDraft.complete).toBe(true);
+    expect(e.batch.draft.complete).toBe(false);
+    expect(e.myNext.kind).toBe('final');
+    await manager.post(`/api/batches/${id}/review`, { action: 'revisions', scriptIds: [hers], submissionId: sent.body.submissionId, note: 'Punchier hook' });
+    const list = (await sarah.get('/api/my-work')).body.batches;
+    expect(list[0].myProgress.revisions).toBeGreaterThan(0);
+    // the revised version says which feedback it answers
+    const v2 = await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: [hers], url: 'https://docs.google.com/document/d/own-v2' });
+    expect(v2.status).toBe(200);
+    const detail = (await manager.get(`/api/batches/${id}`)).body;
+    const doc = detail.submissions.find((s: any) => s.id === v2.body.submissionId);
+    expect(doc.afterFeedback).toMatchObject({ note: 'Punchier hook' });
+    expect(detail.submissions.find((s: any) => s.id === sent.body.submissionId).afterFeedback).toBeNull();
+    // a sent-back script still counts as written
+    expect(detail.writers.find((w: any) => w.userId === ids.sarah).written).toBe(1);
+  });
+
+  it('lets a writer undo their own delivery the same day, and tells managers', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Undo my delivery', targetCount: 1, split: [{ writerId: ids.sarah, count: 1 }] });
+    const id = b.body.batchId;
+    const s = (await manager.get(`/api/batches/${id}`)).body.scripts[0].id;
+    await sarah.post(`/api/batches/${id}/scripts/action`, { action: 'submit', scriptIds: [s] });
+    await manager.post(`/api/batches/${id}/scripts/action`, { action: 'approve', scriptIds: [s] });
+    await sarah.post(`/api/batches/${id}/scripts/action`, { action: 'deliver', scriptIds: [s] });
+    // someone else's delivery isn't theirs to undo
+    expect((await marcus.post(`/api/batches/${id}/scripts/action`, { action: 'undo_delivery', scriptIds: [s] })).status).toBe(403);
+    const undo = await sarah.post(`/api/batches/${id}/scripts/action`, { action: 'undo_delivery', scriptIds: [s], note: 'Not in Timeliner yet' });
+    expect(undo.status).toBe(200);
+    expect((await manager.get(`/api/batches/${id}`)).body.scripts[0].status).toBe('approved');
+    const n = (await manager.get('/api/notifications')).body.notifications.find((x: any) => x.title.startsWith('Delivery undone'));
+    expect(n.body).toMatch(/took back their delivery/);
+    // an older delivery needs a manager
+    await sarah.post(`/api/batches/${id}/scripts/action`, { action: 'deliver', scriptIds: [s] });
+    await db.query(`update scripts set delivered_at = delivered_at - interval '3 days' where id = $1`, [s]);
+    const late = await sarah.post(`/api/batches/${id}/scripts/action`, { action: 'undo_delivery', scriptIds: [s] });
+    expect(late.status).toBe(403);
+    expect(late.body.error.message).toMatch(/Only a manager can undo/);
+  });
+
+  it('counts dated to-dos in the Today pill, overdue ones included', async () => {
+    const before = (await sarah.get('/api/today')).body;
+    const t = await manager.post('/api/todos', { userId: ids.sarah, text: 'Send the hook ideas', due: '2026-01-05' });
+    expect(t.status).toBe(200);
+    const after = (await sarah.get('/api/today')).body;
+    expect(after.total).toBe(before.total + 1);
+    expect(after.items.find((i: any) => i.kind === 'todo' && i.text === 'Send the hook ideas')).toMatchObject({ overdue: true, done: 0 });
+  });
+
+  it('keeps notes about potential clients and the client history for managers', async () => {
+    const p = await manager.post('/api/clients', { name: 'Quiet Prospect Co', prospect: true, description: 'Budget is tight, push the bundle' });
+    const pid = p.body.clientId ?? p.body.client?.id ?? p.body.id;
+    const asWriter = (await sarah.get('/api/clients?status=all')).body.clients.find((c: any) => c.name === 'Quiet Prospect Co');
+    expect(asWriter.description).toBeNull();
+    expect((await manager.get('/api/clients?status=all')).body.clients.find((c: any) => c.name === 'Quiet Prospect Co').description).toMatch(/bundle/);
+    const one = (await sarah.get(`/api/clients/${pid}`)).body;
+    expect(one.description).toBeNull();
+    expect((await sarah.get(`/api/clients/${acmeId}`)).body.activity).toEqual([]);
+    expect((await manager.get(`/api/clients/${acmeId}`)).body.activity.length).toBeGreaterThan(0);
+  });
+});
+
+describe('round 3: manager and editor screens', () => {
+  it('tells editors whether each shoot’s scripts are ready, and when they’re final', async () => {
+    await manager.post('/api/users', { name: 'Readiness Editor', email: 'ready-ed@scale.test', role: 'editor', password: 'ready-editor-pass' });
+    const ed = as(await login('ready-ed@scale.test', 'ready-editor-pass'));
+    const today = (await manager.get('/api/bootstrap')).body.clock.today as string;
+    const start = new Date(Date.parse(today) + 20 * 86400_000).toISOString().slice(0, 10);
+    const r = await manager.post('/api/shoots', { clientId: acmeId, startDate: start, batch: { targetCount: 2, split: [{ writerId: ids.sarah, count: 2 }] } });
+    expect(r.status).toBe(200);
+    const shootId = r.body.shootId ?? r.body.shoot?.id;
+    let row = (await ed.get('/api/shoot-readiness')).body.shoots.find((x: any) => x.shoot.id === shootId);
+    expect(row).toMatchObject({ total: 2, finished: 0, state: 'on_track' });
+    const sc = (await manager.get(`/api/batches/${r.body.batchId}`)).body.scripts.map((s: any) => s.id);
+    await sarah.post(`/api/batches/${r.body.batchId}/scripts/action`, { action: 'submit', scriptIds: sc });
+    await manager.post(`/api/batches/${r.body.batchId}/scripts/action`, { action: 'approve', scriptIds: sc });
+    row = (await ed.get('/api/shoot-readiness')).body.shoots.find((x: any) => x.shoot.id === shootId);
+    expect(row).toMatchObject({ finished: 2, state: 'ready' });
+    const n = (await ed.get('/api/notifications')).body.notifications;
+    expect(n.some((x: any) => x.title.startsWith('Scripts final · '))).toBe(true);
+    // editors can search, but only find what they can open
+    const found = (await ed.get('/api/search?q=acme')).body;
+    expect(found.batches).toEqual([]);
+    expect(found.clients.length).toBeGreaterThan(0);
+  });
+
+  it('searches people, shoots, script numbers and briefing calls', async () => {
+    const people = (await manager.get('/api/search?q=sarah')).body.people;
+    expect(people.some((p: any) => p.id === ids.sarah)).toBe(true);
+    const nums = (await manager.get(`/api/search?q=${encodeURIComponent('#1')}`)).body.scripts;
+    expect(nums.length).toBeGreaterThan(0);
+    expect(nums.every((x: any) => x.number === 1)).toBe(true);
+    // writers only find their own script numbers
+    const hers = (await sarah.get(`/api/search?q=${encodeURIComponent('script 1')}`)).body.scripts;
+    const all = (await manager.get(`/api/search?q=${encodeURIComponent('script 1')}`)).body.scripts;
+    expect(hers.length).toBeLessThanOrEqual(all.length);
+    const shoots = (await manager.get('/api/search?q=acme')).body.shoots;
+    expect(Array.isArray(shoots)).toBe(true);
+  });
+
+  it('names both missed deadlines the same way when drafts and final delivery are late', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Both late', targetCount: 1, draftDue: '2026-01-05', finalDue: '2026-01-07', split: [{ writerId: ids.sarah, count: 1 }] });
+    const att = (await manager.get('/api/dashboard')).body.attention.find((a: any) => a.batch.id === b.body.batchId);
+    expect(att.issues[0].text).toMatch(/^Drafts \d+ days overdue · Final delivery \d+ days overdue/);
+  });
+
+  it('names the document version in the history when deciding on it', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Versioned log', targetCount: 1, split: [{ writerId: ids.sarah, count: 1 }] });
+    const id = b.body.batchId;
+    const sc = (await manager.get(`/api/batches/${id}`)).body.scripts.map((s: any) => s.id);
+    const v = await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: sc, url: 'https://docs.google.com/document/d/log-v1' });
+    await manager.post(`/api/batches/${id}/review`, { action: 'approve', scriptIds: sc, submissionId: v.body.submissionId });
+    const act = (await manager.get(`/api/batches/${id}`)).body.activity;
+    expect(act.some((a: any) => /\(document version 1\)/.test(a.summary))).toBe(true);
+  });
+});
+
+
+describe('overview cards', () => {
+  it('gives the cards their footers: deliveries per day this week and the review queue’s age', async () => {
+    const c = (await manager.get('/api/dashboard')).body.cards;
+    expect(c.deliveredByDay).toHaveLength(7);
+    expect(c.deliveredByDay.reduce((n: number, x: number) => n + x, 0)).toBe(c.deliveredThisWeekScripts);
+    if (c.awaitingReviewScripts > 0) expect(typeof c.oldestInReviewAt).toBe('string');
+    else expect(c.oldestInReviewAt).toBeNull();
+    expect(c.lastReviewAt === null || typeof c.lastReviewAt === 'string').toBe(true);
   });
 });
