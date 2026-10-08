@@ -720,6 +720,11 @@ export async function applyScriptAction(
     review?: { url: string | null; fileId: number | null; submissionId?: number | null };
     /** set when scripts are sent as one document */
     submission?: { id: number; label: string; version: number };
+    /**
+     * Timeliner confirmed this delivery by itself (the batch's script document landed there): every
+     * approved script in the batch goes, recorded under `me` (the uploader, or whoever connected Timeliner)
+     */
+    viaTimeliner?: { fileName: string; uploaderName: string | null };
   },
 ): Promise<{ changed: number[]; deliveryId?: number; reviewId?: number }> {
   const rule = ACTION_RULES[action];
@@ -735,7 +740,7 @@ export async function applyScriptAction(
     if (!b) throw notFound('Batch');
     // a manager confirming delivery delivers the whole batch: every approved
     // script goes, whoever wrote it (scripts still in the works stay as they are)
-    if (action === 'deliver' && isManager(me.role)) {
+    if (action === 'deliver' && (isManager(me.role) || opts.viaTimeliner)) {
       const rest = await t.query<{ id: number }>(`select id from scripts where batch_id = $1 and removed_at is null and status = 'approved'`, [batchId]);
       for (const r of rest) if (!ids.includes(r.id)) ids.push(r.id);
     }
@@ -762,7 +767,8 @@ export async function applyScriptAction(
     }
     const problems = new Map<string, number[]>();
     for (const r of rows) {
-      const why = checkAction(action, { status: r.status, assigneeId: r.assignee_id }, me);
+      // Timeliner delivers the whole batch, whoever is recorded for it
+      const why = checkAction(action, { status: r.status, assigneeId: r.assignee_id }, opts.viaTimeliner && action === 'deliver' ? { ...me, role: 'manager' } : me);
       if (why) problems.set(why, [...(problems.get(why) ?? []), r.number]);
     }
     if (problems.size) {
@@ -821,7 +827,8 @@ export async function applyScriptAction(
         }
         break;
       case 'deliver': {
-        const d = await t.one<{ id: number }>(`insert into deliveries (batch_id, confirmed_by, timeliner_url, note) values ($1, $2, $3, $4) returning id`, [batchId, me.id, opts.timelinerUrl, opts.note]);
+        const d = await t.one<{ id: number }>(`insert into deliveries (batch_id, confirmed_by, timeliner_url, note, source) values ($1, $2, $3, $4, $5) returning id`,
+          [batchId, me.id, opts.timelinerUrl, opts.note, opts.viaTimeliner ? 'timeliner' : null]);
         deliveryId = d!.id;
         await t.query(
           `update scripts set status = 'delivered', delivered_at = now(), delivered_by = $1, delivery_id = $2,
@@ -854,8 +861,10 @@ export async function applyScriptAction(
     const decided = opts.review?.submissionId && (action === 'approve' || action === 'request_revisions')
       ? await t.one<{ version: number }>(`select version from submissions where id = $1`, [opts.review.submissionId]) : null;
     const versionNote = decided ? ` (document version ${decided.version})` : '';
+    const tl = action === 'deliver' ? opts.viaTimeliner : undefined;
     const summary = action === 'submit' && opts.submission
       ? `Sent ${scriptsWord} for review as one document: “${opts.submission.label}”${opts.submission.version > 1 ? ` (version ${opts.submission.version})` : ''}${onBehalf}`
+      : tl ? `Timeliner confirmed delivery of ${scriptsWord}: “${tl.fileName}” landed in Timeliner${tl.uploaderName ? `, uploaded by ${tl.uploaderName}` : ''}`
       : `${verb[action]} ${scriptsWord}${versionNote}${onBehalf}${opts.note && action !== 'deliver' ? ` — “${opts.note}”` : ''}${attached ? (action === 'approve' ? ' (edited version attached)' : ' (changes attached)') : ''}`;
     await logActivity(t, {
       actor: me, action: `scripts.${action}`, entityType: 'batch', entityId: batchId, batchId, clientId: b.client_id,
@@ -906,11 +915,17 @@ export async function applyScriptAction(
       const mgrs = await managerIds(t);
       await notify(t, mgrs, {
         type: 'delivery', title: `Delivered · ${b.client_name}`,
-        body: `${me.name} confirmed script${rows.length > 1 ? 's' : ''} ${nums} of ${b.title} in Timeliner${onBehalf}.`, link,
-      }, me.id);
-      for (const uid of others.filter((id) => !mgrs.includes(id))) {
+        body: tl
+          ? `Timeliner confirmed script${rows.length > 1 ? 's' : ''} ${nums} of ${b.title}: “${tl.fileName}” is in Timeliner${tl.uploaderName ? ` (uploaded by ${tl.uploaderName})` : ''}.`
+          : `${me.name} confirmed script${rows.length > 1 ? 's' : ''} ${nums} of ${b.title} in Timeliner${onBehalf}.`, link,
+      }, tl ? undefined : me.id);
+      for (const uid of (tl ? writers : others).filter((id) => !mgrs.includes(id))) {
         const w = theirs(uid);
-        await notify(t, [uid], { type: 'delivery', title: `Delivered · ${b.client_name} · ${b.title}`, body: `${me.name} marked your ${w.word} delivered to Timeliner for you. Nothing left to do for ${w.them}.`, link: '/my-work' }, me.id);
+        await notify(t, [uid], {
+          type: 'delivery', title: `Delivered · ${b.client_name} · ${b.title}`,
+          body: tl ? `Your ${w.word} ${w.n > 1 ? 'are' : 'is'} in Timeliner (“${tl.fileName}”), so ${w.n > 1 ? 'they’re' : 'it’s'} marked delivered. Nothing left to do.` : `${me.name} marked your ${w.word} delivered to Timeliner for you. Nothing left to do for ${w.them}.`,
+          link: '/my-work',
+        }, tl ? undefined : me.id);
       }
     } else if (action === 'undo_delivery') {
       if (!isManager(me.role)) {

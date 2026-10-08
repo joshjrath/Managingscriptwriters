@@ -28,6 +28,7 @@ import { registerRecording, routedDb } from './recording';
 import { registerScriptBankRoutes } from './script-bank';
 import { registerTodayRoutes } from './today';
 import { registerEditorRoutes } from './control/editors';
+import { registerTimelinerRoutes } from './timeliner';
 import { registerUploadCleanup } from './files';
 import type { Db } from './db';
 import { CSRF_HEADER } from '../shared/types';
@@ -119,6 +120,7 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
   registerCalendarFeedRoutes(app, ctx);
   registerCalendarShootRoutes(app, ctx);
   registerEditorRoutes(app, ctx);
+  registerTimelinerRoutes(app, ctx);
 
   app.all('/api/*', async () => { throw new HttpError(404, 'Not found'); });
 

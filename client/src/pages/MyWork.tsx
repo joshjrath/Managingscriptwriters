@@ -135,7 +135,7 @@ export function MyWorkPage() {
                     <div className="rows">{q.data.recentDeliveries.map((d) => (
                       <div key={d.id} className="item edge-mint">
                         <div className="body"><div className="top">{d.clientName}</div><div className="title">{d.batchTitle}</div><div className="meta">{d.scriptNumbers.length ? scriptsWord(d.scriptNumbers) : 'Scripts —'} · {fmtStamp(d.confirmedAt, displayTz)}</div></div>
-                        <div className="side"><Chip color="mint">{d.forNames.length ? `For ${d.forNames.join(', ')}` : 'You confirmed'}</Chip></div>
+                        <div className="side"><Chip color="mint">{d.verification === 'timeliner' ? 'Timeliner confirmed' : d.forNames.length ? `For ${d.forNames.join(', ')}` : 'You confirmed'}</Chip></div>
                       </div>
                     ))}</div>
                   </>

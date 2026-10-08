@@ -347,7 +347,8 @@ export interface Delivery {
   timelinerUrl: string | null;
   note: string | null;
   scriptNumbers: number[];
-  verification: 'writer_confirmed';
+  /** who said it's delivered: a person on the team, or Timeliner itself when the script document landed there */
+  verification: 'writer_confirmed' | 'timeliner';
   /** writers it was confirmed for, when someone else (a manager) confirmed it */
   forNames: string[];
 }
@@ -765,4 +766,36 @@ export interface CalendarShoot {
   total: number;
   /** what this client's last batch had, to start from */
   suggested: { count: number; split: { writerId: number; name: string; count: number }[] } | null;
+}
+
+// ── Timeliner ─────────────────────────────────────────────────────────────
+
+/** What happened to one message from Timeliner. */
+export type TimelinerOutcome = 'delivered' | 'unmatched' | 'nothing_approved' | 'already_delivered' | 'ignored' | 'test';
+
+export interface TimelinerEvent {
+  id: string;
+  receivedAt: string;
+  fileName: string | null;
+  /** the Timeliner brand / project / task it arrived in, as far as known */
+  where: string | null;
+  uploader: string | null;
+  outcome: TimelinerOutcome;
+  /** why it couldn't be placed, or what was delivered */
+  detail: string | null;
+  batch: { id: number; title: string; clientName: string } | null;
+}
+
+/** Settings → Timeliner. */
+export interface TimelinerStatus {
+  /** TIMELINER_API_KEY is set on the server */
+  keySet: boolean;
+  /** the address Timeliner calls; null when the site doesn't know its public address (set PUBLIC_URL) */
+  webhookUrl: string | null;
+  connected: { at: string; byName: string | null } | null;
+  /** when Timeliner's test message last arrived and checked out */
+  testAt: string | null;
+  events: TimelinerEvent[];
+  /** batches with approved scripts not yet delivered, to place an upload that couldn't be matched */
+  openBatches: { id: number; title: string; clientName: string; approved: number }[];
 }

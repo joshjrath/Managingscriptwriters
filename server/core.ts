@@ -22,6 +22,10 @@ export interface Ctx {
   notesReader?: import('./notes-import').NotesReader | null;
   /** reads a synced calendar's iCal link (tests pass a stand-in) */
   fetchCalendar?: (url: string) => Promise<string>;
+  /** Timeliner's API, when TIMELINER_API_KEY is set (tests pass a stand-in) */
+  timeliner?: import('./timeliner').TimelinerApi | null;
+  /** the site's public https address (for the webhook Timeliner calls) */
+  publicUrl?: string;
   /** the real workspace; `db` points at a practice copy for requests made in Recording mode */
   realDb?: Db;
   /** the database this request is using right now (for work that outlives the handler, like streaming a file) */

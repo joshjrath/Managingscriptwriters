@@ -21,6 +21,12 @@ export interface Config {
   uploadLimitBytes: number;
   /** turns on Paste notes (Claude); the SDK reads the key from the environment itself */
   anthropicApiKey: string | undefined;
+  /** Timeliner's workspace API key (tlsk_…): with it, a script document uploaded in Timeliner marks its batch delivered */
+  timelinerApiKey: string | undefined;
+  /** where Timeliner's API lives (tests and staging point it elsewhere) */
+  timelinerApiUrl: string;
+  /** the site's public https address, for the webhook Timeliner calls (PUBLIC_URL, or the one Render sets) */
+  publicUrl: string | undefined;
   /** the built client; an empty STATIC_DIR (the dev runner) serves no client */
   staticDir: string | undefined;
   remindersEnabled: boolean;
@@ -98,6 +104,9 @@ export function loadConfig(
     // files are stored in the database in pieces appended together, which gets slow and heavy for very large files
     uploadLimitBytes: number('UPLOAD_LIMIT_MB', 25, 1, 100, { clamp: true }) * 1024 * 1024,
     anthropicApiKey: set(env.ANTHROPIC_API_KEY),
+    timelinerApiKey: set(env.TIMELINER_API_KEY),
+    timelinerApiUrl: (set(env.TIMELINER_API_URL) ?? 'https://timeliner.io').replace(/\/+$/, ''),
+    publicUrl: (set(env.PUBLIC_URL) ?? set(env.RENDER_EXTERNAL_URL))?.replace(/\/+$/, ''),
     staticDir: env.STATIC_DIR !== undefined ? env.STATIC_DIR || undefined : defaults.staticDir,
     remindersEnabled: flag('REMINDERS', true),
     reminderIntervalMinutes: number('REMINDER_INTERVAL_MINUTES', 10, 1, 24 * 60),

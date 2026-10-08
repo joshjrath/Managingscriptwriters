@@ -546,4 +546,33 @@ create index if not exists activity_actor_idx on activity (actor_id, created_at 
 alter table settings alter column org_name set default 'SCALE Media';
 update settings set org_name = 'SCALE Media' where org_name = 'Scale Media';
 `,
+  // 28 · Timeliner: a script document uploaded there marks its batch delivered. The batch remembers its
+  // Timeliner project once matched, a delivery says Timeliner confirmed it, the workspace keeps the webhook
+  // it registered (and the secret Timeliner signs each message with), and every message is logged once
+  `
+alter table batches add column timeliner_project_id text;
+create index batches_timeliner_project_idx on batches (timeliner_project_id);
+alter table deliveries add column source text;
+alter table settings add column timeliner_webhook_id text;
+alter table settings add column timeliner_webhook_secret text;
+alter table settings add column timeliner_connected_by bigint references users(id);
+alter table settings add column timeliner_connected_at timestamptz;
+alter table settings add column timeliner_test_at timestamptz;
+create table timeliner_events (
+  id text primary key,
+  type text not null,
+  received_at timestamptz not null default now(),
+  project_id text,
+  task_id text,
+  brand_id text,
+  file_name text,
+  place text,
+  uploader text,
+  outcome text not null,
+  batch_id bigint references batches(id),
+  delivery_id bigint references deliveries(id),
+  detail text
+);
+create index timeliner_events_received_idx on timeliner_events (received_at desc);
+`,
 ];

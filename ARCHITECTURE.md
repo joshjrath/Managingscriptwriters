@@ -41,6 +41,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 | Master log (activity and audit) | `server/audit.ts` |
 | Reminders (in-process timer, or `npm run reminders` from cron) | `server/reminders.ts`, `server/reminders-cli.ts` |
 | Paste notes (Anthropic API) | `server/notes-import.ts` |
+| Timeliner: uploads of a batch's script document deliver it (webhook, matching, Settings → Timeliner) | `server/timeliner.ts` |
 | Editors who don't sign in (Settings → Editors) | `server/control/editors.ts` |
 | Demo data | `server/seed-demo.ts`, `server/seed-cli.ts` |
 | Dates, deadlines, clock, due state | `shared/dates.ts` |
@@ -122,6 +123,11 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
   - Each run takes `LOCKS.reminders`, and notifications are de-duplicated by key, so overlapping runs are harmless.
 - **Calendar sync** re-reads each synced calendar every `CALENDAR_SYNC_MINUTES` (15) inside the server (`CALENDAR_SYNC=off` turns it off), and tells managers once about each new shoot it finds.
 - **Paste notes** calls the Anthropic API, only when `ANTHROPIC_API_KEY` is set. Each person can run one read at a time and 30 an hour. If the API fails, the person gets a clear message and nothing is created.
+- **Timeliner** (`server/timeliner.ts`), only when `TIMELINER_API_KEY` is set:
+  - On start-up (once) or from Settings → Timeliner, the server registers a webhook (`version.uploaded`, `file.uploaded`) pointing at `PUBLIC_URL` (or `RENDER_EXTERNAL_URL`) + `/hooks/timeliner`, and keeps the signing secret Timeliner returns in `settings`.
+  - `POST /hooks/timeliner` is public and outside `/api` (so the same-page header check doesn't apply); it refuses a message unless `X-Timeliner-Signature` checks out against that secret and is under five minutes old. Each message id is claimed in `timeliner_events` before anything happens, so a repeat is a no-op.
+  - A document upload is matched to a batch (its `timeliner_project_id`, else the client named like the Timeliner brand or project) and its approved scripts are delivered through `applyScriptAction` with `viaTimeliner`, which records the delivery with `source = 'timeliner'`.
+  - Lookups (project, brand, members) are best effort: when Timeliner can't be reached the upload is kept as unmatched for a manager to place.
 - **No email:** the app never sends email. Sign-in details are copied by hand.
 
 ## Invariants (break one and something real breaks)

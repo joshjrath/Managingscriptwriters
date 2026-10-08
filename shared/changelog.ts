@@ -20,7 +20,7 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-09-28-potential-clients': ['managers'], '2026-09-28-plan-later': ['managers'], '2026-09-28-admin-name': ['managers'],
   '2026-09-28-calendar-drag': ['managers'], '2026-09-28-team': ['managers'], '2026-09-28-signin-details': ['managers'],
   '2026-10-07-my-work-redesign': ['writers', 'managers'], '2026-09-28-written-counter': ['writers', 'managers'], '2026-10-08-writers-never-miss': ['writers', 'managers'],
-  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-editors-never-get-scripts': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'], '2026-10-08-master-log-everything': ['managers'], '2026-10-08-no-script-titles': ['managers', 'writers'],
+  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-editors-never-get-scripts': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'], '2026-10-08-master-log-everything': ['managers'], '2026-10-08-no-script-titles': ['managers', 'writers'], '2026-10-08-timeliner-auto-delivery': ['managers', 'writers'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -34,6 +34,18 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-08-timeliner-auto-delivery',
+    date: '2026-10-08',
+    title: 'Timeliner marks batches delivered by itself',
+    summary: 'Upload the batch’s script PDF or Doc to Timeliner and the batch is marked delivered here, with no link to paste or button to press.',
+    changes: [
+      { tag: 'new', text: 'When a batch’s script document (PDF or Word) is uploaded to the client’s project in Timeliner, every approved script in that batch is marked delivered here straight away, labelled “Confirmed by Timeliner”. Videos and images editors upload don’t count.' },
+      { tag: 'new', text: 'The app works out the batch from the Timeliner brand or project name (the client), and remembers the project after the first match. If it can’t tell, the upload waits in Settings → Timeliner and managers are told: pick the batch once and it’s delivered.' },
+      { tag: 'new', text: 'Settings → Timeliner shows whether it’s connected, lets you send a test from Timeliner, and lists recent uploads and what happened to each.' },
+      { tag: 'improved', text: 'You can still mark scripts delivered by hand, the same as before.' },
+    ],
+  },
   {
     id: '2026-10-08-no-script-titles',
     date: '2026-10-08',

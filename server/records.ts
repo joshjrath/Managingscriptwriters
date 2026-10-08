@@ -83,7 +83,7 @@ export async function loadRevisions(db: Db, where: { batchId?: number; scriptIds
 
 // ── deliveries ───────────────────────────────────────────────────────────
 
-interface DeliveryRow { id: number; batch_id: number; confirmed_by: number; confirmed_by_name: string; confirmed_at: string; timeliner_url: string | null; note: string | null }
+interface DeliveryRow { id: number; batch_id: number; confirmed_by: number; confirmed_by_name: string; confirmed_at: string; timeliner_url: string | null; note: string | null; source: string | null }
 
 export async function loadDeliveries(db: Db, where: { batchIds?: number[]; confirmedBy?: number; limit?: number }): Promise<Delivery[]> {
   const cond: string[] = [];
@@ -91,7 +91,7 @@ export async function loadDeliveries(db: Db, where: { batchIds?: number[]; confi
   if (where.batchIds) { if (!where.batchIds.length) return []; cond.push(`d.batch_id in (${inList(where.batchIds, params)})`); }
   if (where.confirmedBy) { params.push(where.confirmedBy); cond.push(`d.confirmed_by = $${params.length}`); }
   const rows = await db.query<DeliveryRow>(
-    `select d.id, d.batch_id, d.confirmed_by, u.name as confirmed_by_name, d.confirmed_at, d.timeliner_url, d.note
+    `select d.id, d.batch_id, d.confirmed_by, u.name as confirmed_by_name, d.confirmed_at, d.timeliner_url, d.note, d.source
        from deliveries d join users u on u.id = d.confirmed_by
        ${cond.length ? 'where ' + cond.join(' and ') : ''}
       order by d.confirmed_at desc ${where.limit ? `limit ${Number(where.limit)}` : ''}`,
@@ -117,7 +117,7 @@ export async function loadDeliveries(db: Db, where: { batchIds?: number[]; confi
     return {
       id: r.id, batchId: r.batch_id, confirmedById: r.confirmed_by, confirmedByName: r.confirmed_by_name,
       confirmedAt: r.confirmed_at, timelinerUrl: r.timeliner_url, note: r.note,
-      scriptNumbers: numbers.get(r.id) ?? [], verification: 'writer_confirmed', forNames,
+      scriptNumbers: numbers.get(r.id) ?? [], verification: r.source === 'timeliner' ? 'timeliner' : 'writer_confirmed', forNames,
     };
   });
 }

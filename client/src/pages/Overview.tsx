@@ -160,7 +160,7 @@ export function Overview() {
                         <div className="body">
                           <div className="top">{x.clientName}</div>
                           <div className="title">{x.batchTitle}</div>
-                          <div className="meta"><span>{scriptsLabel(x.scriptNumbers)}</span><span>by {x.confirmedByName}</span></div>
+                          <div className="meta"><span>{scriptsLabel(x.scriptNumbers)}</span><span>{x.verification === 'timeliner' ? 'confirmed by Timeliner' : `by ${x.confirmedByName}`}</span></div>
                         </div>
                         <div className="side"><Chip color="mint" icon={<CheckCheck aria-hidden />}>{plural(x.scriptNumbers.length, 'script')}</Chip><span className="muted nowrap" style={{ fontSize: 12 }}>{fmtStamp(x.confirmedAt, displayTz)}</span></div>
                       </Link>

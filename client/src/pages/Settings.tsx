@@ -13,6 +13,7 @@ import { CITIES, cityLabel, findCity, shiftLength, shiftOf, timeZoneList, zoneOf
 import { ACCENT_LABEL, ACCENTS, darkTextContrast, DEFAULT_PALETTE, HEX, MIN_ACCENT_CONTRAST, PALETTES, resolveTheme, SURFACE_LABEL, SURFACES, surfaceSwatch, type Accent, type WorkspaceTheme } from '../../../shared/palettes';
 import { applyTheme, restoreTheme } from '../theme';
 import { CalendarFeedsPanel } from '../components/CalendarFeeds';
+import { TimelinerPanel } from '../components/TimelinerPanel';
 import { PageHeader, useBoot } from '../components/Shell';
 import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, Term, useFieldId, useToast } from '../components/ui';
 
@@ -42,6 +43,7 @@ export function SettingsPage() {
         <RulesPanel />
         <div className="grid" style={{ alignContent: 'start' }}>
           <TeamPanel />
+          <TimelinerPanel />
           <CalendarFeedsPanel />
           {isAdmin(me.role) && <EditorsPanel />}
         </div>

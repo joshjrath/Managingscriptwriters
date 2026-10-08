@@ -10,6 +10,7 @@ import { openDb } from './db';
 import { hashPassword, validatePassword } from './auth';
 import { startReminderScheduler } from './reminders';
 import { startCalendarSync } from './calendar-feeds';
+import { connectOnStart, timelinerClient } from './timeliner';
 import { seedDemo } from './seed-demo';
 import { claudeNotesReader } from './notes-import';
 import type { Ctx } from './core';
@@ -43,6 +44,9 @@ async function main() {
     notesReader: config.anthropicApiKey ? claudeNotesReader() : null,
     remindersEnabled: config.remindersEnabled,
     calendarAllowPrivate: config.calendarAllowPrivate,
+    // a script document uploaded in Timeliner marks its batch delivered
+    timeliner: config.timelinerApiKey ? timelinerClient(config.timelinerApiKey, config.timelinerApiUrl) : null,
+    publicUrl: config.publicUrl,
   };
   const app = await buildApp(ctx, { staticDir: config.staticDir, logger: config.production, trustProxy: config.trustProxy });
 
@@ -52,6 +56,8 @@ async function main() {
 
   await app.listen({ port: config.port, host: config.host });
   console.log(`SCALE Media scripts listening on :${config.port}`);
+  // with a Timeliner key and a public address, register the webhook the first time
+  void connectOnStart(ctx, (m) => console.log(m));
 
   let stopping = false;
   const shutdown = () => {

@@ -894,13 +894,13 @@ function Deliveries({ b }: { b: BatchDetail }) {
   return (
     <Panel title="Delivery records" sub="who confirmed each delivery to Timeliner">
       {b.progress.delivered < b.progress.total && b.progress.delivered > 0 && <div className="banner yellow" style={{ marginBottom: 12 }}><AlertTriangle aria-hidden /><div className="txt"><b>Partially delivered: {b.progress.delivered} / {b.progress.total}</b><span>The batch is complete only when every script is recorded as delivered.</span></div></div>}
-      {!b.deliveries.length ? <Empty boxed icon={<Send />} title="Nothing delivered yet">Writers confirm delivery here after adding scripts to Timeliner.</Empty> : (
+      {!b.deliveries.length ? <Empty boxed icon={<Send />} title="Nothing delivered yet">It’s marked delivered when the script document lands in Timeliner, or a writer confirms it here.</Empty> : (
         <div className="rows">
           {b.deliveries.map((d) => (
             <div key={d.id} className="item edge-mint">
               <div className="body">
                 <div className="title">{d.scriptNumbers.length ? scriptsLabel(d.scriptNumbers) : 'Scripts —'}</div>
-                <div className="meta"><span>{d.forNames.length ? <>Confirmed by <b style={{ color: 'var(--text)' }}>{d.confirmedByName}</b> for {d.forNames.join(', ')}</> : <>Confirmed by the writer, <b style={{ color: 'var(--text)' }}>{d.confirmedByName}</b></>}</span><span>{fmtStamp(d.confirmedAt, displayTz)}</span></div>
+                <div className="meta"><span>{d.verification === 'timeliner' ? <>Confirmed by <b style={{ color: 'var(--text)' }}>Timeliner</b> when the document was uploaded</> : d.forNames.length ? <>Confirmed by <b style={{ color: 'var(--text)' }}>{d.confirmedByName}</b> for {d.forNames.join(', ')}</> : <>Confirmed by the writer, <b style={{ color: 'var(--text)' }}>{d.confirmedByName}</b></>}</span><span>{fmtStamp(d.confirmedAt, displayTz)}</span></div>
                 {d.note && <div className="muted" style={{ fontSize: 13 }}>{d.note}</div>}
                 {d.scriptNumbers.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>These scripts were later moved back to approved.</div>}
               </div>

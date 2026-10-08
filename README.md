@@ -145,9 +145,17 @@ Shoot dates are stored as plain calendar dates, so timezones can't move them a d
 
 **Planned writing start** is tracked separately. If a writer has a capacity (scripts per working day) set in Settings → Team, the batch form offers an *estimated* start date; writers are only shown as over capacity when a capacity is configured.
 
-### Timeliner delivery — manually confirmed
+### Timeliner delivery: confirmed by Timeliner itself
 
-There is no Timeliner integration and no fake "send to Timeliner" button. The writer adds scripts in Timeliner, selects them here, and clicks **Mark delivered to Timeliner**, optionally adding the Timeliner link and a note. The app records who confirmed and when, labels it **"Writer-confirmed delivery"**, and notifies managers. A batch is fully delivered only when every script is recorded as delivered. Managers can undo a delivery (it's logged).
+With `TIMELINER_API_KEY` set (Timeliner → Settings → Developers → Generate; the API needs Timeliner's Agency plan), the batch is marked delivered as soon as its script document lands in Timeliner — nobody pastes a link or presses a button.
+
+- **Connecting.** The server registers a webhook with Timeliner the first time it starts with the key (or from **Settings → Timeliner → Connect**). It uses `PUBLIC_URL`, or the address Render sets, plus `/hooks/timeliner`. **Test** asks Timeliner to send a sample message and shows when it arrived.
+- **What counts.** A PDF, Word or text file uploaded to a task or a project in Timeliner (`version.uploaded`, `file.uploaded`). The videos and images editors upload are ignored. Every message is checked against the secret Timeliner signs it with, refused if it's more than five minutes old, and acted on once even if Timeliner sends it twice.
+- **Which batch.** The batch already linked to that Timeliner project; otherwise the client whose name the Timeliner brand or project carries, and of its batches with approved scripts the only one, or the one whose title or shoot date the project or task name carries. Once matched, the batch remembers its Timeliner project.
+- **What happens.** Every approved script in the batch is delivered, recorded under the uploader when their Timeliner email is on the team (else whoever connected Timeliner), and shown as **Confirmed by Timeliner**. Managers and writers are notified as usual. Managers can undo a delivery (it's logged).
+- **When it can't tell.** The upload waits in **Settings → Timeliner** with why it couldn't be placed; a manager picks the batch and it's delivered (and that project goes to that batch from then on). An upload for a batch with nothing approved yet delivers nothing and tells the managers.
+
+Without the key, delivery works as before: the writer adds scripts in Timeliner, selects them here, and clicks **Mark delivered to Timeliner**, optionally adding the Timeliner link and a note. The app records who confirmed and when, labels it **"Writer-confirmed delivery"**, and notifies managers. A batch is fully delivered only when every script is recorded as delivered.
 
 ### Quick entry (natural language)
 
@@ -233,7 +241,7 @@ test/           vitest suites
 
 ## Limitations
 
-- Timeliner delivery is **manually confirmed by the writer**, not verified. An official Timeliner API integration could be added later without changing this flow.
+- Without `TIMELINER_API_KEY`, Timeliner delivery is **confirmed by the writer** here, not checked against Timeliner.
 - Quick entry is pattern-based; unusual phrasing falls back to the structured form.
 - Scripts aren't written in the app — writers send a PDF or a Google Doc link, and edits happen in that document.
 - Notifications are in-app only (no email or Slack yet).

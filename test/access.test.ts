@@ -113,6 +113,13 @@ const ACCESS: Record<string, Access> = {
   'POST /api/editors': 'admin',
   'PATCH /api/editors/:id': 'admin',
   'DELETE /api/editors/:id': 'admin',
+
+  'GET /api/timeliner': 'manager',
+  'POST /api/timeliner/connect': 'manager',
+  'POST /api/timeliner/test': 'manager',
+  'POST /api/timeliner/events/:id/assign': 'manager',
+  // Timeliner calls it; the signature is the protection (test/timeliner.test.ts)
+  'POST /hooks/timeliner': 'public',
 };
 
 /** Every route the server registers, read from its source (`app.get('/api/…'` and friends). */
