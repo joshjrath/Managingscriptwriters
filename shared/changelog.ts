@@ -41,7 +41,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     summary: 'The four cards at the top of the Overview have a new look, and each one now says what’s behind its number.',
     changes: [
       { tag: 'improved', text: 'Overdue batches always has its warm gradient. When something is late it says “Needs you” and names the batches and how many days late; when nothing is, it says “All clear” and shows the next deadline.' },
-      { tag: 'improved', text: 'Batches due today lights up only when something is due, with the cutoff time and a bar for how much of today’s work is done. Otherwise it shows what’s due next.' },
+      { tag: 'improved', text: 'Batches due today always has its yellow gradient too. When something is due it shows the cutoff time and a bar for how much of today’s work is done; otherwise it says “Nothing due” and shows what’s due next.' },
       { tag: 'improved', text: 'Scripts in review shows how long the oldest one has been waiting and which batches they’re in. Delivered this week has a small bar for each day, Monday to Sunday.' },
       { tag: 'fixed', text: 'Under More on the Overview, Active batches and Writing progress sit side by side again instead of being pushed apart.' },
     ],

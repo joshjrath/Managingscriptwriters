@@ -1,8 +1,7 @@
-// The Overview's four summary cards. Overdue always wears its warm gradient
-// fill (it's the card people look for first), and says "All clear" when
-// nothing is late. Due today lights up the same way only when something is
-// due; In review and Delivered this week are dark cards with a glow in their
-// colour, and every card goes calm at zero. Each card ends in a small footer
+// The Overview's four summary cards. Overdue and Due today always wear their
+// gradient fills (warm and yellow: the cards people look for first), and say
+// "All clear" / "Nothing due" when there's nothing in them. In review and
+// Delivered this week are dark cards with a glow in their colour, calm at zero. Each card ends in a small footer
 // that says what's behind the number: which batches are late, how far today's
 // work has got, where the scripts in review are, and deliveries day by day.
 
@@ -88,13 +87,13 @@ export function StatCards({ d }: { d: Dashboard }) {
       )} />
   );
 
-  // 2 · due today: the gradient only when something is due
+  // 2 · due today: always the yellow gradient
   const t = today.data;
   const dueTomorrow = upcoming.filter((b) => b.next!.date === tomorrow);
   const dueNow = c.dueTodayBatches > 0;
   const todayCard = (
-    <Card look={dueNow ? 'aurora' : 'calm'} tone="today" icon={dueNow ? <CalendarCheck /> : <CalendarDays />} n={c.dueTodayBatches}
-      pill={dueNow ? <span className="kpi-pill hot">Due {fmtCutoff(settings.cutoff)} {fmtTimeZoneAbbr(settings.timezone)}</span> : undefined}
+    <Card look="aurora" tone="today" icon={dueNow ? <CalendarCheck /> : <CalendarDays />} n={c.dueTodayBatches}
+      pill={dueNow ? <span className="kpi-pill hot">Due {fmtCutoff(settings.cutoff)} {fmtTimeZoneAbbr(settings.timezone)}</span> : <span className="kpi-pill"><Check aria-hidden />Nothing due</span>}
       cap={mine ? 'Yours due today' : c.dueTodayBatches === 1 ? 'Batch due today' : 'Batches due today'}
       sub={c.dueTodayScripts ? `${plural(c.dueTodayScripts, 'script')} left to finish` : 'No deadlines today'}
       label={`${plural(c.dueTodayBatches, 'batch', 'batches')} due today. Show them.`}
