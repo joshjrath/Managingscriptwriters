@@ -575,4 +575,68 @@ create table timeliner_events (
 );
 create index timeliner_events_received_idx on timeliner_events (received_at desc);
 `,
+  // 29 · editors' videos, read from Timeliner: a copy of its tasks (each matched to a client, batch and script),
+  // its members (matched to the team by email) and the names of its brands, projects and sub-folders; what each
+  // editor says they're on, and the videos they marked done here. Settings keep when Timeliner was last read.
+  `
+create table timeliner_members (
+  id text primary key,
+  email text,
+  name text,
+  role text,
+  active boolean not null default true,
+  synced_at timestamptz not null default now()
+);
+create index timeliner_members_email_idx on timeliner_members (lower(email));
+create table timeliner_names (
+  id text primary key,
+  kind text not null check (kind in ('brand', 'project', 'subfolder')),
+  name text not null,
+  parent_id text,
+  synced_at timestamptz not null default now()
+);
+create table timeliner_tasks (
+  id text primary key,
+  title text not null,
+  status_group text not null,
+  step_label text,
+  history_group text,
+  project_id text,
+  brand_id text,
+  sub_folder_id text,
+  folder text,
+  assignee_ids text[] not null default '{}',
+  internal_deadline date,
+  external_deadline date,
+  internal_revisions int not null default 0,
+  client_revisions int not null default 0,
+  created_at timestamptz,
+  updated_at timestamptz,
+  moved_at timestamptz,
+  moved_by text,
+  left_plate_at timestamptz,
+  client_id bigint references clients(id) on delete set null,
+  batch_id bigint references batches(id) on delete set null,
+  script_number int,
+  synced_at timestamptz not null default now()
+);
+create index timeliner_tasks_batch_idx on timeliner_tasks (batch_id);
+create table editor_focus (
+  user_id bigint primary key references users(id) on delete cascade,
+  task_id text not null,
+  state text not null check (state in ('on', 'paused')),
+  since timestamptz not null,
+  worked_seconds int not null default 0,
+  paused_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+create table editing_done (
+  task_id text not null,
+  user_id bigint not null references users(id) on delete cascade,
+  done_at timestamptz not null default now(),
+  primary key (task_id, user_id)
+);
+alter table settings add column timeliner_synced_at timestamptz;
+alter table settings add column timeliner_sync_error text;
+`,
 ];

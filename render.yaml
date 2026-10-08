@@ -31,8 +31,10 @@ services:
       # Optional: turns on New work → Paste notes (Claude reads pasted notes). From console.anthropic.com → API keys.
       - key: ANTHROPIC_API_KEY
         sync: false
-      # Optional: a Timeliner workspace API key (Timeliner → Settings → Developers, starts tlsk_). With it, a script
-      # document uploaded in Timeliner marks its batch delivered by itself. Render's own address is used for the webhook.
+      # Optional: a Timeliner workspace API key (Timeliner → Settings → Developers, starts tlsk_). With it, the Editors
+      # tab shows each editor's videos, read from Timeliner every TIMELINER_SYNC_MINUTES (default 5; a read-only key is
+      # enough), and a script document uploaded in Timeliner marks its batch delivered by itself (that needs the
+      # webhook, so Webhooks read & write). Render's own address is used for the webhook. TIMELINER_SYNC=off stops the reads.
       - key: TIMELINER_API_KEY
         sync: false
       # Recommended: how many proxies sit in front of the app, so sign-in limits and the Master log

@@ -1,4 +1,6 @@
 // Timeliner: when a batch's script document lands in Timeliner, the batch is marked delivered by itself.
+// (The editors' videos are read from Timeliner too: see server/editing.ts. This file holds the API client, the
+// webhook, and passes task messages on to it.)
 //
 // Timeliner sends a signed message to POST /hooks/timeliner when a file is uploaded: version.uploaded for a
 // file on a task, file.uploaded for a file in a project. Each message is checked against the secret Timeliner
@@ -18,23 +20,65 @@ import { batchLink, logActivity, managerIds, notify, type Ctx } from './core';
 import { requireManager } from './auth';
 import { HttpError, conflict, notFound, parse, zs } from './http';
 import { applyScriptAction } from './routes/batches';
+import { applyTaskMessage } from './editing';
 import type { Me, TimelinerEvent, TimelinerOutcome, TimelinerStatus } from '../shared/types';
 import { compressRanges } from '../shared/workflow';
 
+/** uploads deliver batches; task messages keep the editors' videos current between reads */
+const UPLOAD_EVENTS = ['version.uploaded', 'file.uploaded'];
+const TASK_EVENTS = ['task.created', 'task.updated', 'task.status_changed', 'task.trashed'];
 /** the messages this server subscribes to */
-export const TIMELINER_EVENTS = ['version.uploaded', 'file.uploaded'];
-/** what the key needs: register the webhook, read where an upload landed, and who uploaded it */
-export const KEY_PERMISSIONS = 'Webhooks (read & write), Projects (read) and Workspace (read)';
+export const TIMELINER_EVENTS = [...UPLOAD_EVENTS, ...TASK_EVENTS];
+/**
+ * What the key needs: read the videos (tasks), where they and uploads sit (projects and brands), and who is who
+ * (workspace members). Registering the webhook also needs Webhooks; without it the videos are still read on a timer.
+ */
+export const KEY_PERMISSIONS = 'Tasks (read), Projects (read), Workspace (read) and Webhooks (read & write)';
 export const HOOK_PATH = '/hooks/timeliner';
 
 // ── Timeliner's API ──────────────────────────────────────────────────────
 
+/** A task as Timeliner sends it: one video (or document) to make. Only the fields this server reads. */
+export interface TimelinerTask {
+  id: string;
+  /** the human handle (TL-1042), when the workspace uses them */
+  taskId?: string | null;
+  title: string;
+  statusGroup: string;
+  /** active, archived or trashed */
+  status?: string | null;
+  /** media or doc */
+  type?: string | null;
+  projectId?: string | null;
+  brandId?: string | null;
+  subFolderId?: string | null;
+  assigneeIds?: string[];
+  internalDeadline?: string | null;
+  externalDeadline?: string | null;
+  internalRevisions?: number;
+  clientRevisions?: number;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  approvedAt?: string | null;
+}
+
+/** One page of a list, newest first; `nextBefore` is the cursor for the next (null at the end). */
+export interface TimelinerPage<T> { data: T[]; nextBefore: string | null }
+
 /** The parts of Timeliner's REST API this server uses (tests pass a stand-in). */
 export interface TimelinerApi {
-  project(id: string): Promise<{ id: string; name: string } | null>;
+  /** a project with its sub-folders (the level between a project and its tasks) */
+  project(id: string): Promise<{ id: string; name: string; nodeId?: string | null; subFolders?: { id: string; name: string }[] } | null>;
   brand(id: string): Promise<{ id: string; name: string } | null>;
-  task(id: string): Promise<{ id: string; taskId: string | null; title: string } | null>;
-  members(): Promise<{ id: string; email: string; firstName: string | null; lastName: string | null }[]>;
+  task(id: string): Promise<TimelinerTask | null>;
+  /** 100 tasks per page, newest first */
+  tasks(before: string | null): Promise<TimelinerPage<TimelinerTask>>;
+  /** brands and clients, 100 per page */
+  brands(before: string | null): Promise<TimelinerPage<{ id: string; name: string }>>;
+  /** the team, including people who have left (tasks can still name them) */
+  members(): Promise<{ id: string; email: string; firstName: string | null; lastName: string | null; role?: string | null; deactivated?: boolean }[]>;
+  /** a task's latest step move: its exact step name, when, and who moved it (null when it never moved) */
+  lastMove(taskId: string): Promise<{ at: string; to: string | null; byId: string | null } | null>;
   webhooks(): Promise<{ id: string; url: string; events: string[]; active: boolean }[]>;
   createWebhook(url: string, events: string[]): Promise<{ id: string; secret: string }>;
   updateWebhook(id: string, patch: { events?: string[]; active?: boolean }): Promise<void>;
@@ -58,7 +102,7 @@ function explain(status: number, body: Record<string, unknown>): string {
 
 /** Timeliner's REST API at `base` (https://timeliner.io), called with a workspace key (tlsk_…). */
 export function timelinerClient(key: string, base: string, fetchImpl: typeof fetch = fetch): TimelinerApi {
-  const call = async <T>(method: string, path: string, body?: unknown): Promise<T | null> => {
+  const call = async <T>(method: string, path: string, body?: unknown, retried = false): Promise<T | null> => {
     let res: Response;
     try {
       res = await fetchImpl(`${base}/api/v1${path}`, {
@@ -70,6 +114,12 @@ export function timelinerClient(key: string, base: string, fetchImpl: typeof fet
     } catch {
       throw new TimelinerError('Couldn’t reach Timeliner. Try again in a minute.', 0);
     }
+    // over the key's per-minute limit: wait as long as Timeliner asks, when that's short, and try once more
+    const wait = Number(res.headers.get('retry-after'));
+    if (res.status === 429 && !retried && Number.isFinite(wait) && wait >= 0 && wait <= 10) {
+      await new Promise((r) => setTimeout(r, wait * 1000));
+      return call<T>(method, path, body, true);
+    }
     if (res.status === 404 && method === 'GET') return null;
     const text = await res.text();
     let json: Record<string, unknown> = {};
@@ -77,11 +127,23 @@ export function timelinerClient(key: string, base: string, fetchImpl: typeof fet
     if (!res.ok) throw new TimelinerError(explain(res.status, json), res.status);
     return json as T;
   };
+  const page = async <T>(path: string, before: string | null): Promise<TimelinerPage<T>> => {
+    const r = await call<Partial<TimelinerPage<T>>>('GET', `${path}?limit=100${before ? `&before=${encodeURIComponent(before)}` : ''}`);
+    return { data: Array.isArray(r?.data) ? r.data : [], nextBefore: typeof r?.nextBefore === 'string' ? r.nextBefore : null };
+  };
+  type Move = { createdAt?: string; movedTo?: string | null; actor?: { id?: string } | null };
   return {
     project: (id) => call('GET', `/projects/${encodeURIComponent(id)}`),
     brand: (id) => call('GET', `/brands/${encodeURIComponent(id)}`),
     task: (id) => call('GET', `/tasks/${encodeURIComponent(id)}`),
-    members: async () => (await call<{ data: Awaited<ReturnType<TimelinerApi['members']>> }>('GET', '/members'))?.data ?? [],
+    tasks: (before) => page('/tasks', before),
+    brands: (before) => page('/brands', before),
+    members: async () => (await call<{ data: Awaited<ReturnType<TimelinerApi['members']>> }>('GET', '/members?includeDeactivated=true'))?.data ?? [],
+    lastMove: async (id) => {
+      const r = await call<{ data?: Move[] }>('GET', `/tasks/${encodeURIComponent(id)}/activity?action=moved&limit=1`);
+      const last = Array.isArray(r?.data) ? r.data[r.data.length - 1] : undefined;
+      return last?.createdAt ? { at: last.createdAt, to: last.movedTo ?? null, byId: last.actor?.id ?? null } : null;
+    },
     webhooks: async () => (await call<{ data: Awaited<ReturnType<TimelinerApi['webhooks']>> }>('GET', '/webhooks'))?.data ?? [],
     createWebhook: async (url, events) => (await call<{ id: string; secret: string }>('POST', '/webhooks', { url, events }))!,
     updateWebhook: async (id, patch) => { await call('PATCH', `/webhooks/${encodeURIComponent(id)}`, patch); },
@@ -220,7 +282,8 @@ async function candidates(db: Db, where: string, params: unknown[]): Promise<Can
   );
 }
 
-type Handled = { outcome: TimelinerOutcome | 'duplicate'; batchId?: number };
+/** `video`: a task message, applied to the editors' copy of the videos (logged as ignored: it isn't an upload) */
+type Handled = { outcome: TimelinerOutcome | 'duplicate' | 'video'; batchId?: number };
 /** Records what became of a message (its row was claimed when it arrived). */
 type Settle = (t: Db, outcome: TimelinerOutcome, extra?: { place?: string | null; uploader?: string | null; batchId?: number | null; deliveryId?: number | null; detail?: string | null }) => Promise<void>;
 
@@ -257,7 +320,13 @@ async function place(ctx: Ctx, api: TimelinerApi | null, m: UploadMessage, settl
     await db.query(`update settings set timeliner_test_at = $1 where id = 1`, [ctx.now().toISOString()]);
     return { outcome: 'test' };
   }
-  if (!TIMELINER_EVENTS.includes(m.type) || !m.fileName || !isScriptDocument(m.fileName, m.mimeType)) {
+  if (TASK_EVENTS.includes(m.type)) {
+    // a video was added, changed step, was reassigned or trashed: the Editors tab's copy follows straight away
+    const detail = await applyTaskMessage(ctx, api, m);
+    await settle(db, 'ignored', { detail });
+    return { outcome: 'video' };
+  }
+  if (!UPLOAD_EVENTS.includes(m.type) || !m.fileName || !isScriptDocument(m.fileName, m.mimeType)) {
     await settle(db, 'ignored', { detail: m.fileName ? 'Not a document' : `A ${m.type} message` });
     return { outcome: 'ignored' };
   }
@@ -368,14 +437,29 @@ export async function connectTimeliner(ctx: Ctx, api: TimelinerApi, publicUrl: s
     `update settings set timeliner_webhook_id = $1, timeliner_webhook_secret = $2, timeliner_connected_by = $3, timeliner_connected_at = $4 where id = 1`,
     [id, secret, by?.id ?? null, ctx.now().toISOString()],
   );
-  await logActivity(ctx.db, { actor: by, action: 'timeliner.connected', entityType: 'settings', summary: `Connected Timeliner: uploads of script documents now mark their batch delivered (${url})` });
+  await logActivity(ctx.db, { actor: by, action: 'timeliner.connected', entityType: 'settings', summary: `Connected Timeliner: uploads of script documents now mark their batch delivered, and changes to videos reach the Editors tab straight away (${url})` });
 }
 
-/** On start-up: connect once when there's a key and an address but no webhook yet. */
+/**
+ * On start-up: connect once when there's a key and an address but no webhook yet. Connected before the videos
+ * were read from Timeliner, the webhook is given the task messages too (a read-only key can't: the timed read
+ * still keeps the videos current, just not straight away).
+ */
 export async function connectOnStart(ctx: Ctx, log: (m: string) => void): Promise<void> {
   if (!ctx.timeliner || !ctx.publicUrl) return;
   const s = await ctx.db.one<{ id: string | null }>(`select timeliner_webhook_id as id from settings where id = 1`);
-  if (s?.id) return;
+  if (s?.id) {
+    try {
+      const hook = (await ctx.timeliner.webhooks()).find((w) => w.id === s.id);
+      if (hook && TIMELINER_EVENTS.some((e) => !hook.events.includes(e))) {
+        await ctx.timeliner.updateWebhook(hook.id, { events: [...new Set([...hook.events, ...TIMELINER_EVENTS])] });
+        log('timeliner: the webhook now also says when videos change');
+      }
+    } catch (err) {
+      log(`timeliner: couldn't add the video messages to the webhook (videos are still read every few minutes): ${err instanceof Error ? err.message : String(err)}`);
+    }
+    return;
+  }
   try {
     await connectTimeliner(ctx, ctx.timeliner, ctx.publicUrl, null);
     log('timeliner: connected (uploads of script documents now mark their batch delivered)');

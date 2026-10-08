@@ -27,6 +27,9 @@ export interface Config {
   timelinerApiUrl: string;
   /** the site's public https address, for the webhook Timeliner calls (PUBLIC_URL, or the one Render sets) */
   publicUrl: string | undefined;
+  /** with a Timeliner key, the editors' videos are re-read from Timeliner on a timer (TIMELINER_SYNC=off turns it off) */
+  timelinerSyncEnabled: boolean;
+  timelinerSyncMinutes: number;
   /** the built client; an empty STATIC_DIR (the dev runner) serves no client */
   staticDir: string | undefined;
   remindersEnabled: boolean;
@@ -107,6 +110,8 @@ export function loadConfig(
     timelinerApiKey: set(env.TIMELINER_API_KEY),
     timelinerApiUrl: (set(env.TIMELINER_API_URL) ?? 'https://timeliner.io').replace(/\/+$/, ''),
     publicUrl: (set(env.PUBLIC_URL) ?? set(env.RENDER_EXTERNAL_URL))?.replace(/\/+$/, ''),
+    timelinerSyncEnabled: flag('TIMELINER_SYNC', true),
+    timelinerSyncMinutes: number('TIMELINER_SYNC_MINUTES', 5, 1, 24 * 60),
     staticDir: env.STATIC_DIR !== undefined ? env.STATIC_DIR || undefined : defaults.staticDir,
     remindersEnabled: flag('REMINDERS', true),
     reminderIntervalMinutes: number('REMINDER_INTERVAL_MINUTES', 10, 1, 24 * 60),

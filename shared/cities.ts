@@ -1,6 +1,8 @@
 // Cities a team member or editor can be placed in: name,
 // three-letter code, country, latitude, longitude and IANA timezone.
 
+import { nowInZone } from './dates';
+
 export interface City {
   name: string;
   code: string;
@@ -194,6 +196,14 @@ export function shiftOf(start: number, end: number): [number, number] {
   return [start, e];
 }
 
+
+/** Whether it's within someone's working hours where they are, `now` (a stored shift: its end may pass midnight). */
+export function onShift([start, end]: [number, number], timezone: string, now: Date = new Date()): boolean {
+  if (end - start >= 24) return true;
+  const h = nowInZone(timezone, now).minutes / 60;
+  // 1 AM is 25 for a shift that runs 6 PM to 2 AM (stored 18–26)
+  return (h >= start && h < end) || (h + 24 >= start && h + 24 < end);
+}
 
 /** How long a stored shift is, in words: "9 hours", "around the clock". */
 export function shiftLength([start, end]: [number, number]): string {

@@ -160,6 +160,8 @@ export const LOCKS = {
   setup: 724002,
   /** applying a migration, so processes starting together (web replicas, the web server and the cron) take turns */
   migrations: 724003,
+  /** writing what was read from Timeliner (the timed read, and a webhook's single video), so one never interleaves with another */
+  timeliner: 724004,
 } as const;
 
 export async function migrate(db: Db): Promise<void> {
