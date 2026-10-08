@@ -7,7 +7,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../server/app';
 import type { Db } from '../server/db';
 import type { Ctx } from '../server/core';
-import { clientFit, isScriptDocument, pickBatch, verifySignature, type TimelinerApi } from '../server/timeliner';
+import { clientFit, isScriptDocument, pickBatch, timelinerClient, verifySignature, type TimelinerApi } from '../server/timeliner';
 import type { BatchDetail, TimelinerStatus } from '../shared/types';
 import { freshDb } from './db';
 
@@ -82,6 +82,16 @@ beforeAll(async () => {
 afterAll(async () => {
   await app.close();
   await db.close();
+});
+
+describe('talking to Timeliner', () => {
+  it('says which permissions the key needs when Timeliner refuses it', async () => {
+    const refusing = (async () => new Response(JSON.stringify({ error: 'Insufficient scope', code: 'insufficient_scope', requiredScope: 'write:webhooks', grantedScopes: ['read:projects'] }), { status: 403 })) as typeof fetch;
+    const api = timelinerClient('tlsk_test', 'https://timeliner.test', refusing);
+    await expect(api.createWebhook('https://scripts.example.com/hooks/timeliner', ['version.uploaded'])).rejects.toThrow(
+      'The Timeliner key isn’t allowed to write webhooks. In Timeliner → Settings → Developers, make a key with Webhooks (read & write), Projects (read) and Workspace (read), put it in TIMELINER_API_KEY, and connect again.',
+    );
+  });
 });
 
 describe('matching helpers', () => {

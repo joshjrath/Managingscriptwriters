@@ -11,6 +11,9 @@ import type { TimelinerEvent, TimelinerStatus } from '../../../shared/types';
 import { fmtAgo } from '../../../shared/format';
 import { Button, Chip, FormError, Panel, useToast } from './ui';
 
+/** the permissions the Timeliner key needs (server/timeliner.ts says the same in its errors) */
+const KEY_PERMISSIONS = 'Webhooks (read & write), Projects (read) and Workspace (read)';
+
 const OUTCOME: Record<TimelinerEvent['outcome'], { label: string; color: string }> = {
   delivered: { label: 'Delivered', color: 'mint' },
   unmatched: { label: 'Needs a batch', color: 'yellow' },
@@ -41,7 +44,7 @@ export function TimelinerPanel() {
         <div className="stack s3">
           <FormError error={err} />
           {!s.keySet ? (
-            <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>Add <b>TIMELINER_API_KEY</b> to the server’s environment (Timeliner → Settings → Developers → Generate), redeploy, then connect here.</p>
+            <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>In Timeliner → Settings → Developers, create an API key with <b>{KEY_PERMISSIONS}</b>. Add it to the server’s environment as <b>TIMELINER_API_KEY</b>, redeploy, then connect here.</p>
           ) : !s.webhookUrl ? (
             <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>The server doesn’t know its public address. Set <b>PUBLIC_URL</b> (like https://scripts.example.com) in its environment, then connect.</p>
           ) : s.connected ? (
@@ -53,7 +56,7 @@ export function TimelinerPanel() {
               </div>
             </div>
           ) : (
-            <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>The key is set. Connect to have Timeliner tell this site about uploads, and the batches deliver themselves.</p>
+            <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>The key is set. Connect to have Timeliner tell this site about uploads, and the batches deliver themselves. The key needs <b>{KEY_PERMISSIONS}</b> in Timeliner (a read-only key can’t connect).</p>
           )}
           {s.events.length > 0 && (
             <>

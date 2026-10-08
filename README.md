@@ -147,7 +147,7 @@ Shoot dates are stored as plain calendar dates, so timezones can't move them a d
 
 ### Timeliner delivery: confirmed by Timeliner itself
 
-With `TIMELINER_API_KEY` set (Timeliner → Settings → Developers → Generate; the API needs Timeliner's Agency plan), the batch is marked delivered as soon as its script document lands in Timeliner — nobody pastes a link or presses a button.
+With `TIMELINER_API_KEY` set (Timeliner → Settings → Developers → Create API Key, with **Webhooks: read & write**, **Projects: read** and **Workspace: read**; a read-only key can't connect, and the API needs Timeliner's Agency plan), the batch is marked delivered as soon as its script document lands in Timeliner — nobody pastes a link or presses a button.
 
 - **Connecting.** The server registers a webhook with Timeliner the first time it starts with the key (or from **Settings → Timeliner → Connect**). It uses `PUBLIC_URL`, or the address Render sets, plus `/hooks/timeliner`. **Test** asks Timeliner to send a sample message and shows when it arrived.
 - **What counts.** A PDF, Word or text file uploaded to a task or a project in Timeliner (`version.uploaded`, `file.uploaded`). The videos and images editors upload are ignored. Every message is checked against the secret Timeliner signs it with, refused if it's more than five minutes old, and acted on once even if Timeliner sends it twice.

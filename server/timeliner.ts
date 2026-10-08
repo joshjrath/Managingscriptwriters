@@ -23,6 +23,8 @@ import { compressRanges } from '../shared/workflow';
 
 /** the messages this server subscribes to */
 export const TIMELINER_EVENTS = ['version.uploaded', 'file.uploaded'];
+/** what the key needs: register the webhook, read where an upload landed, and who uploaded it */
+export const KEY_PERMISSIONS = 'Webhooks (read & write), Projects (read) and Workspace (read)';
 export const HOOK_PATH = '/hooks/timeliner';
 
 // ── Timeliner's API ──────────────────────────────────────────────────────
@@ -49,7 +51,7 @@ export class TimelinerError extends Error {
 /** What Timeliner's error means for the person reading Settings. */
 function explain(status: number, body: Record<string, unknown>): string {
   if (status === 401) return 'Timeliner didn’t accept the API key. Check TIMELINER_API_KEY on the server (Timeliner → Settings → Developers).';
-  if (status === 403 && body.code === 'insufficient_scope') return `The Timeliner key isn’t allowed to ${String(body.requiredScope ?? 'do this').replace(':', ' ')}. Give the key that permission in Timeliner, or make a new one with it.`;
+  if (status === 403 && body.code === 'insufficient_scope') return `The Timeliner key isn’t allowed to ${String(body.requiredScope ?? 'do this').replace(':', ' ')}. In Timeliner → Settings → Developers, make a key with ${KEY_PERMISSIONS}, put it in TIMELINER_API_KEY, and connect again.`;
   if (status === 429) return 'Timeliner is limiting how often this key can call it. Try again in a minute.';
   return `Timeliner answered ${status}${typeof body.error === 'string' ? `: ${body.error}` : ''}.`;
 }
