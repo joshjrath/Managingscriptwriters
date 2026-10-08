@@ -1,5 +1,5 @@
-// Editors: people the admin wants to see in the Control Center, with their
-// city, local time and working hours, who don't use the platform itself. They
+// Editors: people the admin keeps a list of, with their city, local time and
+// working hours, who don't use the platform itself. They
 // can't sign in and are never offered as writers, so they live in their own
 // table rather than as team members.
 

@@ -1230,40 +1230,6 @@ html[data-motion='on'] .rec-dot { animation: rec-pulse 1.8s var(--ease-out-quint
 .past-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; }
 @media (max-width: 640px) { .past-pair { grid-template-columns: minmax(0, 1fr); } }
 
-/* ── the Control Center link: easy to miss on purpose ──────────────────── */
-.cc-link {
-  display: inline-block; font: 500 9px/1 var(--font-ui); letter-spacing: 0.26em; text-transform: uppercase;
-  color: color-mix(in srgb, var(--text-3) 42%, transparent); background: none; border: 0; padding: 4px 0; cursor: pointer;
-  transition: color 600ms var(--ease-out-quint), letter-spacing 600ms var(--ease-out-quint);
-}
-.cc-link:hover, .cc-link:focus-visible { color: var(--text-2); letter-spacing: 0.3em; }
-.rail .cc-link { margin: -16px 0 18px 12px; }
-.app.collapsed .rail .cc-link { display: none; }
-@media (max-width: 1180px) { .app:not(.expanded) .rail .cc-link { display: none; } }
-.login-card .cc-link { float: right; margin-top: -48px; }
-
-/* leaving the public site: colour drains, depth flattens, a scan passes, then dark */
-html.cc-departing #root > * {
-  transition: filter 1100ms cubic-bezier(0.65, 0, 0.35, 1), transform 1200ms cubic-bezier(0.65, 0, 0.35, 1);
-  filter: saturate(0) brightness(0.32) blur(2.5px); transform: scale(0.982);
-}
-html.cc-departing .wordmark { opacity: 0; transition: opacity 350ms; }
-.cc-departure { position: fixed; inset: 0; z-index: 10000; background: rgba(1, 2, 6, 0); animation: ccd-black 1250ms cubic-bezier(0.65, 0, 0.35, 1) forwards; }
-.cc-departure i {
-  position: absolute; left: 0; right: 0; top: 0; height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(180, 215, 255, 0.95) 30%, rgba(180, 215, 255, 0.95) 70%, transparent);
-  box-shadow: 0 0 30px 3px rgba(110, 160, 255, 0.45); animation: ccd-scan 950ms 120ms cubic-bezier(0.65, 0, 0.35, 1) both;
-}
-.cc-departure.gone { animation: none; background: #010206; opacity: 0; transition: opacity 700ms; }
-@keyframes ccd-black { 0%, 30% { background: rgba(1, 2, 6, 0); } 100% { background: rgba(1, 2, 6, 1); } }
-@keyframes ccd-scan { from { transform: translateY(-2px); opacity: 0; } 12% { opacity: 1; } to { transform: translateY(100vh); opacity: 0.1; } }
-html.cc-returning #root > * { animation: ccr-in 1100ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-@keyframes ccr-in { from { filter: saturate(0) brightness(0) blur(3px); } to { filter: none; } }
-@media (prefers-reduced-motion: reduce) {
-  html.cc-departing #root > * { filter: brightness(0.2); transform: none; }
-  .cc-departure i { display: none; }
-}
-
 /* ── writing pulse: one pip per script, today's counter updates lit up ── */
 .pips { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 8px; --pw: 9px; --ph: 14px; }
 .pips.lg { --pw: 12px; --ph: 20px; gap: 4px; }

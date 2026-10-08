@@ -27,7 +27,6 @@ const STATIC_VIEWS: Record<string, string> = {
   '/api/users': 'Viewed the Team',
   '/api/settings': 'Viewed Settings',
   '/api/audit': 'Viewed the Master log',
-  '/api/control/world': 'Viewed the Control Center',
 };
 
 const MUTATIONS: Record<string, string> = {
@@ -72,7 +71,6 @@ const MUTATIONS: Record<string, string> = {
   '/api/moments/seen': 'dismiss a celebration',
   '/api/me/whats-new': 'open What’s new',
   '/api/me/timezone': 'set their time zone',
-  '/api/control/authorize': 'open the Control Center',
   '/api/editors': 'add an editor',
   '/api/editors/:id': 'change an editor',
 };

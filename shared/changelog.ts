@@ -35,6 +35,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-08-control-center-removed',
+    date: '2026-10-08',
+    title: 'The Control Center has been retired',
+    summary: 'The admin-only Control Center (the globe view of the team) is gone. Everything else works as before.',
+    changes: [
+      { tag: 'improved', text: 'The Control Center link and page are gone. The rest of the site has less code to keep up to date.' },
+      { tag: 'improved', text: 'Nothing else changes: each person’s city, time zone and working hours, Settings → Editors and Give site access all stay as they were.' },
+    ],
+  },
+  {
     id: '2026-10-08-writers-overview-back',
     date: '2026-10-08',
     title: 'Writers have Overview and Production back',
