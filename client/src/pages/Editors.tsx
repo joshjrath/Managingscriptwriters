@@ -224,11 +224,12 @@ function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: nu
   const marked = todays.filter((v) => isOnPlate(v.state) && v.doneAt).length;
   const unassignedDue = b.unassigned.filter((g) => g.due && g.due <= today);
   const top = due[0];
+  // today's videos all sent to review or marked done: there were some, there's just nothing left to edit
   const dueCard = (
     <KpiCard tone="today" icon={<AlarmClock />} n={t.dueToday}
-      pill={due.length ? <span className="kpi-pill">{plural(due.length, 'editor')}</span> : <span className="kpi-pill"><Check aria-hidden />Nothing due</span>}
+      pill={due.length ? <span className="kpi-pill">{plural(due.length, 'editor')}</span> : <span className="kpi-pill"><Check aria-hidden />{todays.length ? 'Nothing left' : 'Nothing due'}</span>}
       cap="Due today"
-      sub={top ? `${first(top.name)} · ${compressTitles(top.videos.filter((v) => onPlate(v) && v.due && v.due <= today).map((v) => v.title))} still to edit` : 'No videos due today'}
+      sub={top ? `${first(top.name)} · ${compressTitles(top.videos.filter((v) => onPlate(v) && v.due && v.due <= today).map((v) => v.title))} still to edit` : todays.length ? 'Nothing left to edit today' : 'No videos due today'}
       label={`${plural(t.dueToday, 'video')} due today still to edit`}
       foot={todays.length ? (
         <span className="kpi-meter">
