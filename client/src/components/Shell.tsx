@@ -7,7 +7,7 @@ import { isAdmin, isManager, ROLE_LABEL } from '../../../shared/workflow';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Bell, Building2, CalendarDays, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
+  Bell, Building2, CalendarDays, Clapperboard, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
   Circle, Eye, Globe2, Home, Library, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
 } from 'lucide-react';
 import { LayoutGroup, m } from 'framer-motion';
@@ -172,6 +172,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
     { to: '/review', label: 'Review queue', icon: <ClipboardCheck />, count: counts.reviewQueue || undefined },
     { to: '/writers', label: 'Team', icon: <Users /> },
+    { to: '/editors', label: 'Editors', icon: <Clapperboard /> },
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
   ];

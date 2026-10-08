@@ -21,6 +21,7 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-09-28-calendar-drag': ['managers'], '2026-09-28-team': ['managers'], '2026-09-28-signin-details': ['managers'],
   '2026-10-07-my-work-redesign': ['writers', 'managers'], '2026-09-28-written-counter': ['writers', 'managers'], '2026-10-08-writers-never-miss': ['writers', 'managers'],
   '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-editors-never-get-scripts': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'], '2026-10-08-master-log-everything': ['managers'], '2026-10-08-no-script-titles': ['managers', 'writers'], '2026-10-08-timeliner-auto-delivery': ['managers', 'writers'], '2026-10-08-timeliner-key-permissions': ['managers'],
+  '2026-10-08-editors-tab-timeliner': ['managers', 'editors'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -34,6 +35,19 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-08-editors-tab-timeliner',
+    date: '2026-10-08',
+    title: 'The Editors tab: who’s cutting what, read from Timeliner',
+    summary: 'Each editor’s videos now come straight from Timeliner with the script to cut from, and editors can say which one they’re on.',
+    changes: [
+      { tag: 'new', text: 'Managers have a new Editors tab, after Team. Each editor has a card: what they’re on right now (Editing now, Paused, Next up by deadline, or Off hours), how many videos they have to edit and in revisions, what’s due today, the last video they finished, and the script documents they’re cutting from. Cards along the top count who’s editing, what’s due today, what’s waiting on you to review, and videos nobody has been given in Timeliner yet.' },
+      { tag: 'new', text: 'Videos come from Timeliner automatically. Keep giving videos to editors in Timeliner as you do now: nobody picks or claims them here. Each editor is matched by their email, and each video to its client, batch and script number, so it links to the script to cut from (the edited version a manager approved, when there is one).' },
+      { tag: 'new', text: 'Editors see their own videos on their Home: what to do next, then Revisions, To edit and Waiting on review, each with a link to its script. Tap I’m on this when you start a video, Pause and Resume when you step away, and Done when it’s finished.' },
+      { tag: 'new', text: 'Done tells the managers straight away. It doesn’t change anything in Timeliner: move the video to Needs review there as usual, and it moves on here once Timeliner has it.' },
+      { tag: 'new', text: 'The site reads Timeliner by itself every few minutes, and Settings → Timeliner has a Read Timeliner now button. When Timeliner’s webhook is connected, changes show up straight away.' },
+    ],
+  },
   {
     id: '2026-10-08-timeliner-key-permissions',
     date: '2026-10-08',

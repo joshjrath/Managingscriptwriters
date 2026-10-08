@@ -22,6 +22,7 @@ import { ReviewPage } from './pages/Review';
 import { ResourcesPage } from './pages/Resources';
 import { ScriptBankPage } from './pages/ScriptBank';
 import { WritersPage } from './pages/Writers';
+import { EditorsPage } from './pages/Editors';
 import { EditorHome } from './pages/EditorHome';
 import { SettingsPage } from './pages/Settings';
 import { MasterLogPage } from './pages/MasterLog';
@@ -86,6 +87,7 @@ function Gate() {
         <Route path="/resources" element={<ResourcesPage />} />
         <Route path="/scripts" element={<ScriptBankPage />} />
         <Route path="/writers" element={managers(<WritersPage />)} />
+        <Route path="/editors" element={managers(<EditorsPage />)} />
         <Route path="/settings" element={only(<SettingsPage />)} />
         <Route path="/log" element={only(<MasterLogPage />)} />
         <Route path="/whats-new" element={<WhatsNewPage />} />

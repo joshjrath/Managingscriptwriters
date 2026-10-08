@@ -1,18 +1,20 @@
 // Settings → Timeliner: when a batch's script document is uploaded in Timeliner, the batch is marked
 // delivered by itself. Here a manager connects it (once), checks Timeliner can reach the site, and picks
-// the batch for any upload that couldn't be matched.
+// the batch for any upload that couldn't be matched. It also says when the editors' videos were last read
+// from Timeliner (for the Editors tab), and reads them again on request.
 
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { CheckCheck, CircleHelp, FileText, Plug, RefreshCw, Send } from 'lucide-react';
+import { CheckCheck, CircleHelp, Clapperboard, FileText, Plug, RefreshCw, Send } from 'lucide-react';
 import { api, useSave } from '../api';
-import type { TimelinerEvent, TimelinerStatus } from '../../../shared/types';
-import { fmtAgo } from '../../../shared/format';
+import type { EditingBoard, TimelinerEvent, TimelinerStatus } from '../../../shared/types';
+import { fmtAgo, fmtStamp } from '../../../shared/format';
+import { useDisplayTz } from './Shell';
 import { Button, Chip, FormError, Panel, useToast } from './ui';
 
 /** the permissions the Timeliner key needs (server/timeliner.ts says the same in its errors) */
-const KEY_PERMISSIONS = 'Webhooks (read & write), Projects (read) and Workspace (read)';
+const KEY_PERMISSIONS = 'Tasks (read), Projects (read), Workspace (read) and Webhooks (read & write)';
 
 const OUTCOME: Record<TimelinerEvent['outcome'], { label: string; color: string }> = {
   delivered: { label: 'Delivered', color: 'mint' },
@@ -56,8 +58,9 @@ export function TimelinerPanel() {
               </div>
             </div>
           ) : (
-            <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>The key is set. Connect to have Timeliner tell this site about uploads, and the batches deliver themselves. The key needs <b>{KEY_PERMISSIONS}</b> in Timeliner (a read-only key can’t connect).</p>
+            <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>The key is set. Connect to have Timeliner tell this site about uploads, and the batches deliver themselves. The key needs <b>{KEY_PERMISSIONS}</b> in Timeliner (a read-only key can’t connect, but it’s enough to read the editors’ videos).</p>
           )}
+          {s.keySet && <VideosRead />}
           {s.events.length > 0 && (
             <>
               <div className="section-title" style={{ margin: '4px 0 0' }}>Recent uploads</div>
@@ -68,6 +71,33 @@ export function TimelinerPanel() {
         </div>
       )}
     </Panel>
+  );
+}
+
+/** When the editors' videos were last read from Timeliner, and a way to read them now. */
+function VideosRead() {
+  const toast = useToast();
+  const tz = useDisplayTz();
+  const board = useQuery({ queryKey: ['editing'], queryFn: () => api<EditingBoard>('/api/editing') });
+  const read = useSave(() => api<EditingBoard>('/api/editing/sync', { body: {} }), {
+    onSuccess: (b) => { if (b.sync.error) toast(`Couldn’t read Timeliner: ${b.sync.error}`, 'error'); else toast('Read Timeliner just now'); },
+  });
+  const sync = board.data?.sync;
+  return (
+    <div className="tl-videos">
+      <div className="row-flex s2">
+        <Clapperboard size={16} aria-hidden />
+        <span className="txt">
+          Editors’ videos: {!sync ? '…' : sync.syncedAt
+            ? <span title={fmtStamp(sync.syncedAt, tz)}>read {fmtAgo(sync.syncedAt)}</span>
+            : 'not read yet'}
+        </span>
+        <Button variant="sm ghost" icon={<RefreshCw aria-hidden />} busy={read.isPending} onClick={() => read.mutate(undefined)}>Read Timeliner now</Button>
+      </div>
+      {sync?.error && <p className="tl-videos-err" role="status">Couldn’t read Timeliner{sync.syncedAt ? ' just now' : ''}: {sync.error}</p>}
+      {board.isError && <p className="tl-videos-err" role="status">Couldn’t load when they were last read: {board.error.message}</p>}
+      <FormError error={read.error} />
+    </div>
   );
 }
 

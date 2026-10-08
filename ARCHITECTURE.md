@@ -41,7 +41,8 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 | Master log (activity and audit) | `server/audit.ts` |
 | Reminders (in-process timer, or `npm run reminders` from cron) | `server/reminders.ts`, `server/reminders-cli.ts` |
 | Paste notes (Anthropic API) | `server/notes-import.ts` |
-| Timeliner: uploads of a batch's script document deliver it (webhook, matching, Settings → Timeliner) | `server/timeliner.ts` |
+| Timeliner: its API client and webhook; uploads of a batch's script document deliver it (matching, Settings → Timeliner) | `server/timeliner.ts` |
+| Editors tab: the timed read of Timeliner's videos, matching each to an editor, client, batch and script, and I'm on this / Pause / Resume / Done | `server/editing.ts` |
 | Editors who don't sign in (Settings → Editors) | `server/control/editors.ts` |
 | Demo data | `server/seed-demo.ts`, `server/seed-cli.ts` |
 | Dates, deadlines, clock, due state | `shared/dates.ts` |
@@ -52,6 +53,8 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 | Theme palettes and contrast rule | `shared/palettes.ts` |
 | Client API wrapper (`api`, `useSave`, `qs`) | `client/src/api.ts` |
 | Routes (pages) and app shell | `client/src/main.tsx`, `client/src/components/Shell.tsx` |
+| Editors page (managers, `/editors`): a card per editor, summary cards, videos not assigned in Timeliner | `client/src/pages/Editors.tsx` |
+| Editor home: the hero (Next up / You're on / Paused) and Your videos with script links, above shoots and finished scripts | `client/src/pages/EditorHome.tsx` |
 | UI primitives (Dialog, Panel, buttons…) | `client/src/components/ui.tsx` |
 | Design tokens (every colour, radius, spacing) | `client/src/styles/tokens.css` |
 
@@ -97,7 +100,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
   | `requireAdmin` | Admin only |
 
   Role checks use `isManager`, `isAdmin`, `isEditor` and `canWrite` from `shared/workflow.ts`. Never compare role strings in routes.
-- **Editors** get only the routes listed in `server/editor-access.ts`; every other route is refused before it runs, so a new route is closed to editors until it's added there on purpose. Their reads are also scoped to finished (approved or delivered) work; which stored files they may open is `EDITOR_FILES` in `server/files.ts`.
+- **Editors** get only the routes listed in `server/editor-access.ts`; every other route is refused before it runs, so a new route is closed to editors until it's added there on purpose. Their reads are also scoped to finished (approved or delivered) work; which stored files they may open is `EDITOR_FILES` in `server/files.ts`. Of the Editors routes they get only `GET /api/editing/me` and `POST /api/editing/focus`, both for the session user's own videos (matched by email); focus refuses a video not assigned to them in Timeliner (403). `GET /api/editing` and `POST /api/editing/sync` are `requireManager`.
 - **Script actions:** every status change goes through `applyScriptAction`. It locks the rows and checks each one with `checkAction` and `ACTION_RULES`. Writers can act only on their own scripts.
 - **Ownership checks** live in the route: the assignee on a script edit, `isAssignedTo` for blockers and resources. A personal view (My work, Today, to-dos) always gives a writer their own data, from the session. A manager may name someone with `?userId=`, and may ask for the whole team on Today (no `userId`) and to-dos (`?all=1`). Notifications always use the session user.
 - **Admin protection:** only an Admin can grant the Admin role or change anything on an Admin's account. The last Admin can't be removed or demoted. Temporary passwords are shown only to managers, and never an Admin's to a non-admin.
@@ -113,6 +116,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
   - Function migrations import `shared/dates.ts`. Changing those helpers changes what a fresh database's backfill produces.
 - **Optimistic concurrency:** scripts carry a `version`, and a stale edit gets 409 `stale` (the script dialog sends all its fields with the version it started from). Edit batch, Edit client and Script titles send only the fields the person changed, compared with a snapshot taken when the dialog opened. Other edit forms (deadline rules in Settings, team members, to-dos) still send the whole form, so a route must compare the input with the stored row before treating a field as changed, as `PATCH /api/users/:id` does.
 - **Files** are stored in Postgres, in the `files.data` column (`server/files.ts`). An upload is read in 4 MB pieces into a scratch table and written as one value (linear in the file's size; appending piece by piece would be quadratic), and downloads stream back out in 512 KB pieces. A single value can't exceed 1 GB, and `UPLOAD_LIMIT_MB` caps uploads at 100. Names are cleaned up by `storedFileName`, and executables are refused.
+- **Timeliner copy** (`server/editing.ts`): `timeliner_tasks`, `timeliner_members` and `timeliner_names` (brands, projects, sub-folders) are a copy of Timeliner, written only by its reads and webhook. Each task row also stores its match (`client_id`, `batch_id`, `script_number`), worked out again on every read. The site's own layer is `editor_focus` (one row per person: the video they're on, `on` or `paused`, with time worked) and `editing_done` (Done marks, which count until Timeliner moves the video). `timeliner_removed` keeps removed task ids for a day. Nothing here writes to Timeliner.
 - **Retention:** the reminders run deletes expired sessions. It also deletes `audit_log` page views, and anonymous sign-in records, after 400 days. Activity and everything else is kept.
 - **Single instance:** some state lives in the server's memory: the sign-in throttle, View-as and Recording-mode state, the Paste-notes rate limit, and the de-duplication of page views. A restart clears it, and it isn't shared between instances, so run one web instance. The reminders and migrations are safe with several, because they use advisory locks.
 
@@ -124,10 +128,16 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 - **Calendar sync** re-reads each synced calendar every `CALENDAR_SYNC_MINUTES` (15) inside the server (`CALENDAR_SYNC=off` turns it off), and tells managers once about each new shoot it finds.
 - **Paste notes** calls the Anthropic API, only when `ANTHROPIC_API_KEY` is set. Each person can run one read at a time and 30 an hour. If the API fails, the person gets a clear message and nothing is created.
 - **Timeliner** (`server/timeliner.ts`), only when `TIMELINER_API_KEY` is set:
-  - On start-up (once) or from Settings → Timeliner, the server registers a webhook (`version.uploaded`, `file.uploaded`) pointing at `PUBLIC_URL` (or `RENDER_EXTERNAL_URL`) + `/hooks/timeliner`, and keeps the signing secret Timeliner returns in `settings`.
+  - On start-up (once) or from Settings → Timeliner, the server registers a webhook (`TIMELINER_EVENTS`: `version.uploaded` and `file.uploaded`, plus the `task.*` and `project.trashed` messages for the Editors tab) pointing at `PUBLIC_URL` (or `RENDER_EXTERNAL_URL`) + `/hooks/timeliner`, and keeps the signing secret Timeliner returns in `settings`. Already connected, start-up switches the webhook back on and adds any events it lacks (best effort: a read-only key can't).
   - `POST /hooks/timeliner` is public and outside `/api` (so the same-page header check doesn't apply); it refuses a message unless `X-Timeliner-Signature` checks out against that secret and is under five minutes old. Each message id is claimed in `timeliner_events` before anything happens, so a repeat is a no-op.
   - A document upload is matched to a batch (its `timeliner_project_id`, else the client named like the Timeliner brand or project) and its approved scripts are delivered through `applyScriptAction` with `viaTimeliner`, which records the delivery with `source = 'timeliner'`.
   - Lookups (project, brand, members) are best effort: when Timeliner can't be reached the upload is kept as unmatched for a manager to place.
+- **Timeliner sync** (`server/editing.ts`, `syncTimeliner`), only when `TIMELINER_API_KEY` is set:
+  - **Polling is the baseline.** Every `TIMELINER_SYNC_MINUTES` (5; the first 15 seconds after start-up) inside the server (`TIMELINER_SYNC=off` turns it off), and on Read Timeliner now (`POST /api/editing/sync`). It only reads, so a read-only key works. The timed read uses `ctx.realDb ?? ctx.db`, never a practice copy.
+  - A read takes members, brands, tasks newest first (at most 30 pages of 100; trashed, archived, document and long-finished tasks are dropped), the projects open videos sit in (names and sub-folders, re-read at most hourly) and the last step move of videos whose step changed (capped per read). A 429 or no connection stops these optional lookups for that read.
+  - **Its lock:** everything is written in one `db.tx` under `LOCKS.timeliner`, which the webhook's one-video write also takes. A row written after a read began isn't overwritten by that read, and a removed id stays in `timeliner_removed` so an older read can't write it back. A complete read removes tasks it no longer lists; one stopped by the page cap removes only within the stretch it read.
+  - **The webhook makes it faster:** when connected, `task.*` and `project.trashed` messages go to `applyTaskMessage`, which re-reads that one task (or removes it). The message is answered even when the task can't be read; the next timed read catches up.
+  - After every write, a focus whose video left the editor's plate, was given to someone else or is gone ends by itself. A failed read keeps the copy and stores Timeliner's message in `settings.timeliner_sync_error`; a good one sets `timeliner_synced_at`.
 - **No email:** the app never sends email. Sign-in details are copied by hand.
 
 ## Invariants (break one and something real breaks)

@@ -4,6 +4,7 @@
 // or "Queue clear" when there's nothing in them. Each card ends in a small footer
 // that says what's behind the number: which batches are late, how far today's
 // work has got, where the scripts in review are, and deliveries day by day.
+// The card itself (KpiCard) is shared with the Editors tab.
 
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -16,12 +17,14 @@ import { fmtCutoff, fmtDate, fmtTimeZoneAbbr, fmtWeekday, plural } from '../../.
 import { useBoot } from './Shell';
 import { CountUp } from './ui';
 
-function Card({ tone, icon, pill, n, cap, sub, foot, onClick, label }: {
-  tone: 'overdue' | 'today' | 'review' | 'done'; icon: ReactNode; pill?: ReactNode;
-  n: number; cap: string; sub: string; foot: ReactNode; onClick: () => void; label: string;
+/** One gradient summary card. With `onClick` it's a button; without, a labelled group (the Editors tab). */
+export function KpiCard({ tone, icon, pill, n, cap, sub, foot, onClick, label, glint }: {
+  tone: 'overdue' | 'today' | 'review' | 'done' | 'live' | 'revs'; icon: ReactNode; pill?: ReactNode;
+  n: number; cap: string; sub: string; foot: ReactNode; onClick?: () => void; label: string; glint?: boolean;
 }) {
-  return (
-    <button type="button" className={`kpi aurora ${tone}`} onClick={onClick} aria-label={label}>
+  const inner = (
+    <>
+      {glint && <span className="dt-glint" aria-hidden />}
       <span className="kpi-top">
         <span className="kpi-ic" aria-hidden>{icon}</span>
         {pill}
@@ -32,8 +35,10 @@ function Card({ tone, icon, pill, n, cap, sub, foot, onClick, label }: {
         <span className="kpi-sub">{sub}</span>
       </span>
       <span className="kpi-foot">{foot}</span>
-    </button>
+    </>
   );
+  if (!onClick) return <div className={`kpi aurora ${tone} static`} role="group" aria-label={label}>{inner}</div>;
+  return <button type="button" className={`kpi aurora ${tone}`} onClick={onClick} aria-label={label}>{inner}</button>;
 }
 
 /** "Drafts 4d · Final 2d": how late, in a few characters (the card already says overdue). */
@@ -69,7 +74,7 @@ export function StatCards({ d }: { d: Dashboard }) {
 
   // 1 · overdue: always the warm gradient
   const overdue = (
-    <Card tone="overdue" icon={<AlertTriangle />} n={c.overdueBatches}
+    <KpiCard tone="overdue" icon={<AlertTriangle />} n={c.overdueBatches}
       pill={c.overdueBatches ? <span className="kpi-pill hot"><i aria-hidden />Needs you</span> : <span className="kpi-pill"><Check aria-hidden />All clear</span>}
       cap={mine ? (c.overdueBatches === 1 ? 'Your overdue batch' : 'Your overdue batches') : c.overdueBatches === 1 ? 'Overdue batch' : 'Overdue batches'}
       sub={c.overdueScripts ? `${plural(c.overdueScripts, 'script')} behind` : 'Nothing overdue'}
@@ -90,7 +95,7 @@ export function StatCards({ d }: { d: Dashboard }) {
   const dueTomorrow = upcoming.filter((b) => b.next!.date === tomorrow);
   const dueNow = c.dueTodayBatches > 0;
   const todayCard = (
-    <Card tone="today" icon={dueNow ? <CalendarCheck /> : <CalendarDays />} n={c.dueTodayBatches}
+    <KpiCard tone="today" icon={dueNow ? <CalendarCheck /> : <CalendarDays />} n={c.dueTodayBatches}
       pill={dueNow ? <span className="kpi-pill hot">Due {fmtCutoff(settings.cutoff)} {fmtTimeZoneAbbr(settings.timezone)}</span> : <span className="kpi-pill"><Check aria-hidden />Nothing due</span>}
       cap={mine ? 'Yours due today' : c.dueTodayBatches === 1 ? 'Batch due today' : 'Batches due today'}
       sub={c.dueTodayScripts ? `${plural(c.dueTodayScripts, 'script')} left to finish` : 'No deadlines today'}
@@ -114,7 +119,7 @@ export function StatCards({ d }: { d: Dashboard }) {
   const top = inReview.slice(0, 3);
   const rest = inReview.slice(3).reduce((n, b) => n + b.progress.inReview, 0);
   const reviewCard = (
-    <Card tone="review" icon={<ClipboardCheck />} n={c.awaitingReviewScripts}
+    <KpiCard tone="review" icon={<ClipboardCheck />} n={c.awaitingReviewScripts}
       pill={c.awaitingReviewScripts && c.oldestInReviewAt ? <span className="kpi-pill">Oldest waiting {waited(c.oldestInReviewAt)}</span>
         : !c.awaitingReviewScripts ? <span className="kpi-pill"><Check aria-hidden />Queue clear</span> : undefined}
       cap={mine ? 'Your scripts in review' : c.awaitingReviewScripts === 1 ? 'Script in review' : 'Scripts in review'}
@@ -143,7 +148,7 @@ export function StatCards({ d }: { d: Dashboard }) {
   const todayIndex = (() => { const wd = new Date(`${clock.today}T12:00:00Z`).getUTCDay(); return wd === 0 ? 6 : wd - 1; })();
   const weekStart = addDays(clock.today, -todayIndex) as ISODate;
   const doneCard = (
-    <Card tone="done" icon={<Send />} n={c.deliveredThisWeekScripts}
+    <KpiCard tone="done" icon={<Send />} n={c.deliveredThisWeekScripts}
       pill={<span className="kpi-pill">Mon – Sun</span>}
       cap="Delivered this week"
       sub={`${mine ? 'your scripts' : 'scripts in Timeliner'}${c.deliveredThisWeekBatches ? ` · ${plural(c.deliveredThisWeekBatches, 'batch', 'batches')}` : ''}`}
