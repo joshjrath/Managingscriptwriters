@@ -46,6 +46,18 @@ export function useModeActions() {
   };
 }
 
+/** The one way out of Recording mode: it always asks, because everything done in it is thrown away. */
+export function RecordingOffDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const act = useModeActions();
+  return (
+    <Dialog open={open} onClose={onClose} title="Turn off Recording mode?" size="narrow"
+      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Keep recording</Button><Button variant="primary" busy={act.busy === 'recording'} onClick={act.stopRecording}>Turn off and discard</Button></div>}>
+      <p className="muted" style={{ margin: 0 }}>Everything you did while recording is thrown away, and you’re back on the real workspace exactly as you left it.</p>
+      <FormError error={act.error} />
+    </Dialog>
+  );
+}
+
 export function ModeBar() {
   const { mode } = useBoot();
   const [small, setSmall] = useState(() => {
@@ -96,11 +108,7 @@ export function ModeBar() {
         )}
       </AnimatePresence>
       <ViewAsDialog open={picker} onClose={() => setPicker(false)} />
-      <Dialog open={confirmOff} onClose={() => setConfirmOff(false)} title="Turn off Recording mode?" size="narrow"
-        footer={<div className="form-actions"><Button variant="ghost" onClick={() => setConfirmOff(false)}>Keep recording</Button><Button variant="primary" busy={act.busy === 'recording'} onClick={act.stopRecording}>Turn off and discard</Button></div>}>
-        <p className="muted" style={{ margin: 0 }}>Everything you did while recording is thrown away, and you’re back on the real workspace exactly as you left it.</p>
-        <FormError error={act.error} />
-      </Dialog>
+      <RecordingOffDialog open={confirmOff} onClose={() => setConfirmOff(false)} />
     </>
   );
 }

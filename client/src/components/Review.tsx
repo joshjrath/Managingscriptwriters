@@ -7,8 +7,8 @@ import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, m } from 'framer-motion';
 import { Check, ChevronDown, ExternalLink, FileText, Link2, PenLine, RotateCcw, Send, Upload } from 'lucide-react';
-import { api, ApiError, useSave } from '../api';
-import type { Attachment, ReviewGroup, Script, Submission } from '../../../shared/types';
+import { api, ApiError, queryClient, useSave } from '../api';
+import type { Attachment, ReviewGroup, ReviewRecord, Script, Submission } from '../../../shared/types';
 import { compressRanges, parseRanges, parseTitleLines } from '../../../shared/workflow';
 import { fmtBytes, fmtStamp, plural } from '../../../shared/format';
 import { useBoot, useDisplayTz } from './Shell';
@@ -214,11 +214,23 @@ export function SendDialog({ batchId, batchTitle, candidates, preselect, resend,
   );
 }
 
+/** The Undo button on a decision's toast: puts the scripts back in review, as if nothing happened. */
+export function useUndoDecision() {
+  const toast = useToast();
+  return (reviewId: number | undefined, text: string) => {
+    if (!reviewId) { toast(text); return; }
+    toast(text, 'ok', {
+      label: 'Undo',
+      run: () => { void api(`/api/reviews/${reviewId}/undo`, { body: {} }).then(() => { void queryClient.invalidateQueries(); toast('Undone: back in review'); }, (err: ApiError) => toast(err.message, 'error')); },
+    });
+  };
+}
+
 // ── the manager's decision ───────────────────────────────────────────────
 
 export function DecisionDialog({ batchId, scripts, submissionId, mode, groupKey, onClose }: { batchId: number; scripts: Script[]; submissionId: number | null; mode: 'revisions' | 'approve_edits'; groupKey?: string; onClose: () => void }) {
   const from = useRef<{ x: number; y: number } | null>(null);
-  const toast = useToast();
+  const undoable = useUndoDecision();
   const [note, setNote] = useState('');
   const [att, setAtt] = useState<AttachValue>(emptyAttach(mode === 'approve_edits' ? 'file' : 'none'));
   const [errs, setErrs] = useState<Record<string, string>>({});
@@ -227,14 +239,14 @@ export function DecisionDialog({ batchId, scripts, submissionId, mode, groupKey,
   const save = useSave(async () => {
     const out = await postWith(`/api/batches/${batchId}/review`, {
       action: mode === 'revisions' ? 'revisions' : 'approve', scriptIds: scripts.map((s) => s.id), submissionId, note: note.trim() || null,
-    }, att);
+    }, att) as { reviewId?: number };
     if (groupKey) leaving.set(groupKey, mode === 'revisions' ? 'sent_back' : 'approved');
     return out;
-  }, { onSuccess: () => {
+  }, { onSuccess: (out) => {
     const at = from.current ?? centerOf(null);
     if (mode === 'revisions') burst(at.x, at.y, { colors: PINK, count: 14 });
     else { burst(at.x, at.y, { colors: MINT, count: 18 }); confetti({ x: at.x, y: at.y, count: 40, spread: 80, power: 10 }); }
-    toast(mode === 'revisions' ? `Sent ${plural(scripts.length, 'script')} back for revisions` : `Approved ${plural(scripts.length, 'script')} with your edits`);
+    undoable(out?.reviewId, mode === 'revisions' ? `Sent ${plural(scripts.length, 'script')} back for revisions` : `Approved ${plural(scripts.length, 'script')} with your edits`);
     onClose();
   } });
   const submit = () => {
@@ -286,7 +298,6 @@ function TitlesPreview({ scripts }: { scripts: Script[] }) {
 export function WaitingCard({ group, showBatch = true, onReplace }: { group: ReviewGroup; showBatch?: boolean; onReplace?: () => void }) {
   const displayTz = useDisplayTz();
   const { me, clock } = useBoot();
-  const toast = useToast();
   const manager = me.role !== 'writer';
   const [dialog, setDialog] = useState<null | { mode: 'revisions' | 'approve_edits'; scripts: Script[] }>(null);
   const [oneByOne, setOneByOne] = useState(false);
@@ -295,21 +306,25 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
   const n = group.scripts.length;
   const nums = compressRanges(group.scripts.map((s) => s.number));
   const from = useRef<{ x: number; y: number } | null>(null);
+  const undoable = useUndoDecision();
   const approve = useSave(async (scripts: Script[]) => {
-    const out = await api(`/api/batches/${group.batch.id}/review`, { body: { action: 'approve', scriptIds: scripts.map((s) => s.id), submissionId: sub?.id ?? null } });
+    const out = await api<{ reviewId?: number }>(`/api/batches/${group.batch.id}/review`, { body: { action: 'approve', scriptIds: scripts.map((s) => s.id), submissionId: sub?.id ?? null } });
     if (scripts.length === n) leaving.set(group.key, 'approved');
     return out;
   }, {
-    onSuccess: (_o, scripts) => {
+    onSuccess: (out, scripts) => {
       const at = from.current ?? centerOf(null);
       burst(at.x, at.y, { colors: MINT, count: 20, distance: 70 });
       confetti({ x: at.x, y: at.y, count: scripts.length === n ? 50 : 24, spread: 70, power: 11 });
-      toast(`Approved ${plural(scripts.length, 'script')}`);
+      undoable(out.reviewId, `Approved ${plural(scripts.length, 'script')}`);
       setPicked(new Set());
     },
   });
   const approveNow = (scripts: Script[], el: EventTarget) => { from.current = centerOf(el as Element); approve.mutate(scripts); };
   const pickedScripts = group.scripts.filter((s) => picked.has(s.id));
+  // with scripts ticked, the main buttons act on those, and say so
+  const target = oneByOne && pickedScripts.length ? pickedScripts : group.scripts;
+  const sel = target !== group.scripts;
   return (
     <section className="review-card edge-lavender" aria-label={`${group.writerName}: scripts ${nums}`}>
       <div className="rc-head">
@@ -331,9 +346,9 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
       {manager && (
         <>
           <div className="rc-actions">
-            <Button variant="mint" icon={<Check aria-hidden />} busy={approve.isPending && approve.variables?.length === n} onClick={(e) => approveNow(group.scripts, e.currentTarget)}>{n === 1 ? 'Approve' : `Approve all ${n}`}</Button>
-            <Button variant="danger" icon={<RotateCcw aria-hidden />} onClick={() => setDialog({ mode: 'revisions', scripts: group.scripts })}>Send back for revisions</Button>
-            <Button variant="ghost" icon={<PenLine aria-hidden />} onClick={() => setDialog({ mode: 'approve_edits', scripts: group.scripts })}>Approve with my edits</Button>
+            <Button variant="mint" icon={<Check aria-hidden />} busy={approve.isPending && approve.variables === target} onClick={(e) => approveNow(target, e.currentTarget)}>{sel ? `Approve ${target.length} selected` : n === 1 ? 'Approve' : `Approve all ${n}`}</Button>
+            <Button variant="danger" icon={<RotateCcw aria-hidden />} onClick={() => setDialog({ mode: 'revisions', scripts: target })}>{sel ? `Send ${target.length} selected back` : 'Send back for revisions'}</Button>
+            <Button variant="ghost" icon={<PenLine aria-hidden />} onClick={() => setDialog({ mode: 'approve_edits', scripts: target })}>{sel ? `Approve ${target.length} with my edits` : 'Approve with my edits'}</Button>
             {n > 1 && <button type="button" className="linkbtn rc-more" aria-expanded={oneByOne} onClick={() => setOneByOne(!oneByOne)}>{oneByOne ? 'Hide script list' : 'Review scripts one by one'}</button>}
           </div>
           <FormError error={approve.error} />
@@ -346,10 +361,7 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
                   {s.docUrl && <a className="link" href={s.docUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>own link</a>}
                 </label>
               ))}
-              <div className="row-flex s2">
-                <Button variant="sm mint" disabled={!pickedScripts.length} onClick={(e) => approveNow(pickedScripts, e.currentTarget)}>Approve {pickedScripts.length || ''} selected</Button>
-                <Button variant="sm danger" disabled={!pickedScripts.length} onClick={() => setDialog({ mode: 'revisions', scripts: pickedScripts })}>Send selected back</Button>
-              </div>
+              <p className="muted" style={{ fontSize: 12.5, margin: '6px 0 0' }}>{pickedScripts.length ? `The buttons above now act on the ${plural(pickedScripts.length, 'ticked script')} only.` : 'Tick scripts to decide on them separately.'}</p>
             </div>
           )}
         </>
@@ -402,6 +414,56 @@ export function DocumentHistory({ submissions }: { submissions: Submission[] }) 
   return (
     <div className="timeline">
       {items.map((i) => <div key={i.key} className="tl" style={{ ['--c' as string]: i.c }}><span className="d" /><div><div className="s">{i.node}</div><div className="w">{fmtStamp(i.at, displayTz)}</div></div></div>)}
+    </div>
+  );
+}
+
+// ── which version to paste into Timeliner ────────────────────────────────
+
+/** Approved scripts grouped by the version to use: the manager's edited one when there is one, else the writer's latest document. */
+export interface Source { key: string; ids: number[]; nums: number[]; edit: ReviewRecord | null; doc: Submission | null }
+
+export function approvedSources(scripts: Script[], submissions: Submission[]): Source[] {
+  const reviews = new Map<number, ReviewRecord>();
+  for (const sub of submissions) for (const r of sub.reviews) reviews.set(r.id, r);
+  const edits = [...reviews.values()].filter((r) => r.action === 'approved' && hasDoc(r)).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const subs = [...submissions].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const out = new Map<string, Source>();
+  for (const s of [...scripts].sort((a, b) => a.number - b.number)) {
+    const edit = [...edits].reverse().find((r) => r.batchId === s.batchId && r.scriptNumbers.includes(s.number)) ?? null;
+    const doc = edit ? null : [...subs].reverse().find((x) => x.batchId === s.batchId && x.scriptNumbers.includes(s.number) && hasDoc(x)) ?? null;
+    const key = edit ? `e${edit.id}` : doc ? `d${doc.id}` : 'none';
+    const g = out.get(key) ?? { key, ids: [], nums: [], edit, doc };
+    g.ids.push(s.id); g.nums.push(s.number);
+    out.set(key, g);
+  }
+  // the manager's versions first: they're the ones people miss
+  return [...out.values()].sort((a, b) => Number(!!b.edit) - Number(!!a.edit) || a.nums[0] - b.nums[0]);
+}
+
+/** "Scripts 11–12 · Josh's edited version · Open", one line per version, optionally with a tick box each. */
+export function SourceList({ sources, picked, onToggle }: { sources: Source[]; picked?: Set<string>; onToggle?: (key: string) => void }) {
+  if (!sources.length) return null;
+  return (
+    <div className="sources">
+      {sources.map((g) => {
+        const nums = compressRanges(g.nums);
+        const what = g.nums.length === 1 ? `Script ${nums}` : `Scripts ${nums}`;
+        const a = g.edit ?? g.doc;
+        const label = g.edit ? `${g.edit.reviewedByName.split(' ')[0]}’s edited version · use this one` : g.doc ? (g.doc.version > 1 ? `Your document (version ${g.doc.version})` : 'Your document') : 'No document attached';
+        return (
+          <div key={g.key} className={`source${g.edit ? ' edit' : ''}`}>
+            {onToggle && <input type="checkbox" aria-label={`${what} added to Timeliner`} checked={picked?.has(g.key) ?? true} onChange={() => onToggle(g.key)} />}
+            <span className="ic" aria-hidden>{g.edit ? <PenLine /> : a?.fileId ? <FileText /> : <Link2 />}</span>
+            <div className="body">
+              <b>{what}</b>
+              <span>{label}</span>
+              {g.edit?.note && <span className="q">“{g.edit.note}”</span>}
+            </div>
+            {a && hasDoc(a) && <a className={`btn sm${g.edit ? ' mint' : ''}`} href={docHref(a)} target="_blank" rel="noopener noreferrer">Open<ExternalLink aria-hidden /></a>}
+          </div>
+        );
+      })}
     </div>
   );
 }

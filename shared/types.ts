@@ -55,6 +55,8 @@ export interface Settings {
   planReminderDays: number;
   isDemo: boolean;
   remindersLastRunAt: string | null;
+  /** false when reminders are switched off on this server */
+  remindersEnabled: boolean;
   /** the colour palette the admin picked for the whole site (null = the original) */
   theme: WorkspaceTheme | null;
 }
@@ -82,11 +84,12 @@ export type DeliverableState = 'in_progress' | 'in_review' | 'revisions' | 'appr
 /** One document (a PDF or a link) covering a writer's scripts for a batch: one entry in the Script bank. */
 export interface Deliverable {
   key: string;
-  kind: 'file' | 'link';
-  href: string;
+  /** none: scripts that were sent or finished without any document attached */
+  kind: 'file' | 'link' | 'none';
+  href: string | null;
   name: string | null;
   note: string | null;
-  /** the newest version is listed; older ones are on the batch page */
+  /** each script is listed under the newest document it was sent in; older versions are on the batch page */
   version: number;
   sentAt: string;
   writerId: number | null;
@@ -98,15 +101,18 @@ export interface Deliverable {
   batchArchived: boolean;
   clientId: number;
   clientName: string;
+  shootId: number | null;
   shootDate: string | null;
   scripts: { id: number; number: number; title: string | null; status: ScriptStatus }[];
+  /** how many of its scripts are approved or delivered */
+  finished: number;
   /** set for scripts from before the platform, uploaded straight to the Script bank */
   past: { id: number; scriptCount: number | null; writtenOn: string | null } | null;
   /** "1–45" */
   ranges: string;
   state: DeliverableState;
-  /** the version a manager approved with their own edits */
-  edited: { kind: 'file' | 'link'; href: string; name: string | null; at: string } | null;
+  /** the version a manager approved with their own edits: the one to use, for the scripts in `ranges` */
+  edited: { kind: 'file' | 'link'; href: string; name: string | null; at: string; by: string; note: string | null; ranges: string } | null;
   timelinerUrl: string | null;
 }
 
@@ -304,6 +310,8 @@ export interface Shoot {
   notes: string | null;
   batchIds: number[];
   cancelledAt: string | null;
+  /** the synced-calendar event it was planned from */
+  calendarUid: string | null;
 }
 
 export interface Delivery {
@@ -316,6 +324,8 @@ export interface Delivery {
   note: string | null;
   scriptNumbers: number[];
   verification: 'writer_confirmed';
+  /** writers it was confirmed for, when someone else (a manager) confirmed it */
+  forNames: string[];
 }
 
 export interface Activity {
@@ -652,6 +662,8 @@ export interface ReschedulePreview {
     inPast: boolean;
   }[];
   affectedWriters: string[];
+  /** batches where drafts would be due after final delivery */
+  outOfOrder: { batchId: number; batchTitle: string; draftDue: ISODate; finalDue: ISODate }[];
 }
 
 export interface SearchResults {

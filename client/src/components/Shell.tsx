@@ -14,10 +14,10 @@ import { api, queryClient, useSave } from '../api';
 import type { Bootstrap, Notification, SearchResults } from '../../../shared/types';
 import { fmtStamp, fmtTimeZoneAbbr } from '../../../shared/format';
 import { nowInZone } from '../../../shared/dates';
-import { Avatar, Button, Dialog, Field, FormError, inputProps, useFieldId, useToast } from './ui';
+import { Avatar, Button, Dialog, Field, FormError, inputProps, setToastTag, useFieldId, useToast } from './ui';
 import { NewWorkDialog, type NewWorkTab, type NewWorkPreset } from './NewWork';
 import { MomentsHost } from './Moments';
-import { ModeBar, RecordingDialog, ViewAsDialog, useModeActions } from './ModeBar';
+import { ModeBar, RecordingDialog, RecordingOffDialog, ViewAsDialog } from './ModeBar';
 import { SPRING, setMotionEnabled, useMotionSetting } from '../motion';
 import { LATEST_CHANGE } from '../../../shared/changelog';
 import { ControlCenterLink } from '../control/Link';
@@ -63,6 +63,8 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
   const loc = useLocation();
   useEffect(() => { setDrawer(false); }, [loc.pathname]);
   useEffect(() => { window.scrollTo(0, 0); }, [loc.pathname]);
+  // every confirmation in Recording mode says it isn't kept
+  useEffect(() => { setToastTag(boot.mode?.recording ? 'Practice copy · not kept' : null); }, [boot.mode?.recording]);
 
   const toggle = () => {
     // at medium widths the rail starts collapsed; the toggle expands it instead
@@ -150,6 +152,12 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
         <span>{collapsed && !mobile ? 'S' : 'Media'}</span>
       </NavLink>
       {me.role === 'owner' && !mode?.viewingAs && !mobile && <ControlCenterLink />}
+      {(mode?.recording || mode?.viewingAs) && (
+        <div className={`rail-mode${mode.recording ? ' rec' : ''}`} role="status" title={mode.recording ? 'Recording mode: a practice copy, nothing is kept' : `Viewing as ${mode.viewingAs!.name}: view only`}>
+          {mode.recording ? <i className="rec-dot" aria-hidden /> : <Eye size={14} aria-hidden />}
+          <span className="label">{mode.recording ? (mode.viewingAs ? `Recording as ${mode.viewingAs.name.split(' ')[0]}` : 'Recording mode') : `Viewing as ${mode.viewingAs!.name.split(' ')[0]}`}</span>
+        </div>
+      )}
       {me.role !== 'editor' && <SearchBox />}
       <LayoutGroup id={mobile ? 'nav-mobile' : 'nav'}>
         <nav className="nav">
@@ -216,7 +224,7 @@ function UserMenu() {
   const [pw, setPw] = useState(false);
   const [viewAs, setViewAs] = useState(false);
   const [recording, setRecording] = useState(false);
-  const modeAct = useModeActions();
+  const [recordingOff, setRecordingOff] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   useOutside(ref, () => setOpen(false), open);
   const logout = async () => {
@@ -238,13 +246,13 @@ function UserMenu() {
           {mode && (
             <>
               <button role="menuitem" onClick={() => { setViewAs(true); setOpen(false); }}><Eye />View as…</button>
-              <button role="menuitemcheckbox" aria-checked={!!mode.recording} onClick={() => { setOpen(false); if (mode.recording) modeAct.stopRecording(); else setRecording(true); }}>
+              <button role="menuitemcheckbox" aria-checked={!!mode.recording} onClick={() => { setOpen(false); if (mode.recording) setRecordingOff(true); else setRecording(true); }}>
                 <Circle />Recording mode<span className={`switch${mode.recording ? ' on' : ''}`} aria-hidden><i /></span>
               </button>
             </>
           )}
-          {!mode?.viewingAs && <button role="menuitem" onClick={() => { setPw(true); setOpen(false); }}><KeyRound />Change password</button>}
-          {!mode?.viewingAs && <button role="menuitem" onClick={() => { setOpen(false); openTimezoneDialog(); }}><Globe2 />Time zone<span className="menu-hint">{fmtTimeZoneAbbr(tzNow)}</span></button>}
+          {!mode?.viewingAs && !mode?.recording && <button role="menuitem" onClick={() => { setPw(true); setOpen(false); }}><KeyRound />Change password</button>}
+          {!mode?.viewingAs && !mode?.recording && <button role="menuitem" onClick={() => { setOpen(false); openTimezoneDialog(); }}><Globe2 />Time zone<span className="menu-hint">{fmtTimeZoneAbbr(tzNow)}</span></button>}
           <button role="menuitemcheckbox" aria-checked={motionOn} onClick={() => setMotionEnabled(!motionOn)}><Wand2 />Animations<span className={`switch${motionOn ? ' on' : ''}`} aria-hidden><i /></span></button>
           <button role="menuitem" onClick={logout}><LogOut />Sign out</button>
         </div>
@@ -252,6 +260,7 @@ function UserMenu() {
       <PasswordDialog open={pw} onClose={() => setPw(false)} />
       {mode && <ViewAsDialog open={viewAs} onClose={() => setViewAs(false)} />}
       {mode && <RecordingDialog open={recording} onClose={() => setRecording(false)} />}
+      {mode && <RecordingOffDialog open={recordingOff} onClose={() => setRecordingOff(false)} />}
     </div>
   );
 }

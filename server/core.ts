@@ -46,7 +46,7 @@ export async function loadSettings(db: Db): Promise<Settings> {
     orgName: r.org_name, timezone: r.timezone, cutoff: r.cutoff,
     draftOffsetDays: r.draft_offset_days, finalOffsetDays: r.final_offset_days,
     dayMode: r.day_mode, workingDays: wd, reminderLeadDays: r.reminder_lead_days, planReminderDays: r.plan_reminder_days ?? 14,
-    isDemo: r.is_demo, remindersLastRunAt: r.reminders_last_run_at,
+    isDemo: r.is_demo, remindersLastRunAt: r.reminders_last_run_at, remindersEnabled: process.env.REMINDERS !== 'off',
     theme: typeof r.theme === 'string' ? JSON.parse(r.theme) : r.theme ?? null,
   };
 }

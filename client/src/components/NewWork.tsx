@@ -2,7 +2,7 @@
 // Required fields are minimal; everything else sits behind "More options".
 // After saving, the dialog shows exactly what was created and which dates apply.
 
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CalendarDays, Camera, CheckCheck, ChevronDown, FileText, Link2, PlayCircle, Plus, Sparkles, Trash2, Type, Users, Wand2 } from 'lucide-react';
@@ -11,14 +11,14 @@ import { api, ApiError, queryClient, useSave } from '../api';
 import { useBoot } from './Shell';
 import { Button, Dialog, Field, FormError, inputProps, Seg, useFieldId, useToast } from './ui';
 import { addDays, computeDeadlines, draftFromFinal, dueState, suggestStart, type ISODate } from '../../../shared/dates';
-import { canWrite, evenSplit, isManager } from '../../../shared/workflow';
+import { canWrite, evenSplit, isManager, ROLE_LABEL } from '../../../shared/workflow';
 import { fmtBytes, fmtDate, fmtLong, fmtRange, plural } from '../../../shared/format';
 import { parseEntry, type ParsedEntry } from '../../../shared/parse';
 import type { BatchSummary, ClientDetail, Priority, ResourceCategory } from '../../../shared/types';
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
 
 export type NewWorkTab = 'notes' | 'quick' | 'shoot' | 'batch' | 'client';
-export interface NewWorkPreset { prospect?: boolean; clientId?: number; shootId?: number; text?: string; start?: ISODate; end?: ISODate | null; count?: number; split?: SplitPart[] }
+export interface NewWorkPreset { prospect?: boolean; clientId?: number; shootId?: number; text?: string; start?: ISODate; end?: ISODate | null; count?: number; split?: SplitPart[]; newClientName?: string; calendarUid?: string }
 
 interface Created {
   kind: 'shoot' | 'batch' | 'client';
@@ -105,11 +105,31 @@ export function SplitEditor({ total, parts, onChange, error }: { total: number; 
   const assigned = parts.reduce((n, p) => n + (Number(p.count) || 0), 0);
   const over = total > 0 && assigned > total;
   const set = (i: number, patch: Partial<SplitPart>) => onChange(parts.map((p, j) => (j === i ? { ...p, ...patch } : p)));
-  const even = () => {
-    const chosen = parts.filter((p) => p.writerId !== '');
-    const counts = evenSplit(total, chosen.length);
-    onChange(chosen.map((p, i) => ({ ...p, count: counts[i] })));
+  const chosenOf = (ps: SplitPart[]) => ps.filter((p) => p.writerId !== '');
+  // the counts are still the even split (nobody has typed their own numbers yet)
+  const isEven = (ps: SplitPart[]) => {
+    const c = chosenOf(ps);
+    if (!c.length) return true;
+    const counts = evenSplit(total, c.length);
+    return c.every((p, i) => (Number(p.count) || 0) === counts[i]) || c.every((p) => p.count === '' || p.count === 0);
   };
+  const even = (ps = parts) => {
+    const chosen = chosenOf(ps);
+    const counts = evenSplit(total, chosen.length);
+    let k = 0;
+    onChange(ps.filter((p) => p.writerId !== '' || ps.length === 1).map((p) => (p.writerId !== '' ? { ...p, count: counts[k++] } : p)));
+  };
+  // picking a writer shares the scripts out evenly while nobody has typed their own numbers,
+  // otherwise gives the new writer what's left, so no one is ever added with 0 by accident
+  const pick = (i: number, writerId: number | '') => {
+    const next = parts.map((p, j) => (j === i ? { ...p, writerId } : p));
+    if (writerId === '' || total <= 0 || (parts[i].count !== '' && parts[i].count !== 0)) return onChange(next);
+    if (isEven(parts)) return even(next);
+    const left = total - assigned;
+    onChange(next.map((p, j) => (j === i ? { ...p, count: left > 0 ? left : '' } : p)));
+  };
+  const empty = chosenOf(parts).filter((p) => !(Number(p.count) > 0));
+  const nameOf = (id: number | '') => team.find((u) => u.id === id)?.name ?? 'A writer';
   let start = 1;
   return (
     <div className="split-editor">
@@ -120,13 +140,13 @@ export function SplitEditor({ total, parts, onChange, error }: { total: number; 
         return (
           <div key={i}>
             <div className="split-row">
-              <select className="select" aria-label={`Writer ${i + 1}`} value={p.writerId} onChange={(e) => set(i, { writerId: e.target.value ? Number(e.target.value) : '' })}>
+              <select className="select" aria-label={`Writer ${i + 1}`} value={p.writerId} onChange={(e) => pick(i, e.target.value ? Number(e.target.value) : '')}>
                 <option value="">Choose a writer…</option>
                 {team.map((u) => (
-                  <option key={u.id} value={u.id} disabled={parts.some((q, j) => j !== i && q.writerId === u.id)}>{u.name}{u.role !== 'writer' ? ` (${u.role})` : ''}</option>
+                  <option key={u.id} value={u.id} disabled={parts.some((q, j) => j !== i && q.writerId === u.id)}>{u.name}{u.role !== 'writer' ? ` (${ROLE_LABEL[u.role]})` : ''}</option>
                 ))}
               </select>
-              <input className="input num" type="number" min={0} max={500} inputMode="numeric" aria-label={`Scripts for writer ${i + 1}`} value={p.count} onChange={(e) => set(i, { count: e.target.value === '' ? '' : Math.max(0, Number(e.target.value)) })} />
+              <input className={`input num${p.writerId !== '' && !(Number(p.count) > 0) ? ' invalid' : ''}`} type="number" min={0} max={500} inputMode="numeric" placeholder="Scripts" aria-label={`Scripts for writer ${i + 1}`} value={p.count} onChange={(e) => set(i, { count: e.target.value === '' ? '' : Math.max(0, Number(e.target.value)) })} />
               <button type="button" className="icon-btn sm" aria-label={`Remove writer ${i + 1}`} onClick={() => onChange(parts.filter((_, j) => j !== i))}><Trash2 size={16} /></button>
             </div>
             {range && <div className="muted" style={{ fontSize: 12, margin: '4px 2px 0' }}>{range}</div>}
@@ -135,11 +155,12 @@ export function SplitEditor({ total, parts, onChange, error }: { total: number; 
       })}
       <div className="row-flex s2">
         <Button variant="sm" icon={<Plus aria-hidden />} onClick={() => onChange([...parts, { writerId: '', count: '' }])}>Add writer</Button>
-        {parts.length > 1 && total > 0 && <Button variant="ghost sm" onClick={even}>Split {total} evenly</Button>}
+        {chosenOf(parts).length > 1 && total > 0 && <Button variant="sm" onClick={() => even()}>Split {total} evenly</Button>}
       </div>
       <div className="split-sum" aria-live="polite">
         <span className={over ? 'red' : ''}>{assigned} of {total || 0} assigned</span>
-        {!over && total > assigned && <span>{plural(total - assigned, 'script')} will be unassigned — you can assign them later</span>}
+        {empty.length > 0 && <span className="red">{empty.map((p) => nameOf(p.writerId)).join(' and ')} {empty.length === 1 ? 'has' : 'have'} no scripts. Give them some, split evenly, or remove them.</span>}
+        {!empty.length && !over && total > assigned && <span>{plural(total - assigned, 'script')} will be unassigned — you can assign them later</span>}
         {over && <span className="red">Assigned more scripts than the batch has</span>}
       </div>
       {error && <span className="err" role="alert" style={{ color: '#FF9C94', fontSize: 12.5, fontWeight: 600 }}>{error}</span>}
@@ -147,7 +168,7 @@ export function SplitEditor({ total, parts, onChange, error }: { total: number; 
   );
 }
 
-function DeadlinePreview({ start, draftOverride, finalOverride }: { start: ISODate | ''; draftOverride?: ISODate | ''; finalOverride?: ISODate | '' }) {
+function DeadlinePreview({ start, draftOverride, finalOverride, draftFollowsFinal }: { start: ISODate | ''; draftOverride?: ISODate | ''; finalOverride?: ISODate | ''; draftFollowsFinal?: boolean }) {
   const { settings, clock } = useBoot();
   if (!start) return <div className="muted" style={{ fontSize: 13 }}>Enter the shoot start date to see the draft and final delivery deadlines.</div>;
   const d = computeDeadlines(start, settings);
@@ -157,7 +178,7 @@ function DeadlinePreview({ start, draftOverride, finalOverride }: { start: ISODa
   return (
     <div className="stack s2">
       <div className="preview-dates" aria-live="polite">
-        <div><span className="k">Drafts due</span><span className="v">{fmtLong(draft)}</span><span className="r">{draftOverride ? 'Manual override' : d.draftRule}</span></div>
+        <div><span className="k">Drafts due</span><span className="v">{fmtLong(draft)}</span><span className="r">{draftOverride ? (draftFollowsFinal ? 'From final delivery' : 'Manual override') : d.draftRule}</span></div>
         <div><span className="k">Final delivery to Timeliner</span><span className="v">{fmtLong(final)}</span><span className="r">{finalOverride ? 'Manual override' : d.finalRule}</span></div>
       </div>
       {past.map((p) => <div key={p} className="banner red"><AlertTriangle aria-hidden /><div className="txt"><b>{p}</b><span>You can still save; the batch will show as overdue straight away.</span></div></div>)}
@@ -169,13 +190,18 @@ function useClient(clientId: number | '') {
   return useQuery({ queryKey: ['client', clientId], queryFn: () => api<ClientDetail>(`/api/clients/${clientId}`), enabled: !!clientId });
 }
 
-function ClientSelect({ id, value, onChange, error }: { id: string; value: number | ''; onChange: (v: number | '') => void; error?: string }) {
+function ClientSelect<T extends number | '' | 'new'>({ id, value, onChange, error, allowNew }: { id: string; value: T; onChange: (v: T) => void; error?: string; allowNew?: boolean }) {
   const { clients } = useBoot();
+  const list = clients.filter((c) => c.status !== 'archived');
   return (
-    <select className="select" value={value} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : '')} {...inputProps(id, error)}>
-      <option value="">Choose a client…</option>
-      {clients.filter((c) => c.status !== 'archived').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-    </select>
+    <>
+      <select className="select" value={value} onChange={(e) => onChange((e.target.value === 'new' ? 'new' : e.target.value ? Number(e.target.value) : '') as T)} {...inputProps(id, error)}>
+        <option value="">{list.length ? 'Choose a client…' : allowNew ? 'No clients yet: add one below' : 'No clients yet'}</option>
+        {allowNew && <option value="new">+ New client…</option>}
+        {list.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </select>
+      {!list.length && !allowNew && <span className="help">Add your first client in the New client tab first.</span>}
+    </>
   );
 }
 
@@ -242,7 +268,23 @@ function Advanced({ children, label = 'More options' }: { children: ReactNode; l
   );
 }
 
-const cleanSplit = (parts: SplitPart[]) => parts.filter((p) => p.writerId !== '' && Number(p.count) > 0).map((p) => ({ writerId: Number(p.writerId), count: Number(p.count) }));
+// a chosen writer with no count is sent as 0, so the form can say so instead of dropping them
+const cleanSplit = (parts: SplitPart[]) => parts.filter((p) => p.writerId !== '').map((p) => ({ writerId: Number(p.writerId), count: Number(p.count) || 0 }));
+
+/**
+ * Drops a field's error as soon as that field changes, so fixed fields don't stay red until the next
+ * submit. `watch` maps error keys to the values they're about; a server error is cleared too.
+ */
+function useClearErrors(watch: Record<string, unknown>, setLocal: (fn: (l: Record<string, string>) => Record<string, string>) => void, clearServer: () => void) {
+  const prev = useRef(watch);
+  useEffect(() => {
+    const changed = Object.keys(watch).filter((k) => watch[k] !== prev.current[k]);
+    prev.current = watch;
+    if (!changed.length) return;
+    setLocal((l) => { const n = { ...l }; let hit = false; for (const k of changed) if (k in n) { delete n[k]; hit = true; } return hit ? n : l; });
+    clearServer();
+  });
+}
 
 function splitLines(parts: { writerId: number; count: number }[], total: number, name: (id: number) => string) {
   let n = 1;
@@ -335,6 +377,8 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   const names = useNames();
   const p = preset;
   const [clientId, setClientId] = useState<number | ''>(p?.clientId ?? '');
+  // a client that isn't on the site yet, created with the shoot (e.g. a new name on the calendar)
+  const [newClient, setNewClient] = useState<string | null>(p?.newClientName && !p?.clientId ? p.newClientName : null);
   const [start, setStart] = useState<string>(p?.start ?? '');
   const [end, setEnd] = useState<string>(p?.end ?? '');
   const [count, setCount] = useState<number | ''>(p?.count ?? '');
@@ -360,23 +404,23 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   const [attach, setAttach] = useState<Attach>(emptyAttach);
   const [uploading, setUploading] = useState(false);
   const client = useClient(clientId);
-  const ids = { client: useFieldId('client'), start: useFieldId('start'), end: useFieldId('end'), count: useFieldId('count'), title: useFieldId('st'), bt: useFieldId('bt'), pr: useFieldId('pr'), ps: useFieldId('ps'), dd: useFieldId('dd'), fd: useFieldId('fd'), loc: useFieldId('loc'), brief: useFieldId('brief') };
+  const ids = { nc: useFieldId('nc'), client: useFieldId('client'), start: useFieldId('start'), end: useFieldId('end'), count: useFieldId('count'), title: useFieldId('st'), bt: useFieldId('bt'), pr: useFieldId('pr'), ps: useFieldId('ps'), dd: useFieldId('dd'), fd: useFieldId('fd'), loc: useFieldId('loc'), brief: useFieldId('brief') };
 
   // single writer: default their count to the whole batch
   useEffect(() => {
     if (parts.length === 1 && parts[0].writerId !== '' && (parts[0].count === '' || parts[0].count === 0) && count) setParts([{ ...parts[0], count }]);
   }, [count, parts]);
 
-  const save = useSave((body: Record<string, unknown>) => api<{ shootId: number; batchId: number | null; warnings: string[]; batch: BatchSummary | null }>('/api/shoots', { body }), {
+  const save = useSave((body: Record<string, unknown>) => api<{ shootId: number; clientId: number; batchId: number | null; warnings: string[]; batch: BatchSummary | null }>('/api/shoots', { body }), {
     onSuccess: async (out) => {
       const d = computeDeadlines(start, settings);
       const split = cleanSplit(parts);
       setUploading(true);
-      const att = await saveAttachments(Number(clientId), out.batchId, attach).finally(() => setUploading(false));
+      const att = await saveAttachments(out.clientId, out.batchId, attach).finally(() => setUploading(false));
       await queryClient.invalidateQueries();
       if (!out.batch) {
         onCreated({
-          kind: 'shoot', title: 'Shoot scheduled', clientId: Number(clientId), batchId: null, warnings: [...out.warnings, ...att.warnings],
+          kind: 'shoot', title: 'Shoot scheduled', clientId: out.clientId, batchId: null, warnings: [...out.warnings, ...att.warnings],
           lines: [
             { k: 'Shoot', v: fmtRange(start, end || null) },
             { k: 'Scripts', v: 'Not planned yet — add them from the shoot on the calendar, the client page or Overview' },
@@ -403,10 +447,12 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
       });
     },
   });
+  useClearErrors({ clientId: `${clientId}|${newClient}`, newClientName: newClient, startDate: start, endDate: end, 'batch.targetCount': count, 'batch.split': parts }, setLocal, () => { if (save.error) save.reset(); });
   const f = { ...local, ...(save.error?.fields ?? {}) };
   const submit = () => {
     const errs: Record<string, string> = {};
-    if (!clientId) errs.clientId = 'Choose a client';
+    if (!clientId && newClient === null) errs.clientId = 'Choose a client';
+    if (newClient !== null && !newClient.trim()) errs.newClientName = 'Type the new client’s name';
     if (!start) errs.startDate = 'Enter the first shoot day';
     if (end && start && end < start) errs.endDate = 'The shoot can’t end before it starts';
     if (!later && (!count || Number(count) < 1)) errs['batch.targetCount'] = 'How many scripts are needed? Or choose “Plan scripts later”.';
@@ -414,7 +460,8 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
     setLocal(errs);
     if (Object.keys(errs).length) return;
     save.mutate({
-      clientId, title: title || null, startDate: start, endDate: end || null, location: location || null, notes: null,
+      ...(newClient !== null ? { newClientName: newClient.trim() } : { clientId }), calendarUid: p?.calendarUid,
+      title: title || null, startDate: start, endDate: end || null, location: location || null, notes: null,
       batch: later ? undefined : {
         title: batchTitle || null, targetCount: Number(count), priority, plannedStart: planned || null,
         draftDue: draftOverride || null, finalDue: finalOverride || null, brief: brief || null, nextAction: null,
@@ -426,7 +473,8 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
     <form className="form" onSubmit={(e) => { e.preventDefault(); submit(); }} noValidate>
       <FormError error={save.error && !Object.keys(save.error.fields).length ? save.error : null} />
       <div className="form-grid">
-        <Field label="Client" htmlFor={ids.client} error={f.clientId} className="full"><ClientSelect id={ids.client} value={clientId} onChange={setClientId} error={f.clientId} /></Field>
+        <Field label="Client" htmlFor={ids.client} error={f.clientId} className="full"><ClientSelect id={ids.client} value={newClient !== null ? 'new' : clientId} onChange={(v) => { if (v === 'new') { setNewClient(''); setClientId(''); } else { setNewClient(null); setClientId(v); } }} error={f.clientId} allowNew /></Field>
+        {newClient !== null && <Field label="New client’s name" htmlFor={ids.nc} error={f.newClientName} className="full" help="They’re added to Clients with this shoot. Add their brand voice and resources from their page later."><input className="input" value={newClient} onChange={(e) => setNewClient(e.target.value)} {...inputProps(ids.nc, f.newClientName)} /></Field>}
         <Field label="Shoot starts" htmlFor={ids.start} error={f.startDate}><input className="input" type="date" value={start} onChange={(e) => setStart(e.target.value)} {...inputProps(ids.start, f.startDate)} /></Field>
         <Field label="Shoot ends" optional htmlFor={ids.end} error={f.endDate} help="Leave empty for a one-day shoot. Deadlines count back from the first day."><input className="input" type="date" value={end} min={start || undefined} onChange={(e) => setEnd(e.target.value)} {...inputProps(ids.end, f.endDate)} /></Field>
         <div className="field full">
@@ -438,7 +486,7 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
           {later && <span className="help">Just book the shoot. Add the script count and writers when you know them — you’ll get a reminder {settings.planReminderDays} days before the shoot if they’re still not planned (change this in Settings).</span>}
         </div>
         {!later && <Field label="Scripts needed" htmlFor={ids.count} error={f['batch.targetCount']} help="Writers can be assigned now or later."><input className="input num" type="number" min={1} max={500} inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value === '' ? '' : Number(e.target.value))} {...inputProps(ids.count, f['batch.targetCount'])} /></Field>}
-        <div className="field full"><span className="lbl">{later ? 'Deadlines, once scripts are added' : 'Deadlines'}</span><DeadlinePreview start={start as ISODate} draftOverride={draftOverride as ISODate} finalOverride={finalOverride as ISODate} /></div>
+        <div className="field full"><span className="lbl">{later ? 'Deadlines, once scripts are added' : 'Deadlines'}</span><DeadlinePreview start={start as ISODate} draftOverride={draftOverride as ISODate} finalOverride={finalOverride as ISODate} draftFollowsFinal={draftFollows && !!finalOverride} /></div>
         {!later && <div className="field full"><span className="lbl">Writers <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional — assign later if you’re not sure</span></span><SplitEditor total={Number(count) || 0} parts={parts} onChange={setParts} error={f['batch.split']} /></div>}
       </div>
       <div className="field"><span className="lbl">Recording & files <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional</span></span><AttachmentsSection value={attach} onChange={setAttach} errors={f} /></div>
@@ -496,7 +544,7 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   const auto = shoot ? computeDeadlines(shoot.startDate, settings) : null;
   // adding scripts to a shoot: name the batch after it unless a name has been typed
   const [named, setNamed] = useState(false);
-  useEffect(() => { if (shoot && !named) setTitle(`${shoot.title || 'Shoot'} · ${fmtRange(shoot.startDate, shoot.endDate)}`); }, [shoot, named]);
+  useEffect(() => { if (shoot && !named) setTitle(`${shoot.title || shoot.clientName} · ${fmtRange(shoot.startDate, shoot.endDate)}`); }, [shoot, named]);
   const ids = { client: useFieldId('bc'), title: useFieldId('btl'), count: useFieldId('bn'), shoot: useFieldId('bs'), draft: useFieldId('bd'), final: useFieldId('bf'), pr: useFieldId('bp'), ps: useFieldId('bps'), brief: useFieldId('bb'), na: useFieldId('bna') };
   useEffect(() => {
     if (parts.length === 1 && parts[0].writerId !== '' && (parts[0].count === '' || parts[0].count === 0) && count) setParts([{ ...parts[0], count }]);
@@ -521,6 +569,7 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
       });
     },
   });
+  useClearErrors({ clientId, title, targetCount: count, draftDue: `${draft}|${final}`, split: parts }, setLocal, () => { if (save.error) save.reset(); });
   const f = { ...local, ...(save.error?.fields ?? {}) };
   const submit = () => {
     const errs: Record<string, string> = {};
@@ -591,6 +640,8 @@ function ClientForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: 
   const [links, setLinks] = useState<{ title: string; url: string; category: ResourceCategory }[]>([]);
   const [withBatch, setWithBatch] = useState(false);
   const [batch, setBatch] = useState({ title: 'Initial scripts', targetCount: 5 as number | '', draftDue: '', finalDue: '' });
+  const [batchDraftFollows, setBatchDraftFollows] = useState(true);
+  const { settings } = useBoot();
   const [parts, setParts] = useState<SplitPart[]>([{ writerId: '', count: '' }]);
   const [local, setLocal] = useState<Record<string, string>>({});
   const [uploading, setUploading] = useState(false);
@@ -623,6 +674,7 @@ function ClientForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: 
       });
     },
   });
+  useClearErrors({ name, 'initialBatch.targetCount': batch.targetCount, 'initialBatch.title': batch.title, 'briefing.recordingUrl': call.recordingUrl, 'briefing.documentUrl': call.documentUrl, 'initialBatch.split': parts }, setLocal, () => { if (save.error) save.reset(); });
   const f = { ...local, ...(save.error?.fields ?? {}) };
   const submit = () => {
     const errs: Record<string, string> = {};
@@ -688,9 +740,9 @@ function ClientForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: 
         <div className="form-grid">
           <Field label="Batch name" htmlFor={ids.bt} error={f['initialBatch.title']}><input className="input" value={batch.title} onChange={(e) => setBatch({ ...batch, title: e.target.value })} {...inputProps(ids.bt, f['initialBatch.title'])} /></Field>
           <Field label="Scripts" htmlFor={ids.bn} error={f['initialBatch.targetCount']}><input className="input num" type="number" min={1} value={batch.targetCount} onChange={(e) => setBatch({ ...batch, targetCount: e.target.value === '' ? '' : Number(e.target.value) })} {...inputProps(ids.bn, f['initialBatch.targetCount'])} /></Field>
-          <Field label="Drafts due" optional htmlFor={ids.bd}><input className="input" type="date" id={ids.bd} value={batch.draftDue} onChange={(e) => setBatch({ ...batch, draftDue: e.target.value })} /></Field>
-          <Field label="Final delivery" optional htmlFor={ids.bf} error={f['initialBatch.draftDue'] ?? f.draftDue}><input className="input" type="date" id={ids.bf} value={batch.finalDue} onChange={(e) => setBatch({ ...batch, finalDue: e.target.value })} /></Field>
-          <div className="field full"><span className="lbl">Writers</span><SplitEditor total={Number(batch.targetCount) || 0} parts={parts} onChange={setParts} /></div>
+          <Field label="Final delivery" optional htmlFor={ids.bf} error={f['initialBatch.finalDue']}><input className="input" type="date" id={ids.bf} value={batch.finalDue} onChange={(e) => { const v = e.target.value; setBatch({ ...batch, finalDue: v, draftDue: batchDraftFollows ? (v ? draftFromFinal(v as ISODate, settings).date : '') : batch.draftDue }); }} /></Field>
+          <Field label="Drafts due" optional htmlFor={ids.bd} error={f['initialBatch.draftDue'] ?? f.draftDue} help={batchDraftFollows && batch.finalDue ? `Set from final delivery: ${draftFromFinal(batch.finalDue as ISODate, settings).rule}` : undefined}><input className="input" type="date" id={ids.bd} value={batch.draftDue} onChange={(e) => { setBatchDraftFollows(false); setBatch({ ...batch, draftDue: e.target.value }); }} /></Field>
+          <div className="field full"><span className="lbl">Writers</span><SplitEditor total={Number(batch.targetCount) || 0} parts={parts} onChange={setParts} error={f['initialBatch.split']} /></div>
         </div>
       )}
       <div className="form-actions"><Button type="submit" variant="primary pill lg" busy={save.isPending || uploading} onClick={submit}>{prospect ? 'Add potential client' : 'Create client'}</Button></div>

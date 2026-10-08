@@ -73,11 +73,13 @@ export async function findCalendarShoots(ctx: Ctx, opts: { includeDismissed?: bo
     const end = (e.all_day ? e.end_date : day(new Date(new Date(e.end_at).getTime() - 1).toISOString())) as ISODate;
     if (end < today) continue;
     const candidates = matchClients(`${e.title} ${e.location ?? ''}`, clients, e.feed_name);
-    // the site's shoot for one of those clients on the same days (a day either side); without a client we don't guess
+    // a shoot planned from this very event wins; otherwise the site's shoot for one of those clients
+    // on the same days (a day either side). Without a client we don't guess.
     let client = candidates[0] ?? null;
-    let shoot: (typeof siteShoots)[number] | undefined;
+    let shoot: (typeof siteShoots)[number] | undefined = siteShoots.find((x) => x.calendarUid === e.uid);
     let batches: typeof summaries = [];
-    for (const c of candidates) {
+    if (shoot) { client = { id: shoot.clientId, name: shoot.clientName }; batches = summaries.filter((b) => b.shootId === shoot!.id); }
+    for (const c of shoot ? [] : candidates) {
       shoot = siteShoots.find((s) => s.clientId === c.id && s.startDate <= addDays(end, 1) && (s.endDate ?? s.startDate) >= addDays(start, -1));
       if (shoot) { client = c; batches = summaries.filter((b) => b.shootId === shoot!.id); break; }
     }
@@ -133,7 +135,9 @@ export async function notifyNewCalendarShoots(ctx: Ctx): Promise<number> {
 export function registerCalendarShootRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/api/calendar-shoots', async (req) => {
     requireManager(req);
-    return { shoots: await findCalendarShoots(ctx) };
+    const all = await findCalendarShoots(ctx, { includeDismissed: true });
+    const hidden = new Set((await ctx.db.query<{ uid: string }>(`select uid from calendar_shoot_marks where dismissed_at is not null`)).map((r) => r.uid));
+    return { shoots: all.filter((s) => !hidden.has(s.uid)), hidden: all.filter((s) => hidden.has(s.uid)) };
   });
   app.post('/api/calendar-shoots/dismiss', async (req) => {
     const me = requireManager(req);

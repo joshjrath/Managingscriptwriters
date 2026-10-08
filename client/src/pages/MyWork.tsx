@@ -18,7 +18,7 @@ import { TodoPanel } from '../components/Todos';
 import { WrittenCounter } from '../components/WrittenCounter';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import { Button, Chip, Empty, ErrorState, ExtLink, LiquidBar, Loading, Panel, useToast } from '../components/ui';
-import { CardList, SendDialog, SentBackCard, TitlesDialog, WaitingCard } from '../components/Review';
+import { approvedSources, CardList, SendDialog, SentBackCard, SourceList, TitlesDialog, WaitingCard } from '../components/Review';
 import { DeliverDialog } from './BatchDetail';
 import { confetti } from '../fx';
 
@@ -123,7 +123,7 @@ export function MyWorkPage() {
                     <div className="rows">{q.data.recentDeliveries.map((d) => (
                       <div key={d.id} className="item edge-mint">
                         <div className="body"><div className="top">{d.clientName}</div><div className="title">{d.batchTitle}</div><div className="meta">Scripts {compressRanges(d.scriptNumbers) || '—'} · {fmtStamp(d.confirmedAt, displayTz)}</div></div>
-                        <div className="side"><Chip color="mint">Writer-confirmed</Chip></div>
+                        <div className="side"><Chip color="mint">{d.forNames.length ? `For ${d.forNames.join(', ')}` : 'You confirmed'}</Chip></div>
                       </div>
                     ))}</div>
                   </>
@@ -181,9 +181,14 @@ function WorkCard({ e, writerId, fresh, collapsible }: { e: Entry; writerId: num
   const [showReview, setShowReview] = useState(false);
   const bodyId = useId();
   const [dialog, setDialog] = useState<null | { kind: 'send'; preselect: number[]; resend?: boolean } | { kind: 'titles' } | { kind: 'deliver' }>(null);
-  const deliver = useSave((v: { url: string | null; note: string | null }) => api<{ changed: number[] }>(`/api/batches/${b.id}/scripts/action`, {
-    body: { action: 'deliver', scriptIds: st.approved.map((s) => s.id), timelinerUrl: v.url, note: v.note, versions: Object.fromEntries(st.approved.map((s) => [s.id, s.version])) },
-  }), { onSuccess: (o) => { confetti({ y: innerHeight * 0.55, count: 70, spread: 120, power: 13 }); toast(o.changed.length > st.approved.length ? `Delivery confirmed for all ${o.changed.length} approved scripts in this batch` : `Delivery confirmed for scripts ${nums(st.approved)}`); setDialog(null); } });
+  const deliver = useSave((v: { url: string | null; note: string | null; ids: number[] }) => api<{ changed: number[] }>(`/api/batches/${b.id}/scripts/action`, {
+    body: { action: 'deliver', scriptIds: v.ids, timelinerUrl: v.url, note: v.note, versions: Object.fromEntries(st.approved.filter((s) => v.ids.includes(s.id)).map((s) => [s.id, s.version])) },
+  }), { onSuccess: (o, v) => { confetti({ y: innerHeight * 0.55, count: 70, spread: 120, power: 13 }); toast(o.changed.length > v.ids.length ? `Delivered all ${o.changed.length} approved scripts in this batch` : `Delivered ${o.changed.length === 1 ? 'script' : 'scripts'} ${compressRanges(st.approved.filter((s) => v.ids.includes(s.id)).map((s) => s.number))}`); setDialog(null); } });
+  const sources = approvedSources(st.approved, e.submissions);
+  const extraApproved = isManager(me.role) ? b.progress.awaitingDelivery - st.approved.length : 0;
+  // send what the counter says is written, not every unsent script
+  const writtenUnsent = Math.max(0, written - (total - st.notSent.length));
+  const toSend = writtenUnsent > 0 && writtenUnsent < st.notSent.length ? st.notSent.slice(0, writtenUnsent) : st.notSent;
   const waiting = e.groups.filter((g) => g.kind === 'waiting');
   const sentBack = e.groups.filter((g) => g.kind === 'sent_back');
   const assigned = lastAssigned(e.mine);
@@ -235,7 +240,7 @@ function WorkCard({ e, writerId, fresh, collapsible }: { e: Entry; writerId: num
               </div>
               <div className="wc-task-actions">
                 <WrittenCounter batchId={b.id} writerId={writerId} forOther={writerId !== me.id} total={total} sent={e.myProgress.draftReady} written={written} inline />
-                <Button variant="primary pill" icon={<Send aria-hidden />} onClick={() => setDialog({ kind: 'send', preselect: st.notSent.map((s) => s.id) })}>Send for review</Button>
+                <Button variant="primary pill" icon={<Send aria-hidden />} onClick={() => setDialog({ kind: 'send', preselect: toSend.map((s) => s.id) })}>{toSend.length < st.notSent.length ? `Send ${toSend.length === 1 ? 'script' : 'scripts'} ${nums(toSend)} for review` : 'Send for review'}</Button>
               </div>
             </div>
           )}
@@ -246,11 +251,12 @@ function WorkCard({ e, writerId, fresh, collapsible }: { e: Entry; writerId: num
                 <span className="wc-task-ic"><CheckCheck aria-hidden /></span>
                 <div style={{ minWidth: 0 }}>
                   <div className="t">{plural(st.approved.length, 'script')} approved ({nums(st.approved)})</div>
-                  <div className="s">Add {st.approved.length === 1 ? 'it' : 'them'} to Timeliner, then confirm here.</div>
+                  <div className="s">{sources.some((g) => g.edit) ? 'Paste the version shown into Timeliner, then confirm here.' : `Add ${st.approved.length === 1 ? 'it' : 'them'} to Timeliner, then confirm here.`}</div>
                 </div>
               </div>
+              {(sources.some((g) => g.edit) || sources.length > 1) && <SourceList sources={sources} />}
               <div className="wc-task-actions end">
-                <Button variant="primary pill" icon={<Send aria-hidden />} onClick={() => setDialog({ kind: 'deliver' })}>Mark {plural(st.approved.length, 'script')} delivered</Button>
+                <Button variant="mint pill" icon={<CheckCheck aria-hidden />} onClick={() => setDialog({ kind: 'deliver' })}>Mark {plural(st.approved.length, 'script')} delivered</Button>
               </div>
             </div>
           )}
@@ -278,7 +284,10 @@ function WorkCard({ e, writerId, fresh, collapsible }: { e: Entry; writerId: num
       )}
       {dialog?.kind === 'send' && <SendDialog batchId={b.id} batchTitle={b.title} candidates={sendable} preselect={dialog.preselect} resend={dialog.resend} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'titles' && <TitlesDialog batchId={b.id} scripts={e.mine} onClose={() => setDialog(null)} />}
-      {dialog?.kind === 'deliver' && <DeliverDialog count={st.approved.length} extra={isManager(me.role) ? b.progress.awaitingDelivery - st.approved.length : 0} nums={nums(st.approved)} busy={deliver.isPending} error={deliver.error} onClose={() => setDialog(null)} onSubmit={(url, note) => deliver.mutate({ url, note })} />}
+      {dialog?.kind === 'deliver' && <DeliverDialog scripts={st.approved} submissions={e.submissions} pick={!isManager(me.role)}
+        also={extraApproved > 0 ? { count: extraApproved, detail: `${plural(extraApproved, 'more approved script')} from others on this batch` } : null}
+        forName={writerId !== me.id ? e.mine[0]?.assigneeName ?? null : null}
+        busy={deliver.isPending} error={deliver.error} onClose={() => setDialog(null)} onSubmit={(url, note, ids) => deliver.mutate({ url, note, ids })} />}
     </article>
   );
 }

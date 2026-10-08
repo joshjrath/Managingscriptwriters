@@ -1,7 +1,7 @@
 // Settings (managers): deadline rules, timezone and cutoff, reminders, team;
 // the admin also picks the site's colour palette.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { isManager, ROLE_LABEL, type Role } from '../../../shared/workflow';
 import { AlertTriangle, CalendarClock, Check, Copy, KeyRound, Plus, RefreshCw, UserPlus } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
@@ -122,27 +122,56 @@ function PalettePanel() {
   );
 }
 
+/** Scrolls to the first field marked invalid inside `root` and focuses it. */
+function revealError(root: HTMLElement | null) {
+  requestAnimationFrame(() => {
+    const el = root?.querySelector<HTMLElement>('[aria-invalid="true"]');
+    if (!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    el.focus({ preventScroll: true });
+  });
+}
+
 function RulesPanel() {
   const { settings } = useBoot();
   const toast = useToast();
   const [v, setV] = useState<Settings>(settings);
-  const [recalc, setRecalc] = useState(false);
+  const [asking, setAsking] = useState<null | 'save' | 'existing'>(null);
+  const form = useRef<HTMLFormElement>(null);
   useEffect(() => setV(settings), [settings]);
-  const save = useSave(() => api<{ settings: Settings; recalculated: number }>('/api/settings', {
-    method: 'PATCH',
-    body: { orgName: v.orgName, timezone: v.timezone, cutoff: v.cutoff, draftOffsetDays: v.draftOffsetDays, finalOffsetDays: v.finalOffsetDays, dayMode: v.dayMode, workingDays: v.workingDays, reminderLeadDays: v.reminderLeadDays, planReminderDays: v.planReminderDays, recalculate: recalc },
-  }), { onSuccess: (out) => { toast(`Settings saved${recalc ? ` · ${plural(out.recalculated, 'batch', 'batches')} recalculated` : ''}`); setRecalc(false); } });
-  const f = save.error?.fields ?? {};
+  const body = (recalculate: boolean) => ({ orgName: v.orgName, timezone: v.timezone, cutoff: v.cutoff, draftOffsetDays: v.draftOffsetDays, finalOffsetDays: v.finalOffsetDays, dayMode: v.dayMode, workingDays: v.workingDays, reminderLeadDays: v.reminderLeadDays, planReminderDays: v.planReminderDays, recalculate });
+  const save = useSave((recalculate: boolean) => api<{ settings: Settings; recalculated: number }>('/api/settings', { method: 'PATCH', body: body(recalculate) }), {
+    onSuccess: (out, recalculate) => { toast(`Settings saved${recalculate ? ` · ${plural(out.recalculated, 'batch', 'batches')} updated to the new rules` : ''}`); setAsking(null); },
+  });
+  // a failed save says so where you're looking, and takes you to the field
+  useEffect(() => { if (save.error) { toast(save.error.message, 'error'); revealError(form.current); } }, [save.error]); // eslint-disable-line react-hooks/exhaustive-deps
+  const num = (x: string) => (x === '' ? Number.NaN : Number(x));
+  const shown = (n: number) => (Number.isNaN(n) ? '' : n);
+  // checked as you type, in plain words
+  const live: Record<string, string> = {};
+  for (const [k, max] of [['draftOffsetDays', 60], ['finalOffsetDays', 60], ['reminderLeadDays', 14], ['planReminderDays', 60]] as const) {
+    const n = v[k];
+    if (Number.isNaN(n)) live[k] = 'Enter a number of days';
+    else if (n < (k === 'planReminderDays' ? 3 : 0) || n > max || !Number.isInteger(n)) live[k] = `Use a whole number from ${k === 'planReminderDays' ? 3 : 0} to ${max}`;
+  }
+  if (!live.draftOffsetDays && !live.finalOffsetDays && v.finalOffsetDays > v.draftOffsetDays) live.finalOffsetDays = `Final delivery can’t come before the drafts. Use ${v.draftOffsetDays} or fewer: drafts are due ${v.draftOffsetDays} days before the shoot.`;
+  if (!v.workingDays.length) live.workingDays = 'Pick at least one working day';
+  const f = { ...(save.error?.fields ?? {}), ...live };
   const ids = { tz: useFieldId('tz'), cut: useFieldId('cut'), d: useFieldId('d'), fo: useFieldId('fo'), lead: useFieldId('lead'), plan: useFieldId('plan'), org: useFieldId('org') };
-  const example = computeDeadlines('2026-10-12', { ...DEFAULT_RULES, draftOffsetDays: v.draftOffsetDays, finalOffsetDays: v.finalOffsetDays, dayMode: v.dayMode, workingDays: v.workingDays.length ? v.workingDays : [1] });
+  const valid = !Object.keys(live).length;
+  const example = valid ? computeDeadlines('2026-10-12', { ...DEFAULT_RULES, draftOffsetDays: v.draftOffsetDays, finalOffsetDays: v.finalOffsetDays, dayMode: v.dayMode, workingDays: v.workingDays }) : null;
   const changedRules = v.draftOffsetDays !== settings.draftOffsetDays || v.finalOffsetDays !== settings.finalOffsetDays || v.dayMode !== settings.dayMode || v.workingDays.join() !== settings.workingDays.join();
+  const submit = () => {
+    if (!valid) { toast('Some settings need fixing first', 'error'); revealError(form.current); return; }
+    if (changedRules) setAsking('save'); else save.mutate(false);
+  };
   return (
-    <Panel title="Deadline rules & time">
-      <form className="form" onSubmit={(e) => { e.preventDefault(); save.mutate(undefined); }}>
-        <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
+    <Panel title="Deadline rules & time" sub="How deadlines are worked out from each shoot, and what time they end.">
+      <form ref={form} className="form" onSubmit={(e) => { e.preventDefault(); submit(); }} noValidate>
+        <FormError error={save.error && !Object.keys(save.error.fields).length ? save.error : null} />
         <div className="form-grid">
-          <Field label="Drafts due" htmlFor={ids.d} error={f.draftOffsetDays} help="days before the shoot starts"><input className="input num" type="number" min={0} max={60} value={v.draftOffsetDays} onChange={(e) => setV({ ...v, draftOffsetDays: Number(e.target.value) })} {...inputProps(ids.d, f.draftOffsetDays)} /></Field>
-          <Field label="Final delivery to Timeliner" htmlFor={ids.fo} error={f.finalOffsetDays} help="days before the shoot starts"><input className="input num" type="number" min={0} max={60} value={v.finalOffsetDays} onChange={(e) => setV({ ...v, finalOffsetDays: Number(e.target.value) })} {...inputProps(ids.fo, f.finalOffsetDays)} /></Field>
+          <Field label="Drafts due" htmlFor={ids.d} error={f.draftOffsetDays} help="days before the shoot starts"><input className="input num" type="number" min={0} max={60} value={shown(v.draftOffsetDays)} onChange={(e) => setV({ ...v, draftOffsetDays: num(e.target.value) })} {...inputProps(ids.d, f.draftOffsetDays)} /></Field>
+          <Field label="Final delivery to Timeliner" htmlFor={ids.fo} error={f.finalOffsetDays} help="days before the shoot starts (the same as drafts, or fewer)"><input className="input num" type="number" min={0} max={60} value={shown(v.finalOffsetDays)} onChange={(e) => setV({ ...v, finalOffsetDays: num(e.target.value) })} {...inputProps(ids.fo, f.finalOffsetDays)} /></Field>
         </div>
         <div className="field">
           <span className="lbl">Count days as</span>
@@ -156,26 +185,53 @@ function RulesPanel() {
           <span className="lbl">Working week</span>
           <div className="row-flex s2">{DAYS.map((d, i) => (
             <label key={d} className="check" style={{ background: 'var(--row)', padding: '4px 12px', borderRadius: 12 }}>
-              <input type="checkbox" checked={v.workingDays.includes(i)} onChange={(e) => setV({ ...v, workingDays: e.target.checked ? [...v.workingDays, i].sort() : v.workingDays.filter((x) => x !== i) })} />{d}
+              <input type="checkbox" checked={v.workingDays.includes(i)} onChange={(e) => setV({ ...v, workingDays: e.target.checked ? [...v.workingDays, i].sort() : v.workingDays.filter((x) => x !== i) })} aria-invalid={f.workingDays ? true : undefined} />{d}
             </label>
           ))}</div>
-          <span className="help">{f.workingDays ?? 'Used for working-day deadlines and for writer capacity estimates.'}</span>
+          <span className={f.workingDays ? 'err' : 'help'} style={f.workingDays ? { color: '#FF9C94', fontSize: 12.5, fontWeight: 600 } : undefined}>{f.workingDays ?? 'Used for working-day deadlines and for writer capacity estimates.'}</span>
         </div>
-        <div className="banner"><CalendarClock aria-hidden /><div className="txt"><b>Example: shoot on Oct 12–13, 2026</b><span>Drafts due {fmtLong(example.draftDue)} · final delivery {fmtLong(example.finalDue)}</span></div></div>
-        {changedRules && <label className="check"><input type="checkbox" checked={recalc} onChange={(e) => setRecalc(e.target.checked)} />Also recalculate automatic deadlines on active batches (manual overrides are kept; writers are notified)</label>}
+        {example && <div className="banner"><CalendarClock aria-hidden /><div className="txt"><b>Example: shoot on Oct 12–13, 2026</b><span>Drafts due {fmtLong(example.draftDue)} · final delivery {fmtLong(example.finalDue)}</span></div></div>}
         <div className="form-grid">
-          <Field label="HQ time zone" htmlFor={ids.tz} error={f.timezone ?? (isValidTimeZone(v.timezone) ? undefined : 'Unknown timezone')} help="Decides what “today” is and when a deadline passes. Anyone in another time zone sees HQ time under their own clock at the top.">
+          <Field label="HQ time zone" htmlFor={ids.tz} error={f.timezone ?? (isValidTimeZone(v.timezone) ? undefined : 'Unknown timezone')} help="Decides what “today” is and when a deadline passes. Existing deadlines keep their dates. Anyone in another time zone sees HQ time under their own clock.">
             <select className="select" id={ids.tz} value={v.timezone} onChange={(e) => setV({ ...v, timezone: e.target.value })}>{[...new Set([v.timezone, ...ZONES])].map((z) => <option key={z} value={z}>{z.replace('_', ' ')}</option>)}</select>
           </Field>
-          <Field label="Daily cutoff" htmlFor={ids.cut} error={f.cutoff} help={`Work is due by ${fmtCutoff(v.cutoff)} on the deadline day.`}><input className="input" type="time" value={v.cutoff} onChange={(e) => setV({ ...v, cutoff: e.target.value })} {...inputProps(ids.cut, f.cutoff)} /></Field>
-          <Field label="Remind writers" htmlFor={ids.lead} error={f.reminderLeadDays} help="days before a deadline (plus on the day, and when overdue)"><input className="input num" type="number" min={0} max={14} value={v.reminderLeadDays} onChange={(e) => setV({ ...v, reminderLeadDays: Number(e.target.value) })} {...inputProps(ids.lead, f.reminderLeadDays)} /></Field>
-          <Field label="Remind managers to plan scripts" htmlFor={ids.plan} error={f.planReminderDays} help="days before a shoot that has no scripts planned or has unassigned scripts (again at 7, 3 and 1 days)"><input className="input num" type="number" min={3} max={60} value={v.planReminderDays} onChange={(e) => setV({ ...v, planReminderDays: Number(e.target.value) })} {...inputProps(ids.plan, f.planReminderDays)} /></Field>
+          <Field label="Daily cutoff" htmlFor={ids.cut} error={f.cutoff} help={`Work is due by ${fmtCutoff(v.cutoff)} HQ time on the deadline day.`}><input className="input" type="time" value={v.cutoff} onChange={(e) => setV({ ...v, cutoff: e.target.value })} {...inputProps(ids.cut, f.cutoff)} /></Field>
+          <Field label="Remind writers" htmlFor={ids.lead} error={f.reminderLeadDays} help="days before a deadline (plus on the day, and when overdue)"><input className="input num" type="number" min={0} max={14} value={shown(v.reminderLeadDays)} onChange={(e) => setV({ ...v, reminderLeadDays: num(e.target.value) })} {...inputProps(ids.lead, f.reminderLeadDays)} /></Field>
+          <Field label="Remind managers to plan scripts" htmlFor={ids.plan} error={f.planReminderDays} help="days before a shoot that has no scripts planned or has unassigned scripts (again at 7, 3 and 1 days)"><input className="input num" type="number" min={3} max={60} value={shown(v.planReminderDays)} onChange={(e) => setV({ ...v, planReminderDays: num(e.target.value) })} {...inputProps(ids.plan, f.planReminderDays)} /></Field>
           <Field label="Organisation name" htmlFor={ids.org} error={f.orgName}><input className="input" value={v.orgName} onChange={(e) => setV({ ...v, orgName: e.target.value })} {...inputProps(ids.org, f.orgName)} /></Field>
         </div>
-        <p className="muted" style={{ fontSize: 12.5 }}>Reminders run on the server every 10 minutes while it’s running{settings.remindersLastRunAt ? ` · last run ${fmtStamp(settings.remindersLastRunAt, settings.timezone)}` : ' · not run yet'}.</p>
-        <div className="form-actions"><Button type="submit" variant="primary pill" busy={save.isPending}>Save settings</Button></div>
+        <p className="muted" style={{ fontSize: 12.5 }}>{settings.remindersEnabled === false
+          ? 'Reminders are turned off on this server.'
+          : `Reminders appear in each person’s bell on the site (there’s no email). They run every 10 minutes${settings.remindersLastRunAt ? ` · last run ${fmtStamp(settings.remindersLastRunAt, settings.timezone)}` : ' · not run yet'}.`}</p>
+        <div className="form-actions">
+          <Button variant="ghost" onClick={() => setAsking('existing')} disabled={!valid || changedRules}>Apply these rules to existing batches…</Button>
+          <Button type="submit" variant="primary pill" busy={save.isPending && asking === null}>Save settings</Button>
+        </div>
       </form>
+      {asking && <ApplyRulesDialog rules={{ draftOffsetDays: v.draftOffsetDays, finalOffsetDays: v.finalOffsetDays, dayMode: v.dayMode, workingDays: v.workingDays }} existingOnly={asking === 'existing'}
+        busy={save.isPending} onClose={() => setAsking(null)} onChoose={(recalc) => save.mutate(recalc)} />}
     </Panel>
+  );
+}
+
+/** Asks whether new deadline rules should also move the deadlines of batches that already exist. */
+function ApplyRulesDialog({ rules, existingOnly, busy, onClose, onChoose }: { rules: Pick<Settings, 'draftOffsetDays' | 'finalOffsetDays' | 'dayMode' | 'workingDays'>; existingOnly: boolean; busy: boolean; onClose: () => void; onChoose: (recalculate: boolean) => void }) {
+  const preview = useQuery({ queryKey: ['recalc-preview', rules], queryFn: () => api<{ batches: number; writers: number }>('/api/settings/recalculate-preview', { body: rules }) });
+  const n = preview.data?.batches ?? 0;
+  return (
+    <Dialog open onClose={onClose} size="narrow" title={existingOnly ? 'Apply the rules to existing batches?' : 'Apply the new rules to existing batches too?'}
+      sub="New batches always use the current rules. Deadlines someone set by hand are never changed."
+      footer={<div className="form-actions">
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        {!existingOnly && <Button busy={busy} onClick={() => onChoose(false)}>Only new batches</Button>}
+        <Button variant="primary pill" busy={busy} disabled={preview.isLoading || (existingOnly && !n)} onClick={() => onChoose(true)}>{existingOnly ? `Update ${plural(n, 'batch', 'batches')}` : 'Also existing batches'}</Button>
+      </div>}>
+      {preview.isLoading && <Loading height={60} />}
+      {preview.isError && <ErrorState error={preview.error} retry={() => preview.refetch()} />}
+      {preview.data && <p className="muted" style={{ margin: 0 }}>{n
+        ? `${plural(n, 'active batch', 'active batches')} would get new automatic deadlines${preview.data.writers ? `, and ${plural(preview.data.writers, 'writer')} would be told` : ''}.`
+        : 'No active batches would change: they already match these rules, or their deadlines were set by hand.'}</p>}
+    </Dialog>
   );
 }
 
@@ -191,6 +247,8 @@ function TeamPanel() {
   const team = (q.data?.users ?? []).filter((u) => !u.removed);
   const order: Record<Role, number> = { owner: 0, manager: 1, writer: 2, editor: 3 };
   team.sort((a, b) => Number(b.active) - Number(a.active) || order[a.role] - order[b.role] || a.name.localeCompare(b.name));
+  // the Admin's own account is the Admin's to change
+  const locked = (u: UserSummary) => u.role === 'owner' && me.role !== 'owner';
   return (
     <Panel title="Team" count={team.filter((u) => u.active).length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setAdding(true)}>Add person</Button>}>
       {q.isLoading && <Loading height={200} />}
@@ -198,12 +256,12 @@ function TeamPanel() {
       <div className="rows">
         {team.map((u) => (
           <div key={u.id} className="item" style={{ opacity: u.active ? 1 : 0.6 }}>
-            <button className="row-flex" style={{ flexWrap: 'nowrap', minWidth: 0, border: 0, background: 'none', color: 'inherit', font: 'inherit', textAlign: 'left', padding: 0, cursor: 'pointer' }} onClick={() => setEditing(u)} aria-label={`Edit ${u.name}`}>
+            <button className="row-flex" disabled={locked(u)} style={{ flexWrap: 'nowrap', minWidth: 0, border: 0, background: 'none', color: 'inherit', font: 'inherit', textAlign: 'left', padding: 0, cursor: locked(u) ? 'default' : 'pointer' }} onClick={() => setEditing(u)} aria-label={`Edit ${u.name}`}>
               <Avatar name={u.name} id={u.id} />
               <div className="body">
                 <div className="title">{u.name}{u.id === me.id ? ' (you)' : ''}</div>
                 <div className="meta ellipsis">{u.email}</div>
-                <div className="meta">{u.active ? (u.capacityPerDay ? `${u.capacityPerDay} scripts / working day` : 'Capacity not set') : 'Deactivated'}{u.active && u.city ? ` · ${u.city.split(',')[0]}` : ''}</div>
+                <div className="meta">{!u.active ? 'Deactivated' : u.role === 'editor' ? 'Read-only sign-in' : u.capacityPerDay ? `${u.capacityPerDay} scripts / working day` : 'Capacity not set'}{u.active && u.city ? ` · ${u.city.split(',')[0]}` : ''}</div>
               </div>
             </button>
             <div className="side">
@@ -211,17 +269,19 @@ function TeamPanel() {
               {u.tempPassword
                 ? <Button variant="sm" icon={<Copy aria-hidden />} onClick={() => setSharing(u)} title="They haven’t set their own password yet">Copy sign-in details</Button>
                 : u.id !== me.id && u.active ? <span className="muted" style={{ fontSize: 12 }}>Set their own password</span> : null}
-              <div className="row-flex s2">
-                <Button variant="sm ghost" onClick={() => setEditing(u)}>Edit</Button>
-                {u.id !== me.id && <Button variant="sm ghost" onClick={() => setRemoving(u)}>Remove</Button>}
-              </div>
+              {locked(u) ? <span className="muted" style={{ fontSize: 12 }}>Only the Admin can change this</span> : (
+                <div className="row-flex s2">
+                  <Button variant="sm ghost" onClick={() => setEditing(u)}>Edit</Button>
+                  {u.id !== me.id && <Button variant="sm ghost" onClick={() => setRemoving(u)}>Remove</Button>}
+                </div>
+              )}
             </div>
           </div>
         ))}
       </div>
-      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>Admins and managers have the same permissions. The temporary password stays copyable here until the person sets their own. Writers only show as over capacity when a capacity is set.</p>
+      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>Managers can do everything the Admin can, except change the Admin’s account and use the Admin-only parts (Control Center, Master log, View as and the colour palette). The temporary password stays copyable here until the person sets their own. Writers only show as over capacity when a capacity is set.</p>
       {adding && <PersonDialog onClose={() => setAdding(false)} />}
-      {editing && <PersonDialog user={editing} onClose={() => setEditing(null)} />}
+      {editing && <PersonDialog user={editing} team={team} onClose={() => setEditing(null)} />}
       {sharing && <ShareDetails name={firstName(sharing.name)} onClose={() => setSharing(null)}
         message={signInMessage({ name: sharing.name, email: sharing.email, password: sharing.tempPassword!, role: sharing.role, orgName: settings.orgName, url: window.location.origin })} />}
       {removing && <RemoveDialog user={removing} team={team} onClose={() => setRemoving(null)} />}
@@ -231,33 +291,38 @@ function TeamPanel() {
 
 const firstName = (name: string) => name.trim().split(/\s+/)[0] || name;
 
+/** Someone's unfinished scripts, and who takes them over. */
+function OpenWorkPicker({ userId, team, value, onChange }: { userId: number; team: UserSummary[]; value: string; onChange: (v: string) => void }) {
+  const work = useQuery({ queryKey: ['open-work', userId], queryFn: () => api<{ scripts: number; batches: { id: number; title: string; clientName: string; scripts: number }[] }>(`/api/users/${userId}/open-work`) });
+  const id = useFieldId('rm');
+  const n = work.data?.scripts ?? 0;
+  if (work.isLoading) return <span className="muted">Checking their work…</span>;
+  if (!work.data || !n) return <p className="muted">They have no unfinished scripts.</p>;
+  return (
+    <>
+      <div className="banner yellow"><AlertTriangle aria-hidden /><div className="txt"><b>{plural(n, 'unfinished script')}</b><span>{work.data.batches.map((b) => `${b.clientName} · ${b.title} (${b.scripts})`).join(' · ')}</span></div></div>
+      <Field label="Give their unfinished scripts to" htmlFor={id} help="Delivered scripts keep their name.">
+        <select className="select" id={id} value={value} onChange={(e) => onChange(e.target.value)}>
+          <option value="">Nobody — leave them unassigned</option>
+          {team.filter((u) => u.active && u.id !== userId && u.role !== 'editor').map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+        </select>
+      </Field>
+    </>
+  );
+}
+
 function RemoveDialog({ user, team, onClose }: { user: UserSummary; team: UserSummary[]; onClose: () => void }) {
   const toast = useToast();
   const [to, setTo] = useState('');
-  const work = useQuery({ queryKey: ['open-work', user.id], queryFn: () => api<{ scripts: number; batches: { id: number; title: string; clientName: string; scripts: number }[] }>(`/api/users/${user.id}/open-work`) });
   const remove = useSave(() => api<{ moved: number }>(`/api/users/${user.id}/remove`, { body: { reassignTo: to ? Number(to) : null } }), {
     onSuccess: (out) => { toast(`${user.name} removed${out.moved ? ` · ${plural(out.moved, 'script')} ${to ? 'reassigned' : 'unassigned'}` : ''}`); onClose(); },
   });
-  const id = useFieldId('rm');
-  const n = work.data?.scripts ?? 0;
   return (
-    <Dialog open onClose={onClose} title={`Remove ${user.name}?`} sub="They’re signed out and can’t sign in any more. Their name stays in the history, and you can add them back later with the same email." size="narrow"
-      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="danger" busy={remove.isPending} disabled={work.isLoading} onClick={() => remove.mutate(undefined)}>Remove {firstName(user.name)}</Button></div>}>
+    <Dialog open onClose={onClose} title={`Remove ${user.name}?`} sub="They’re signed out and can’t sign in any more. Their name stays in the history, and you can add them back later with the same email. To keep them on the team but stop them signing in for now, use Edit → Deactivate instead." size="narrow"
+      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="danger" busy={remove.isPending} onClick={() => remove.mutate(undefined)}>Remove {firstName(user.name)}</Button></div>}>
       <div className="form">
         <FormError error={remove.error} />
-        {work.isLoading && <span className="muted">Checking their work…</span>}
-        {work.data && !n && <p className="muted">They have no unfinished scripts.</p>}
-        {work.data && n > 0 && (
-          <>
-            <div className="banner yellow"><AlertTriangle aria-hidden /><div className="txt"><b>{plural(n, 'unfinished script')}</b><span>{work.data.batches.map((b) => `${b.clientName} · ${b.title} (${b.scripts})`).join(' · ')}</span></div></div>
-            <Field label="Give their unfinished scripts to" htmlFor={id} help="Delivered scripts keep their name.">
-              <select className="select" id={id} value={to} onChange={(e) => setTo(e.target.value)}>
-                <option value="">Nobody — leave them unassigned</option>
-                {team.filter((u) => u.active && u.id !== user.id && u.role !== 'editor').map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
-              </select>
-            </Field>
-          </>
-        )}
+        <OpenWorkPicker userId={user.id} team={team} value={to} onChange={setTo} />
       </div>
     </Dialog>
   );
@@ -308,12 +373,14 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 function ShareDetails({ message, name, onClose }: { message: string; name: string; onClose: () => void }) {
+  const recording = !!useBoot().mode?.recording;
   const [copied, setCopied] = useState<'idle' | 'ok' | 'fail'>('idle');
   const copy = async () => setCopied((await copyText(message)) ? 'ok' : 'fail');
   return (
     <Dialog open onClose={onClose} title={`Send ${name} their sign-in details`} sub="Copy this and paste it into WhatsApp, Slack, text or email. You can copy it again from Team until they set their own password." size="narrow"
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Done</Button><Button variant="primary pill" icon={copied === 'ok' ? <Check aria-hidden /> : <Copy aria-hidden />} onClick={copy}>{copied === 'ok' ? 'Copied' : 'Copy message'}</Button></div>}>
       <div className="form">
+        {recording && <div className="banner red"><AlertTriangle aria-hidden /><div className="txt"><b>Practice copy: don’t send this</b><span>You’re in Recording mode, so this person and password disappear when you turn it off. The sign-in won’t work for them.</span></div></div>}
         <pre className="share-block" aria-label="Sign-in message">{message}</pre>
         {copied === 'fail' && <span className="err" role="alert" style={{ color: '#FF9C94', fontSize: 12.5, fontWeight: 600 }}>Your browser blocked copying — select the text above and copy it manually.</span>}
         {copied === 'ok' && <span className="muted" style={{ fontSize: 12.5 }} role="status">Copied to your clipboard.</span>}
@@ -322,7 +389,7 @@ function ShareDetails({ message, name, onClose }: { message: string; name: strin
   );
 }
 
-function PersonDialog({ user, preset, onCreated, onClose }: { user?: UserSummary; preset?: { name: string; role: Role; city?: string; timezone?: string; hours?: [number, number] }; onCreated?: () => void; onClose: () => void }) {
+function PersonDialog({ user, team = [], preset, onCreated, onClose }: { user?: UserSummary; team?: UserSummary[]; preset?: { name: string; role: Role; city?: string; timezone?: string; hours?: [number, number] }; onCreated?: () => void; onClose: () => void }) {
   const toast = useToast();
   const { me } = useBoot();
   const [name, setName] = useState(user?.name ?? preset?.name ?? '');
@@ -336,9 +403,11 @@ function PersonDialog({ user, preset, onCreated, onClose }: { user?: UserSummary
   const [tz, setTz] = useState(user?.timezone ?? preset?.timezone ?? findCity(user?.city ?? preset?.city ?? '')?.timezone ?? '');
   const [hours, setHours] = useState<[number, number]>(user?.workHours ?? preset?.hours ?? [9, 18]);
   const [share, setShare] = useState<string | null>(null);
+  const [takeover, setTakeover] = useState('');
+  const deactivating = !!user && user.active && !active;
   const place = { city: city.trim() || null, ...(city.trim() ? { timezone: tz || undefined, workStart: hours[0], workEnd: hours[1] % 24 || 24 } : {}) };
   const save = useSave(() => user
-    ? api(`/api/users/${user.id}`, { method: 'PATCH', body: { name, role, active, capacityPerDay: capacity ? Number(capacity) : null, password: password || undefined, ...place } })
+    ? api<{ moved: number }>(`/api/users/${user.id}`, { method: 'PATCH', body: { name, email, role, active, capacityPerDay: capacity ? Number(capacity) : null, password: password || undefined, ...place, ...(deactivating ? { reassignTo: takeover ? Number(takeover) : null } : {}) } })
     : api('/api/users', { body: { name, email, role, password, capacityPerDay: capacity ? Number(capacity) : null, ...place } }), {
     onSuccess: () => {
       if (!user) onCreated?.();
@@ -347,7 +416,7 @@ function PersonDialog({ user, preset, onCreated, onClose }: { user?: UserSummary
         setShare(signInMessage({ name, email: user?.email ?? email.trim().toLowerCase(), password, role, orgName: settings.orgName, url: window.location.origin, reset: !!user }));
         toast(user ? `New password set for ${name}` : `${name} added`);
       } else {
-        toast(`${name} updated`);
+        toast(deactivating ? `${name} deactivated${takeover ? ' · their scripts were handed over' : ''}` : `${name} updated`);
         onClose();
       }
     },
@@ -361,11 +430,15 @@ function PersonDialog({ user, preset, onCreated, onClose }: { user?: UserSummary
       <form className="form" onSubmit={(e) => { e.preventDefault(); save.mutate(undefined); }}>
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
         <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} /></Field>
-        <Field label="Email" htmlFor={ids.e} error={f.email} help={user ? 'Email can’t be changed here.' : 'They sign in with this.'}><input className="input" type="email" value={email} disabled={!!user} onChange={(e) => setEmail(e.target.value)} {...inputProps(ids.e, f.email)} /></Field>
+        <Field label="Email" htmlFor={ids.e} error={f.email} help="They sign in with this."><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} {...inputProps(ids.e, f.email)} /></Field>
         <Field label="Role" htmlFor={ids.r} error={f.role} help={role === 'editor'
           ? 'Editors see the calendar, finished scripts, clients and resources, and can message the team and get to-dos. Read-only, and they can’t be given scripts.'
-          : 'Admins and managers can do everything. Writers see everything but can only update their own scripts, blockers, resources and deliveries.'}>
-          <select className="select" id={ids.r} value={role} onChange={(e) => setRole(e.target.value as Role)}><option value="writer">Writer</option><option value="editor">Editor</option><option value="manager">Manager</option><option value="owner">Admin</option></select>
+          : role === 'owner' ? 'The Admin can do everything, including the Admin-only parts. Only an Admin can make someone an Admin.'
+          : 'Managers plan, assign and review everything. Writers work on their own scripts, blockers, resources and deliveries.'}>
+          <select className="select" id={ids.r} value={role} onChange={(e) => setRole(e.target.value as Role)}>
+            <option value="writer">Writer</option><option value="editor">Editor</option><option value="manager">Manager</option>
+            {(me.role === 'owner' || role === 'owner') && <option value="owner">Admin</option>}
+          </select>
         </Field>
         {role !== 'editor' && <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates and over-capacity warnings."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>}
         <PlaceFields optional city={city} tz={tz} hours={hours} f={f}
@@ -382,7 +455,7 @@ function PersonDialog({ user, preset, onCreated, onClose }: { user?: UserSummary
         {user && user.id !== me.id && (
           <label className="check"><input type="checkbox" checked={!active} onChange={(e) => setActive(!e.target.checked)} />Deactivate (signs them out; their history is kept)</label>
         )}
-        {user && !active && user.active && <div className="banner yellow"><AlertTriangle aria-hidden /><div className="txt"><b>Reassign their open scripts after deactivating.</b></div></div>}
+        {deactivating && <OpenWorkPicker userId={user.id} team={team} value={takeover} onChange={setTakeover} />}
       </form>
     </Dialog>
   );

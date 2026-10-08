@@ -8,7 +8,7 @@ import { AlertTriangle, ArrowRight, CalendarClock, Camera, CheckCheck, Clipboard
 import { api } from '../api';
 import type { Dashboard } from '../../../shared/types';
 import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
-import { compressRanges, isManager } from '../../../shared/workflow';
+import { compressRanges, isManager, ROLE_LABEL } from '../../../shared/workflow';
 import { PipLegend, TodayBump, WritingFeed } from '../components/WritingPulse';
 import { TodoPanel } from '../components/Todos';
 import { CalendarShootsPanel } from '../components/CalendarShoots';
@@ -64,7 +64,7 @@ export function Overview() {
             <button className="stat-card elev" onClick={() => nav('/production?stage=delivered&view=table&completed=1')} style={{ ['--c' as string]: 'var(--mint)' }} aria-label={`${d.cards.deliveredThisWeekScripts} scripts delivered this week.`}>
               <span className="corner"><Send /></span>
               <span className={`n${d.cards.deliveredThisWeekScripts ? '' : ' zero'}`}><CountUp value={d.cards.deliveredThisWeekScripts} /></span>
-              <span><span className="cap">Delivered this week</span><span className="sub" style={{ display: 'block' }}>{d.scope === 'mine' ? 'your scripts' : 'scripts, writer-confirmed'}{d.cards.deliveredThisWeekBatches ? ` · ${plural(d.cards.deliveredThisWeekBatches, 'batch', 'batches')}` : ''}</span></span>
+              <span><span className="cap">Delivered this week</span><span className="sub" style={{ display: 'block' }}>{d.scope === 'mine' ? 'your scripts' : 'scripts in Timeliner'}{d.cards.deliveredThisWeekBatches ? ` · ${plural(d.cards.deliveredThisWeekBatches, 'batch', 'batches')}` : ''}</span></span>
             </button>
           </div>
 
@@ -132,7 +132,7 @@ export function Overview() {
                     {d.workload.map((w) => (
                       <Link key={w.userId} to={`/production?writerId=${w.userId}&view=table`} className={`item clickable ${w.overdueScripts ? 'edge-red' : w.overCapacity ? 'edge-yellow' : ''}`}>
                         <div className="body">
-                          <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}><Avatar name={w.name} id={w.userId} small /><span className="title">{w.name}</span>{w.role !== 'writer' && <span className="muted" style={{ fontSize: 12 }}>{w.role}</span>}</div>
+                          <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}><Avatar name={w.name} id={w.userId} small /><span className="title">{w.name}</span>{w.role !== 'writer' && <span className="muted" style={{ fontSize: 12 }}>{ROLE_LABEL[w.role]}</span>}</div>
                           <div className="meta num">
                             <span>{plural(w.activeBatches, 'batch', 'batches')}</span>
                             <span>{w.assigned} assigned</span>
@@ -154,7 +154,7 @@ export function Overview() {
                   </div>
                 )}
               </Panel>
-              <Panel title={d.scope === 'mine' ? 'Your recent deliveries' : 'Recent deliveries'} sub="writer-confirmed in Timeliner">
+              <Panel title={d.scope === 'mine' ? 'Your recent deliveries' : 'Recent deliveries'} sub="confirmed in Timeliner">
                 {!d.recentDeliveries.length ? <Empty boxed icon={<Send />} title="No deliveries yet" /> : (
                   <div className="rows">
                     {d.recentDeliveries.slice(0, 6).map((x) => (

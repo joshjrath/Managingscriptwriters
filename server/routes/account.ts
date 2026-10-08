@@ -7,9 +7,10 @@ import {
   SESSION_COOKIE, setSessionCookie, sha, validatePassword, verifyPassword,
 } from '../auth';
 import { assigneesOf, batchLink, loadSettings, loadUsers, logActivity, notify, rulesOf, type Ctx } from '../core';
-import { compressRanges, isManager, type Role } from '../../shared/workflow';
+import { compressRanges, isManager, ROLE_LABEL, type Role } from '../../shared/workflow';
 import { auditEvent } from '../audit';
-import type { Me, UserSummary } from '../../shared/types';
+import type { Me, Settings, UserSummary } from '../../shared/types';
+import type { Db } from '../db';
 import { conflict, forbidden, HttpError, notFound, parse, zs } from '../http';
 import { computeDeadlines, isValidTimeZone } from '../../shared/dates';
 import { findCity, shiftOf, zoneFor } from '../../shared/cities';
@@ -123,7 +124,48 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const users = await loadUsers(db);
     if (!isManager(me.role)) return users;
     const temps = new Map((await db.query<{ id: number; temp_password: string }>(`select id, temp_password from users where temp_password is not null and removed_at is null`)).map((r) => [r.id, r.temp_password]));
-    return users.map((u) => ({ ...u, tempPassword: temps.get(u.id) ?? null }));
+    // only the Admin sees (and can reset) the Admin's own sign-in details
+    return users.map((u) => ({ ...u, tempPassword: u.role === 'owner' && !isAdmin(me.role) ? null : temps.get(u.id) ?? null }));
+  }
+
+  /** The Admin role can only be given, taken away or edited by the Admin. */
+  function guardAdmin(me: Me, target: { role: Role } | null, nextRole?: Role) {
+    if (isAdmin(me.role)) return;
+    if (nextRole === 'owner') throw forbidden('Only the Admin can make someone an Admin');
+    if (target?.role === 'owner') throw forbidden('Only the Admin can change the Admin’s account');
+  }
+
+  /**
+   * Hands someone's unfinished scripts to another person (or leaves them unassigned), with a history
+   * line per batch and a notification for whoever takes them. Used when removing or deactivating someone.
+   */
+  async function moveOpenScripts(t: Parameters<Parameters<typeof db.tx>[0]>[0], me: Me, u: { id: number; name: string }, target: { id: number; name: string } | null, why: string) {
+    const scripts = await t.query<{ id: number; number: number; batch_id: number; client_id: number; title: string }>(
+      `select s.id, s.number, s.batch_id, b.client_id, b.title from scripts s join batches b on b.id = s.batch_id
+        where s.assignee_id = $1 and s.removed_at is null and s.status <> 'delivered' order by s.batch_id, s.number for update of s`, [u.id],
+    );
+    if (scripts.length) {
+      await t.query(`update scripts set assignee_id = $1, assigned_at = case when $1::bigint is null then null else now() end, version = version + 1, updated_at = now() where id in (${scripts.map((_, i) => `$${i + 2}`).join(',')})`, [target?.id ?? null, ...scripts.map((x) => x.id)]);
+    }
+    const byBatch = new Map<number, typeof scripts>();
+    for (const x of scripts) byBatch.set(x.batch_id, [...(byBatch.get(x.batch_id) ?? []), x]);
+    for (const [batchId, list] of byBatch) {
+      const nums = compressRanges(list.map((x) => x.number));
+      await logActivity(t, {
+        actor: me, action: 'scripts.assigned', entityType: 'batch', entityId: batchId, batchId, clientId: list[0].client_id,
+        summary: `${u.name} ${why}: scripts ${nums} ${target ? `moved to ${target.name}` : 'are now unassigned'}`,
+      });
+      if (target) await notify(t, [target.id], { type: 'assignment', title: `Assigned · ${list[0].title}`, body: `Scripts ${nums} moved to you from ${u.name}.`, link: batchLink(batchId) }, me.id);
+    }
+    return scripts.length;
+  }
+
+  async function takeoverTarget(reassignTo: number | null | undefined, fromId: number) {
+    if (!reassignTo) return null;
+    if (reassignTo === fromId) throw new HttpError(400, 'Choose someone else to take over their scripts', { reassignTo: 'Choose someone else' });
+    const t = await db.one<{ id: number; name: string }>(`select id, name from users where id = $1 and active and removed_at is null and role <> 'editor'`, [reassignTo]);
+    if (!t) throw new HttpError(400, 'Choose an active team member', { reassignTo: 'Choose an active team member' });
+    return t;
   }
 
   async function keepAManager(excludeId: number) {
@@ -173,6 +215,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       name: zs.name('Name', 120), email, role: z.enum(ROLES), password, capacityPerDay: capacity,
       city, timezone, workStart: hour.optional(), workEnd: hour.optional(),
     }), req.body);
+    guardAdmin(me, null, input.role);
     const place = placeColumns(input);
     const err = validatePassword(input.password);
     if (err) throw new HttpError(400, err, { password: err });
@@ -196,7 +239,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     }
     const placeKeys = Object.keys(place);
     if (placeKeys.length) await db.query(`update users set ${placeKeys.map((k, i) => `${k} = $${i + 2}`).join(', ')} where id = $1`, [id, ...placeKeys.map((k) => place[k])]);
-    await logActivity(db, { actor: me, action: 'user.created', entityType: 'user', entityId: id, summary: `${existing ? 'Re-added' : 'Added'} ${input.name} as ${input.role}` });
+    await logActivity(db, { actor: me, action: 'user.created', entityType: 'user', entityId: id, summary: `${existing ? 'Re-added' : 'Added'} ${input.name} as ${ROLE_LABEL[input.role]}` });
     return { users: await teamFor(me) };
   });
 
@@ -204,14 +247,17 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const me = requireManager(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const input = parse(z.object({
-      name: zs.name('Name', 120).optional(), role: z.enum(ROLES).optional(), active: z.boolean().optional(),
+      name: zs.name('Name', 120).optional(), email: email.optional(), role: z.enum(ROLES).optional(), active: z.boolean().optional(),
       capacityPerDay: capacity, password: z.string().max(200).optional(),
       city, timezone, workStart: hour.optional(), workEnd: hour.optional(),
+      /** when deactivating: who takes over their unfinished scripts (null leaves them unassigned) */
+      reassignTo: zs.id.nullable().optional(),
     }), req.body);
-    const u = await db.one<{ role: Role; active: boolean; name: string; removed_at: string | null; city: string | null; country: string | null; timezone: string | null }>(
-      `select role, active, name, removed_at, city, country, timezone from users where id = $1`, [id],
+    const u = await db.one<{ role: Role; active: boolean; name: string; email: string; removed_at: string | null; city: string | null; country: string | null; timezone: string | null; capacity_per_day: number | null; work_start: number | null; work_end: number | null }>(
+      `select role, active, name, email, removed_at, city, country, timezone, capacity_per_day, work_start, work_end from users where id = $1`, [id],
     );
     if (!u || u.removed_at) throw notFound('Team member');
+    guardAdmin(me, u, input.role);
     if (isManager(u.role) && ((input.role && !isManager(input.role)) || input.active === false)) await keepAManager(id);
     // an editor writes nothing: move their unfinished scripts first
     if (input.role === 'editor' && u.role !== 'editor') {
@@ -219,12 +265,23 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       if (open && Number(open.n) > 0) throw new HttpError(400, `${u.name} still has ${open.n} unfinished script${Number(open.n) === 1 ? '' : 's'}. Reassign them before making ${u.name.split(' ')[0]} an editor.`, { role: 'Reassign their scripts first' });
     }
     if (input.active === false && id === me.id) throw new HttpError(400, 'You can’t deactivate your own account');
+    const deactivating = input.active === false && u.active;
+    const target = deactivating ? await takeoverTarget(input.reassignTo, id) : null;
     const set: Record<string, unknown> = {};
-    if (input.name !== undefined) set.name = input.name;
-    if (input.role !== undefined) set.role = input.role;
-    if (input.active !== undefined) set.active = input.active;
-    if (input.capacityPerDay !== undefined) set.capacity_per_day = input.capacityPerDay;
-    Object.assign(set, placeColumns(input, u));
+    if (input.name !== undefined && input.name !== u.name) set.name = input.name;
+    if (input.email !== undefined && input.email !== u.email) {
+      const taken = await db.one<{ id: number }>(`select id from users where lower(email) = $1 and id <> $2 and removed_at is null`, [input.email, id]);
+      if (taken) throw new HttpError(409, 'Someone else on the team already uses that email', { email: 'Already used by someone else' });
+      set.email = input.email;
+    }
+    if (input.role !== undefined && input.role !== u.role) set.role = input.role;
+    if (input.active !== undefined && input.active !== u.active) set.active = input.active;
+    if (input.capacityPerDay !== undefined && Number(input.capacityPerDay ?? 0) !== Number(u.capacity_per_day ?? 0)) set.capacity_per_day = input.capacityPerDay;
+    const place = placeColumns(input, u);
+    if (place.city !== undefined && place.city === u.city) for (const k of PLACE_KEYS) if (k !== 'timezone') delete place[k];
+    if (place.timezone !== undefined && place.timezone === u.timezone) delete place.timezone;
+    if (place.work_start !== undefined && place.work_start === u.work_start && place.work_end === u.work_end) { delete place.work_start; delete place.work_end; }
+    Object.assign(set, place);
     if (input.password) {
       const err = validatePassword(input.password);
       if (err) throw new HttpError(400, err, { password: err });
@@ -232,12 +289,28 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       set.temp_password = input.password;
     }
     const keys = Object.keys(set);
+    let moved = 0;
     if (keys.length) {
-      await db.query(`update users set ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() where id = $1`, [id, ...keys.map((k) => set[k])]);
-      if (input.active === false || input.password) await db.query(`delete from sessions where user_id = $1`, [id]);
-      await logActivity(db, { actor: me, action: 'user.updated', entityType: 'user', entityId: id, summary: `Updated ${u.name}: ${[...new Set(keys.filter((k) => k !== 'temp_password').map((k) => (k === 'password_hash' ? 'password reset' : PLACE_KEYS.has(k) ? 'location' : k.startsWith('work_') ? 'working hours' : k.replace(/_/g, ' '))))].join(', ')}` });
+      await db.tx(async (t) => {
+        await t.query(`update users set ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() where id = $1`, [id, ...keys.map((k) => set[k])]);
+        if (input.active === false || input.password) await t.query(`delete from sessions where user_id = $1`, [id]);
+        if (deactivating) moved = await moveOpenScripts(t, me, { id, name: u.name }, target, 'was deactivated');
+        // say what changed, in words
+        const what: string[] = [];
+        if (set.name !== undefined) what.push(`name ${u.name} → ${input.name}`);
+        if (set.email !== undefined) what.push(`email → ${input.email}`);
+        if (set.role !== undefined) what.push(`role ${ROLE_LABEL[u.role]} → ${ROLE_LABEL[input.role!]}`);
+        if (set.active === false) what.push(`deactivated${moved ? ` (${moved} unfinished scripts ${target ? `moved to ${target.name}` : 'unassigned'})` : ''}`);
+        if (set.active === true) what.push('reactivated');
+        if (set.capacity_per_day !== undefined) what.push(`capacity ${u.capacity_per_day ?? 'not set'} → ${input.capacityPerDay ?? 'not set'} a day`);
+        if (keys.some((k) => PLACE_KEYS.has(k) && k !== 'timezone')) what.push(`city → ${set.city ?? 'none'}`);
+        else if (set.timezone !== undefined) what.push(`time zone → ${set.timezone}`);
+        if (keys.some((k) => k.startsWith('work_'))) what.push('working hours');
+        if (set.password_hash) what.push('password reset (signed out)');
+        await logActivity(t, { actor: me, action: 'user.updated', entityType: 'user', entityId: id, summary: `${u.name}: ${what.join(', ')}` });
+      });
     }
-    return { users: await teamFor(me) };
+    return { users: await teamFor(me), moved };
   });
 
   /** What removing someone would affect: their unfinished scripts. */
@@ -261,36 +334,15 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     if (id === me.id) throw new HttpError(400, 'You can’t remove yourself');
     const u = await db.one<{ role: Role; name: string; removed_at: string | null }>(`select role, name, removed_at from users where id = $1`, [id]);
     if (!u || u.removed_at) throw notFound('Team member');
+    guardAdmin(me, u);
     if (isManager(u.role)) await keepAManager(id);
-    let target: { id: number; name: string } | null = null;
-    if (reassignTo) {
-      if (reassignTo === id) throw new HttpError(400, 'Choose someone else to take over their scripts');
-      const t = await db.one<{ id: number; name: string }>(`select id, name from users where id = $1 and active and removed_at is null and role <> 'editor'`, [reassignTo]);
-      if (!t) throw new HttpError(400, 'Choose an active team member', { reassignTo: 'Choose an active team member' });
-      target = t;
-    }
+    const target = await takeoverTarget(reassignTo, id);
     const moved = await db.tx(async (t) => {
-      const scripts = await t.query<{ id: number; number: number; batch_id: number; client_id: number; title: string }>(
-        `select s.id, s.number, s.batch_id, b.client_id, b.title from scripts s join batches b on b.id = s.batch_id
-          where s.assignee_id = $1 and s.removed_at is null and s.status <> 'delivered' order by s.batch_id, s.number for update of s`, [id],
-      );
-      if (scripts.length) {
-        await t.query(`update scripts set assignee_id = $1, assigned_at = case when $1::bigint is null then null else now() end, version = version + 1, updated_at = now() where id in (${scripts.map((_, i) => `$${i + 2}`).join(',')})`, [target?.id ?? null, ...scripts.map((x) => x.id)]);
-      }
-      const byBatch = new Map<number, typeof scripts>();
-      for (const x of scripts) byBatch.set(x.batch_id, [...(byBatch.get(x.batch_id) ?? []), x]);
-      for (const [batchId, list] of byBatch) {
-        const nums = compressRanges(list.map((x) => x.number));
-        await logActivity(t, {
-          actor: me, action: 'scripts.assigned', entityType: 'batch', entityId: batchId, batchId, clientId: list[0].client_id,
-          summary: `${u.name} was removed from the team: scripts ${nums} ${target ? `moved to ${target.name}` : 'are now unassigned'}`,
-        });
-        if (target) await notify(t, [target.id], { type: 'assignment', title: `Assigned · ${list[0].title}`, body: `Scripts ${nums} moved to you from ${u.name}.`, link: batchLink(batchId) }, me.id);
-      }
+      const n = await moveOpenScripts(t, me, { id, name: u.name }, target, 'was removed from the team');
       await t.query(`update users set active = false, removed_at = now(), temp_password = null, updated_at = now() where id = $1`, [id]);
       await t.query(`delete from sessions where user_id = $1`, [id]);
-      await logActivity(t, { actor: me, action: 'user.removed', entityType: 'user', entityId: id, summary: `Removed ${u.name} from the team${scripts.length ? ` (${scripts.length} unfinished scripts ${target ? `moved to ${target.name}` : 'unassigned'})` : ''}` });
-      return scripts.length;
+      await logActivity(t, { actor: me, action: 'user.removed', entityType: 'user', entityId: id, summary: `Removed ${u.name} from the team${n ? ` (${n} unfinished scripts ${target ? `moved to ${target.name}` : 'unassigned'})` : ''}` });
+      return n;
     });
     return { moved, users: await teamFor(me) };
   });
@@ -323,29 +375,76 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     return { settings: await loadSettings(db) };
   });
 
+  const rulesInput = {
+    draftOffsetDays: z.coerce.number({ message: 'Enter a number of days' }).int('Use whole days').min(0, 'Use 0 or more days').max(60, 'Use 60 days or fewer').optional(),
+    finalOffsetDays: z.coerce.number({ message: 'Enter a number of days' }).int('Use whole days').min(0, 'Use 0 or more days').max(60, 'Use 60 days or fewer').optional(),
+    dayMode: z.enum(['calendar', 'business']).optional(),
+    workingDays: z.array(z.number().int().min(0).max(6)).min(1, 'Pick at least one working day').max(7).optional(),
+  };
+  /** Active batches whose automatic deadlines these rules would change, and the new dates. */
+  async function recalcPlan(t: Db, s: Settings) {
+    const rows = await t.query<{ id: number; client_id: number; title: string; start_date: string; draft_due: string | null; final_due: string | null; draft_due_mode: string; final_due_mode: string }>(
+      `select b.id, b.client_id, b.title, s.start_date, b.draft_due, b.final_due, b.draft_due_mode, b.final_due_mode
+         from batches b join shoots s on s.id = b.shoot_id where b.archived_at is null and (b.draft_due_mode = 'auto' or b.final_due_mode = 'auto')`,
+    );
+    const out: { r: (typeof rows)[number]; nd: string | null; nf: string | null }[] = [];
+    for (const r of rows) {
+      const d = computeDeadlines(r.start_date, rulesOf(s));
+      const nd = r.draft_due_mode === 'auto' ? d.draftDue : r.draft_due;
+      const nf = r.final_due_mode === 'auto' ? d.finalDue : r.final_due;
+      if (nd !== r.draft_due || nf !== r.final_due) out.push({ r, nd, nf });
+    }
+    return out;
+  }
+  const finalAfterDrafts = (draft: number, final: number) =>
+    new HttpError(400, `Final delivery can’t come before the drafts. Use ${draft} days or fewer: drafts are due ${draft} days before the shoot.`, { finalOffsetDays: `Use ${draft} or fewer (drafts are due ${draft} days before)` });
+
+  // what applying rules to existing batches would change, before anything is saved
+  app.post('/api/settings/recalculate-preview', async (req) => {
+    requireManager(req);
+    const input = parse(z.object(rulesInput), req.body);
+    const before = await loadSettings(db);
+    const next = { ...before, ...Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) } as Settings;
+    if (next.finalOffsetDays > next.draftOffsetDays) throw finalAfterDrafts(next.draftOffsetDays, next.finalOffsetDays);
+    const plan = await recalcPlan(db, next);
+    const writers = plan.length ? await db.query<{ n: number }>(
+      `select count(distinct assignee_id)::int as n from scripts where removed_at is null and status <> 'delivered' and assignee_id is not null and batch_id = any($1::bigint[])`, [plan.map((p) => p.r.id)],
+    ) : [{ n: 0 }];
+    return { batches: plan.length, writers: writers[0]?.n ?? 0 };
+  });
+
   app.patch('/api/settings', async (req) => {
     const me = requireManager(req);
     const input = parse(z.object({
       orgName: zs.name('Organisation name', 120).optional(),
       timezone: z.string().refine(isValidTimeZone, 'Choose a valid timezone').optional(),
       cutoff: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Use a time like 17:00').optional(),
-      draftOffsetDays: z.coerce.number().int().min(0).max(60).optional(),
-      finalOffsetDays: z.coerce.number().int().min(0).max(60).optional(),
-      dayMode: z.enum(['calendar', 'business']).optional(),
-      workingDays: z.array(z.number().int().min(0).max(6)).min(1, 'Pick at least one working day').max(7).optional(),
-      reminderLeadDays: z.coerce.number().int().min(0).max(14).optional(),
-      planReminderDays: z.coerce.number().int().min(3).max(60).optional(),
+      ...rulesInput,
+      reminderLeadDays: z.coerce.number({ message: 'Enter a number of days' }).int().min(0, 'Use 0 or more days').max(14, 'Use 14 days or fewer').optional(),
+      planReminderDays: z.coerce.number({ message: 'Enter a number of days' }).int().min(3, 'Use at least 3 days').max(60, 'Use 60 days or fewer').optional(),
       recalculate: z.boolean().default(false),
     }), req.body);
     const before = await loadSettings(db);
     const draft = input.draftOffsetDays ?? before.draftOffsetDays;
     const final = input.finalOffsetDays ?? before.finalOffsetDays;
-    if (final > draft) throw new HttpError(400, 'Final delivery should come after drafts, so its offset must be smaller', { finalOffsetDays: 'Must be ≤ the draft offset' });
+    if (final > draft) throw finalAfterDrafts(draft, final);
     const map: Record<string, string> = {
       orgName: 'org_name', timezone: 'timezone', cutoff: 'cutoff', draftOffsetDays: 'draft_offset_days', finalOffsetDays: 'final_offset_days',
       dayMode: 'day_mode', workingDays: 'working_days', reminderLeadDays: 'reminder_lead_days', planReminderDays: 'plan_reminder_days',
     };
-    const keys = Object.keys(map).filter((k) => (input as Record<string, unknown>)[k] !== undefined);
+    const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const shown = (k: string, v: unknown) => (k === 'workingDays' ? (v as number[]).map((d) => DAY[d]).join(' ') : k === 'dayMode' ? (v === 'business' ? 'working days' : 'calendar days') : String(v));
+    const label: Record<string, string> = {
+      orgName: 'Organisation name', timezone: 'HQ time zone', cutoff: 'Daily cutoff', draftOffsetDays: 'Drafts due (days before)', finalOffsetDays: 'Final delivery (days before)',
+      dayMode: 'Count days as', workingDays: 'Working week', reminderLeadDays: 'Remind writers (days before)', planReminderDays: 'Remind managers to plan (days before)',
+    };
+    // only what actually changed
+    const keys = Object.keys(map).filter((k) => {
+      const v = (input as Record<string, unknown>)[k];
+      if (v === undefined) return false;
+      const was = (before as unknown as Record<string, unknown>)[k];
+      return k === 'workingDays' ? [...new Set(v as number[])].sort().join() !== [...(was as number[])].sort().join() : v !== was;
+    });
     let recalculated = 0;
     await db.tx(async (t) => {
       if (keys.length) {
@@ -353,19 +452,14 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
           `update settings set ${keys.map((k, i) => `${map[k]} = $${i + 1}${k === 'workingDays' ? '::jsonb' : ''}`).join(', ')}, updated_at = now() where id = 1`,
           keys.map((k) => (k === 'workingDays' ? JSON.stringify([...new Set(input.workingDays)].sort()) : (input as Record<string, unknown>)[k])),
         );
-        await logActivity(t, { actor: me, action: 'settings.updated', entityType: 'settings', summary: `Updated settings: ${keys.join(', ')}` });
+        await logActivity(t, {
+          actor: me, action: 'settings.updated', entityType: 'settings',
+          summary: `Settings: ${keys.map((k) => `${label[k]} ${shown(k, (before as unknown as Record<string, unknown>)[k])} → ${shown(k, k === 'workingDays' ? [...new Set(input.workingDays)].sort() : (input as Record<string, unknown>)[k])}`).join(' · ')}`,
+        });
       }
       if (input.recalculate) {
-        const s = await loadSettings(t);
-        const rows = await t.query<{ id: number; client_id: number; title: string; start_date: string; draft_due: string | null; final_due: string | null; draft_due_mode: string; final_due_mode: string }>(
-          `select b.id, b.client_id, b.title, s.start_date, b.draft_due, b.final_due, b.draft_due_mode, b.final_due_mode
-             from batches b join shoots s on s.id = b.shoot_id where b.archived_at is null and (b.draft_due_mode = 'auto' or b.final_due_mode = 'auto')`,
-        );
-        for (const r of rows) {
-          const d = computeDeadlines(r.start_date, rulesOf(s));
-          const nd = r.draft_due_mode === 'auto' ? d.draftDue : r.draft_due;
-          const nf = r.final_due_mode === 'auto' ? d.finalDue : r.final_due;
-          if (nd === r.draft_due && nf === r.final_due) continue;
+        const plan = await recalcPlan(t, await loadSettings(t));
+        for (const { r, nd, nf } of plan) {
           recalculated++;
           await t.query(`update batches set draft_due = $2, final_due = $3, updated_at = now() where id = $1`, [r.id, nd, nf]);
           const msg = [nd !== r.draft_due ? `Drafts ${fmtDate(r.draft_due)} → ${fmtDate(nd)}` : null, nf !== r.final_due ? `Final delivery ${fmtDate(r.final_due)} → ${fmtDate(nf)}` : null].filter(Boolean).join(' · ');
@@ -374,7 +468,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
         }
       }
     });
-    return { settings: await loadSettings(db), recalculated };
+    return { settings: await loadSettings(db), recalculated, changed: keys.length };
   });
 
   // ── notifications ──────────────────────────────────────────────────────

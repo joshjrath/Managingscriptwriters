@@ -65,11 +65,22 @@ function dueByDay(kind: 'draft' | 'final', batches: BatchSummary[], scripts: Map
 
 const RANK: Record<AttentionKind, number> = { overdue: 0, blocked: 1, due_today: 2, date_review: 3, unassigned: 4, revisions: 5 };
 
-export function attentionFor(batches: BatchSummary[]): AttentionItem[] {
+/** People who can't sign in any more (deactivated or removed), by id. */
+export async function inactivePeople(db: Ctx['db']): Promise<Map<number, string>> {
+  const rows = await db.query<{ id: number; name: string }>(`select id, name from users where not active or removed_at is not null`);
+  return new Map(rows.map((r) => [r.id, r.name]));
+}
+
+export function attentionFor(batches: BatchSummary[], inactive: Map<number, string> = new Map()): AttentionItem[] {
   const out: AttentionItem[] = [];
   for (const b of batches) {
     if (b.stage === 'delivered') continue;
     const issues: AttentionItem['issues'] = [];
+    // scripts left with someone who can't sign in any more
+    for (const w of b.writers) {
+      const left = w.count - w.delivered;
+      if (w.userId != null && inactive.has(w.userId) && left > 0) issues.push({ kind: 'unassigned', text: `${plural(left, 'script')} still with ${w.name}, who’s deactivated · reassign them` });
+    }
     if (b.final.overdue) issues.push({ kind: 'overdue', text: `Final delivery ${b.final.label.toLowerCase()} · ${plural(b.final.remaining, 'script')} not delivered` });
     else if (b.draft.overdue) issues.push({ kind: 'overdue', text: `Drafts ${b.draft.label.toLowerCase()} · ${plural(b.draft.remaining, 'script')} not draft-ready` });
     if (b.blocked) issues.push({ kind: 'blocked', text: `Blocked: ${b.blockerNote ?? 'no details'}` });
@@ -144,7 +155,7 @@ export async function computeCounts(ctx: Ctx, me: Me, batches?: BatchSummary[], 
     reviewQueue: isManager(me.role) ? data.summaries.reduce((n, b) => n + b.progress.inReview, 0) : 0,
     unreadNotifications: unread?.n ?? 0,
     unreadMessages: Number(msgs?.n ?? 0),
-    attention: attentionFor(data.summaries).length,
+    attention: isManager(me.role) ? attentionFor(data.summaries, await inactivePeople(ctx.db)).length : attentionFor(data.summaries).length,
   };
 }
 
@@ -213,7 +224,7 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
         deliveredThisWeekBatches: deliveredBatches.size,
       },
       due: { draft: dueByDay('draft', summaries, scripts, clock), final: dueByDay('final', summaries, scripts, clock) },
-      attention: attentionFor(summaries),
+      attention: attentionFor(summaries, mine ? new Map() : await inactivePeople(db)),
       upcomingShoots: shoots,
       activeBatches: summaries
         .filter((b) => b.stage !== 'delivered')

@@ -157,9 +157,11 @@ export function milestone(kind: MilestoneKind, date: ISODate | null, p: Progress
   };
 }
 
-/** The earliest milestone that isn't complete yet. */
+/** The earliest milestone that isn't complete yet (final delivery first when it falls before the drafts date). */
 export function nextMilestone(draft: Milestone, final: Milestone): Milestone | null {
-  if (!draft.complete && draft.date) return draft;
+  const draftOpen = !draft.complete && !!draft.date;
+  if (draftOpen && !final.complete && final.date && final.date < draft.date!) return final;
+  if (draftOpen) return draft;
   if (!final.complete) return final;
   return null;
 }
@@ -168,7 +170,6 @@ export function nextMilestone(draft: Milestone, final: Milestone): Milestone | n
 
 export type Role = 'owner' | 'manager' | 'writer' | 'editor';
 
-/** Admins (stored as 'owner') can do everything managers can. */
 /** How long work counts as new on My work. */
 export const NEW_WORK_DAYS = 7;
 
@@ -182,6 +183,7 @@ export function isNewWork(mine: { status: ScriptStatus; assignedAt: string | nul
   return mine.some((s) => s.assignedAt != null && new Date(s.assignedAt).getTime() >= cut);
 }
 
+/** Admins (stored as 'owner') can do everything managers can. */
 export const isManager = (role: Role) => role === 'manager' || role === 'owner';
 /** Editors cut the videos: they see the calendar, finished scripts, clients and resources, read-only. */
 export const isEditor = (role: Role) => role === 'editor';

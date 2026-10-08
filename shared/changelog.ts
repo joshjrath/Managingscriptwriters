@@ -17,6 +17,29 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-08-safety-fixes',
+    date: '2026-10-08',
+    title: 'Safer approvals, a Script bank that keeps everything, and other fixes',
+    summary: 'The first round of fixes from a full review of the site: the problems that could lose work, give the wrong access, or do more than a button said.',
+    changes: [
+      { tag: 'fixed', text: 'Only the Admin can make someone an Admin, or change the Admin’s account. Managers no longer see the Admin option.' },
+      { tag: 'fixed', text: 'The Script bank keeps every finished script. When a writer resends only some scripts from a document, the others stay findable under the earlier one. Scripts finished without any document get a row of their own too.' },
+      { tag: 'fixed', text: 'You can’t approve a version you haven’t seen: if a writer sends a newer version while the Review queue is open, the site asks you to open it first.' },
+      { tag: 'new', text: 'Approving or sending back now has an Undo on the confirmation for a few minutes. It puts the scripts back in review and takes back the notification.' },
+      { tag: 'new', text: 'When you approve with your own edits, the writer sees “Final version (your edits) · use this one” on My work and when they mark scripts delivered. In the Script bank, “Final version” is the main button.' },
+      { tag: 'fixed', text: 'Adding a second writer to a new shoot or batch splits the scripts evenly, and you can’t create work with a writer who has no scripts.' },
+      { tag: 'fixed', text: 'Moving a shoot warns when drafts would end up due after final delivery, and moves the manual date too unless you untick it. “Dates are fine” is off while the order is wrong.' },
+      { tag: 'improved', text: 'Shoots that need writers: a shoot you plan from the list stays linked to its calendar event, so it never shows up again. You can create the client right there, hide a shoot with “Not ours” (with Undo), and bring hidden ones back.' },
+      { tag: 'improved', text: 'Deactivating someone lets you hand their unfinished scripts to someone else. Scripts left with someone who can’t sign in show up in Needs attention.' },
+      { tag: 'fixed', text: 'Recording mode labels every confirmation “Practice copy · not kept”, shows a badge in the sidebar, keeps its dot clear of the chat button, and always asks before turning off. Password and time zone changes are off while it’s on.' },
+      { tag: 'fixed', text: 'Settings checks deadline rules as you type, says what’s wrong in plain words, and asks whether new rules should also update existing batches.' },
+      { tag: 'improved', text: 'Sending scripts back from a writer’s row starts with nothing picked and warns before un-approving anything.' },
+      { tag: 'improved', text: 'Delivering as a manager says exactly which scripts it marks delivered, and records it as “confirmed by Josh for Priya” rather than writer-confirmed. Writers can tick which documents they’ve added to Timeliner.' },
+      { tag: 'fixed', text: 'Notifications only list each writer’s own scripts, and include the reviewer’s note.' },
+      { tag: 'improved', text: 'Send for review starts with the scripts your Written so far count says are written. Batches without a shoot name are named after the client. Form errors disappear as soon as you fix the field.' },
+    ],
+  },
+  {
     id: '2026-10-07-my-work-redesign',
     date: '2026-10-07',
     title: 'My work, rebuilt: new work first',

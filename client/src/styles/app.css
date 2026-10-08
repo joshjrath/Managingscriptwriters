@@ -457,7 +457,7 @@ main.page-main { padding: 28px 28px 72px 22px; min-width: 0; }
 .input::placeholder, .textarea::placeholder { color: #85858F; }
 .input:hover, .select:hover, .textarea:hover { background: #2F2F37; }
 .input:focus, .select:focus, .textarea:focus { outline: none; border-color: var(--focus); box-shadow: 0 0 0 3px color-mix(in srgb, var(--focus) 25%, transparent); }
-.input[aria-invalid="true"], .select[aria-invalid="true"], .textarea[aria-invalid="true"] { border-color: var(--red); }
+.input[aria-invalid="true"], .select[aria-invalid="true"], .textarea[aria-invalid="true"], .input.invalid { border-color: var(--red); }
 .select { appearance: none; padding-right: 38px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%23A2A2AD' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' viewBox='0 0 24 24'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 12px center; }
 .select option { background: var(--panel-2); color: var(--text); }
 input[type="date"].input { color-scheme: dark; }
@@ -1111,7 +1111,8 @@ dialog.moment::backdrop { background: rgba(8, 8, 10, 0.72); backdrop-filter: blu
 html[data-motion='on'] .rec-dot { animation: rec-pulse 1.8s var(--ease-out-quint) infinite; }
 @keyframes rec-pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 55%, transparent); } 70%, 100% { box-shadow: 0 0 0 9px transparent; } }
 .mode-dot {
-  position: fixed; right: 18px; bottom: 18px; z-index: 90; width: 34px; height: 34px; border-radius: 50%; border: 0; cursor: pointer;
+  /* left of the chat button, never under it */
+  position: fixed; right: 96px; bottom: 30px; z-index: 96; width: 34px; height: 34px; border-radius: 50%; border: 0; cursor: pointer;
   display: grid; place-items: center; color: var(--cyan); background: var(--panel-2); box-shadow: var(--shadow-pop);
 }
 .mode-dot:hover { background: var(--row); }
@@ -1124,7 +1125,7 @@ html[data-motion='on'] .rec-dot { animation: rec-pulse 1.8s var(--ease-out-quint
 .viewas-row .who span { color: var(--text-2); font-size: 12px; }
 @media (max-width: 640px) {
   .mode-bar { border-radius: 20px; bottom: 12px; padding: 10px 12px; gap: 8px; }
-  .mode-dot { right: 12px; bottom: 12px; }
+  .mode-dot { right: 84px; bottom: 26px; }
 }
 
 /* ── Script bank ─────────────────────────────────────────────────────── */
@@ -1676,3 +1677,31 @@ html.cc-returning #root > * { animation: ccr-in 1100ms cubic-bezier(0.22, 1, 0.3
 .mw-alert b { display: block; font-size: 15.5px; }
 .mw-alert span { display: block; color: var(--text-2); font-size: 13.5px; margin-top: 2px; }
 .mw-alert .go { width: 18px; height: 18px; color: var(--text-2); }
+.bank-edit { color: var(--mint); font-weight: 600; }
+
+/* which version to paste into Timeliner */
+.sources { display: flex; flex-direction: column; gap: 6px; }
+.source { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; background: var(--bg); min-width: 0; }
+.source > input { width: 20px; height: 20px; flex: none; accent-color: var(--mint); }
+.source .ic { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; flex: none; background: color-mix(in srgb, var(--lavender) 16%, transparent); color: var(--lavender); }
+.source .ic svg { width: 16px; height: 16px; }
+.source.edit { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--mint) 55%, transparent); }
+.source.edit .ic { background: color-mix(in srgb, var(--mint) 18%, transparent); color: var(--mint); }
+.source .body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: 13px; color: var(--text-2); }
+.source .body b { color: var(--text); font-size: 14px; }
+.source.edit .body span:not(.q) { color: var(--mint); font-weight: 650; }
+.source .body .q { color: var(--text); font-style: italic; overflow-wrap: anywhere; }
+.source .btn { flex: none; }
+.toast-act { border: 0; background: color-mix(in srgb, var(--text) 14%, transparent); color: var(--text); font: 700 12.5px/1 var(--font-ui); padding: 8px 12px; border-radius: var(--r-pill); cursor: pointer; flex: none; }
+.toast-act:hover { background: color-mix(in srgb, var(--text) 22%, transparent); }
+.toast-tag { display: block; font-style: normal; font-size: 11.5px; color: var(--yellow); margin-top: 2px; }
+.cal-hide { margin-left: 6px; }
+@media (pointer: coarse) { .cal-hide { min-height: 44px; margin-left: 14px; } }
+
+/* which mode you're in, always visible in the sidebar */
+.rail-mode { display: flex; align-items: center; gap: 8px; margin: 0 4px 12px; padding: 8px 12px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--cyan) 16%, var(--row)); color: var(--text); font: 700 12px/1.2 var(--font-ui); }
+.rail-mode.rec { background: color-mix(in srgb, var(--red) 18%, var(--row)); }
+.rail-mode svg { color: var(--cyan); flex: none; }
+.app.collapsed .sidebar .rail-mode .label { display: none; }
+.app.collapsed .sidebar .rail-mode { justify-content: center; padding: 8px; }
+@media (max-width: 1180px) { .app:not(.expanded) .sidebar .rail-mode .label { display: none; } .app:not(.expanded) .sidebar .rail-mode { justify-content: center; padding: 8px; } }

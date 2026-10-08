@@ -104,18 +104,27 @@ export async function loadDeliveries(db: Db, where: { batchIds?: number[]; confi
   );
   const ids = rows.map((r) => r.id);
   const numbers = new Map<number, number[]>();
+  const writers = new Map<number, Set<string>>();
   if (ids.length) {
     const p: unknown[] = [];
-    const srows = await db.query<{ delivery_id: number; number: number }>(
-      `select delivery_id, number from scripts where removed_at is null and delivery_id in (${inList(ids, p)}) order by number`, p,
+    const srows = await db.query<{ delivery_id: number; number: number; assignee_id: number | null; assignee_name: string | null }>(
+      `select s.delivery_id, s.number, s.assignee_id, u.name as assignee_name from scripts s left join users u on u.id = s.assignee_id
+        where s.removed_at is null and s.delivery_id in (${inList(ids, p)}) order by s.number`, p,
     );
-    for (const s of srows) numbers.set(s.delivery_id, [...(numbers.get(s.delivery_id) ?? []), s.number]);
+    const by = new Map(rows.map((r) => [r.id, r.confirmed_by]));
+    for (const s of srows) {
+      numbers.set(s.delivery_id, [...(numbers.get(s.delivery_id) ?? []), s.number]);
+      if (s.assignee_id != null && s.assignee_id !== by.get(s.delivery_id) && s.assignee_name) writers.set(s.delivery_id, (writers.get(s.delivery_id) ?? new Set()).add(s.assignee_name));
+    }
   }
-  return rows.map((r) => ({
-    id: r.id, batchId: r.batch_id, confirmedById: r.confirmed_by, confirmedByName: r.confirmed_by_name,
-    confirmedAt: r.confirmed_at, timelinerUrl: r.timeliner_url, note: r.note,
-    scriptNumbers: numbers.get(r.id) ?? [], verification: 'writer_confirmed',
-  }));
+  return rows.map((r) => {
+    const forNames = [...(writers.get(r.id) ?? [])].sort();
+    return {
+      id: r.id, batchId: r.batch_id, confirmedById: r.confirmed_by, confirmedByName: r.confirmed_by_name,
+      confirmedAt: r.confirmed_at, timelinerUrl: r.timeliner_url, note: r.note,
+      scriptNumbers: numbers.get(r.id) ?? [], verification: 'writer_confirmed', forNames,
+    };
+  });
 }
 
 // ── resources ────────────────────────────────────────────────────────────
@@ -215,7 +224,7 @@ export async function loadBriefings(db: Db, where: { clientId?: number; batchId?
 
 interface ShootRow {
   id: number; client_id: number; client_name: string; title: string | null; start_date: ISODate; end_date: ISODate | null;
-  location: string | null; notes: string | null; cancelled_at: string | null;
+  location: string | null; notes: string | null; cancelled_at: string | null; calendar_uid: string | null;
 }
 
 export async function loadShoots(db: Db, where: { clientId?: number; id?: number; from?: ISODate; to?: ISODate; activeClientsOnly?: boolean }): Promise<Shoot[]> {
@@ -227,7 +236,7 @@ export async function loadShoots(db: Db, where: { clientId?: number; id?: number
   if (where.to) { params.push(where.to); cond.push(`sh.start_date <= $${params.length}`); }
   if (where.activeClientsOnly) cond.push(`c.status <> 'archived'`);
   const rows = await db.query<ShootRow>(
-    `select sh.id, sh.client_id, c.name as client_name, sh.title, sh.start_date, sh.end_date, sh.location, sh.notes, sh.cancelled_at
+    `select sh.id, sh.client_id, c.name as client_name, sh.title, sh.start_date, sh.end_date, sh.location, sh.notes, sh.cancelled_at, sh.calendar_uid
        from shoots sh join clients c on c.id = sh.client_id
       ${cond.length ? 'where ' + cond.join(' and ') : ''}
       order by sh.start_date`,
@@ -244,7 +253,7 @@ export async function loadShoots(db: Db, where: { clientId?: number; id?: number
   }
   return rows.map((r) => ({
     id: r.id, clientId: r.client_id, clientName: r.client_name, title: r.title, startDate: r.start_date, endDate: r.end_date,
-    location: r.location, notes: r.notes, batchIds: batchIds.get(r.id) ?? [], cancelledAt: r.cancelled_at,
+    location: r.location, notes: r.notes, batchIds: batchIds.get(r.id) ?? [], cancelledAt: r.cancelled_at, calendarUid: r.calendar_uid,
   }));
 }
 

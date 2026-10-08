@@ -367,15 +367,21 @@ export function Dialog({ open, onClose, title, sub, children, footer, kind = 'mo
 
 // ── toasts (only after a save has actually succeeded) ────────────────────
 
-interface Toast { id: number; text: ReactNode; kind: 'ok' | 'error' }
-const ToastCtx = createContext<(text: ReactNode, kind?: 'ok' | 'error') => void>(() => {});
+interface ToastAction { label: string; run: () => void }
+interface Toast { id: number; text: ReactNode; kind: 'ok' | 'error'; action?: ToastAction; tag?: string }
+type Push = (text: ReactNode, kind?: 'ok' | 'error', action?: ToastAction) => void;
+const ToastCtx = createContext<Push>(() => {});
+
+// a label added to every toast while it applies (Recording mode: nothing is really saved)
+let toastTag: string | null = null;
+export const setToastTag = (tag: string | null) => { toastTag = tag; };
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const push = useCallback((text: ReactNode, kind: 'ok' | 'error' = 'ok') => {
+  const push = useCallback<Push>((text, kind = 'ok', action) => {
     const id = Date.now() + Math.random();
-    setToasts((t) => [...t.slice(-3), { id, text, kind }]);
-    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 9000 : 4500);
+    setToasts((t) => [...t.slice(-3), { id, text, kind, action, tag: kind === 'ok' ? toastTag ?? undefined : undefined }]);
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 9000 : action ? 9000 : 4500);
   }, []);
   return (
     <ToastCtx.Provider value={push}>
@@ -386,7 +392,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
             <m.div key={t.id} layout className={`toast ${t.kind === 'error' ? 'error' : ''}`}
               initial={{ opacity: 0, y: 18, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, x: 40, transition: { duration: 0.16, ease: [0.32, 0, 0.67, 0] } }} transition={SPRING}>
               {t.kind === 'error' ? <CircleAlert aria-hidden /> : <Check aria-hidden className="toast-check" />}
-              <span>{t.text}</span>
+              <span>{t.text}{t.tag && <em className="toast-tag">{t.tag}</em>}</span>
+              {t.action && <button type="button" className="toast-act" onClick={() => { t.action!.run(); setToasts((all) => all.filter((x) => x.id !== t.id)); }}>{t.action.label}</button>}
               <button className="x" onClick={() => setToasts((all) => all.filter((x) => x.id !== t.id))} aria-label="Dismiss"><X size={15} /></button>
             </m.div>
           ))}

@@ -3,9 +3,10 @@
 // filled in (client, dates, and last time's script count and writers), or the
 // batch when only the writers are missing.
 
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
-import { CalendarDays, UserPlus, X } from 'lucide-react';
+import { CalendarDays, EyeOff, RotateCcw, UserPlus } from 'lucide-react';
 import { api, useSave } from '../api';
 import type { CalendarShoot } from '../../../shared/types';
 import { fmtRange, plural } from '../../../shared/format';
@@ -18,21 +19,30 @@ const WHY: Record<CalendarShoot['status'], string> = {
   unassigned: 'Scripts without a writer',
 };
 
+/** "Shoot – Elegant Jeweler" → "Elegant Jeweler": a starting point for a client that isn't on the site yet. */
+const nameFromTitle = (t: string) => t.replace(/\b(photo ?shoot|video ?shoot|shoots?|shooting|filming|film day|content day|production day|session)\b/gi, '').replace(/\([^)]*\)/g, '').replace(/\s+and\s+.*$/i, '').replace(/^[\s–—:·-]+|[\s–—:·-]+$/g, '').replace(/\s{2,}/g, ' ').trim();
+
 export function CalendarShootsPanel() {
   const { clock } = useBoot();
   const openNew = useNewWork();
   const toast = useToast();
-  const q = useQuery({ queryKey: ['calendar-shoots'], queryFn: () => api<{ shoots: CalendarShoot[] }>('/api/calendar-shoots'), refetchInterval: 5 * 60_000 });
-  const dismiss = useSave((s: CalendarShoot) => api('/api/calendar-shoots/dismiss', { body: { uid: s.uid } }), {
-    onSuccess: (_o, s) => toast(`Hidden: ${s.title}`),
+  const q = useQuery({ queryKey: ['calendar-shoots'], queryFn: () => api<{ shoots: CalendarShoot[]; hidden: CalendarShoot[] }>('/api/calendar-shoots'), refetchInterval: 5 * 60_000 });
+  const [showHidden, setShowHidden] = useState(false);
+  const mark = useSave((v: { s: CalendarShoot; undo: boolean }) => api('/api/calendar-shoots/dismiss', { body: { uid: v.s.uid, undo: v.undo } }), {
+    onSuccess: (_o, v) => {
+      if (v.undo) toast(`Back on the list: ${v.s.title}`);
+      else toast(`Hidden: ${v.s.title}`, 'ok', { label: 'Undo', run: () => mark.mutate({ s: v.s, undo: true }) });
+    },
   });
   const list = q.data?.shoots ?? [];
-  if (!list.length) return null;
-  const feed = list[0].feedName;
+  const hidden = q.data?.hidden ?? [];
+  if (!list.length && !hidden.length) return null;
+  const feed = (list[0] ?? hidden[0]).feedName;
   const plan = (s: CalendarShoot) => {
     if (s.status === 'no_shoot') {
       openNew('shoot', {
-        clientId: s.client?.id, start: s.start, end: s.end !== s.start ? s.end : null,
+        clientId: s.client?.id, newClientName: s.client ? undefined : nameFromTitle(s.title) || undefined, calendarUid: s.uid,
+        start: s.start, end: s.end !== s.start ? s.end : null,
         count: s.suggested?.count, split: s.suggested?.split.map((x) => ({ writerId: x.writerId, count: x.count })),
       });
     } else if (s.status === 'no_scripts') {
@@ -40,7 +50,9 @@ export function CalendarShootsPanel() {
     }
   };
   return (
-    <Panel className="cal-shoots" title="Shoots that need writers" count={list.length} sub={`from ${new Set(list.map((s) => s.feedName)).size > 1 ? 'your synced calendars' : feed}`}>
+    <Panel className="cal-shoots" title="Shoots that need writers" count={list.length} sub={`from ${new Set(list.map((s) => s.feedName)).size > 1 ? 'your synced calendars' : feed}`}
+      tools={hidden.length ? <button type="button" className="btn sm ghost" aria-expanded={showHidden} onClick={() => setShowHidden(!showHidden)}><EyeOff aria-hidden />{showHidden ? 'Hide the hidden ones' : `Hidden (${hidden.length})`}</button> : undefined}>
+      {!list.length && <p className="muted" style={{ fontSize: 13.5 }}>Every shoot on the calendar is planned.</p>}
       <div className="rows">
         {list.map((s) => {
           const days = Math.round((Date.parse(s.start) - Date.parse(clock.today)) / 86400000);
@@ -49,7 +61,7 @@ export function CalendarShootsPanel() {
               <DateTile date={s.start} color={s.color} />
               <div className="body">
                 <div className="top"><CalendarDays size={13} aria-hidden style={{ color: s.color }} /> {s.title}</div>
-                <div className="title">{s.client ? s.client.name : <span className="muted">Which client? Pick it when you plan</span>}</div>
+                <div className="title">{s.client ? s.client.name : <span className="muted">{nameFromTitle(s.title) ? `New client? Plan scripts adds “${nameFromTitle(s.title)}”` : 'Which client? Pick it when you plan'}</span>}</div>
                 <div className="meta">
                   <span>{fmtRange(s.start, s.end !== s.start ? s.end : null)}</span>
                   <span>{days <= 0 ? 'today' : days === 1 ? 'tomorrow' : `in ${days} days`}</span>
@@ -63,12 +75,23 @@ export function CalendarShootsPanel() {
                 {s.status === 'unassigned' && s.batchId
                   ? <Link to={`/batches/${s.batchId}#scripts`} className="btn sm primary"><UserPlus aria-hidden />Assign writers</Link>
                   : <Button variant="sm primary" icon={<UserPlus aria-hidden />} onClick={() => plan(s)}>Plan scripts</Button>}
-                <button type="button" className="icon-btn sm" title="Not a shoot we write for: hide it" aria-label={`Hide ${s.title}`} onClick={() => dismiss.mutate(s)}><X /></button>
+                <button type="button" className="btn sm ghost cal-hide" title="Not a shoot we write for: hide it (you can bring it back)" aria-label={`Hide ${s.title}`} onClick={() => mark.mutate({ s, undo: false })}><EyeOff aria-hidden />Not ours</button>
               </div>
             </div>
           );
         })}
       </div>
+      {showHidden && hidden.length > 0 && (
+        <div className="rows" style={{ marginTop: 12 }}>
+          <div className="section-title">Hidden: not shoots we write for</div>
+          {hidden.map((s) => (
+            <div key={s.uid} className="item" style={{ opacity: 0.8 }}>
+              <div className="body"><div className="title">{s.title}</div><div className="meta"><span>{fmtRange(s.start, s.end !== s.start ? s.end : null)}</span></div></div>
+              <div className="side"><Button variant="sm" icon={<RotateCcw aria-hidden />} onClick={() => mark.mutate({ s, undo: true })}>Show again</Button></div>
+            </div>
+          ))}
+        </div>
+      )}
     </Panel>
   );
 }

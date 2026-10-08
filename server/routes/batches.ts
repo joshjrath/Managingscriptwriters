@@ -108,6 +108,9 @@ export async function insertBatch(
   // writers
   const users = await loadUsers(t);
   const active = new Map(users.filter((u) => u.active).map((u) => [u.id, u]));
+  // a writer picked with no scripts is a mistake, not a choice: say so instead of dropping them
+  const empty = input.split.find((s) => s.count === 0);
+  if (empty) fields.split = `${active.get(empty.writerId)?.name ?? 'One of the writers'} has no scripts. Give them some, split evenly, or remove them.`;
   const split = input.split.filter((s) => s.count > 0);
   const seen = new Set<number>();
   for (const s of split) {
@@ -421,6 +424,8 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post('/api/batches/:id/dates-reviewed', async (req) => {
     const me = requireManager(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
+    const cur = await db.one<{ draft_due: string | null; final_due: string | null }>(`select draft_due::text, final_due::text from batches where id = $1`, [id]);
+    if (cur?.draft_due && cur.final_due && cur.draft_due > cur.final_due) throw new HttpError(400, 'Drafts are due after final delivery. Change the deadlines before confirming them.');
     const b = await db.one<{ client_id: number }>(`update batches set needs_date_review = false, date_review_note = null, updated_at = now() where id = $1 returning client_id`, [id]);
     if (!b) throw notFound('Batch');
     await logActivity(db, { actor: me, action: 'batch.dates_reviewed', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id, summary: 'Confirmed deadlines after shoot change' });
@@ -834,9 +839,13 @@ export async function applyScriptAction(
       detail: { action, scripts: rows.map((r) => r.number), note: opts.note, timelinerUrl: opts.timelinerUrl, deliveryId: deliveryId ?? null },
     });
 
-    // notifications
+    // notifications: each writer hears about their own scripts only
     const link = batchLink(batchId);
     const writers = [...new Set(rows.map((r) => r.assignee_id).filter((x): x is number => x != null))];
+    const theirs = (uid: number) => {
+      const n = rows.filter((r) => r.assignee_id === uid).map((r) => r.number);
+      return { n: n.length, word: `script${n.length > 1 ? 's' : ''} ${compressRanges(n)}`, them: n.length > 1 ? 'them' : 'it' };
+    };
     if (action === 'submit') {
       const today = (await clockFor({ ...ctx, db: t })).today;
       const waiting = await t.query<{ number: number }>(`select number from scripts where batch_id = $1 and status = 'ready_for_review' and removed_at is null order by number`, [batchId]);
@@ -854,23 +863,42 @@ export async function applyScriptAction(
         }, me.id);
       }
     } else if (action === 'approve') {
-      await notify(t, writers, { type: 'approval', title: `Approved · ${b.title}`, body: `${me.name} approved ${scriptsWord}.${attached ? ' They attached their edited version — use that one.' : ''} Add ${rows.length > 1 ? 'them' : 'it'} to Timeliner and confirm delivery.`, link: '/my-work' }, me.id);
+      for (const uid of writers) {
+        const w = theirs(uid);
+        await notify(t, [uid], {
+          type: 'approval', title: `Approved · ${b.client_name} · ${b.title}`,
+          body: `${me.name} approved your ${w.word}.${attached ? ` Use ${me.name.split(' ')[0]}’s edited version: it’s linked on My work.` : ''}${opts.note ? ` Note: “${opts.note}”` : ''} Add ${w.them} to Timeliner, then mark ${w.them} delivered.`,
+          link: '/my-work',
+        }, me.id);
+      }
     } else if (action === 'request_revisions') {
-      await notify(t, writers, { type: 'revision_request', title: `Revisions requested · ${b.title}`, body: `${scriptsWord}: ${opts.note}${attached ? ' (their changes are attached)' : ''}`, link: '/my-work' }, me.id);
+      for (const uid of writers) {
+        const w = theirs(uid);
+        await notify(t, [uid], { type: 'revision_request', title: `Sent back · ${b.client_name} · ${b.title}`, body: `${me.name} sent your ${w.word} back: “${opts.note}”${attached ? ' Their changes are attached.' : ''}`, link: '/my-work' }, me.id);
+      }
     } else if (action === 'deliver') {
       const mgrs = await managerIds(t);
       await notify(t, mgrs, {
         type: 'delivery', title: `Delivered to Timeliner · ${b.client_name}`,
-        body: `${me.name} confirmed script${rows.length > 1 ? 's' : ''} ${nums} of ${b.title}${onBehalf || ' (writer-confirmed)'}.`, link,
+        body: `${me.name} confirmed script${rows.length > 1 ? 's' : ''} ${nums} of ${b.title} in Timeliner${onBehalf}.`, link,
       }, me.id);
-      const told = others.filter((id) => !mgrs.includes(id));
-      if (told.length) {
-        await notify(t, told, { type: 'delivery', title: `Delivered to Timeliner · ${b.title}`, body: `${me.name} marked your script${rows.length > 1 ? 's' : ''} ${nums} delivered.`, link }, me.id);
+      for (const uid of others.filter((id) => !mgrs.includes(id))) {
+        const w = theirs(uid);
+        await notify(t, [uid], { type: 'delivery', title: `Delivered · ${b.client_name} · ${b.title}`, body: `${me.name} marked your ${w.word} delivered to Timeliner for you. Nothing left to do for ${w.them}.`, link: '/my-work' }, me.id);
       }
     } else if (action === 'undo_delivery') {
-      await notify(t, writers, { type: 'delivery', title: `Delivery undone · ${b.title}`, body: `${me.name} moved script${rows.length > 1 ? 's' : ''} ${nums} back to approved.`, link }, me.id);
+      for (const uid of writers) {
+        const w = theirs(uid);
+        await notify(t, [uid], { type: 'delivery', title: `Delivery undone · ${b.client_name} · ${b.title}`, body: `${me.name} moved your ${w.word} back to approved.${opts.note ? ` “${opts.note}”` : ''}`, link: '/my-work' }, me.id);
+      }
     }
     await recordMoments(t, me, batchId, action, rows, b, { note: opts.note, attached });
+    // tie what this decision told the writers to the decision, so undoing it can take them back
+    // (everything inserted in this transaction has the transaction's timestamp)
+    if (reviewId && writers.length) {
+      await t.query(`update notifications set review_id = $1 where review_id is null and user_id = any($2::bigint[]) and created_at = now() and type in ('approval', 'revision_request')`, [reviewId, writers]);
+      await t.query(`update moments set review_id = $1 where review_id is null and user_id = any($2::bigint[]) and created_at = now() and batch_id = $3`, [reviewId, writers, batchId]);
+    }
     await t.query(`update batches set updated_at = now() where id = $1`, [batchId]);
     return { changed: idList, deliveryId, reviewId };
   });

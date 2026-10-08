@@ -234,7 +234,7 @@ describe('progress, review and Timeliner delivery', () => {
     expect(b.deliveries[0]).toMatchObject({ confirmedByName: 'Sarah Chen', scriptNumbers: [1, 2, 3, 4, 5], timelinerUrl: 'https://timeliner.io/x', verification: 'writer_confirmed' });
     expect(new Date(b.deliveries[0].confirmedAt).getTime()).toBeGreaterThan(0);
     const notes = (await manager.get('/api/notifications')).body.notifications;
-    expect(notes.some((n: any) => n.type === 'delivery' && /writer-confirmed/.test(n.body))).toBe(true);
+    expect(notes.some((n: any) => n.type === 'delivery' && /Sarah Chen confirmed scripts .* in Timeliner\./.test(n.body))).toBe(true);
   });
 
   it('cannot deliver scripts that are not approved', async () => {
@@ -303,19 +303,19 @@ describe('moving a shoot', () => {
     expect(created.status).toBe(200);
     const id = created.body.batchId as number;
     const shootId = created.body.shootId as number;
-    expect(created.body.batch.title).toBe('Shoot · Nov 10–11, 2026');
+    expect(created.body.batch.title).toBe('Acme Outdoor Co. · Nov 10–11, 2026'); // named after the client when the shoot has no name
     const pv = (await manager.post(`/api/shoots/${shootId}/reschedule-preview`, { startDate: '2026-11-17', endDate: '2026-11-18' })).body;
     expect(pv).toMatchObject({ days: 7, manualCount: 1 });
     expect(pv.plannedStarts).toEqual([expect.objectContaining({ batchId: id, from: '2026-11-01', to: '2026-11-08' })]);
-    expect(pv.renames).toEqual([{ batchId: id, from: 'Shoot · Nov 10–11, 2026', to: 'Shoot · Nov 17–18, 2026' }]);
+    expect(pv.renames).toEqual([{ batchId: id, from: 'Acme Outdoor Co. · Nov 10–11, 2026', to: 'Acme Outdoor Co. · Nov 17–18, 2026' }]);
     expect(pv.changes.find((c: any) => c.field === 'finalDue')).toMatchObject({ kept: true, to: '2026-11-06' });
     const withManual = (await manager.post(`/api/shoots/${shootId}/reschedule-preview`, { startDate: '2026-11-17', endDate: '2026-11-18', shiftManual: true })).body;
     expect(withManual.changes.find((c: any) => c.field === 'finalDue')).toMatchObject({ kept: false, mode: 'manual', to: '2026-11-13' });
 
     expect((await manager.post(`/api/shoots/${shootId}/reschedule`, { startDate: '2026-11-17', endDate: '2026-11-18', shiftManual: true })).status).toBe(200);
     const b = (await manager.get(`/api/batches/${id}`)).body as BatchDetail;
-    expect(b).toMatchObject({ title: 'Shoot · Nov 17–18, 2026', plannedStart: '2026-11-08', draftDue: '2026-11-12', finalDue: '2026-11-13', finalDueMode: 'manual', needsDateReview: false });
-    expect(b.activity[0].summary).toMatch(/Writing start Nov 1 → Nov 8.*Renamed to “Shoot · Nov 17–18, 2026”/);
+    expect(b).toMatchObject({ title: 'Acme Outdoor Co. · Nov 17–18, 2026', plannedStart: '2026-11-08', draftDue: '2026-11-12', finalDue: '2026-11-13', finalDueMode: 'manual', needsDateReview: false });
+    expect(b.activity[0].summary).toMatch(/Writing start Nov 1 → Nov 8.*Renamed to “Acme Outdoor Co. · Nov 17–18, 2026”/);
   });
 });
 
@@ -431,15 +431,53 @@ describe('persistence', () => {
 });
 
 describe('team: roles, temporary passwords, removal', () => {
-  it('the first account is the owner, and owners and managers have the same permissions', async () => {
+  it('the first account is the Admin; managers run the team but can’t take over the Admin role', async () => {
     const team = (await manager.get('/api/users')).body.users;
     expect(team.find((u: any) => u.id === ids.josh).role).toBe('owner');
     const add = await manager.post('/api/users', { name: 'Mia Park', email: 'mia@scale.test', role: 'manager', password: 'manager-temp-1' });
     expect(add.status).toBe(200);
     const mia = as(await login('mia@scale.test', 'manager-temp-1'));
-    // a manager can do owner things, including managing the team and settings
+    const miaId = add.body.users.find((u: any) => u.email === 'mia@scale.test').id;
+    // a manager manages the team and settings…
     expect((await mia.patch('/api/settings', { reminderLeadDays: 3 })).status).toBe(200);
-    expect((await mia.post('/api/users', { name: 'Owner Two', email: 'o2@scale.test', role: 'owner', password: 'owner-two-temp' })).status).toBe(200);
+    expect((await mia.post('/api/users', { name: 'Writer Two', email: 'w2@scale.test', role: 'writer', password: 'writer-two-temp' })).status).toBe(200);
+    // …but can't make an Admin, promote themselves, or change the Admin's account
+    expect((await mia.post('/api/users', { name: 'Owner Two', email: 'o2@scale.test', role: 'owner', password: 'owner-two-temp' })).status).toBe(403);
+    expect((await mia.patch(`/api/users/${miaId}`, { role: 'owner' })).status).toBe(403);
+    expect((await mia.patch(`/api/users/${ids.josh}`, { role: 'writer' })).status).toBe(403);
+    expect((await mia.patch(`/api/users/${ids.josh}`, { password: 'taken-over-pass' })).status).toBe(403);
+    expect((await mia.post(`/api/users/${ids.josh}/remove`, {})).status).toBe(403);
+    expect((await mia.get('/api/users')).body.users.find((u: any) => u.id === ids.josh).tempPassword).toBeNull();
+    // the Admin can make another Admin, and the log says what changed
+    const o2 = await manager.post('/api/users', { name: 'Owner Two', email: 'o2@scale.test', role: 'owner', password: 'owner-two-temp' });
+    expect(o2.status).toBe(200);
+    expect((await manager.patch(`/api/users/${miaId}`, { role: 'writer' })).status).toBe(200);
+    const log = (await db.query<{ summary: string }>(`select summary from activity where action = 'user.updated' order by id desc limit 1`))[0];
+    expect(log.summary).toBe('Mia Park: role Manager → Writer');
+    await manager.patch(`/api/users/${miaId}`, { role: 'manager' });
+  });
+
+  it('deactivating someone can hand their unfinished scripts to someone else, and flags any left behind', async () => {
+    const add = await manager.post('/api/users', { name: 'Dee Active', email: 'dee@scale.test', role: 'writer', password: 'dee-temp-pass1' });
+    const deeId = add.body.users.find((u: any) => u.email === 'dee@scale.test').id;
+    const b1 = await manager.post('/api/batches', { clientId: acmeId, title: 'Dee hand-over', targetCount: 2, split: [{ writerId: deeId, count: 2 }] });
+    const r = await manager.patch(`/api/users/${deeId}`, { active: false, reassignTo: ids.marcus });
+    expect(r.status).toBe(200);
+    expect(r.body.moved).toBe(2);
+    const d1 = (await manager.get(`/api/batches/${b1.body.batchId}`)).body as BatchDetail;
+    expect(d1.writers.map((w) => w.name)).toEqual(['Marcus Webb']);
+    // no one chosen: they're unassigned, which Needs attention shows
+    await manager.patch(`/api/users/${deeId}`, { active: true });
+    const b2 = await manager.post('/api/batches', { clientId: acmeId, title: 'Dee left behind', targetCount: 1, split: [{ writerId: deeId, count: 1 }] });
+    await manager.patch(`/api/users/${deeId}`, { active: false });
+    let item = (await manager.get('/api/dashboard')).body.attention.find((a: any) => a.batch.id === b2.body.batchId);
+    expect(item.issues.map((i: any) => i.text)).toContain('1 script unassigned');
+    // scripts still held by someone who can't sign in (older data) are flagged by name
+    await manager.patch(`/api/users/${deeId}`, { active: true });
+    const b3 = await manager.post('/api/batches', { clientId: acmeId, title: 'Dee legacy', targetCount: 1, split: [{ writerId: deeId, count: 1 }] });
+    await db.query(`update users set active = false where id = $1`, [deeId]);
+    item = (await manager.get('/api/dashboard')).body.attention.find((a: any) => a.batch.id === b3.body.batchId);
+    expect(item.issues.map((i: any) => i.text)).toContain('1 script still with Dee Active, who’s deactivated · reassign them');
   });
 
   it('keeps the temporary password readable for managers until the person sets their own', async () => {
@@ -1003,25 +1041,20 @@ describe('view as and recording mode', () => {
 });
 
 describe('script bank', () => {
-  it('lists one entry per document (newest version), not one per script, and searches inside it', async () => {
+  it('lists one entry per document, each script under the newest document it was sent in', async () => {
     const all = (await sarah.get('/api/script-bank?limit=200')).body;
-    // one entry per newest submission that still covers scripts
-    const newest = await db.query<{ id: number; version: number; n: number }>(
-      `select s.id, s.version, count(ss.script_id)::int as n from submissions s join submission_scripts ss on ss.submission_id = s.id
-        join scripts sc on sc.id = ss.script_id and sc.removed_at is null
-        where not exists (select 1 from submissions later where later.previous_id = s.id) group by s.id, s.version`,
+    // every script sits under the newest document that includes it
+    const current = await db.query<{ submission_id: number; n: number }>(
+      `select latest as submission_id, count(*)::int as n from (
+         select sc.id, (select s.id from submission_scripts ss2 join submissions s on s.id = ss2.submission_id
+                         where ss2.script_id = sc.id order by s.created_at desc, s.id desc limit 1) as latest
+           from scripts sc where sc.removed_at is null) x
+        where latest is not null group by latest`,
     );
     const fromSubs = all.deliverables.filter((d: any) => d.key.startsWith('s'));
-    expect(fromSubs.length).toBe(newest.length);
-    expect(newest.length).toBeGreaterThan(0);
-    for (const n of newest) {
-      const d = fromSubs.find((x: any) => x.key === `s${n.id}`);
-      expect(d.scripts.length).toBe(n.n);
-      expect(d.version).toBe(n.version);
-    }
-    // an older version of a revised document isn't listed on its own
-    const older = await db.one<{ id: number }>(`select previous_id as id from submissions where previous_id is not null limit 1`);
-    if (older) expect(all.deliverables.some((d: any) => d.key === `s${older.id}`)).toBe(false);
+    expect(fromSubs.length).toBe(current.length);
+    expect(current.length).toBeGreaterThan(0);
+    for (const c of current) expect(fromSubs.find((x: any) => x.key === `s${c.submission_id}`).scripts.length).toBe(c.n);
     expect(all.scriptCount).toBe(all.deliverables.reduce((n: number, d: any) => n + d.scripts.length, 0));
 
     // "#N" finds the document the script is in
@@ -1037,10 +1070,48 @@ describe('script bank', () => {
     const hers = (await manager.get(`/api/script-bank?writerId=${ids.sarah}&limit=200`)).body;
     expect(hers.deliverables.every((d: any) => d.writerId === ids.sarah)).toBe(true);
     const done = (await manager.get('/api/script-bank?status=finished&limit=200')).body;
-    expect(done.deliverables.every((d: any) => d.scripts.every((s: any) => s.status === 'approved' || s.status === 'delivered'))).toBe(true);
+    expect(done.deliverables.every((d: any) => d.past || d.scripts.some((s: any) => s.status === 'approved' || s.status === 'delivered'))).toBe(true);
     const byName = (await manager.get(`/api/script-bank?q=${encodeURIComponent(d0.clientName.toLowerCase())}`)).body;
     expect(byName.deliverables.some((d: any) => d.key === d0.key)).toBe(true);
     expect((await call('GET', '/api/script-bank')).status).toBe(401);
+  });
+
+  it('keeps finished scripts findable after a partial resend, lists scripts with no document, and puts the edited version first', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Bank keeps everything', targetCount: 4, split: [{ writerId: ids.sarah, count: 4 }] });
+    const id = b.body.batchId;
+    const sc = (await manager.get(`/api/batches/${id}`)).body.scripts as { id: number; number: number }[];
+    const [s1, s2, s3, s4] = sc.map((x) => x.id);
+    const v1 = await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: [s1, s2, s3], url: 'https://docs.google.com/document/d/bank-v1' });
+    expect(v1.status).toBe(200);
+    // approve 1–2 with an edited version, send 3 back, and the writer resends only 3
+    expect((await manager.post(`/api/batches/${id}/review`, { action: 'approve', scriptIds: [s1, s2], submissionId: v1.body.submissionId, url: 'https://docs.google.com/document/d/bank-edit', note: 'Tightened the hooks' })).status).toBe(200);
+    await manager.post(`/api/batches/${id}/review`, { action: 'revisions', scriptIds: [s3], submissionId: v1.body.submissionId, note: 'Rework the ending' });
+    expect((await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: [s3], url: 'https://docs.google.com/document/d/bank-v2' })).status).toBe(200);
+    // script 4 is marked ready without any document, then approved
+    await manager.post(`/api/batches/${id}/scripts/action`, { action: 'submit', scriptIds: [s4], timelinerUrl: null, note: null });
+    await manager.post(`/api/batches/${id}/scripts/action`, { action: 'approve', scriptIds: [s4], timelinerUrl: null, note: null });
+
+    const list = (await manager.get(`/api/script-bank?clientId=${acmeId}&limit=200`)).body.deliverables.filter((d: any) => d.batchId === id);
+    const byKind = (k: string) => list.filter((d: any) => d.kind === k);
+    const first = list.find((d: any) => d.href === 'https://docs.google.com/document/d/bank-v1');
+    expect(first.scripts.map((x: any) => x.number)).toEqual([1, 2]); // still here after the resend of 3
+    expect(first.edited).toMatchObject({ href: 'https://docs.google.com/document/d/bank-edit', by: 'Josh Rath', note: 'Tightened the hooks', ranges: '1–2' });
+    expect(list.find((d: any) => d.href === 'https://docs.google.com/document/d/bank-v2').scripts.map((x: any) => x.number)).toEqual([3]);
+    expect(byKind('none')).toHaveLength(1);
+    expect(byKind('none')[0]).toMatchObject({ ranges: '4', href: null, finished: 1 });
+    // "#1" still finds script 1
+    const hit = (await manager.get(`/api/script-bank?q=%231&clientId=${acmeId}&limit=200`)).body.deliverables;
+    expect(hit.some((d: any) => d.key === first.key)).toBe(true);
+
+    // an editor sees finished scripts even when others in the same document aren't
+    const ed = await manager.post('/api/users', { name: 'Bank Editor', email: 'bank-editor@scale.test', role: 'editor', password: 'bank-editor-pass' });
+    expect(ed.status).toBe(200);
+    const editor = as(await login('bank-editor@scale.test', 'bank-editor-pass'));
+    await manager.post(`/api/batches/${id}/review`, { action: 'revisions', scriptIds: [s1], note: 'One more pass' });
+    const seen = (await editor.get(`/api/script-bank?clientId=${acmeId}&limit=200`)).body.deliverables.filter((d: any) => d.batchId === id);
+    const v1Row = seen.find((d: any) => d.href === 'https://docs.google.com/document/d/bank-v1');
+    expect(v1Row).toMatchObject({ finished: 1 });
+    expect(seen.some((d: any) => d.href === 'https://docs.google.com/document/d/bank-v2')).toBe(false); // nothing finished in it
   });
 });
 
@@ -1162,8 +1233,10 @@ describe('a manager delivering a shared batch', () => {
     expect(after.find((s) => s.assigneeId === ids.marcus)!.status).toBe('not_started');
     expect(r.body.batch.activity[0].summary).toMatch(/on behalf of Sarah Chen/);
     const notes = (await sarah.get('/api/notifications')).body.notifications;
-    expect(notes[0]).toMatchObject({ title: 'Delivered to Timeliner · Shared delivery' });
-    expect(notes[0].body).toMatch(/Josh Rath marked your scripts .* delivered/);
+    expect(notes[0].title).toMatch(/^Delivered · .+ · Shared delivery$/);
+    // only Sarah's own scripts, not Josh's
+    const sarahNums = scripts.filter((s) => s.assigneeId === ids.sarah).map((s) => s.number);
+    expect(notes[0].body).toContain(`Josh Rath marked your scripts ${sarahNums[0]}–${sarahNums[sarahNums.length - 1]} delivered`);
     // a writer confirming delivers only their own
     const b2 = await manager.post('/api/batches', { clientId: acmeId, title: 'Writer delivery', targetCount: 2, finalDue: '2026-10-21', split: [{ writerId: ids.sarah, count: 1 }, { writerId: ids.marcus, count: 1 }] });
     const s2 = (await manager.get(`/api/batches/${b2.body.batchId}`)).body.scripts as { id: number; assigneeId: number }[];
@@ -1638,5 +1711,84 @@ describe('new work on My work', () => {
     // unassigned scripts have no assignment time
     await manager.post(`/api/batches/${id}/scripts/assign`, { scriptIds: [first.id], assigneeId: null });
     expect((await manager.get(`/api/batches/${id}`)).body.scripts.find((s: any) => s.id === first.id).assignedAt).toBeNull();
+  });
+});
+
+describe('round 1 safety checks', () => {
+  it('refuses a decision on a version that has been replaced, and can undo a decision', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Stale and undo', targetCount: 2, split: [{ writerId: ids.sarah, count: 2 }] });
+    const id = b.body.batchId;
+    const sc = (await manager.get(`/api/batches/${id}`)).body.scripts.map((s: any) => s.id);
+    const v1 = await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: sc, url: 'https://docs.google.com/document/d/stale-v1' });
+    const v2 = await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: sc, url: 'https://docs.google.com/document/d/stale-v2' });
+    expect(v2.status).toBe(200);
+    const stale = await manager.post(`/api/batches/${id}/review`, { action: 'approve', scriptIds: sc, submissionId: v1.body.submissionId });
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.message).toMatch(/newer version \(version 2\)/);
+    const ok = await manager.post(`/api/batches/${id}/review`, { action: 'approve', scriptIds: sc, submissionId: v2.body.submissionId });
+    expect(ok.status).toBe(200);
+    expect(ok.body.reviewId).toBeTruthy();
+    const before = (await sarah.get('/api/notifications')).body.notifications.filter((n: any) => n.type === 'approval').length;
+    const undo = await manager.post(`/api/reviews/${ok.body.reviewId}/undo`, {});
+    expect(undo.status).toBe(200);
+    expect(undo.body.batch.scripts.every((s: any) => s.status === 'ready_for_review')).toBe(true);
+    // the approval notice the writer hadn't read is gone, and it can't be undone twice
+    expect((await sarah.get('/api/notifications')).body.notifications.filter((n: any) => n.type === 'approval').length).toBe(before - 1);
+    expect((await manager.post(`/api/reviews/${ok.body.reviewId}/undo`, {})).status).toBe(404);
+    expect((await sarah.post(`/api/reviews/1/undo`, {})).status).toBe(403);
+    // a send-back undone takes its revision requests with it
+    const back = await manager.post(`/api/batches/${id}/review`, { action: 'revisions', scriptIds: [sc[0]], submissionId: v2.body.submissionId, note: 'Shorter' });
+    await manager.post(`/api/reviews/${back.body.reviewId}/undo`, {});
+    const after = (await manager.get(`/api/batches/${id}`)).body.scripts;
+    expect(after.find((s: any) => s.id === sc[0])).toMatchObject({ status: 'ready_for_review', openRevision: null });
+  });
+
+  it('says when a chosen writer has no scripts instead of dropping them', async () => {
+    const r = await manager.post('/api/batches', { clientId: acmeId, title: 'Zero writer', targetCount: 4, split: [{ writerId: ids.sarah, count: 4 }, { writerId: ids.marcus, count: 0 }] });
+    expect(r.status).toBe(400);
+    expect(r.body.error.fields.split).toBe('Marcus Webb has no scripts. Give them some, split evenly, or remove them.');
+  });
+
+  it('won’t confirm deadlines that put drafts after final delivery, and previews rule changes before saving', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Out of order', targetCount: 1, draftDue: '2027-04-10', finalDue: '2027-04-12' });
+    await db.query(`update batches set draft_due = '2027-04-14', needs_date_review = true where id = $1`, [b.body.batchId]);
+    const r = await manager.post(`/api/batches/${b.body.batchId}/dates-reviewed`, {});
+    expect(r.status).toBe(400);
+    expect(r.body.error.message).toMatch(/Drafts are due after final delivery/);
+    const bad = await manager.patch('/api/settings', { draftOffsetDays: 3, finalOffsetDays: 5 });
+    expect(bad.status).toBe(400);
+    expect(bad.body.error.fields.finalOffsetDays).toMatch(/Use 3 or fewer/);
+    const p = await manager.post('/api/settings/recalculate-preview', { draftOffsetDays: 9, finalOffsetDays: 4 });
+    expect(p.status).toBe(200);
+    expect(typeof p.body.batches).toBe('number');
+    expect((await sarah.post('/api/settings/recalculate-preview', {})).status).toBe(403);
+  });
+
+  it('remembers which calendar event a shoot was planned from, can create the client with it, and keeps hidden ones', async () => {
+    ctx.fetchCalendar = async () => ['BEGIN:VCALENDAR', 'VERSION:2.0',
+      'BEGIN:VEVENT', 'UID:planned@g', 'DTSTART;VALUE=DATE:20270310', 'DTEND;VALUE=DATE:20270311', 'SUMMARY:Shoot – Fresh Faces Studio', 'END:VEVENT',
+      'BEGIN:VEVENT', 'UID:other@g', 'DTSTART;VALUE=DATE:20270320', 'DTEND;VALUE=DATE:20270321', 'SUMMARY:Shoot – Not Ours', 'END:VEVENT',
+      'END:VCALENDAR'].join('\r\n');
+    const feed = await manager.post('/api/calendar-feeds', { name: 'Planning calendar', url: 'https://calendar.google.com/calendar/ical/p%40example.com/private-z/basic.ics' });
+    expect(feed.status).toBe(200);
+    let res = (await manager.get('/api/calendar-shoots')).body;
+    const fresh = res.shoots.find((s: any) => s.uid.startsWith('planned@g'));
+    const other = res.shoots.find((s: any) => s.uid.startsWith('other@g')).uid;
+    expect(fresh).toMatchObject({ status: 'no_shoot', client: null });
+    // planned under a brand-new client straight from the event
+    const made = await manager.post('/api/shoots', { newClientName: 'Bright Smiles Dental', calendarUid: fresh.uid, startDate: '2027-03-10', endDate: null, batch: { targetCount: 3, split: [{ writerId: ids.sarah, count: 3 }] } });
+    expect(made.status).toBe(200);
+    expect((await manager.get(`/api/clients/${made.body.clientId}`)).body.name).toBe('Bright Smiles Dental');
+    expect(made.body.batch.title).toBe('Bright Smiles Dental · Mar 10, 2027');
+    res = (await manager.get('/api/calendar-shoots')).body;
+    expect(res.shoots.some((s: any) => s.uid === fresh.uid)).toBe(false); // planned, even though the title names no client
+    // hiding one keeps it in the hidden list, and it can come back
+    await manager.post('/api/calendar-shoots/dismiss', { uid: other });
+    res = (await manager.get('/api/calendar-shoots')).body;
+    expect(res.shoots.some((s: any) => s.uid === other)).toBe(false);
+    expect(res.hidden.map((s: any) => s.uid)).toContain(other);
+    await manager.post('/api/calendar-shoots/dismiss', { uid: other, undo: true });
+    expect((await manager.get('/api/calendar-shoots')).body.shoots.some((s: any) => s.uid === other)).toBe(true);
+    await manager.del(`/api/calendar-feeds/${feed.body.feed.id}`);
   });
 });

@@ -508,4 +508,14 @@ alter table calendar_feeds add constraint calendar_feeds_visibility_check check 
 alter table scripts add column assigned_at timestamptz;
 update scripts set assigned_at = created_at where assignee_id is not null;
 `,
+  // 23 · a shoot planned from a synced-calendar event remembers which one, so it's never offered again
+  `
+alter table shoots add column calendar_uid text;
+create index shoots_calendar_uid_idx on shoots (calendar_uid);
+`,
+  // 24 · the decision a notification or celebration came from, so undoing the decision takes it back
+  `
+alter table notifications add column review_id bigint;
+alter table moments add column review_id bigint;
+`,
 ];
