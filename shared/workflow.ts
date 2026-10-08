@@ -323,24 +323,3 @@ export function evenSplit(total: number, writers: number): number[] {
   const extra = total % writers;
   return Array.from({ length: writers }, (_, i) => base + (i < extra ? 1 : 0));
 }
-
-/** "3. Title" lines; lines without a number fill the next script in order. */
-export function parseTitleLines(text: string, numbers: number[]): { number: number; title: string | null }[] {
-  const out = new Map<number, string | null>();
-  let next = 0;
-  for (const raw of text.split('\n')) {
-    const line = raw.trim();
-    if (!line) continue;
-    const m = /^(\d+)\s*[.):\-–]\s*(.*)$/.exec(line);
-    if (m) {
-      // a numbered line for a script outside this set is ignored, not shifted onto another script
-      const n = Number(m[1]);
-      if (!numbers.includes(n)) continue;
-      out.set(n, m[2].trim() || null);
-      next = numbers.indexOf(n) + 1;
-    } else if (next < numbers.length) {
-      out.set(numbers[next++], line);
-    }
-  }
-  return [...out.entries()].map(([number, title]) => ({ number, title }));
-}

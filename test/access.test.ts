@@ -58,7 +58,6 @@ const ACCESS: Record<string, Access> = {
   'PATCH /api/scripts/:id': 'user',
   'POST /api/batches/:id/written': 'user',
   'POST /api/batches/:id/submissions': 'user',
-  'POST /api/batches/:id/titles': 'user',
   'GET /api/shoots': 'user',
   'GET /api/clients': 'user',
   'GET /api/clients/:id': 'user',

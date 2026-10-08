@@ -6,8 +6,8 @@
 // finished without any document get a row of their own, so nothing finished
 // is ever missing. The version a manager approved with edits is attached to
 // the scripts it covers. Search matches the client, batch, writer, file
-// name and note, plus the titles and numbers of the scripts inside, so "#12"
-// finds the document script 12 is in.
+// name and note, and the numbers of the scripts inside, so "#12" finds the
+// document script 12 is in.
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -24,10 +24,10 @@ interface SubRow {
   created_at: string; writer_id: number | null; writer_name: string | null;
   batch_id: number; batch_title: string; batch_archived: boolean; client_id: number; client_name: string; shoot_id: number | null; shoot_date: string | null;
 }
-interface ScriptRow { submission_id: number; id: number; number: number; title: string | null; status: ScriptStatus; timeliner_url: string | null }
+interface ScriptRow { submission_id: number; id: number; number: number; status: ScriptStatus; timeliner_url: string | null }
 interface EditRow { script_ids: number[]; url: string | null; file_id: number | null; file_name: string | null; note: string | null; reviewer: string; created_at: string }
 interface BareRow {
-  id: number; number: number; title: string | null; status: ScriptStatus; timeliner_url: string | null; updated_at: string;
+  id: number; number: number; status: ScriptStatus; timeliner_url: string | null; updated_at: string;
   writer_id: number | null; writer_name: string | null;
   batch_id: number; batch_title: string; batch_archived: boolean; client_id: number; client_name: string; shoot_id: number | null; shoot_date: string | null;
 }
@@ -76,7 +76,7 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
     );
     const subIds = subs.map((x) => x.id);
     const scripts = await db.query<ScriptRow>(
-      `select ss.submission_id, sc.id, sc.number, sc.title, sc.status, sc.timeliner_url
+      `select ss.submission_id, sc.id, sc.number, sc.status, sc.timeliner_url
          from submission_scripts ss join scripts sc on sc.id = ss.script_id
         where sc.removed_at is null and ss.submission_id = any($1::bigint[]) order by sc.number`, [subIds],
     );
@@ -109,7 +109,7 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
     for (const s of subs) {
       const list = scriptsBySub.get(s.id) ?? [];
       if (!list.length || (q.writerId && s.writer_id !== q.writerId)) continue;
-      const mine = list.map((x) => ({ id: x.id, number: x.number, title: x.title, status: x.status }));
+      const mine = list.map((x) => ({ id: x.id, number: x.number, status: x.status }));
       out.push({
         key: `s${s.id}`,
         kind: s.file_id ? 'file' : 'link',
@@ -131,7 +131,7 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
     // Scripts sent, approved or delivered without any document (marked ready by hand): one row per
     // writer in a batch, so finished work never goes missing from the bank.
     const bare = await db.query<BareRow>(
-      `select sc.id, sc.number, sc.title, sc.status, sc.timeliner_url, sc.updated_at, sc.assignee_id as writer_id, u.name as writer_name,
+      `select sc.id, sc.number, sc.status, sc.timeliner_url, sc.updated_at, sc.assignee_id as writer_id, u.name as writer_name,
               b.id as batch_id, b.title as batch_title, b.archived_at is not null as batch_archived, c.id as client_id, c.name as client_name,
               b.shoot_id, sh.start_date::text as shoot_date
          from scripts sc join batches b on b.id = sc.batch_id join clients c on c.id = b.client_id
@@ -145,7 +145,7 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
     for (const r of bare) { const k = `${r.batch_id}|${r.writer_id ?? 0}`; const l = bareGroups.get(k) ?? []; l.push(r); bareGroups.set(k, l); }
     for (const list of bareGroups.values()) {
       const r = list[0];
-      const mine = list.map((x) => ({ id: x.id, number: x.number, title: x.title, status: x.status }));
+      const mine = list.map((x) => ({ id: x.id, number: x.number, status: x.status }));
       out.push({
         key: `n${r.id}`, kind: 'none', href: null, name: null, note: null, version: 1,
         sentAt: list.reduce((m, x) => (x.updated_at > m ? x.updated_at : m), r.updated_at),
@@ -165,7 +165,7 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
     // Scripts tracked with their own document link and never sent through the
     // app: one deliverable per distinct link in a batch.
     const loose = await db.query<LooseRow>(
-      `select sc.id, sc.number, sc.title, sc.status, sc.doc_url, sc.timeliner_url, sc.updated_at, sc.assignee_id as writer_id, u.name as writer_name,
+      `select sc.id, sc.number, sc.status, sc.doc_url, sc.timeliner_url, sc.updated_at, sc.assignee_id as writer_id, u.name as writer_name,
               b.id as batch_id, b.title as batch_title, b.archived_at is not null as batch_archived, c.id as client_id, c.name as client_name,
               b.shoot_id, sh.start_date::text as shoot_date
          from scripts sc join batches b on b.id = sc.batch_id join clients c on c.id = b.client_id
@@ -184,7 +184,7 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
         writerId: r.writer_id, writerName: list.every((x) => x.writer_id === r.writer_id) ? r.writer_name : 'Several writers',
         batchId: r.batch_id, batchTitle: r.batch_title, batchArchived: r.batch_archived,
         clientId: r.client_id, clientName: r.client_name, shootId: r.shoot_id, shootDate: r.shoot_date,
-        scripts: list.map((x) => ({ id: x.id, number: x.number, title: x.title, status: x.status })),
+        scripts: list.map((x) => ({ id: x.id, number: x.number, status: x.status })),
         ranges: compressRanges(list.map((x) => x.number)),
         state: documentState(list.map((x) => x.status)),
         finished: list.filter((x) => FINISHED.has(x.status)).length,
@@ -231,7 +231,7 @@ export function registerScriptBankRoutes(app: FastifyInstance, ctx: Ctx) {
       if (!needle) return true;
       if (num != null) return d.scripts.some((s) => s.number === num);
       // past documents: their title, file name and note are searched below
-      const hay = [d.clientName, d.batchTitle, d.writerName ?? '', d.name ?? '', d.note ?? '', ...d.scripts.map((s) => s.title ?? '')].join('\n').toLowerCase();
+      const hay = [d.clientName, d.batchTitle, d.writerName ?? '', d.name ?? '', d.note ?? ''].join('\n').toLowerCase();
       return hay.includes(needle);
     };
     const found = out.filter(match);

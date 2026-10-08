@@ -6,10 +6,10 @@
 import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { AnimatePresence, m } from 'framer-motion';
-import { Check, ChevronDown, ExternalLink, FileText, Link2, PenLine, RotateCcw, Send, Upload } from 'lucide-react';
+import { Check, ExternalLink, FileText, Link2, PenLine, RotateCcw, Send, Upload } from 'lucide-react';
 import { api, ApiError, queryClient, useSave } from '../api';
 import type { Attachment, ReviewGroup, ReviewRecord, Script, Submission } from '../../../shared/types';
-import { compressRanges, parseRanges, parseTitleLines, scriptsLabel } from '../../../shared/workflow';
+import { compressRanges, parseRanges, scriptsLabel } from '../../../shared/workflow';
 import { fmtBytes, fmtStamp, plural } from '../../../shared/format';
 import { useBoot, useDisplayTz } from './Shell';
 import { burst, centerOf, confetti, plane } from '../fx';
@@ -119,36 +119,6 @@ function postWith<T>(path: string, fields: Record<string, unknown>, att: AttachV
   return api<T>(path, { body: { ...fields, url: att.mode === 'link' ? att.url.trim() : null } });
 }
 
-// ── titles ───────────────────────────────────────────────────────────────
-
-export const titleLines = (scripts: Pick<Script, 'number' | 'title'>[]) => scripts.map((s) => `${s.number}. ${s.title ?? ''}`).join('\n');
-
-function TitlesField({ id, scripts, value, onChange }: { id: string; scripts: Script[]; value: string; onChange: (v: string) => void }) {
-  return (
-    <Field label="Titles" optional htmlFor={id} help="One per line. Keep the number, or paste a plain list and it’s applied in order.">
-      <textarea className="textarea tnum" id={id} rows={Math.min(12, Math.max(4, scripts.length + 1))} value={value} onChange={(e) => onChange(e.target.value)} spellCheck />
-    </Field>
-  );
-}
-
-export function TitlesDialog({ batchId, scripts, onClose }: { batchId: number; scripts: Script[]; onClose: () => void }) {
-  const toast = useToast();
-  const [text, setText] = useState(titleLines(scripts));
-  // only titles changed here are sent, so this can't put back a title someone else changed meanwhile
-  const [base] = useState(scripts);
-  const id = useFieldId('titles');
-  const changed = () => parseTitleLines(text, base.map((s) => s.number)).filter((t) => (base.find((s) => s.number === t.number)?.title ?? null) !== (t.title ?? null));
-  const save = useSave(() => api<{ changed: number }>(`/api/batches/${batchId}/titles`, { body: { titles: changed() } }), {
-    onSuccess: (out) => { toast(out.changed ? `Updated ${plural(out.changed, 'title')}` : 'No titles changed'); onClose(); },
-  });
-  return (
-    <Dialog open onClose={onClose} title="Script titles" sub={scriptsLabel(scripts.map((s) => s.number))} size="narrow"
-      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={save.isPending} onClick={() => save.mutate(undefined)}>Save titles</Button></div>}>
-      <div className="form"><FormError error={save.error} /><TitlesField id={id} scripts={scripts} value={text} onChange={setText} /></div>
-    </Dialog>
-  );
-}
-
 // ── sending scripts for review ───────────────────────────────────────────
 
 /**
@@ -172,10 +142,8 @@ export function SendDialog({ batchId, batchTitle, candidates, preselect, resend,
   const [range, setRange] = useState(compressRanges(pre.map((s) => s.number)));
   const [att, setAtt] = useState<AttachValue>(emptyAttach('file'));
   const [note, setNote] = useState('');
-  const [showTitles, setShowTitles] = useState(false);
-  const [titles, setTitles] = useState(titleLines(pre));
   const [errs, setErrs] = useState<Record<string, string>>({});
-  const ids = { r: useFieldId('rng'), n: useFieldId('note'), t: useFieldId('ttl') };
+  const ids = { r: useFieldId('rng'), n: useFieldId('note') };
   const chosen = useMemo(() => {
     if (scope === 'all') return pre;
     const nums = parseRanges(range, Math.max(0, ...candidates.map((s) => s.number)));
@@ -184,7 +152,6 @@ export function SendDialog({ batchId, batchTitle, candidates, preselect, resend,
   const from = useRef<{ x: number; y: number } | null>(null);
   const save = useSave(() => postWith(`/api/batches/${batchId}/submissions`, {
     scriptIds: chosen.map((s) => s.id), note: note.trim() || null,
-    titles: showTitles ? parseTitleLines(titles, chosen.map((s) => s.number)) : [],
   }, att), { onSuccess: () => { plane(from.current ?? centerOf(null)); toast(`Sent ${plural(chosen.length, 'script')} for review as one document`); onClose(); } });
   const submit = () => {
     from.current = centerOf(document.activeElement);
@@ -221,10 +188,6 @@ export function SendDialog({ batchId, batchTitle, candidates, preselect, resend,
             </Field>
           )}
         </div>
-        <details className="details" open={showTitles} onToggle={(e) => { const open = (e.target as HTMLDetailsElement).open; setShowTitles(open); if (open) setTitles(titleLines(chosen)); }}>
-          <summary><ChevronDown aria-hidden />Add titles (optional)</summary>
-          <div className="inner"><TitlesField id={ids.t} scripts={chosen} value={titles} onChange={setTitles} /></div>
-        </details>
         <Field label="Note for the reviewer" optional htmlFor={ids.n}><textarea className="textarea" id={ids.n} rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Anything they should know" /></Field>
       </div>
     </Dialog>
@@ -299,19 +262,6 @@ export function DecisionDialog({ batchId, scripts, submissionId, mode, groupKey,
 
 // ── cards ────────────────────────────────────────────────────────────────
 
-function TitlesPreview({ scripts }: { scripts: Script[] }) {
-  const titled = scripts.filter((s) => s.title);
-  const [all, setAll] = useState(false);
-  if (!titled.length) return null;
-  const shown = all ? titled : titled.slice(0, 4);
-  return (
-    <div className="titles-preview">
-      {shown.map((s) => <span key={s.id}><b className="tnum">{s.number}.</b> {s.title}</span>)}
-      {titled.length > 4 && <button type="button" className="linkbtn" onClick={() => setAll(!all)}>{all ? 'Show fewer' : `+${titled.length - 4} more`}</button>}
-    </div>
-  );
-}
-
 /** One document (or one writer's scripts) in review. */
 export function WaitingCard({ group, showBatch = true, onReplace }: { group: ReviewGroup; showBatch?: boolean; onReplace?: () => void }) {
   const displayTz = useDisplayTz();
@@ -360,7 +310,6 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
       {sub && hasDoc(sub) ? <DocRow a={sub} tone="lavender" /> : <p className="muted" style={{ fontSize: 13 }}>No document attached — these were marked ready without one. {showBatch ? 'Check each script’s own link on the batch page.' : 'Check each script’s own link in the checklist below.'}</p>}
       {sub && sub.scriptNumbers.length > n && <p className="muted" style={{ fontSize: 12.5 }}>This document covers scripts {compressRanges(sub.scriptNumbers)}. Only {nums} still need{n === 1 ? 's' : ''} a decision.</p>}
       {sub?.note && <blockquote className="rc-note">“{sub.note}” <span>— {sub.submittedByName}</span></blockquote>}
-      <TitlesPreview scripts={group.scripts} />
       {sub?.afterFeedback && (
         <div className="rc-feedback">
           <span className="lbl"><RotateCcw aria-hidden />Revised after this feedback</span>
@@ -383,7 +332,7 @@ export function WaitingCard({ group, showBatch = true, onReplace }: { group: Rev
               {group.scripts.map((s) => (
                 <label key={s.id} className="check rc-script">
                   <input type="checkbox" checked={picked.has(s.id)} onChange={() => { const x = new Set(picked); x.has(s.id) ? x.delete(s.id) : x.add(s.id); setPicked(x); }} />
-                  <span className="tnum"><b>{s.number}</b></span><span className="ellipsis">{s.title ?? `Script ${s.number}`}</span>
+                  <span className="ellipsis">Script <b className="tnum">{s.number}</b></span>
                   {s.docUrl && <a className="link" href={s.docUrl} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}>own link</a>}
                 </label>
               ))}

@@ -11,7 +11,7 @@ const inList = (ids: number[], params: unknown[]) =>
 // ── scripts ──────────────────────────────────────────────────────────────
 
 interface ScriptRow {
-  id: number; batch_id: number; number: number; title: string | null; assignee_id: number | null; assignee_name: string | null;
+  id: number; batch_id: number; number: number; assignee_id: number | null; assignee_name: string | null;
   status: ScriptStatus; doc_url: string | null; timeliner_url: string | null; notes: string | null; version: number;
   submitted_at: string | null; approved_at: string | null; approved_by_name: string | null; delivered_at: string | null;
   delivered_by_name: string | null; delivery_id: number | null; assigned_at: string | null; updated_at: string;
@@ -27,7 +27,7 @@ export async function loadScripts(db: Db, where: { batchId?: number; batchIds?: 
   if (where.status) { params.push(where.status); cond.push(`s.status = $${params.length}`); }
   if (where.assigneeId) { params.push(where.assigneeId); cond.push(`s.assignee_id = $${params.length}`); }
   const rows = await db.query<ScriptRow>(
-    `select s.id, s.batch_id, s.number, s.title, s.assignee_id, u.name as assignee_name, s.status, s.doc_url, s.timeliner_url,
+    `select s.id, s.batch_id, s.number, s.assignee_id, u.name as assignee_name, s.status, s.doc_url, s.timeliner_url,
             s.notes, s.version, s.submitted_at, s.approved_at, ab.name as approved_by_name, s.delivered_at,
             dl.name as delivered_by_name, s.delivery_id, s.assigned_at, s.updated_at
        from scripts s
@@ -41,7 +41,7 @@ export async function loadScripts(db: Db, where: { batchId?: number; batchIds?: 
   const open = await loadRevisions(db, { scriptIds: rows.map((r) => r.id), openOnly: true });
   const openBy = new Map(open.map((r) => [r.scriptId, r]));
   return rows.map((r) => ({
-    id: r.id, batchId: r.batch_id, number: r.number, title: r.title, assigneeId: r.assignee_id, assigneeName: r.assignee_name,
+    id: r.id, batchId: r.batch_id, number: r.number, assigneeId: r.assignee_id, assigneeName: r.assignee_name,
     status: r.status, docUrl: r.doc_url, timelinerUrl: r.timeliner_url, notes: r.notes, version: r.version,
     submittedAt: r.submitted_at, approvedAt: r.approved_at, approvedByName: r.approved_by_name,
     deliveredAt: r.delivered_at, deliveredByName: r.delivered_by_name, deliveryId: r.delivery_id,

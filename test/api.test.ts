@@ -245,7 +245,7 @@ describe('progress, review and Timeliner delivery', () => {
     const s = (await scriptsOf()).find((x) => x.number === 30)!;
     const ok = await marcus.patch(`/api/scripts/${s.id}`, { version: s.version, docUrl: 'https://docs.example/30' });
     expect(ok.status).toBe(200);
-    const stale = await marcus.patch(`/api/scripts/${s.id}`, { version: s.version, title: 'Old view' });
+    const stale = await marcus.patch(`/api/scripts/${s.id}`, { version: s.version, notes: 'Old view' });
     expect(stale.status).toBe(409);
   });
 });
@@ -335,7 +335,7 @@ describe('permissions are enforced on the server', () => {
     const marcusScript = s.find((x) => x.assigneeId === ids.marcus && x.status === 'ready_for_review')!;
     const checks: [string, Res][] = [
       ['approve', await sarah.post(`/api/batches/${batchId}/scripts/action`, { action: 'approve', scriptIds: [marcusScript.id] })],
-      ['edit another writer’s script', await sarah.patch(`/api/scripts/${marcusScript.id}`, { version: marcusScript.version, title: 'x' })],
+      ['edit another writer’s script', await sarah.patch(`/api/scripts/${marcusScript.id}`, { version: marcusScript.version, notes: 'x' })],
       ['submit another writer’s script', await sarah.post(`/api/batches/${batchId}/scripts/action`, { action: 'withdraw', scriptIds: [marcusScript.id] })],
       ['reassign', await sarah.post(`/api/batches/${batchId}/scripts/assign`, { scriptIds: [marcusScript.id], assigneeId: ids.sarah })],
       ['edit batch deadlines', await sarah.patch(`/api/batches/${batchId}`, { draftDue: { mode: 'manual', date: '2026-12-01' } })],
@@ -663,7 +663,10 @@ describe('scripts sent as one document', () => {
     expect(r.status).toBe(200);
     const detail = r.body.batch as BatchDetail;
     expect(detail.progress.inReview).toBe(10);
-    expect(detail.scripts.find((s) => s.number === 1)!.title).toBe('Rain shell hook');
+    // scripts go out as one document per batch, with no titles of their own: a titles field from an older page is ignored
+    expect(detail.scripts.find((s) => s.number === 1)).not.toHaveProperty('title');
+    expect((await db.one<{ n: number }>(`select count(*)::int as n from scripts where batch_id = $1 and title is not null`, [docBatch]))?.n).toBe(0);
+    expect((await marcus.post(`/api/batches/${docBatch}/titles`, { titles: [{ number: 1, title: 'Rain shell hook' }] })).status).toBe(404);
     expect(detail.submissions).toHaveLength(1);
     expect(detail.submissions[0]).toMatchObject({ version: 1, state: 'in_review', fileName: 'ten-scripts.pdf', writerName: 'Marcus Webb', currentNumbers: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] });
     const queue = (await manager.get('/api/review')).body;
@@ -722,10 +725,6 @@ describe('scripts sent as one document', () => {
     expect((await marcus.post(`/api/batches/${b.body.batchId}/submissions`, { scriptIds: sids })).status).toBe(400); // needs a document
     expect((await marcus.post(`/api/batches/${b.body.batchId}/submissions`, { scriptIds: sids, url: 'https://example.com/x' })).status).toBe(200);
     expect((await marcus.post(`/api/batches/${b.body.batchId}/review`, { action: 'approve', scriptIds: sids })).status).toBe(403);
-    expect((await sarah.post(`/api/batches/${b.body.batchId}/titles`, { titles: [{ number: 1, title: 'Hijack' }] })).status).toBe(403);
-    const t = await marcus.post(`/api/batches/${b.body.batchId}/titles`, { titles: [{ number: 1, title: 'Opening' }, { number: 2, title: null }] });
-    expect(t.status).toBe(200);
-    expect(t.body.batch.scripts[0].title).toBe('Opening');
   });
 });
 

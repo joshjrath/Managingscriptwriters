@@ -113,11 +113,10 @@ async function seed(db: Db, now: Date): Promise<boolean> {
     applyScriptAction(ctx, who, batchId, action, sids, { note, timelinerUrl: url });
 
   // writers send their scripts as one document: a PDF, or a Google Doc link
-  const send = (who: Me, batchId: number, sids: number[], doc: { pdf?: string; url?: string }, note: string | null = null, titles: string[] = []) =>
+  const send = (who: Me, batchId: number, sids: number[], doc: { pdf?: string; url?: string }, note: string | null = null, lines: string[] = []) =>
     sendDocument(ctx, who, batchId, {
       scriptIds: sids, url: doc.url ?? null, note,
-      file: doc.pdf ? bufferFile(`${doc.pdf}.pdf`, 'application/pdf', demoPdf(doc.pdf, titles)) : null,
-      titles: titles.map((t, i) => ({ number: i + 1, title: t })),
+      file: doc.pdf ? bufferFile(`${doc.pdf}.pdf`, 'application/pdf', demoPdf(doc.pdf, lines)) : null,
     });
 
   let rows = await scriptIds(a.batchId);
@@ -235,7 +234,7 @@ async function seed(db: Db, now: Date): Promise<boolean> {
   return true;
 }
 
-/** A small, valid one-page PDF listing the script titles, for demo documents. */
+/** A small, valid one-page PDF with a line per script, for demo documents. */
 function demoPdf(title: string, lines: string[]): Buffer {
   const esc = (t: string) => t.replace(/[’‘]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/[^\x20-\x7e]/g, '').replace(/([\\()])/g, '\\$1');
   const body = [`BT /F1 18 Tf 60 780 Td (${esc(title)}) Tj ET`, ...lines.map((l, i) => `BT /F1 12 Tf 60 ${740 - i * 22} Td (${i + 1}. ${esc(l)}) Tj ET`)].join('\n');

@@ -23,7 +23,7 @@ import { WrittenCounter } from '../components/WrittenCounter';
 import { PipLegend, ScriptPips, TodayBump } from '../components/WritingPulse';
 import { TodoDialog, TodoPanel } from '../components/Todos';
 import { WorkCard } from './MyWork';
-import { approvedSources, CardList, DecisionDialog, DocumentHistory, SendDialog, SentBackCard, SourceList, TitlesDialog, useUndoDecision, WaitingCard } from '../components/Review';
+import { approvedSources, CardList, DecisionDialog, DocumentHistory, SendDialog, SentBackCard, SourceList, useUndoDecision, WaitingCard } from '../components/Review';
 
 export function BatchPage() {
   const { id } = useParams();
@@ -282,7 +282,7 @@ function ReadyToDeliver({ b }: { b: BatchDetail }) {
 function DocumentsPanel({ b }: { b: BatchDetail }) {
   const { me } = useBoot();
   const manager = isManager(me.role);
-  const [dialog, setDialog] = useState<null | { kind: 'send'; preselect: number[]; resend?: boolean; replace?: boolean; feedback?: { note: string | null; byName: string } | null } | { kind: 'titles' }>(null);
+  const [dialog, setDialog] = useState<null | { kind: 'send'; preselect: number[]; resend?: boolean; replace?: boolean; feedback?: { note: string | null; byName: string } | null }>(null);
   useEffect(() => { if (window.location.hash === '#documents') document.getElementById('documents')?.scrollIntoView(); }, []);
   const mine = b.scripts.filter((s) => s.assigneeId === me.id);
   // writers send their own scripts; managers can send any on a writer's behalf
@@ -290,14 +290,12 @@ function DocumentsPanel({ b }: { b: BatchDetail }) {
   const notSent = (manager && !mine.length ? b.scripts : mine).filter((s) => s.status === 'not_started' || s.status === 'in_progress');
   const waiting = b.groups.filter((g) => g.kind === 'waiting');
   const sentBack = b.groups.filter((g) => g.kind === 'sent_back');
-  const titleable = manager ? b.scripts : mine;
   // replacing or resending a document is the writer's job; managers can do it from the writer's My work
   const canResend = (writerId: number | null) => writerId === me.id;
   return (
     <Panel title="Drafts & documents" id="documents" count={waiting.length + sentBack.length || undefined}
       sub={waiting.length || sentBack.length ? `${waiting.length} in review · ${sentBack.length} sent back` : 'one PDF or link per writer, reviewed together'}
       tools={<>
-        {titleable.length > 0 && <Button variant="sm ghost" icon={<Pencil aria-hidden />} onClick={() => setDialog({ kind: 'titles' })}>Titles</Button>}
         {sendable.length > 0 && <Button variant="sm primary" icon={<Upload aria-hidden />} onClick={() => setDialog({ kind: 'send', preselect: (notSent.length ? notSent : sendable).map((s) => s.id) })}>Send scripts for review</Button>}
       </>}>
       <div className="stack s4">
@@ -319,7 +317,6 @@ function DocumentsPanel({ b }: { b: BatchDetail }) {
       </div>
       {dialog?.kind === 'send' && <SendDialog batchId={b.id} batchTitle={b.title} candidates={dialog.replace ? b.scripts.filter((s) => dialog.preselect.includes(s.id)) : sendable} preselect={dialog.preselect}
         resend={dialog.resend} replace={dialog.replace} feedback={dialog.feedback} onClose={() => setDialog(null)} />}
-      {dialog?.kind === 'titles' && <TitlesDialog batchId={b.id} scripts={titleable} onClose={() => setDialog(null)} />}
     </Panel>
   );
 }
@@ -410,7 +407,7 @@ function ScriptChecklist({ b }: { b: BatchDetail }) {
           {counts.map(([st, n]) => <span key={st} className="row-flex" style={{ gap: 6 }}><StatusChip status={st} /><b className="num">{n}</b></span>)}
           {b.progress.unassigned > 0 && <Chip color="pink" icon={<UserPlus aria-hidden />}>{b.progress.unassigned} unassigned</Chip>}
         </div>
-        <p className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>Open the checklist to assign scripts, edit one script’s title or links, or update a few at a time.</p>
+        <p className="muted" style={{ fontSize: 12.5, marginTop: 10 }}>Open the checklist to assign scripts, edit one script’s links or notes, or update a few at a time.</p>
       </Panel>
     );
   }
@@ -463,15 +460,14 @@ function ScriptChecklist({ b }: { b: BatchDetail }) {
               <thead>
                 <tr>
                   <th className="chk"><input type="checkbox" aria-label="Select all shown" checked={allVisibleSelected} onChange={() => setSel(allVisibleSelected ? new Set() : new Set(visible.map((s) => s.id)))} /></th>
-                  <th>#</th><th>Title</th><th>Writer</th><th>Status</th><th>Links</th><th>Notes</th>
+                  <th>#</th><th>Writer</th><th>Status</th><th>Links</th><th>Notes</th>
                 </tr>
               </thead>
               <tbody>
                 {visible.map((s) => (
                   <tr key={s.id} className={`clickable${sel.has(s.id) ? ' selected' : ''}`} onClick={(e) => { if ((e.target as HTMLElement).closest('input,a,button')) return; setOpen(s); }}>
                     <td className="chk"><input type="checkbox" aria-label={`Select script ${s.number}`} checked={sel.has(s.id)} onClick={(e) => toggle(s, e.shiftKey)} onChange={() => {}} /></td>
-                    <td className="num strong">{s.number}</td>
-                    <td style={{ maxWidth: 260 }}><button type="button" className="bare-btn" onClick={() => setOpen(s)} aria-label={`Open script ${s.number}${s.title ? `: ${s.title}` : ''}`}><span className={s.title ? 'strong' : 'muted'}>{s.title ?? `Script ${s.number}`}</span></button></td>
+                    <td className="num strong"><button type="button" className="bare-btn" onClick={() => setOpen(s)} aria-label={`Open script ${s.number}`}>{s.number}</button></td>
                     <td className="nowrap">{s.assigneeName ?? <Chip color="pink" icon={<UserPlus aria-hidden />}>Unassigned</Chip>}</td>
                     <td><StatusChip status={s.status} />{s.status === 'delivered' && s.deliveredByName && <div className="sub" style={{ marginTop: 4 }}>by {s.deliveredByName}</div>}</td>
                     <td><ScriptLinks s={s} /></td>
@@ -486,7 +482,7 @@ function ScriptChecklist({ b }: { b: BatchDetail }) {
               <div key={s.id} className={`scard${sel.has(s.id) ? ' selected' : ''}`}>
                 <input type="checkbox" style={{ width: 22, height: 22, accentColor: 'var(--salmon)' }} aria-label={`Select script ${s.number}`} checked={sel.has(s.id)} onClick={(e) => toggle(s, e.shiftKey)} onChange={() => {}} />
                 <button style={{ border: 0, background: 'none', textAlign: 'left', padding: 0, cursor: 'pointer', minWidth: 0 }} onClick={() => setOpen(s)}>
-                  <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}><span className="n">{s.number}</span><span className="ellipsis" style={{ fontWeight: 600 }}>{s.title ?? `Script ${s.number}`}</span></div>
+                  <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}><span className="n">{s.number}</span><span className="ellipsis" style={{ fontWeight: 600 }}>Script {s.number}</span></div>
                   <div className="row-flex s2" style={{ marginTop: 6 }}><StatusChip status={s.status} /><span className="muted" style={{ fontSize: 12 }}>{s.assigneeName ?? 'Unassigned'}</span></div>
                   {s.openRevision && <div style={{ color: '#F7B8D8', fontSize: 12.5, marginTop: 6 }}>{s.openRevision.note}</div>}
                 </button>
@@ -739,23 +735,22 @@ function ScriptDialog({ s, b, onClose }: { s: Script; b: BatchDetail; onClose: (
   const { me } = useBoot();
   const toast = useToast();
   const canEdit = isManager(me.role) || s.assigneeId === me.id;
-  const [title, setTitle] = useState(s.title ?? '');
   const [docUrl, setDocUrl] = useState(s.docUrl ?? '');
   const [tl, setTl] = useState(s.timelinerUrl ?? '');
   const [notes, setNotes] = useState(s.notes ?? '');
   // The version the fields came from: the server refuses the save if the script has changed since.
   // After such a refusal the script refreshes, and the fields show what it is now.
   const [base, setBase] = useState(s);
-  const save = useSave(() => api(`/api/scripts/${s.id}`, { method: 'PATCH', body: { version: base.version, title, docUrl, timelinerUrl: tl, notes } }), { onSuccess: () => { toast(`Script ${s.number} saved`); onClose(); } });
+  const save = useSave(() => api(`/api/scripts/${s.id}`, { method: 'PATCH', body: { version: base.version, docUrl, timelinerUrl: tl, notes } }), { onSuccess: () => { toast(`Script ${s.number} saved`); onClose(); } });
   // Each refusal refreshes the fields once; later updates to the script leave what's being typed alone.
   const applied = useRef<ApiError | null>(null);
   useEffect(() => {
     if (save.error?.code !== 'stale' || applied.current === save.error || s.version === base.version) return;
     applied.current = save.error;
-    setBase(s); setTitle(s.title ?? ''); setDocUrl(s.docUrl ?? ''); setTl(s.timelinerUrl ?? ''); setNotes(s.notes ?? '');
+    setBase(s); setDocUrl(s.docUrl ?? ''); setTl(s.timelinerUrl ?? ''); setNotes(s.notes ?? '');
   }, [s, base, save.error]);
   const history = b.revisions.filter((r) => r.scriptId === s.id);
-  const ids = { t: useFieldId('t'), d: useFieldId('d'), l: useFieldId('l'), n: useFieldId('n') };
+  const ids = { d: useFieldId('d'), l: useFieldId('l'), n: useFieldId('n') };
   const f = save.error?.fields ?? {};
   return (
     <Dialog open onClose={onClose} kind="drawer" title={`Script ${s.number}`} sub={<span className="row-flex s2"><StatusChip status={s.status} /><span>{s.assigneeName ?? 'Unassigned'}</span></span>}
@@ -763,7 +758,6 @@ function ScriptDialog({ s, b, onClose }: { s: Script; b: BatchDetail; onClose: (
       <div className="form">
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
         {s.openRevision && <div className="banner pink"><RotateCcw aria-hidden /><div className="txt"><b>Sent back</b><span>{s.openRevision.note} — {s.openRevision.requestedByName}, {fmtStamp(s.openRevision.requestedAt, displayTz)}</span></div></div>}
-        <Field label="Title" optional htmlFor={ids.t}><input className="input" id={ids.t} value={title} onChange={(e) => setTitle(e.target.value)} disabled={!canEdit} placeholder={`Script ${s.number}`} /></Field>
         <Field label="Writing document link" optional htmlFor={ids.d} error={f.docUrl}><input className="input" type="url" placeholder="https://docs.google.com/…" value={docUrl} onChange={(e) => setDocUrl(e.target.value)} disabled={!canEdit} {...inputProps(ids.d, f.docUrl)} /></Field>
         <Field label="Timeliner link" optional htmlFor={ids.l} error={f.timelinerUrl}><input className="input" type="url" placeholder="https://" value={tl} onChange={(e) => setTl(e.target.value)} disabled={!canEdit} {...inputProps(ids.l, f.timelinerUrl)} /></Field>
         <Field label="Notes" optional htmlFor={ids.n}><textarea className="textarea" id={ids.n} value={notes} onChange={(e) => setNotes(e.target.value)} disabled={!canEdit} /></Field>
@@ -1062,7 +1056,7 @@ function TargetDialog({ b, onClose }: { b: BatchDetail; onClose: () => void }) {
                 <div className="rows" style={{ maxHeight: 300, overflowY: 'auto' }}>
                   {p.removable.map((s) => (
                     <label key={s.id} className="item" style={{ cursor: 'pointer' }}>
-                      <span className="row-flex s2" style={{ flexWrap: 'nowrap' }}><input type="checkbox" checked={remove.includes(s.id)} onChange={(e) => setRemove(e.target.checked ? [...remove, s.id] : remove.filter((x) => x !== s.id))} style={{ width: 18, height: 18, accentColor: 'var(--salmon)' }} /><b>Script {s.number}</b><span className="muted">{s.title ?? ''}</span></span>
+                      <span className="row-flex s2" style={{ flexWrap: 'nowrap' }}><input type="checkbox" checked={remove.includes(s.id)} onChange={(e) => setRemove(e.target.checked ? [...remove, s.id] : remove.filter((x) => x !== s.id))} style={{ width: 18, height: 18, accentColor: 'var(--salmon)' }} /><b>Script {s.number}</b></span>
                       <span className="side"><StatusChip status={s.status} /><span className="muted" style={{ fontSize: 12 }}>{s.assigneeName ?? 'Unassigned'}</span></span>
                     </label>
                   ))}

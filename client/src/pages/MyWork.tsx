@@ -7,7 +7,7 @@
 import { useId, useRef, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, ArrowRight, Camera, Check, CheckCheck, ChevronDown, ClipboardCheck, Clock, FileText, PenLine, PlayCircle, Plus, RotateCcw, Send, Sparkles, Type } from 'lucide-react';
+import { AlertTriangle, ArrowRight, Camera, Check, CheckCheck, ChevronDown, ClipboardCheck, Clock, FileText, PenLine, PlayCircle, Plus, RotateCcw, Send, Sparkles } from 'lucide-react';
 import { api, useSave } from '../api';
 import type { MyWork, Script } from '../../../shared/types';
 import { compressRanges, isManager, isNewWork, newlyAdded, scriptsLabel as scriptsWord, type Milestone } from '../../../shared/workflow';
@@ -18,7 +18,7 @@ import { TodoPanel } from '../components/Todos';
 import { WrittenCounter } from '../components/WrittenCounter';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import { Button, Chip, Empty, ErrorState, ExtLink, LiquidBar, Loading, Panel, Term, useToast } from '../components/ui';
-import { approvedSources, CardList, SendDialog, SentBackCard, SourceList, TitlesDialog, WaitingCard } from '../components/Review';
+import { approvedSources, CardList, SendDialog, SentBackCard, SourceList, WaitingCard } from '../components/Review';
 import { DeliverDialog } from './BatchDetail';
 import { confetti } from '../fx';
 
@@ -223,7 +223,7 @@ export function WorkCard({ e, writerId, fresh, collapsible, standalone }: { e: E
   const [open, setOpen] = useState(!collapsible);
   const [showReview, setShowReview] = useState(false);
   const bodyId = useId();
-  const [dialog, setDialog] = useState<null | { kind: 'send'; preselect: number[]; resend?: boolean; replace?: boolean; feedback?: { note: string | null; byName: string } | null } | { kind: 'titles' } | { kind: 'deliver' }>(null);
+  const [dialog, setDialog] = useState<null | { kind: 'send'; preselect: number[]; resend?: boolean; replace?: boolean; feedback?: { note: string | null; byName: string } | null } | { kind: 'deliver' }>(null);
   const deliver = useSave((v: { url: string | null; note: string | null; ids: number[] }) => api<{ changed: number[] }>(`/api/batches/${b.id}/scripts/action`, {
     body: { action: 'deliver', scriptIds: v.ids, timelinerUrl: v.url, note: v.note, versions: Object.fromEntries(st.approved.filter((s) => v.ids.includes(s.id)).map((s) => [s.id, s.version])) },
   }), { onSuccess: (o, v) => {
@@ -331,14 +331,12 @@ export function WorkCard({ e, writerId, fresh, collapsible, standalone }: { e: E
           <Materials e={e} />
 
           <footer className="wc-foot">
-            <Button variant="sm" icon={<Type aria-hidden />} onClick={() => setDialog({ kind: 'titles' })}>{e.mine.some((s) => s.title) ? 'Edit titles' : 'Add titles'}</Button>
             <Link to={`/batches/${b.id}`} className="btn sm ghost">Open batch <ArrowRight aria-hidden /></Link>
           </footer>
         </div>
       )}
       {dialog?.kind === 'send' && <SendDialog batchId={b.id} batchTitle={b.title} candidates={dialog.replace ? e.mine.filter((s) => dialog.preselect.includes(s.id)) : sendable} preselect={dialog.preselect}
         resend={dialog.resend} replace={dialog.replace} feedback={dialog.feedback} onClose={() => setDialog(null)} />}
-      {dialog?.kind === 'titles' && <TitlesDialog batchId={b.id} scripts={e.mine} onClose={() => setDialog(null)} />}
       {dialog?.kind === 'deliver' && <DeliverDialog scripts={st.approved} submissions={e.submissions} pick={!isManager(me.role)}
         also={extraApproved > 0 ? { count: extraApproved, detail: `${plural(extraApproved, 'more approved script')} from others on this batch` } : null}
         forName={writerId !== me.id ? e.mine[0]?.assigneeName ?? null : null}

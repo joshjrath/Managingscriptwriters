@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  allowedFrom, canSendDocument, checkAction, compressRanges, deriveStage, documentState, evenSplit, isAdmin, isManager, isNewWork, milestone, newlyAdded, parseRanges, parseTitleLines, progressLabel, splitAssignments, summarize,
+  allowedFrom, canSendDocument, checkAction, compressRanges, deriveStage, documentState, evenSplit, isAdmin, isManager, isNewWork, milestone, newlyAdded, parseRanges, progressLabel, splitAssignments, summarize,
   type ScriptStatus,
 } from '../shared/workflow';
 import { makeClock } from '../shared/dates';
@@ -153,25 +153,6 @@ describe('quick entry parser', () => {
   it('reports missing information', () => {
     const r = parseEntry('shoot next week', ctx);
     expect(r.questions).toEqual(expect.arrayContaining(['When does the shoot start?', 'How many scripts are needed?']));
-  });
-});
-
-describe('script titles', () => {
-  it('reads numbered lines and fills plain lines in order', () => {
-    expect(parseTitleLines('1. Layer up\n2) Travel kit\n\n3 - Rain-proof', [1, 2, 3])).toEqual([
-      { number: 1, title: 'Layer up' }, { number: 2, title: 'Travel kit' }, { number: 3, title: 'Rain-proof' },
-    ]);
-    expect(parseTitleLines('Why we built it\nThe long way round', [29, 30, 31])).toEqual([
-      { number: 29, title: 'Why we built it' }, { number: 30, title: 'The long way round' },
-    ]);
-  });
-  it('continues after a numbered line and clears empty numbered lines', () => {
-    expect(parseTitleLines('5. Five\nSix\n7.', [5, 6, 7])).toEqual([
-      { number: 5, title: 'Five' }, { number: 6, title: 'Six' }, { number: 7, title: null },
-    ]);
-  });
-  it('ignores numbered lines for scripts outside the set', () => {
-    expect(parseTitleLines('13. Not mine\n29. Mine', [29])).toEqual([{ number: 29, title: 'Mine' }]);
   });
 });
 

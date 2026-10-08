@@ -224,7 +224,6 @@ export interface SendInput {
   url: string | null;
   file: UploadedFile | null;
   note: string | null;
-  titles: { number: number; title: string | null }[];
 }
 
 export async function sendDocument(ctx: Ctx, me: Me, batchId: number, input: SendInput): Promise<{ submissionId: number; sent: number[]; replaced: number[] }> {
@@ -239,8 +238,8 @@ export async function sendDocument(ctx: Ctx, me: Me, batchId: number, input: Sen
     const b = await t.one<{ client_id: number; title: string; archived_at: string | null }>(`select client_id, title, archived_at from batches where id = $1 for no key update`, [batchId]);
     if (!b) throw notFound('Batch');
     const p: unknown[] = [batchId];
-    const rows = await t.query<{ id: number; number: number; status: ScriptStatus; assignee_id: number | null; title: string | null }>(
-      `select id, number, status, assignee_id, title from scripts where batch_id = $1 and removed_at is null and id in (${inList(ids, p)}) order by number for update`, p,
+    const rows = await t.query<{ id: number; number: number; status: ScriptStatus; assignee_id: number | null }>(
+      `select id, number, status, assignee_id from scripts where batch_id = $1 and removed_at is null and id in (${inList(ids, p)}) order by number for update`, p,
     );
     if (rows.length !== ids.length) throw conflict('Some of those scripts are no longer in this batch. Refresh and try again.');
     if (!isManager(me.role) && rows.some((r) => r.assignee_id !== me.id)) throw forbidden('You can only send scripts assigned to you');
@@ -260,12 +259,6 @@ export async function sendDocument(ctx: Ctx, me: Me, batchId: number, input: Sen
     const submissionId = sub!.id;
     for (const r of rows) await t.query(`insert into submission_scripts (submission_id, script_id) values ($1, $2)`, [submissionId, r.id]);
 
-    const byNumber = new Map(rows.map((r) => [r.number, r]));
-    for (const tt of input.titles) {
-      const r = byNumber.get(tt.number);
-      if (r && (r.title ?? null) !== (tt.title ?? null)) await t.query(`update scripts set title = $2, version = version + 1, updated_at = now() where id = $1`, [r.id, tt.title]);
-    }
-
     const label = docLabel(input.url, input.file);
     const toSend = rows.filter((r) => r.status !== 'ready_for_review');
     const replaced = rows.filter((r) => r.status === 'ready_for_review');
@@ -282,8 +275,6 @@ export async function sendDocument(ctx: Ctx, me: Me, batchId: number, input: Sen
 
 // ── routes ───────────────────────────────────────────────────────────────
 
-const titlesSchema = z.array(z.object({ number: z.coerce.number().int().positive(), title: z.string().trim().max(300).transform((v) => v || null).nullable() })).max(500).default([]);
-
 export function registerSubmissionRoutes(app: FastifyInstance, ctx: Ctx) {
   const { db } = ctx;
 
@@ -295,9 +286,8 @@ export function registerSubmissionRoutes(app: FastifyInstance, ctx: Ctx) {
       scriptIds: z.array(zs.id).min(1, 'Choose which scripts this document covers').max(500),
       url: zs.url,
       note: zs.text(4000),
-      titles: titlesSchema,
-    }), { scriptIds: jsonField(fields.scriptIds), url: emptyToNull(fields.url), note: emptyToNull(fields.note), titles: jsonField(fields.titles ?? '[]') });
-    const out = await sendDocument(ctx, me, id, { scriptIds: input.scriptIds, url: input.url ?? null, file, note: input.note ?? null, titles: input.titles });
+    }), { scriptIds: jsonField(fields.scriptIds), url: emptyToNull(fields.url), note: emptyToNull(fields.note) });
+    const out = await sendDocument(ctx, me, id, { scriptIds: input.scriptIds, url: input.url ?? null, file, note: input.note ?? null });
     return { ...out, batch: await loadBatchDetail(ctx, id, me) };
   });
 
@@ -376,29 +366,6 @@ export function registerSubmissionRoutes(app: FastifyInstance, ctx: Ctx) {
       return { batchId: r.batch_id, changed: ids };
     });
     return { ...out, batch: await loadBatchDetail(ctx, out.batchId, me) };
-  });
-
-  // titles for many scripts at once
-  app.post('/api/batches/:id/titles', async (req) => {
-    const me = requireUser(req);
-    const { id } = parse(z.object({ id: zs.id }), req.params);
-    const input = parse(z.object({ titles: titlesSchema }), req.body);
-    const changed = await db.tx(async (t) => {
-      const b = await t.one<{ client_id: number }>(`select client_id from batches where id = $1`, [id]);
-      if (!b) throw notFound('Batch');
-      const rows = await t.query<{ id: number; number: number; title: string | null; assignee_id: number | null }>(
-        `select id, number, title, assignee_id from scripts where batch_id = $1 and removed_at is null`, [id],
-      );
-      const byNumber = new Map(rows.map((r) => [r.number, r]));
-      const edits = input.titles.map((x) => ({ ...x, row: byNumber.get(x.number) })).filter((x) => x.row && (x.row.title ?? null) !== (x.title ?? null));
-      if (!isManager(me.role) && edits.some((x) => x.row!.assignee_id !== me.id)) throw forbidden('You can only title scripts assigned to you');
-      for (const e of edits) await t.query(`update scripts set title = $2, version = version + 1, updated_at = now() where id = $1`, [e.row!.id, e.title]);
-      if (edits.length) {
-        await logActivity(t, { actor: me, action: 'scripts.titled', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id, summary: `Updated titles for script${edits.length > 1 ? 's' : ''} ${compressRanges(edits.map((e) => e.number))}` });
-      }
-      return edits.length;
-    });
-    return { changed, batch: await loadBatchDetail(ctx, id, me) };
   });
 }
 

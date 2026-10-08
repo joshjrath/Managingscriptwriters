@@ -634,7 +634,6 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const input = parse(z.object({
       version: z.number().int(),
-      title: zs.text(300),
       docUrl: zs.url,
       timelinerUrl: zs.url,
       notes: zs.text(4000),
@@ -647,7 +646,6 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       if (!isManager(me.role) && s.assignee_id !== me.id) throw forbidden('You can only edit scripts assigned to you');
       if (s.version !== input.version) throw conflict('This script was changed by someone else. Your view has been refreshed — check it and try again.', 'stale');
       const set: Record<string, unknown> = {};
-      if (input.title !== undefined) set.title = input.title;
       if (input.docUrl !== undefined) set.doc_url = input.docUrl;
       if (input.timelinerUrl !== undefined) set.timeliner_url = input.timelinerUrl;
       if (input.notes !== undefined) set.notes = input.notes;

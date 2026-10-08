@@ -86,15 +86,15 @@ export function ScriptBankPage() {
   return (
     <>
       <PageHeader title="Script bank" sub={editor
-        ? 'Every finished script (approved or delivered), for every client, plus past scripts. Search a client, writer, title or script number.'
-        : manager ? 'Every script document your writers have sent, for every client, plus past scripts from before. Search a client, batch, writer, title or script number.'
-          : 'Every script document the team has sent, for every client, plus past scripts. Use it for examples and to find your own. Search a client, batch, writer, title or script number.'}>
+        ? 'Every finished script (approved or delivered), for every client, plus past scripts. Search a client, writer, document name or script number.'
+        : manager ? 'Every script document your writers have sent, for every client, plus past scripts from before. Search a client, batch, writer, document name or script number.'
+          : 'Every script document the team has sent, for every client, plus past scripts. Use it for examples and to find your own. Search a client, batch, writer, document name or script number.'}>
         {manager && <Button icon={<Upload aria-hidden />} onClick={() => setAdding(true)}>Add past scripts</Button>}
       </PageHeader>
       {manager && <PastDialog open={adding} onClose={() => setAdding(false)} />}
       <div className="filters bank-filters" role="search">
         <input ref={search} className="input search" type="search" autoFocus={matchMedia('(pointer: fine)').matches} placeholder="Search, or #12 for script 12…" title="Press / to jump here" value={text}
-          onChange={(e) => setText(e.target.value)} aria-label="Search by client, batch, writer, title or script number" />
+          onChange={(e) => setText(e.target.value)} aria-label="Search by client, batch, writer, document name or script number" />
         <select className="select" value={clientId} onChange={(e) => set('clientId', e.target.value)} aria-label="Client">
           <option value="">All clients</option>
           {clients.map((c) => <option key={c.id} value={c.id}>{c.name}{c.status === 'archived' ? ' (archived)' : ''}</option>)}
@@ -184,7 +184,7 @@ export function DeliverableRow({ d, tz, num, linkBatch = true, finishedView = fa
         )}
         {(hit || (mix && !(finishedView && partly))) && (
           <div className="s">
-            {hit && <b className="bank-hit">Script {hit.number}{hit.title ? ` “${hit.title}”` : ''} is in here{mix ? ' · ' : ''}</b>}
+            {hit && <b className="bank-hit">Script {hit.number} is in here{mix ? ' · ' : ''}</b>}
             {mix}
           </div>
         )}

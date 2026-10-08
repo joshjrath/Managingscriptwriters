@@ -107,7 +107,7 @@ export interface Deliverable {
   clientName: string;
   shootId: number | null;
   shootDate: string | null;
-  scripts: { id: number; number: number; title: string | null; status: ScriptStatus }[];
+  scripts: { id: number; number: number; status: ScriptStatus }[];
   /** how many of its scripts are approved or delivered */
   finished: number;
   /** set for scripts from before the platform, uploaded straight to the Script bank */
@@ -234,7 +234,6 @@ export interface Script {
   id: number;
   batchId: number;
   number: number;
-  title: string | null;
   assigneeId: number | null;
   assigneeName: string | null;
   status: ScriptStatus;
@@ -721,7 +720,7 @@ export interface SearchResults {
   people: { id: number; name: string; role: Role }[];
   shoots: { id: number; title: string; clientId: number; clientName: string; startDate: string; batchId: number | null }[];
   /** "#12" or "script 12": that script number in every active batch */
-  scripts: { batchId: number; batchTitle: string; clientName: string; number: number; title: string | null }[];
+  scripts: { batchId: number; batchTitle: string; clientName: string; number: number }[];
   briefings: { id: number; title: string; clientId: number; clientName: string; callDate: string | null }[];
 }
 

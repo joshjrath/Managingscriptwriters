@@ -20,7 +20,7 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-09-28-potential-clients': ['managers'], '2026-09-28-plan-later': ['managers'], '2026-09-28-admin-name': ['managers'],
   '2026-09-28-calendar-drag': ['managers'], '2026-09-28-team': ['managers'], '2026-09-28-signin-details': ['managers'],
   '2026-10-07-my-work-redesign': ['writers', 'managers'], '2026-09-28-written-counter': ['writers', 'managers'], '2026-10-08-writers-never-miss': ['writers', 'managers'],
-  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-editors-never-get-scripts': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'], '2026-10-08-master-log-everything': ['managers'],
+  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-editors-never-get-scripts': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'], '2026-10-08-master-log-everything': ['managers'], '2026-10-08-no-script-titles': ['managers', 'writers'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -34,6 +34,15 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-08-no-script-titles',
+    date: '2026-10-08',
+    title: 'Scripts no longer have titles',
+    summary: 'Scripts go out as one PDF or Doc link per batch, so the per-script titles are gone.',
+    changes: [
+      { tag: 'improved', text: 'The Titles buttons on the batch page and My work, “Add titles” when sending scripts, the titles under review cards and the Title box on each script are gone. Scripts are just numbered (Script 12), and the PDF or Doc link you send is the deliverable. Search and the Script bank find scripts by number (#12), client, batch, writer or document name.' },
+    ],
+  },
   {
     id: '2026-10-08-master-log-everything',
     date: '2026-10-08',

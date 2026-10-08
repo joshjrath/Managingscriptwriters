@@ -39,12 +39,11 @@ A batch reads e.g. **"20 / 45 drafts ready · 44%"**, with approved and delivere
 
 ### Sending and reviewing scripts as one document
 
-Writers don't send scripts one at a time. On **My work** (or the batch page) they press **Send for review**, upload one PDF or paste one Google Doc / Drive link, and pick which of their scripts it covers — all of them by default, or a range like 1–10. They can add titles for all of them at once (one per line) and a note.
+Writers don't send scripts one at a time. On **My work** (or the batch page) they press **Send for review**, upload one PDF or paste one Google Doc / Drive link, and pick which of their scripts it covers — all of them by default, or a range like 1–10 — and add a note. Scripts have no titles of their own: the document is the deliverable.
 
-- The **Review queue** shows **one card per document**: "Sarah Chen sent 12 scripts (1–12) as one document", with the file or link, the note and the titles. Managers choose **Approve all**, **Send back for revisions** (a note, plus an optional marked-up PDF or edited Google Doc), or **Approve with my edits** (attach the final version). "Review scripts one by one" is there for the rare partial decision.
+- The **Review queue** shows **one card per document**: "Sarah Chen sent 12 scripts (1–12) as one document", with the file or link and the note. Managers choose **Approve all**, **Send back for revisions** (a note, plus an optional marked-up PDF or edited Google Doc), or **Approve with my edits** (attach the final version). "Review scripts one by one" is there for the rare partial decision.
 - Sending back is one request with one note, so the writer sees one card — "12 scripts sent back to you" — with the reviewer's changes and a **Send revised version** button. The new document becomes version 2; every version and decision stays on the batch page under **Drafts & documents**.
 - My work shows exactly where each script is: not sent (split into not started / writing), in review, sent back, approved and delivered. The old +/− counter is gone.
-- Script titles can also be set from **Titles** on the batch page or My work: paste a list and it's applied in order, or keep the "3. Title" numbers.
 - Everything is still recorded per script, so progress, deadlines and delivery rules work exactly as before.
 
 ### My work
@@ -57,7 +56,7 @@ Writers work in one master document, so each batch on **My work**, and their sha
 
 ### Script bank
 
-**Script bank** in the sidebar lists every deliverable ever sent, across all clients and batches (archived ones included), for everyone on the team. A deliverable is one document, the PDF or link a writer sent covering their scripts for a batch ("scripts 1–45"), so it's one entry however many scripts are in it; only its newest version is listed (older ones are on the batch page). **Open** opens the document, **Approved edit** the version a manager approved with edits, and Timeliner once delivered. Search by client, batch, writer, file name, note or a script's title, or type `#12` to find the document script 12 is in; filter by client, writer and status. Press `/` to jump to the search box.
+**Script bank** in the sidebar lists every deliverable ever sent, across all clients and batches (archived ones included), for everyone on the team. A deliverable is one document, the PDF or link a writer sent covering their scripts for a batch ("scripts 1–45"), so it's one entry however many scripts are in it; only its newest version is listed (older ones are on the batch page). **Open** opens the document, **Approved edit** the version a manager approved with edits, and Timeliner once delivered. Search by client, batch, writer, file name or note, or type `#12` to find the document script 12 is in; filter by client, writer and status. Press `/` to jump to the search box.
 
 **Past scripts:** admins and managers can add documents from before the platform with **Add past scripts**: upload one or more PDFs (or paste a link), choose the client, and optionally who wrote them (a team member's name links it to them), when, and how many scripts each holds. They show as "Past script" entries, are searched with everything else, and can be removed.
 

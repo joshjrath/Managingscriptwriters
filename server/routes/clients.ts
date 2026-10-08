@@ -416,8 +416,8 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
            from shoots s join clients c on c.id = s.client_id
           where s.cancelled_at is null and (lower(coalesce(s.title, '')) like $1 or lower(c.name) like $1) and s.start_date >= current_date - 60
           order by s.start_date limit 6`, [like]),
-      num ? db.query<{ batch_id: number; batch_title: string; client_name: string; number: number; title: string | null }>(
-        `select s.batch_id, b.title as batch_title, c.name as client_name, s.number, s.title from scripts s join batches b on b.id = s.batch_id join clients c on c.id = b.client_id
+      num ? db.query<{ batch_id: number; batch_title: string; client_name: string; number: number }>(
+        `select s.batch_id, b.title as batch_title, c.name as client_name, s.number from scripts s join batches b on b.id = s.batch_id join clients c on c.id = b.client_id
           where s.removed_at is null and b.archived_at is null and s.number = $1 ${me.role === 'writer' ? 'and s.assignee_id = $2' : ''} order by b.final_due nulls last limit 8`,
         me.role === 'writer' ? [Number(num), me.id] : [Number(num)]) : Promise.resolve([]),
       db.query<{ id: number; title: string; client_id: number; client_name: string; call_date: string | null }>(
@@ -428,7 +428,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     const extra = {
       people: isEditor(me.role) ? [] : people,
       shoots: shoots.map((s) => ({ id: s.id, title: s.title ?? 'Shoot', clientId: s.client_id, clientName: s.client_name, startDate: s.start_date, batchId: isEditor(me.role) ? null : s.batch_id })),
-      scripts: isEditor(me.role) ? [] : scripts.map((s) => ({ batchId: s.batch_id, batchTitle: s.batch_title, clientName: s.client_name, number: s.number, title: s.title })),
+      scripts: isEditor(me.role) ? [] : scripts.map((s) => ({ batchId: s.batch_id, batchTitle: s.batch_title, clientName: s.client_name, number: s.number })),
       briefings: briefings.map((b) => ({ id: b.id, title: b.title, clientId: b.client_id, clientName: b.client_name, callDate: b.call_date })),
     };
     const [clients, batches, resources] = await Promise.all([

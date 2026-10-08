@@ -366,7 +366,7 @@ function SearchBox() {
   // every result in the order it's shown, so Enter opens the first one you can see
   const hits: Hit[] = !r ? [] : [
     ...r.clients.map((c) => ({ key: `c${c.id}`, group: 'Clients', t: c.name, s: c.status === 'archived' ? 'Archived' : c.status === 'prospect' ? 'Potential client' : undefined, to: `/clients/${c.id}` })),
-    ...r.scripts.map((x) => ({ key: `s${x.batchId}-${x.number}`, group: 'Scripts', t: `#${x.number}${x.title ? ` · ${x.title}` : ''}`, s: `${x.clientName} · ${x.batchTitle}`, to: `/batches/${x.batchId}#scripts` })),
+    ...r.scripts.map((x) => ({ key: `s${x.batchId}-${x.number}`, group: 'Scripts', t: `Script #${x.number}`, s: `${x.clientName} · ${x.batchTitle}`, to: `/batches/${x.batchId}#scripts` })),
     ...r.batches.map((b) => ({ key: `b${b.id}`, group: 'Batches', t: b.title, s: b.clientName, to: `/batches/${b.id}` })),
     ...r.shoots.map((x) => ({ key: `h${x.id}`, group: 'Shoots', t: `${x.title} · ${fmtDate(x.startDate)}`, s: x.clientName, to: x.batchId ? `/batches/${x.batchId}` : editor ? `/scripts?clientId=${x.clientId}` : `/calendar?m=${x.startDate.slice(0, 7)}` })),
     ...(manager ? r.people : []).map((p) => ({ key: `p${p.id}`, group: 'People', t: p.name, s: ROLE_LABEL[p.role], to: p.role === 'editor' ? '/writers' : `/my-work?userId=${p.id}` })),
