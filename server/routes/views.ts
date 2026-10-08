@@ -197,14 +197,26 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     const weekStart = startOfWeek(clock.today);
     let deliveredWeek = 0;
     const deliveredBatches = new Set<number>();
+    // scripts delivered each day of this week, Monday first, for the card's little bars
+    const deliveredByDay = [0, 0, 0, 0, 0, 0, 0];
     for (const b of summaries) {
       for (const s of scripts.get(b.id) ?? []) {
-        if (s.status === 'delivered' && s.delivered_at && nowInZone(clock.timezone, new Date(s.delivered_at)).date >= weekStart) {
+        const day = s.status === 'delivered' && s.delivered_at ? nowInZone(clock.timezone, new Date(s.delivered_at)).date : null;
+        const i = day ? diffDays(day, weekStart) : -1;
+        if (i >= 0 && i < 7) {
           deliveredWeek++;
           deliveredBatches.add(b.id);
+          deliveredByDay[i]++;
         }
       }
     }
+    // how long the review queue has been waiting, and when someone last reviewed
+    const ids = summaries.map((b) => b.id);
+    const oldest = ids.length ? await db.one<{ at: string | null }>(
+      `select min(submitted_at) as at from scripts where status = 'ready_for_review' and removed_at is null and batch_id = any($1)${mine ? ' and assignee_id = $2' : ''}`,
+      mine ? [ids, me.id] : [ids]) : null;
+    const lastReview = ids.length ? await db.one<{ at: string | null }>(`select max(created_at) as at from reviews where batch_id = any($1)`, [ids]) : null;
+    const iso = (x: string | Date | null | undefined) => (x ? new Date(x).toISOString() : null);
     const shoots = (await loadShoots(db, { from: clock.today, to: addDays(clock.today, 45), activeClientsOnly: true }))
       .filter((s) => !s.cancelledAt && (!mine || summaries.some((b) => b.shootId === s.id)))
       .slice(0, 6)
@@ -226,6 +238,9 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
         awaitingReviewBatches: summaries.filter((b) => b.progress.inReview > 0).length,
         deliveredThisWeekScripts: deliveredWeek,
         deliveredThisWeekBatches: deliveredBatches.size,
+        deliveredByDay,
+        oldestInReviewAt: iso(oldest?.at),
+        lastReviewAt: iso(lastReview?.at),
       },
       due: { draft: dueByDay('draft', summaries, scripts, clock), final: dueByDay('final', summaries, scripts, clock) },
       attention: attentionFor(summaries, mine ? new Map() : await inactivePeople(db)),

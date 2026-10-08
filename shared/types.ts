@@ -475,6 +475,11 @@ export interface Dashboard {
     awaitingReviewBatches: number;
     deliveredThisWeekScripts: number;
     deliveredThisWeekBatches: number;
+    /** scripts delivered on each day of this week, Monday first */
+    deliveredByDay: number[];
+    /** when the longest-waiting script in review was sent */
+    oldestInReviewAt: string | null;
+    lastReviewAt: string | null;
   };
   due: { draft: DueDay[]; final: DueDay[] };
   attention: AttentionItem[];

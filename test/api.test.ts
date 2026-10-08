@@ -1909,3 +1909,14 @@ describe('round 3: manager and editor screens', () => {
   });
 });
 
+
+describe('overview cards', () => {
+  it('gives the cards their footers: deliveries per day this week and the review queue’s age', async () => {
+    const c = (await manager.get('/api/dashboard')).body.cards;
+    expect(c.deliveredByDay).toHaveLength(7);
+    expect(c.deliveredByDay.reduce((n: number, x: number) => n + x, 0)).toBe(c.deliveredThisWeekScripts);
+    if (c.awaitingReviewScripts > 0) expect(typeof c.oldestInReviewAt).toBe('string');
+    else expect(c.oldestInReviewAt).toBeNull();
+    expect(c.lastReviewAt === null || typeof c.lastReviewAt === 'string').toBe(true);
+  });
+});

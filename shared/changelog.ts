@@ -20,7 +20,7 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-09-28-potential-clients': ['managers'], '2026-09-28-plan-later': ['managers'], '2026-09-28-admin-name': ['managers'],
   '2026-09-28-calendar-drag': ['managers'], '2026-09-28-team': ['managers'], '2026-09-28-signin-details': ['managers'],
   '2026-10-07-my-work-redesign': ['writers', 'managers'], '2026-09-28-written-counter': ['writers', 'managers'], '2026-10-08-writers-never-miss': ['writers', 'managers'],
-  '2026-10-08-manager-editor-screens': ['managers', 'editors'],
+  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -34,6 +34,18 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-08-overview-cards',
+    date: '2026-10-08',
+    title: 'New summary cards on the Overview',
+    summary: 'The four cards at the top of the Overview have a new look, and each one now says what’s behind its number.',
+    changes: [
+      { tag: 'improved', text: 'Overdue batches always has its warm gradient. When something is late it says “Needs you” and names the batches and how many days late; when nothing is, it says “All clear” and shows the next deadline.' },
+      { tag: 'improved', text: 'Batches due today lights up only when something is due, with the cutoff time and a bar for how much of today’s work is done. Otherwise it shows what’s due next.' },
+      { tag: 'improved', text: 'Scripts in review shows how long the oldest one has been waiting and which batches they’re in. Delivered this week has a small bar for each day, Monday to Sunday.' },
+      { tag: 'fixed', text: 'Under More on the Overview, Active batches and Writing progress sit side by side again instead of being pushed apart.' },
+    ],
+  },
   {
     id: '2026-10-08-phones-admin-polish',
     date: '2026-10-08',
