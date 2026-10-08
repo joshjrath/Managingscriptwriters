@@ -9,19 +9,19 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlarmClock, AlertTriangle, Check, ChevronDown, CircleCheck, Clapperboard, Eye, ExternalLink, FileText, History, Layers, Moon,
-  Pause, RefreshCw, RotateCcw, Scissors, Sunrise, UserPlus, Users,
+  Pause, RefreshCw, RotateCcw, Scissors, Sunrise, TimerOff, UserPlus, Users,
 } from 'lucide-react';
 import { api, useSave } from '../api';
-import type { EditingBoard, EditingSync, EditingVideo, EditorRow } from '../../../shared/types';
-import { isOnPlate } from '../../../shared/workflow';
-import { fmtAgo, fmtStamp, plural } from '../../../shared/format';
+import type { EditingBoard, EditingSync, EditingVideo, EditorRow, ScriptDoc } from '../../../shared/types';
+import { compressTitles, FOCUS_STALE_HOURS, isFocusStale, isOnPlate } from '../../../shared/workflow';
+import { dueWords, fmtAgo, fmtHour, fmtStamp, fmtWorked, plural } from '../../../shared/format';
 import { nowInZone, type ISODate } from '../../../shared/dates';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import { Avatar, Button, Chip, Empty, ErrorState, FormError, Loading, Panel, useToast } from '../components/ui';
 import { KpiCard } from '../components/StatCards';
 import {
-  byTitle, clockTime, docKind, docName, dueWords, fmtHour, midSentence, fmtWhen, fmtWorked, focusSeconds, hoursText, localTime, ScriptLink,
-  shootLabel, squareLabel, syncWords, tileTime, TIMELINER_APP, titleRange, useNow,
+  byTitle, clockTime, docKind, docName, midSentence, fmtWhen, focusSeconds, hoursText, localTime, ScriptLink,
+  shootLabel, squareLabel, syncWords, tileTime, TIMELINER_APP, useNow,
 } from '../components/EditingBits';
 
 const first = (name: string) => name.split(/\s+/)[0] ?? name;
@@ -31,10 +31,54 @@ const plateTotal = (e: EditorRow) => e.plate.toEdit + e.plate.revisions + e.plat
 /** still to edit or fix, and not marked done here */
 const onPlate = (v: EditingVideo) => isOnPlate(v.state) && !v.doneAt;
 
-/** What a card shows under Right now. */
-type NowKind = 'live' | 'paused' | 'next' | 'off' | 'clear';
-const nowKind = (e: EditorRow): NowKind =>
-  e.focus ? (e.focus.state === 'on' ? 'live' : 'paused') : e.nextUp ? 'next' : e.offHours ? 'off' : 'clear';
+/** What a card shows under Right now: one of these for each editor. `stale` is an I'm on this left running (isFocusStale). */
+type NowKind = 'live' | 'stale' | 'paused' | 'next' | 'off' | 'clear';
+const nowKind = (e: EditorRow, now: number): NowKind =>
+  e.focus
+    ? (e.focus.state === 'paused' ? 'paused' : isFocusStale(e.focus, e.offHours, now) ? 'stale' : 'live')
+    : e.nextUp ? 'next' : e.offHours ? 'off' : 'clear';
+
+/** One video once, however many editors share it (marked done if any of them marked it). */
+const uniqueVideos = (list: EditingVideo[]) => {
+  const out = new Map<string, EditingVideo>();
+  for (const v of list) { const was = out.get(v.id); if (!was || (!was.doneAt && v.doneAt)) out.set(v.id, v); }
+  return [...out.values()];
+};
+
+/** Videos counted by state, split as the bars are: marked done here is its own count, as on an editor's Home. */
+function stateCounts(list: EditorRow[]): { label: string; n: number; c: string }[] {
+  const p = (fn: (e: EditorRow) => number) => sum(list.map(fn));
+  const marked = p((e) => e.videos.filter((v) => v.doneAt).length);
+  return [
+    { label: 'To edit', n: p((e) => e.plate.toEdit), c: 'ed' }, { label: 'Revisions', n: p((e) => e.plate.revisions), c: 'rv' },
+    ...(marked ? [{ label: 'Marked done', n: marked, c: 'dn' }] : []),
+    { label: 'In review', n: p((e) => e.videos.filter((v) => v.state === 'in_review').length), c: 'ir' },
+    { label: 'With client', n: p((e) => e.plate.withClient), c: 'cl' }, { label: 'Approved', n: p((e) => e.plate.approvedWeek), c: 'ap' },
+  ];
+}
+
+function Counts({ list }: { list: { label: string; n: number; c: string }[] }) {
+  return (
+    <div className="ed-counts">
+      {list.map((c) => (
+        <div key={c.c}><span className={`ed-cn num${c.n ? '' : ' zero'}`}>{c.n}</span><span className="ed-cl"><i className={`ed-sw c-${c.c}`} aria-hidden />{c.label}</span></div>
+      ))}
+    </div>
+  );
+}
+
+/** A script document as a link, with what it is ("Google Doc", "Edited version"). */
+function DocLink({ d }: { d: ScriptDoc }) {
+  return (
+    <span className="ed-docs">
+      <FileText aria-hidden />
+      <span className="muted">{d.batchTitle}</span>
+      <a className="ed-doc" href={d.href} target="_blank" rel="noopener noreferrer" aria-label={`${docName(d, true)}${d.edited ? ', the edited version' : ''} (opens in a new tab)`}>{docName(d)}</a>
+      <span className="ed-kind">{docKind(d)}</span>
+      {d.edited && <span className="ed-edited">Edited version</span>}
+    </span>
+  );
+}
 
 export function EditorsPage() {
   const { clock } = useBoot();
@@ -79,7 +123,7 @@ export function EditorsPage() {
               <div className="txt"><b>Timeliner isn’t connected any more</b><span>TIMELINER_API_KEY isn’t set on the server, so this is the last copy, read {fmtAgo(b.sync.syncedAt, now)}.</span></div>
             </div>
           )}
-          <SummaryCards b={b} now={now} today={clock.today} />
+          <SummaryCards b={b} now={now} today={clock.today} workspaceTz={clock.timezone} />
           <Panel title="Roster" count={b.editors.length} className="ed-roster"
             sub="Editing now first, then paused, due today, revisions, and who’s free"
             tools={(
@@ -138,50 +182,62 @@ function SyncBanner({ s, now }: { s: EditingSync; now: number }) {
 
 // ── summary cards ────────────────────────────────────────────────────────
 
-function SummaryCards({ b, now, today }: { b: EditingBoard; now: number; today: ISODate }) {
+function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: number; today: ISODate; workspaceTz: string }) {
   const t = b.totals;
-  const live = b.editors.filter((e) => e.focus?.state === 'on');
-  const paused = b.editors.filter((e) => e.focus?.state === 'paused');
+  const kinds = new Map(b.editors.map((e) => [e.userId, nowKind(e, now)]));
+  const live = b.editors.filter((e) => kinds.get(e.userId) === 'live');
+  const paused = b.editors.filter((e) => kinds.get(e.userId) === 'paused');
+  const stale = b.editors.filter((e) => kinds.get(e.userId) === 'stale');
+  const held = [...paused, ...stale];
   const next = b.editors.find((e) => !e.focus && e.nextUp && !e.offHours) ?? b.editors.find((e) => !e.focus && e.nextUp);
 
-  // 1 · editing now: who tapped "I'm on this", and for how long
+  // 1 · editing now: who tapped "I'm on this", and for how long (one left running isn't counted)
   const liveCard = (
-    <KpiCard tone="live" icon={<Scissors />} n={t.editingNow} glint={t.editingNow > 0}
-      pill={t.editingNow ? <span className="kpi-pill"><i className="ed-live-dot" aria-hidden />Live</span> : <span className="kpi-pill">Nobody on a video</span>}
+    <KpiCard tone="live" icon={<Scissors />} n={live.length} glint={live.length > 0}
+      pill={live.length ? <span className="kpi-pill"><i className="ed-live-dot" aria-hidden />Live</span> : <span className="kpi-pill">{held.length ? 'Nobody editing' : 'Nobody on a video'}</span>}
       cap="Editing now"
-      sub={live.length ? names(live.map((e) => first(e.name))) : paused.length ? `${paused.length} paused` : 'Nobody has tapped I’m on this'}
-      label={`${plural(t.editingNow, 'editor')} editing now, ${t.paused} paused`}
+      sub={live.length ? names(live.map((e) => first(e.name))) : paused.length ? `${paused.length} paused` : stale.length ? 'Nobody editing right now' : 'Nobody has tapped I’m on this'}
+      label={`${plural(live.length, 'editor')} editing now, ${paused.length} paused`}
       foot={(
         <span className="kpi-list">
           {live.slice(0, 3).map((e) => (
             <span key={e.userId} className="kpi-row"><span className="ellipsis">{first(e.name)} · <b>{e.focus!.video.title}</b></span><span className="num">{fmtWorked(focusSeconds(e.focus!, now))}</span></span>
           ))}
-          {paused.slice(0, live.length >= 3 ? 1 : 2).map((e) => (
-            <span key={e.userId} className="kpi-row"><span className="ellipsis"><Pause size={11} aria-hidden /> {first(e.name)} · <b>{e.focus!.video.title}</b></span><span>paused</span></span>
+          {held.slice(0, live.length >= 3 ? 1 : 3 - live.length).map((e) => (
+            <span key={e.userId} className="kpi-row"><span className="ellipsis"><Pause size={11} aria-hidden /> {first(e.name)} · <b>{e.focus!.video.title}</b></span><span>{e.focus!.state === 'paused' ? 'paused' : 'still marked'}</span></span>
           ))}
-          {!live.length && !paused.length && (
+          {!live.length && !held.length && (
             <span className="kpi-row"><span>Next up</span><b className="ellipsis">{next ? `${first(next.name)} · ${next.nextUp!.title}` : 'Nothing on anyone’s plate'}</b></span>
           )}
         </span>
       )} />
   );
 
-  // 2 · due today: still to edit or fix, due today or earlier
+  // 2 · due today: still to edit or fix, due today or earlier; the meter is today's videos, each once: due today, and
+  // overdue ones still to do or that left the plate today (sent to review in Timeliner, or marked done here)
   const due = b.editors.filter((e) => e.dueToday > 0).sort((a, c) => c.dueToday - a.dueToday);
-  const dueVideos = b.editors.flatMap((e) => e.videos).filter((v) => v.due && v.due <= today);
-  const sent = dueVideos.filter((v) => !onPlate(v)).length;
+  const dayOf = (iso: string) => nowInZone(workspaceTz, new Date(iso)).date;
+  const leftToday = (v: EditingVideo) => { const at = v.doneAt ?? (isOnPlate(v.state) ? null : v.movedAt); return !!at && dayOf(at) === today; };
+  const todays = uniqueVideos(b.editors.flatMap((e) => e.videos))
+    .filter((v) => v.due && (v.due === today || (v.due < today && (onPlate(v) || leftToday(v)))));
+  const sent = todays.filter((v) => !isOnPlate(v.state)).length;
+  const marked = todays.filter((v) => isOnPlate(v.state) && v.doneAt).length;
   const unassignedDue = b.unassigned.filter((g) => g.due && g.due <= today);
   const top = due[0];
   const dueCard = (
     <KpiCard tone="today" icon={<AlarmClock />} n={t.dueToday}
       pill={due.length ? <span className="kpi-pill">{plural(due.length, 'editor')}</span> : <span className="kpi-pill"><Check aria-hidden />Nothing due</span>}
       cap="Due today"
-      sub={top ? `${first(top.name)} · ${titleRange(top.videos.filter((v) => onPlate(v) && v.due && v.due <= today).map((v) => v.title))} still to edit` : 'No videos due today'}
+      sub={top ? `${first(top.name)} · ${compressTitles(top.videos.filter((v) => onPlate(v) && v.due && v.due <= today).map((v) => v.title))} still to edit` : 'No videos due today'}
       label={`${plural(t.dueToday, 'video')} due today still to edit`}
-      foot={dueVideos.length ? (
+      foot={todays.length ? (
         <span className="kpi-meter">
-          <span className="kpi-row"><span>Sent to review</span><b className="num">{sent} of {dueVideos.length}</b></span>
-          <span className="kpi-bar" aria-hidden><i style={{ width: `${Math.round((sent / dueVideos.length) * 100)}%` }} /></span>
+          <span className="kpi-row"><span>Sent to review</span><b className="num">{sent} of {todays.length}</b></span>
+          <span className="kpi-bar ed-kbar" aria-hidden>
+            {sent > 0 && <i style={{ width: `${(sent / todays.length) * 100}%` }} />}
+            {marked > 0 && <i className="dn" style={{ width: `${(marked / todays.length) * 100}%` }} />}
+          </span>
+          {marked > 0 && <span className="kpi-row"><span>Marked done, not sent yet</span><b className="num">{marked}</b></span>}
           {unassignedDue.length > 0 && <span className="kpi-row"><span>Due, no editor yet</span><b className="ellipsis">{unassignedDue.map((g) => g.titles).join(', ')}</b></span>}
         </span>
       ) : (
@@ -202,20 +258,24 @@ function SummaryCards({ b, now, today }: { b: EditingBoard; now: number; today: 
           {rev.slice(0, 3).map((e) => {
             const vids = e.videos.filter((v) => v.state === 'revisions' && !v.doneAt);
             const round = Math.max(0, ...vids.map((v) => v.revisionRound));
-            return <span key={e.userId} className="kpi-row"><span className="ellipsis">{first(e.name)} · <b>{titleRange(vids.map((v) => v.title))}</b></span><span>{round ? `Round ${round}` : ''}</span></span>;
+            return <span key={e.userId} className="kpi-row"><span className="ellipsis">{first(e.name)} · <b>{compressTitles(vids.map((v) => v.title))}</b></span><span>{round ? `Round ${round}` : ''}</span></span>;
           })}
           {!rev.length && <span className="kpi-row"><span>Every video is moving forward</span></span>}
         </span>
       )} />
   );
 
-  // 4 · waiting on you: in review in Timeliner, or marked done here
+  // 4 · waiting on you: in review in Timeliner, or marked done here. The number is everyone's (the server's);
+  // what's left once the editors' own are counted is in review with nobody here (no editor, or one not on the site)
   const waiting = b.editors.flatMap((e) => e.videos.filter((v) => v.state === 'in_review' || v.doneAt).map((v) => ({ e, v })));
+  const mine = uniqueVideos(waiting.map((w) => w.v));
   const steps = new Map<string, number>();
-  for (const { v } of waiting) if (!v.doneAt) steps.set(v.step, (steps.get(v.step) ?? 0) + 1);
-  const marked = waiting.filter(({ v }) => v.doneAt).length;
-  if (marked) steps.set('Marked done', marked);
-  const oldest = waiting.filter(({ v }) => v.state === 'in_review' && v.movedAt).map(({ v }) => v.movedAt!).sort()[0];
+  for (const v of mine) if (!v.doneAt) steps.set(v.step, (steps.get(v.step) ?? 0) + 1);
+  const markedDone = mine.filter((v) => v.doneAt).length;
+  if (markedDone) steps.set('Marked done', markedDone);
+  const others = Math.max(0, t.waitingOnYou - mine.length);
+  if (others) steps.set('Others', others);
+  const oldest = mine.filter((v) => v.state === 'in_review' && v.movedAt).map((v) => v.movedAt!).sort()[0];
   const byEditor = [...new Map(waiting.map(({ e }) => [e.userId, e])).values()]
     .map((e) => ({ e, vids: waiting.filter((w) => w.e === e).map((w) => w.v) })).sort((a, c) => c.vids.length - a.vids.length);
   const waitCard = (
@@ -226,10 +286,11 @@ function SummaryCards({ b, now, today }: { b: EditingBoard; now: number; today: 
       label={`${plural(t.waitingOnYou, 'video')} waiting on your review`}
       foot={(
         <span className="kpi-list">
-          {byEditor.slice(0, 3).map(({ e, vids }) => (
-            <span key={e.userId} className="kpi-row"><span className="ellipsis">{first(e.name)} · {titleRange(vids.map((v) => v.title))}</span><b className="num">{vids.length}</b></span>
+          {byEditor.slice(0, others ? 2 : 3).map(({ e, vids }) => (
+            <span key={e.userId} className="kpi-row"><span className="ellipsis">{first(e.name)} · {compressTitles(vids.map((v) => v.title))}</span><b className="num">{vids.length}</b></span>
           ))}
-          {!byEditor.length && <span className="kpi-row"><span>Nothing sent to review yet</span></span>}
+          {others > 0 && <span className="kpi-row"><span className="ellipsis">Others in Timeliner</span><b className="num">{others}</b></span>}
+          {!byEditor.length && !others && <span className="kpi-row"><span>Nothing sent to review yet</span></span>}
         </span>
       )} />
   );
@@ -267,7 +328,7 @@ function Roster({ b, now, tz, today }: { b: EditingBoard; now: number; tz: strin
         {b.unassigned.length > 0 && <NotAssigned b={b} today={today} />}
       </div>
       {b.unknownAssignees.length > 0 && <Unknown list={b.unknownAssignees} />}
-      {b.editors.length > 0 && <WholeTeam b={b} />}
+      {b.editors.length > 0 && <WholeTeam b={b} now={now} />}
       <Legend />
     </>
   );
@@ -277,7 +338,7 @@ function EditorCard({ e, scale, now, tz, today, open, onToggle }: {
   e: EditorRow; scale: number; now: number; tz: string; today: ISODate; open: boolean; onToggle: () => void;
 }) {
   const drillId = useId();
-  const kind = nowKind(e);
+  const kind = nowKind(e, now);
   const f = e.focus;
   const city = e.city?.split(',')[0] ?? null;
   const local = localTime(e.timezone, now);
@@ -307,6 +368,12 @@ function EditorCard({ e, scale, now, tz, today, open, onToggle }: {
     eyebrow = <span className="ed-eyebrow-row"><Chip color="cyan" icon={<i className="ed-live-dot" aria-hidden />}>Editing now</Chip><span className="ed-since num">since {clockTime(f!.since, tz)}</span></span>;
     big = { text: f!.video.title, cls: 'live' };
     note = { text: `Timeliner: ${f!.video.step}${f!.video.state === 'revisions' && f!.video.revisionRound ? ` · round ${f!.video.revisionRound}` : ''}` };
+  } else if (kind === 'stale') {
+    // tapped I'm on this and never paused: say so, without claiming they're editing
+    tile = <span className="ed-tile stale" role="img" aria-label={`Still marked as editing, ${fmtWorked(secs)}`}><TimerOff className="ed-ti" aria-hidden /><span className="ed-tn">{tt.n}</span><span className="ed-tu">{tt.unit}</span></span>;
+    eyebrow = <span className="ed-eyebrow-row"><Chip color="plain" icon={<TimerOff aria-hidden />}>Still marked as editing</Chip><span className="ed-since num">since {fmtWhen(f!.since, tz, now)}</span></span>;
+    big = { text: f!.video.title, cls: 'quiet' };
+    note = { text: `${e.offHours ? 'Outside their working hours' : `Over ${FOCUS_STALE_HOURS} hours without a pause`}, so maybe left running · Timeliner: ${f!.video.step}` };
   } else if (kind === 'paused') {
     tile = <span className="ed-tile paused" role="img" aria-label={`Paused, ${fmtWorked(secs)} on it`}><Pause className="ed-ti" aria-hidden /><span className="ed-tn">{tt.n}</span><span className="ed-tu">{tt.unit}</span></span>;
     eyebrow = (
@@ -331,10 +398,16 @@ function EditorCard({ e, scale, now, tz, today, open, onToggle }: {
     big = { text: 'Off hours', cls: 'quiet' };
     note = { text: `Nothing to edit${hours ? ` · works ${hours} their time` : ''}` };
   } else {
+    // nothing to edit: what they do have, if anything, is with you, with the client or approved
     tile = <span className="ed-tile clear" aria-hidden><CircleCheck /><span className="ed-tu">Clear</span></span>;
     eyebrow = <span className="ed-eyebrow">Nothing to edit</span>;
-    big = { text: e.plate.inReview ? 'Waiting on review' : 'Nothing assigned', cls: 'quiet' };
-    note = { text: e.plate.inReview ? `${plural(e.plate.inReview, 'video')} with you to review` : 'Nothing assigned to them in Timeliner' };
+    big = { text: e.plate.inReview ? 'Waiting on review' : e.plate.withClient ? 'With the client' : e.videos.length ? 'All approved' : 'Nothing assigned', cls: 'quiet' };
+    const has = [
+      e.plate.inReview && `${plural(e.plate.inReview, 'video')} with you to review`,
+      e.plate.withClient && `${e.plate.withClient} with the client`,
+      e.plate.approvedWeek && `${e.plate.approvedWeek} approved this week`,
+    ].filter(Boolean);
+    note = { text: has.length ? has.join(' · ') : 'Nothing assigned to them in Timeliner' };
   }
 
   // their plate
@@ -344,13 +417,11 @@ function EditorCard({ e, scale, now, tz, today, open, onToggle }: {
     : soonest ? { text: dueWords(soonest, today)!.text, cls: 'plain' }
     : e.plate.inReview && !plate.length ? { text: 'All waiting on your review', cls: 'review' } : null;
   const segs = plateSegments(e);
-  const counts: { label: string; n: number; c: string }[] = [
-    { label: 'To edit', n: e.plate.toEdit, c: 'ed' }, { label: 'Revisions', n: e.plate.revisions, c: 'rv' }, { label: 'In review', n: e.plate.inReview, c: 'ir' },
-    { label: 'With client', n: e.plate.withClient, c: 'cl' }, { label: 'Approved', n: e.plate.approvedWeek, c: 'ap' },
-  ];
 
   const last = e.lastFinished;
-  const theirs = last && e.timezone && e.timezone !== tz && now - Date.parse(last.at) >= 3600_000 ? ` (${clockTime(last.at, e.timezone)} ${city ? `in ${city}` : 'their time'})` : '';
+  // when it was in their zone, unless this browser doesn't know that zone
+  const lastLocal = last && e.timezone && e.timezone !== tz && now - Date.parse(last.at) >= 3600_000 ? localTime(e.timezone, Date.parse(last.at)) : null;
+  const theirs = lastLocal ? ` (${lastLocal} ${city ? `in ${city}` : 'their time'})` : '';
 
   return (
     <article className={`ed-card ${kind}`} aria-label={e.name}>
@@ -381,23 +452,11 @@ function EditorCard({ e, scale, now, tz, today, open, onToggle }: {
         <div className="ed-bar" role="img" aria-label={segs.length ? segs.map((s) => s.label).join(', ') : 'No videos'}>
           {segs.map((s) => <span key={s.c} className={`c-${s.c}`} style={{ width: `calc(${(s.n / scale) * 100}% - 2px)` }} title={s.label} />)}
         </div>
-        <div className="ed-counts">
-          {counts.map((c) => (
-            <div key={c.c}><span className={`ed-cn num${c.n ? '' : ' zero'}`}>{c.n}</span><span className="ed-cl"><i className={`ed-sw c-${c.c}`} aria-hidden />{c.label}</span></div>
-          ))}
-        </div>
+        <Counts list={stateCounts([e])} />
       </div>
 
       <div className="ed-foot">
-        {e.scripts.slice(0, 3).map((d) => (
-          <span key={d.href} className="ed-docs">
-            <FileText aria-hidden />
-            <span className="muted">{d.batchTitle}</span>
-            <a className="ed-doc" href={d.href} target="_blank" rel="noopener noreferrer" aria-label={`${docName(d, true)}${d.edited ? ', the edited version' : ''} (opens in a new tab)`}>{docName(d)}</a>
-            <span className="ed-kind">{docKind(d)}</span>
-            {d.edited && <span className="ed-edited">Edited version</span>}
-          </span>
-        ))}
+        {e.scripts.slice(0, 3).map((d) => <DocLink key={d.href} d={d} />)}
         {e.scripts.length > 3 && <span className="muted">+{e.scripts.length - 3} more</span>}
         <span className="ed-last">
           {last ? (
@@ -474,7 +533,7 @@ function Drill({ id, e, today, tz, now }: { id: string; e: EditorRow; today: ISO
     <div className="ed-drill" id={id}>
       {groups.map((g) => (
         <div key={g.key} className="ed-group">
-          <div className="ed-group-h">{g.label} · {titleRange(g.vids.map((v) => v.title))} <span>· {g.sub}</span></div>
+          <div className="ed-group-h">{g.label} · {compressTitles(g.vids.map((v) => v.title))} <span>· {g.sub}</span></div>
           <ul className="ed-sqs">
             {g.vids.slice(0, 60).map((v) => (
               <li key={v.id} className={`ed-sq c-${g.c}`} title={`${v.title} · ${v.step}`}>
@@ -496,6 +555,8 @@ function NotAssigned({ b, today }: { b: EditingBoard; today: ISODate }) {
   const dueNow = sum(groups.filter((g) => g.due && g.due <= today).map((g) => g.count));
   const soonest = groups.map((g) => g.due).filter((d): d is string => !!d).sort()[0] ?? null;
   const clients = [...new Set(groups.map((g) => g.clientName).filter((c): c is string => !!c))];
+  // the documents these videos are cut from, so whoever assigns them can check which shoot's scripts they are
+  const docs = [...new Map(groups.flatMap((g) => g.scripts).map((d) => [d.href, d])).values()];
   return (
     <article className="ed-card na" aria-label="Not assigned yet">
       <div className="ed-who">
@@ -517,17 +578,25 @@ function NotAssigned({ b, today }: { b: EditingBoard; today: ISODate }) {
       <div className="ed-plate ed-na-rows">
         {groups.map((g) => {
           const d = dueWords(g.due, today);
+          const hot = d?.tone === 'today' || d?.tone === 'late';
           return (
             <div key={`${g.folder}|${g.clientName ?? ''}`} className="ed-na-row">
               <span className="ed-na-t">{g.titles}</span>
-              <span className="ed-na-sqs" aria-hidden>{Array.from({ length: Math.min(g.count, 12) }, (_, i) => <i key={i} className={d?.tone === 'today' || d?.tone === 'late' ? 'hot' : undefined} />)}{g.count > 12 && <small>+{g.count - 12}</small>}</span>
+              {/* the titles beside them say the same, so the squares are for the eye */}
+              <span className="ed-na-sqs" aria-hidden>
+                {g.videoTitles.slice(0, 12).map((title, i) => <span key={`${title}|${i}`} className={`ed-sq c-na${hot ? ' hot' : ''}`} title={`${title} · not assigned${d ? ` · ${midSentence(d.text)}` : ''}`}>{squareLabel(title)}</span>)}
+                {g.count > 12 && <small>+{g.count - 12}</small>}
+              </span>
               <span className={`ed-due ${d ? (d.tone === 'soon' ? 'plain' : d.tone) : 'plain'}`}>{d?.text ?? 'No deadline'}</span>
             </div>
           );
         })}
       </div>
       <div className="ed-foot">
-        <span className="muted">Videos are given to editors in Timeliner; they show up on that editor’s card here.</span>
+        {docs.length
+          ? docs.slice(0, 3).map((d) => <DocLink key={d.href} d={d} />)
+          : <span className="muted">Videos are given to editors in Timeliner; they show up on that editor’s card here.</span>}
+        {docs.length > 3 && <span className="muted">+{docs.length - 3} more</span>}
         <a className="ed-abtn" href={TIMELINER_APP} target="_blank" rel="noopener noreferrer">Assign in Timeliner<ExternalLink aria-hidden /></a>
       </div>
     </article>
@@ -553,16 +622,10 @@ function Unknown({ list }: { list: EditingBoard['unknownAssignees'] }) {
   );
 }
 
-function WholeTeam({ b }: { b: EditingBoard }) {
-  const kinds = b.editors.map(nowKind);
+function WholeTeam({ b, now }: { b: EditingBoard; now: number }) {
+  // each editor once, under what their card shows
+  const kinds = b.editors.map((e) => nowKind(e, now));
   const n = (k: NowKind) => kinds.filter((x) => x === k).length;
-  const off = b.editors.filter((e) => !e.focus && e.offHours).length;
-  const p = (fn: (e: EditorRow) => number) => sum(b.editors.map(fn));
-  const counts = [
-    { label: 'To edit', n: p((e) => e.plate.toEdit), c: 'ed' }, { label: 'Revisions', n: p((e) => e.plate.revisions), c: 'rv' },
-    { label: 'In review', n: p((e) => e.plate.inReview), c: 'ir' }, { label: 'With client', n: p((e) => e.plate.withClient), c: 'cl' },
-    { label: 'Approved', n: p((e) => e.plate.approvedWeek), c: 'ap' },
-  ];
   return (
     <div className="ed-team" role="group" aria-label="Whole team">
       <div className="ed-team-who">
@@ -572,14 +635,11 @@ function WholeTeam({ b }: { b: EditingBoard }) {
       <div className="ed-team-now">
         <Chip color="cyan" icon={<i className="ed-live-dot" aria-hidden />}>{n('live')} editing now</Chip>
         <Chip color="yellow" icon={<Pause aria-hidden />}>{n('paused')} paused</Chip>
+        {n('stale') > 0 && <Chip color="plain" icon={<TimerOff aria-hidden />}>{n('stale')} still marked as editing</Chip>}
         <Chip color="plain">{n('next')} next up</Chip>
-        <Chip color="plain">{off} off hours</Chip>
+        <Chip color="plain">{n('off')} off hours</Chip>
       </div>
-      <div className="ed-counts">
-        {counts.map((c) => (
-          <div key={c.c}><span className={`ed-cn num${c.n ? '' : ' zero'}`}>{c.n}</span><span className="ed-cl"><i className={`ed-sw c-${c.c}`} aria-hidden />{c.label}</span></div>
-        ))}
-      </div>
+      <Counts list={stateCounts(b.editors)} />
     </div>
   );
 }
@@ -589,6 +649,7 @@ function Legend() {
     <div className="ed-legend">
       <div><span className="ed-legend-h">Right now</span>
         <span className="ed-lg"><i className="k live" />Editing now</span><span className="ed-lg"><i className="k paused" />Paused</span>
+        <span className="ed-lg"><i className="k stale" />Still marked as editing</span>
         <span className="ed-lg"><i className="k next" />Next up (by deadline)</span><span className="ed-lg"><i className="k off" />Off hours</span>
       </div>
       <div><span className="ed-legend-h">Videos</span>
@@ -600,7 +661,7 @@ function Legend() {
         <span className="ed-lg wrap"><span className="ed-src site"><Check aria-hidden />on the site</span>marked done here, until Timeliner moves it to Needs review</span>
         <span className="ed-lg"><span className="ed-src tl">in Timeliner</span>sent to review in Timeliner</span>
       </div>
-      <p>“Editing now” is the video an editor tapped “I’m on this” for. They can pause it, then mark it done. It clears itself when Timeliner moves that video to Needs review.</p>
+      <p>“Editing now” is the video an editor tapped “I’m on this” for. They can pause it, then mark it done. It clears itself when Timeliner moves that video to Needs review. Left running for {FOCUS_STALE_HOURS} hours, or outside the editor’s working hours, it shows as still marked as editing instead.</p>
     </div>
   );
 }

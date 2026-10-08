@@ -47,6 +47,17 @@ export function relDay(iso: ISODate, today: ISODate): string {
   return n > 0 ? `in ${n} days` : `${-n} days ago`;
 }
 
+export type DueTone = 'late' | 'today' | 'soon' | 'plain';
+/** A video's deadline (a whole day in Timeliner) in words, with its tone: "Due today", "Due tomorrow, Fri, Oct 9", "Overdue since Tue, Oct 6". */
+export function dueWords(due: ISODate | null, today: ISODate): { text: string; tone: DueTone } | null {
+  if (!due) return null;
+  const n = diffDays(due, today);
+  if (n < 0) return { text: `Overdue since ${fmtWeekday(due)}`, tone: 'late' };
+  if (n === 0) return { text: 'Due today', tone: 'today' };
+  if (n === 1) return { text: `Due tomorrow, ${fmtWeekday(due)}`, tone: 'soon' };
+  return { text: `Due ${fmtWeekday(due)}`, tone: 'plain' };
+}
+
 /** Timestamp in the organisation's timezone: "Oct 3, 4:12 PM" */
 export function fmtStamp(isoTs: string | null | undefined, timeZone: string): string {
   if (!isoTs) return '—';
@@ -64,6 +75,13 @@ export function fmtAgo(isoTs: string, now = Date.now()): string {
   return d === 1 ? 'yesterday' : `${d} days ago`;
 }
 
+/** Time spent on something: "40 min", "1 h 5 min". */
+export function fmtWorked(seconds: number): string {
+  const m = Math.max(0, Math.round(seconds / 60));
+  if (m < 60) return `${m} min`;
+  return `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`;
+}
+
 export function fmtTimeZoneAbbr(timeZone: string, now = new Date()): string {
   const part = new Intl.DateTimeFormat('en-US', { timeZone, timeZoneName: 'short' }).formatToParts(now).find((p) => p.type === 'timeZoneName');
   return part?.value ?? timeZone;
@@ -73,6 +91,12 @@ export function fmtCutoff(cutoff: string): string {
   const [h, m] = cutoff.split(':').map(Number);
   const hh = h % 12 === 0 ? 12 : h % 12;
   return `${hh}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+/** A working hour: "9 AM", or "9:00 AM" with `minutes`. A stored hour may pass midnight: 26 is 2 AM. */
+export function fmtHour(h: number, minutes = false): string {
+  const x = ((h % 24) + 24) % 24;
+  return `${((x + 11) % 12) + 1}${minutes ? ':00' : ''} ${x < 12 ? 'AM' : 'PM'}`;
 }
 
 /**

@@ -12,8 +12,8 @@
 //
 // The site's own layer is what each editor is doing right now: "I'm on this", Pause, Resume and Done. Done
 // tells the managers and never changes Timeliner; the video moves on here when Timeliner has it in review.
-// A focus ends by itself when its video leaves the editor's plate in Timeliner, and that becomes the
-// editor's last finished video.
+// A focus ends by itself when Timeliner moves its video on (that becomes the editor's last finished video),
+// gives it to someone else or removes it (then it's just over: the video isn't theirs any more).
 
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
@@ -22,14 +22,15 @@ import { loadSettings, loadUsers, logActivity, managerIds, notify, type Ctx } fr
 import { requireManager, requireUser } from './auth';
 import { HttpError, conflict, forbidden, notFound, parse } from './http';
 import { clientFit, nameWords, pickBatch, TimelinerError, type TimelinerApi } from './timeliner';
-import { loadDeliverables, loadScriptEdits, type ScriptEdit } from './script-bank';
+import { loadDeliverables, loadScriptEdits, type ScriptEdit } from './records';
 import { EDITOR_FILES } from './files';
 import { diffDays, isISODate, isValidTimeZone, makeClock, nowInZone, type ISODate } from '../shared/dates';
 import { onShift } from '../shared/cities';
 import {
-  compressRanges, isApproved, isEditor, isOnPlate, TIMELINER_STEP_LABEL, videoState,
+  compressRanges, compressTitles, isApproved, isEditor, isFocusStale, isOnPlate, TIMELINER_STEP_LABEL, titleNumber, videoState,
   type TimelinerStatusGroup, type VideoState,
 } from '../shared/workflow';
+import { fmtWorked } from '../shared/format';
 import type {
   Deliverable, EditingBoard, EditingSync, EditingVideo, EditorFocus, EditorPlate, EditorRow, FocusAction, Me, MyEditing, ScriptDoc, UserSummary,
 } from '../shared/types';
@@ -258,8 +259,7 @@ export function matchVideo(v: VideoPlace, m: Matching): { clientId: number | nul
     ? m.batches.filter((b) => b.client_id === clientId && (b.approved > 0 || linkedIds.has(b.id)))
     : linked;
   const batch = chooseBatch(cands, v, m.timezone, linkedIds);
-  const n = /\d+/.exec(v.title);
-  const num = n ? Number(n[0]) : null;
+  const num = titleNumber(v.title);
   return {
     clientId: clientId ?? batch?.client_id ?? null,
     batchId: batch?.id ?? null,
@@ -568,31 +568,11 @@ interface FocusRow { user_id: number; task_id: string; state: 'on' | 'paused'; s
 interface DoneRow { task_id: string; user_id: number; done_at: string }
 
 const stepLabel = (group: string) => TIMELINER_STEP_LABEL[group as TimelinerStatusGroup] ?? 'To be edited';
-const titleNumber = (title: string) => { const m = /\d+/.exec(title); return m ? Number(m[0]) : Number.MAX_SAFE_INTEGER; };
+const titleOrder = (title: string) => titleNumber(title) ?? Number.MAX_SAFE_INTEGER;
 const byDue = (a: EditingVideo, b: EditingVideo) =>
-  (a.due ?? '9999-12-31').localeCompare(b.due ?? '9999-12-31') || titleNumber(a.title) - titleNumber(b.title) || a.title.localeCompare(b.title);
+  (a.due ?? '9999-12-31').localeCompare(b.due ?? '9999-12-31') || titleOrder(a.title) - titleOrder(b.title) || a.title.localeCompare(b.title);
 const STATE_ORDER: Record<VideoState, number> = { revisions: 0, to_edit: 1, in_review: 2, with_client: 3, approved: 4 };
 const newest = (a: string | null, b: string | null) => time(b) - time(a) || 0;
-
-/** "Organic 26", "Organic 27"… "Organic 30" → "Organic 26–30": titles that differ only by their number, as ranges. */
-export function compressTitles(titles: string[]): string {
-  const groups = new Map<string, { pre: string; post: string; nums: number[]; width: number }>();
-  const plain: string[] = [];
-  for (const raw of titles) {
-    const t = raw.trim();
-    const m = /^(.*?)(\d+)(\D*)$/.exec(t);
-    if (!m) { if (!plain.includes(t)) plain.push(t); continue; }
-    const key = `${m[1]}\u0000${m[3]}`;
-    const g = groups.get(key) ?? { pre: m[1], post: m[3], nums: [], width: 1 };
-    g.nums.push(Number(m[2]));
-    if (m[2].length > 1 && m[2].startsWith('0')) g.width = Math.max(g.width, m[2].length);
-    groups.set(key, g);
-  }
-  return [
-    ...[...groups.values()].map((g) => `${g.pre}${compressRanges(g.nums).replace(/\d+/g, (d) => d.padStart(g.width, '0'))}${g.post}`),
-    ...plain,
-  ].join(', ');
-}
 
 /**
  * The script document a video is cut from, for a finished script only: the edited version a manager last approved
@@ -751,8 +731,11 @@ function editorOf(L: Loaded, u: UserSummary): { row: EditorRow; mine: MyEditing 
   return { row, mine: { sync: L.sync, focus, nextUp, revisions, toEdit, waiting, approvedWeek, scripts } };
 }
 
-/** Editing now → paused → due today → revisions → the rest; off hours last (unless they're on a video). */
-const rank = (e: EditorRow) => (e.focus?.state === 'on' ? 0 : e.offHours ? 5 : e.focus ? 1 : e.dueToday ? 2 : e.plate.revisions ? 3 : 4);
+/** On a video and editing now (not one left running: isFocusStale) */
+const editingNow = (e: EditorRow, now: Date) => e.focus?.state === 'on' && !isFocusStale(e.focus, e.offHours, now.getTime());
+
+/** Editing now → paused (or left running) → due today → revisions → the rest; off hours last (unless they're editing now). */
+const rank = (e: EditorRow, now: Date) => (editingNow(e, now) ? 0 : e.offHours ? 5 : e.focus ? 1 : e.dueToday ? 2 : e.plate.revisions ? 3 : 4);
 
 export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
   const L = await loadEditing(ctx);
@@ -764,26 +747,33 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
   // editors who sign in, and anyone else on the team with open videos in Timeliner
   const roster = L.users.filter((u) => isEditor(u.role) || withVideos.has(u.id));
   const built = roster.map((u) => editorOf(L, u));
-  const editors = built.map((b) => b.row).sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+  const editors = built.map((b) => b.row).sort((a, b) => rank(a, L.now) - rank(b, L.now) || a.name.localeCompare(b.name));
 
   // waiting on the managers: in review in Timeliner, or marked done here and not moved yet
   const waiting = new Set(L.tasks.filter((t) => videoState(t.status_group) === 'in_review').map((t) => t.id));
   for (const b of built) for (const v of b.mine.waiting) if (v.doneAt) waiting.add(v.id);
 
   const recent = L.now.getTime() - NOT_ASSIGNED_DAYS * DAY_MS;
-  const groups = new Map<string, { folder: string; clientName: string | null; titles: string[]; due: ISODate | null }>();
+  const groups = new Map<string, { folder: string; clientName: string | null; titles: string[]; due: ISODate | null; docs: Map<string, ScriptDoc> }>();
   for (const t of L.tasks) {
     if (videoState(t.status_group) !== 'to_edit' || t.assignee_ids.length || (t.created_at && time(t.created_at) < recent)) continue;
     const clientName = t.client_id != null ? L.clients.get(Number(t.client_id)) ?? null : null;
     const key = `${t.folder ?? ''}|${t.client_id ?? ''}`;
-    const g = groups.get(key) ?? { folder: t.folder ?? clientName ?? 'Timeliner', clientName, titles: [], due: null };
+    const g = groups.get(key) ?? { folder: t.folder ?? clientName ?? 'Timeliner', clientName, titles: [], due: null, docs: new Map<string, ScriptDoc>() };
     g.titles.push(t.title);
     const due = t.internal_deadline ?? t.external_deadline;
     if (due && (!g.due || due < g.due)) g.due = due;
+    // the document whoever is given it will cut from, as the editors' cards show it
+    const doc = t.batch_id != null && t.script_number != null ? scriptDoc(L, Number(t.batch_id), t.script_number) : null;
+    if (doc && !g.docs.has(doc.href)) g.docs.set(doc.href, doc);
     groups.set(key, g);
   }
   const unassigned = [...groups.values()]
-    .map((g) => ({ folder: g.folder, clientName: g.clientName, count: g.titles.length, titles: compressTitles(g.titles), due: g.due }))
+    .map((g) => ({
+      folder: g.folder, clientName: g.clientName, count: g.titles.length, titles: compressTitles(g.titles), due: g.due,
+      videoTitles: [...g.titles].sort((a, b) => titleOrder(a) - titleOrder(b) || a.localeCompare(b)),
+      scripts: [...g.docs.values()],
+    }))
     .sort((a, b) => (a.due ?? '9999').localeCompare(b.due ?? '9999') || a.folder.localeCompare(b.folder));
 
   const unknown = new Map<string, { name: string; email: string | null; count: number }>();
@@ -801,7 +791,7 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
   return {
     sync: L.sync,
     totals: {
-      editingNow: editors.filter((e) => e.focus?.state === 'on').length,
+      editingNow: editors.filter((e) => editingNow(e, L.now)).length,
       paused: editors.filter((e) => e.focus?.state === 'paused').length,
       dueToday: editors.reduce((n, e) => n + e.dueToday, 0),
       revisions: editors.reduce((n, e) => n + e.plate.revisions, 0),
@@ -822,11 +812,6 @@ export async function loadMine(ctx: Ctx, me: Me): Promise<MyEditing> {
 }
 
 // ── what an editor is on ─────────────────────────────────────────────────
-
-const fmtWorked = (seconds: number) => {
-  const m = Math.round(seconds / 60);
-  return m < 60 ? `${m} min` : `${Math.floor(m / 60)} h${m % 60 ? ` ${m % 60} min` : ''}`;
-};
 
 /**
  * I'm on this (start), Pause, Resume and Done, for the signed-in person's own videos. Start replaces whatever

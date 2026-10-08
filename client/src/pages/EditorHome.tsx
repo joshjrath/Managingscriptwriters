@@ -15,16 +15,15 @@ import {
 import { api, qs, useSave, type ApiError } from '../api';
 import type { CalendarEvent, EditingVideo, EditorFocus, FocusAction, MyEditing, ScriptBankPage, ShootReadiness } from '../../../shared/types';
 import { addDays, diffDays, type ISODate } from '../../../shared/dates';
-import { fmtAgo, fmtDate, fmtRange, plural } from '../../../shared/format';
-import { isManager, scriptsLabel } from '../../../shared/workflow';
+import { dueWords, fmtAgo, fmtDate, fmtRange, fmtWorked, plural } from '../../../shared/format';
+import { compressTitles, isManager, scriptsLabel } from '../../../shared/workflow';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import { Button, Chip, DateTile, Empty, ErrorState, FormError, Loading, Panel, useToast } from '../components/ui';
 import { TodoPanel } from '../components/Todos';
 import { burst, centerOf } from '../fx';
 import { motionAllowed } from '../motion';
 import {
-  byTitle, docKind, docName, dueWords, fmtWhen, midSentence, fmtWorked, focusSeconds, ScriptLink, shootLabel, squareLabel, syncWords,
-  TIMELINER_APP, titleRange, useNow,
+  byTitle, docKind, docName, fmtWhen, midSentence, focusSeconds, ScriptLink, shootLabel, squareLabel, syncWords, TIMELINER_APP, useNow,
 } from '../components/EditingBits';
 import { DeliverableRow } from './ScriptBank';
 
@@ -159,7 +158,17 @@ function MyVideos() {
     },
   });
   const acting: Acting = {
-    run: (video, action, el) => { from.current = el ? centerOf(el) : null; act.mutate({ video, action }); },
+    run: (video, action, el) => {
+      from.current = el ? centerOf(el) : null;
+      act.mutate({ video, action }, {
+        onError: (err) => {
+          // what Timeliner changed meanwhile can take the video out of view (useSave refreshes on a 409), so say it here too
+          toast(err.message, 'error');
+          // given to someone else (403) or gone (404) in Timeliner: this copy is out of date
+          if (err.status === 403 || err.status === 404) void q.refetch();
+        },
+      });
+    },
     pending: act.isPending,
     busy: (id, action) => act.isPending && act.variables?.video.id === id && act.variables.action === action,
     error: (id) => (act.isError && act.variables?.video.id === id ? act.error : null),
@@ -167,7 +176,8 @@ function MyVideos() {
   const today = clock.today;
 
   if (q.isLoading) return <div className="eh-top"><Loading height={300} /></div>;
-  if (q.isError) return <div className="eh-top"><ErrorState error={q.error} retry={() => q.refetch()} /></div>;
+  // a failed refresh keeps the last copy on screen (Pause and Done are on it), with a note under Your videos
+  if (q.isError && !q.data) return <div className="eh-top"><ErrorState error={q.error} retry={() => q.refetch()} /></div>;
   const d = q.data!;
   const s = d.sync;
 
@@ -215,7 +225,7 @@ function MyVideos() {
     <div className="grid g-main-side eh-top" style={{ alignItems: 'start' }}>
       <div className="stack" style={{ gap: 'var(--gap)' }}>
         {hero}
-        <YourVideos d={d} featured={featured?.id ?? null} now={now} tz={tz} today={today} acting={acting} />
+        <YourVideos d={d} featured={featured?.id ?? null} refreshFailed={q.isError} now={now} tz={tz} today={today} acting={acting} />
       </div>
       <div className="stack" style={{ gap: 'var(--gap)' }}>
         <ScriptDocs d={d} />
@@ -313,7 +323,7 @@ function VideoMap({ f, all, today }: { f: EditorFocus; all: EditingVideo[]; toda
     { k: 'ir', text: `${n('ir')} in review` }, { k: 'ap', text: `${n('ap')} approved` },
   ].filter((x) => x.k === 'now' || x.k === 'ps' || n(x.k) > 0);
   const where = v.batch?.shootDate ? fmtDate(v.batch.shootDate, today) : v.batch?.title ?? v.folder;
-  const label = `Your ${where} videos · ${titleRange(same.map((x) => x.title))}`;
+  const label = `Your ${where} videos · ${compressTitles(same.map((x) => x.title))}`;
   return (
     <div className="eh-map">
       <div className="eh-map-h">{label}</div>
@@ -401,7 +411,9 @@ function ClearCard({ waiting }: { waiting: number }) {
 }
 
 /** Revisions, To edit, then Waiting on review (folded). */
-function YourVideos({ d, featured, now, tz, today, acting }: { d: MyEditing; featured: string | null; now: number; tz: string; today: ISODate; acting: Acting }) {
+function YourVideos({ d, featured, refreshFailed, now, tz, today, acting }: {
+  d: MyEditing; featured: string | null; refreshFailed: boolean; now: number; tz: string; today: ISODate; acting: Acting;
+}) {
   const [open, setOpen] = useState(false);
   const listId = useId();
   const rv = d.revisions.filter((v) => v.id !== featured);
@@ -416,13 +428,13 @@ function YourVideos({ d, featured, now, tz, today, acting }: { d: MyEditing; fea
   const inReview = d.waiting.filter((v) => !v.doneAt && v.state === 'in_review').length;
   const withClient = d.waiting.filter((v) => !v.doneAt && v.state === 'with_client').length;
   const waitSub = done.length
-    ? `${titleRange(done.map((v) => v.title))} marked done · ${done.length === 1 ? 'moves' : 'each moves'} on when it’s in Needs review`
+    ? `${compressTitles(done.map((v) => v.title))} marked done · ${done.length === 1 ? 'moves' : 'each moves'} on when it’s in Needs review`
     : [inReview && `${inReview} with the managers`, withClient && `${withClient} with the client`].filter(Boolean).join(' · ');
   const soonest = ed.map((v) => v.due).filter((x): x is string => !!x).sort()[0];
   const row = (v: EditingVideo, kind: RowKind) => <VideoRow key={v.id} v={v} kind={kind} multi={kind === 'rv' || kind === 'ed' ? multi : multiWaiting} now={now} tz={tz} today={today} acting={acting} />;
   return (
     <Panel title="Your videos" className="eh-videos"
-      sub={<><span className="eh-todo">{todo} to do</span> Assigned to you in Timeliner{folders.length && folders.length <= 2 ? ` · ${folders.join(', ')}` : ''} · <span title={d.sync.error ?? undefined}>{syncWords(d.sync, now).replace('Read from Timeliner', 'read')}{d.sync.error ? ' · couldn’t read it just now' : ''}</span></>}
+      sub={<><span className="eh-todo">{todo} to do</span> Assigned to you in Timeliner{folders.length && folders.length <= 2 ? ` · ${folders.join(', ')}` : ''} · <span title={d.sync.error ?? undefined}>{syncWords(d.sync, now).replace('Read from Timeliner', 'read')}{d.sync.error ? ' · couldn’t read it just now' : ''}</span>{refreshFailed && <span role="status"> · couldn’t refresh just now, so this may be out of date</span>}</>}
       tools={<a className="ed-tl-link" href={TIMELINER_APP} target="_blank" rel="noopener noreferrer"><Layers aria-hidden />Open in Timeliner</a>}>
       <div className="eh-groups">
         {rv.length > 0 && (
@@ -532,7 +544,7 @@ function ScriptDocs({ d }: { d: MyEditing }) {
                     <div className="eh-doc-tags"><span className="ed-kind">{docKind(s)}</span>{s.edited && <span className="ed-edited">Edited version · use this one</span>}</div>
                   </div>
                 </div>
-                {uses.length > 0 && <div className="eh-doc-uses">Your videos {titleRange(uses.map((v) => v.title))} use {scriptsLabel(uses.map((v) => v.scriptNumber!)).toLowerCase()}</div>}
+                {uses.length > 0 && <div className="eh-doc-uses">Your videos {compressTitles(uses.map((v) => v.title))} use {scriptsLabel(uses.map((v) => v.scriptNumber!)).toLowerCase()}</div>}
                 <a className="btn eh-btn block" href={s.href} target="_blank" rel="noopener noreferrer" aria-label={`Open ${docName(s, true)} (opens in a new tab)`}>Open document<ExternalLink aria-hidden /></a>
               </article>
             );
@@ -573,7 +585,7 @@ function Plate({ d, now, tz }: { d: MyEditing; now: number; tz: string }) {
         {counts.map((c) => <div key={c.c}><span className={`ed-cn num${c.n ? '' : ' zero'}`}>{c.n}</span><span className="ed-cl"><i className={`ed-sw c-${c.c}`} aria-hidden />{c.label}</span></div>)}
       </div>
       {d.approvedWeek.length > 0 && (
-        <div className="eh-plate-note"><Check aria-hidden /><span>{titleRange(d.approvedWeek.map((v) => v.title))} approved{lastApproved ? ` · last ${fmtWhen(lastApproved, tz, now)}` : ''}</span></div>
+        <div className="eh-plate-note"><Check aria-hidden /><span>{compressTitles(d.approvedWeek.map((v) => v.title))} approved{lastApproved ? ` · last ${fmtWhen(lastApproved, tz, now)}` : ''}</span></div>
       )}
       {!d.approvedWeek.length && d.waiting.length > 0 && (
         <div className="eh-plate-note wait"><Inbox aria-hidden /><span>{plural(d.waiting.length, 'video')} waiting on review · nothing approved yet this week</span></div>

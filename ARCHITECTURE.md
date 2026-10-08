@@ -28,7 +28,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 | Database interface, engines, migrations runner, `LOCKS` | `server/db.ts` |
 | Migrations (append only) | `server/schema.ts`, with data fixes in `server/backfill.ts` |
 | Settings, users, activity, notifications, batch summaries | `server/core.ts` |
-| Row → API shape loaders | `server/records.ts` |
+| Row → API shape loaders (and the documents sent, `loadDeliverables`, which the Script bank and the Editors tab share) | `server/records.ts` |
 | Account, team, settings, setup | `server/routes/account.ts` |
 | Batches, scripts, and **every script status change** (`applyScriptAction`) | `server/routes/batches.ts` |
 | Clients, resources, uploaded files, search | `server/routes/clients.ts`, `server/files.ts` |
@@ -46,7 +46,8 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 | Editors who don't sign in (Settings → Editors) | `server/control/editors.ts` |
 | Demo data | `server/seed-demo.ts`, `server/seed-cli.ts` |
 | Dates, deadlines, clock, due state | `shared/dates.ts` |
-| Statuses, roles, action rules, progress, document state, ranges | `shared/workflow.ts` |
+| Statuses, roles, action rules, progress, document state, ranges; a video's state, title ranges (`compressTitles`) and a focus left running (`isFocusStale`) | `shared/workflow.ts` |
+| Display wording shared by server and client (dates, times, a video's due words, time worked) | `shared/format.ts` |
 | Quick-entry parser | `shared/parse.ts` |
 | API types and header names | `shared/types.ts` |
 | What's new entries | `shared/changelog.ts` |
@@ -110,7 +111,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 
 - **`Db`** (`server/db.ts`) has `query`, `one`, `tx`, `close` and `withSchema`.
   - Route code always uses `ctx.db`, which follows Recording mode.
-  - `ctx.realDb` is only for session and sign-in plumbing (`recording.ts`), and for streaming file contents that stay on the real workspace (`/api/files/:id`).
+  - `ctx.realDb` is only for session and sign-in plumbing (`recording.ts`), for streaming file contents that stay on the real workspace (`/api/files/:id`), and for the timed background reads of calendars and Timeliner (`startCalendarSync`, `startTimelinerSync`), which never write to a practice copy.
 - **Migrations** run at start-up, in order, one transaction each, under `LOCKS.migrations`.
   - SQL migrations are split into statements on `;` at a line end. Anything that can't be split that way is written as a function migration.
   - Function migrations import `shared/dates.ts`. Changing those helpers changes what a fresh database's backfill produces.
@@ -128,7 +129,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 - **Calendar sync** re-reads each synced calendar every `CALENDAR_SYNC_MINUTES` (15) inside the server (`CALENDAR_SYNC=off` turns it off), and tells managers once about each new shoot it finds.
 - **Paste notes** calls the Anthropic API, only when `ANTHROPIC_API_KEY` is set. Each person can run one read at a time and 30 an hour. If the API fails, the person gets a clear message and nothing is created.
 - **Timeliner** (`server/timeliner.ts`), only when `TIMELINER_API_KEY` is set:
-  - On start-up (once) or from Settings → Timeliner, the server registers a webhook (`TIMELINER_EVENTS`: `version.uploaded` and `file.uploaded`, plus the `task.*` and `project.trashed` messages for the Editors tab) pointing at `PUBLIC_URL` (or `RENDER_EXTERNAL_URL`) + `/hooks/timeliner`, and keeps the signing secret Timeliner returns in `settings`. Already connected, start-up switches the webhook back on and adds any events it lacks (best effort: a read-only key can't).
+  - On start-up (once) or from Settings → Timeliner, the server registers a webhook (`TIMELINER_EVENTS`: `version.uploaded` and `file.uploaded`, plus the `task.*` and `project.trashed` messages for the Editors tab) pointing at `PUBLIC_URL` (or `RENDER_EXTERNAL_URL`) + `/hooks/timeliner`, and keeps the signing secret Timeliner returns in `settings`. Already connected, start-up adds any events it lacks (best effort: a read-only key can't) and leaves it switched on or off as Timeliner has it; Connect in Settings switches it back on.
   - `POST /hooks/timeliner` is public and outside `/api` (so the same-page header check doesn't apply); it refuses a message unless `X-Timeliner-Signature` checks out against that secret and is under five minutes old. Each message id is claimed in `timeliner_events` before anything happens, so a repeat is a no-op.
   - A document upload is matched to a batch (its `timeliner_project_id`, else the client named like the Timeliner brand or project) and its approved scripts are delivered through `applyScriptAction` with `viaTimeliner`, which records the delivery with `source = 'timeliner'`.
   - Lookups (project, brand, members) are best effort: when Timeliner can't be reached the upload is kept as unmatched for a manager to place.
@@ -137,7 +138,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
   - A read takes members, brands, tasks newest first (at most 30 pages of 100; trashed, archived, document and long-finished tasks are dropped), the projects open videos sit in (names and sub-folders, re-read at most hourly) and the last step move of videos whose step changed (capped per read). A 429 or no connection stops these optional lookups for that read.
   - **Its lock:** everything is written in one `db.tx` under `LOCKS.timeliner`, which the webhook's one-video write also takes. A row written after a read began isn't overwritten by that read, and a removed id stays in `timeliner_removed` so an older read can't write it back. A complete read removes tasks it no longer lists; one stopped by the page cap removes only within the stretch it read.
   - **The webhook makes it faster:** when connected, `task.*` and `project.trashed` messages go to `applyTaskMessage`, which re-reads that one task (or removes it). The message is answered even when the task can't be read; the next timed read catches up.
-  - After every write, a focus whose video left the editor's plate, was given to someone else or is gone ends by itself. A failed read keeps the copy and stores Timeliner's message in `settings.timeliner_sync_error`; a good one sets `timeliner_synced_at`.
+  - After every write, a focus whose video left the editor's plate, was given to someone else or is gone ends by itself. One still running after `FOCUS_STALE_HOURS`, or outside the editor's working hours, stays as it is but isn't counted as editing now (`isFocusStale` in `shared/workflow.ts`). A failed read keeps the copy and stores Timeliner's message in `settings.timeliner_sync_error`; a good one sets `timeliner_synced_at`.
 - **No email:** the app never sends email. Sign-in details are copied by hand.
 
 ## Invariants (break one and something real breaks)

@@ -21,7 +21,7 @@ import { requireManager } from './auth';
 import { HttpError, conflict, notFound, parse, zs } from './http';
 import { applyScriptAction } from './routes/batches';
 import { applyTaskMessage } from './editing';
-import type { Me, TimelinerEvent, TimelinerOutcome, TimelinerStatus } from '../shared/types';
+import { TIMELINER_KEY_PERMISSIONS, type Me, type TimelinerEvent, type TimelinerOutcome, type TimelinerStatus } from '../shared/types';
 import { compressRanges } from '../shared/workflow';
 
 /** uploads deliver batches; task messages (and a trashed project, which takes its tasks with it) keep the editors' videos current between reads */
@@ -29,11 +29,6 @@ const UPLOAD_EVENTS = ['version.uploaded', 'file.uploaded'];
 const VIDEO_EVENTS = ['task.created', 'task.updated', 'task.status_changed', 'task.trashed', 'project.trashed'];
 /** the messages this server subscribes to */
 export const TIMELINER_EVENTS = [...UPLOAD_EVENTS, ...VIDEO_EVENTS];
-/**
- * What the key needs: read the videos (tasks), where they and uploads sit (projects and brands), and who is who
- * (workspace members). Registering the webhook also needs Webhooks; without it the videos are still read on a timer.
- */
-export const KEY_PERMISSIONS = 'Tasks (read), Projects (read), Workspace (read) and Webhooks (read & write)';
 export const HOOK_PATH = '/hooks/timeliner';
 
 // ── Timeliner's API ──────────────────────────────────────────────────────
@@ -95,7 +90,7 @@ export class TimelinerError extends Error {
 /** What Timeliner's error means for the person reading Settings. */
 function explain(status: number, body: Record<string, unknown>): string {
   if (status === 401) return 'Timeliner didn’t accept the API key. Check TIMELINER_API_KEY on the server (Timeliner → Settings → Developers).';
-  if (status === 403 && body.code === 'insufficient_scope') return `The Timeliner key isn’t allowed to ${String(body.requiredScope ?? 'do this').replace(':', ' ')}. In Timeliner → Settings → Developers, make a key with ${KEY_PERMISSIONS}, put it in TIMELINER_API_KEY, and connect again.`;
+  if (status === 403 && body.code === 'insufficient_scope') return `The Timeliner key isn’t allowed to ${String(body.requiredScope ?? 'do this').replace(':', ' ')}. In Timeliner → Settings → Developers, make a key with ${TIMELINER_KEY_PERMISSIONS}, put it in TIMELINER_API_KEY, and connect again.`;
   if (status === 429) return 'Timeliner is limiting how often this key can call it. Try again in a minute.';
   return `Timeliner answered ${status}${typeof body.error === 'string' ? `: ${body.error}` : ''}.`;
 }
@@ -443,10 +438,10 @@ export async function connectTimeliner(ctx: Ctx, api: TimelinerApi, publicUrl: s
 
 /**
  * On start-up: connect once when there's a key and an address but no webhook yet. Already connected, the webhook
- * is switched back on when Timeliner switched it off (it does after deliveries keep failing), and given the
- * messages it lacks, like the video messages for a webhook connected before the videos were read from Timeliner.
- * A key that can't write webhooks can do neither (the timed read still keeps the videos current, just not
- * straight away).
+ * is given the messages it lacks, like the video messages for a webhook connected before the videos were read
+ * from Timeliner (a key that can't write webhooks can't; the timed read still keeps the videos current, just not
+ * straight away). Whether it's switched on is left as Timeliner has it: someone may have paused it there on
+ * purpose, and Settings → Timeliner → Connect switches it back on.
  */
 export async function connectOnStart(ctx: Ctx, log: (m: string) => void): Promise<void> {
   if (!ctx.timeliner || !ctx.publicUrl) return;
@@ -455,11 +450,11 @@ export async function connectOnStart(ctx: Ctx, log: (m: string) => void): Promis
     try {
       const hook = (await ctx.timeliner.webhooks()).find((w) => w.id === s.id);
       const missing = hook ? TIMELINER_EVENTS.filter((e) => !hook.events.includes(e)) : [];
-      if (hook && (!hook.active || missing.length)) {
-        await ctx.timeliner.updateWebhook(hook.id, { events: [...new Set([...hook.events, ...TIMELINER_EVENTS])], active: true });
-        if (!hook.active) log('timeliner: the webhook was switched off in Timeliner (it does that after deliveries keep failing); it’s on again');
-        if (missing.length) log(`timeliner: the webhook now also sends ${missing.join(', ')}`);
+      if (hook && missing.length) {
+        await ctx.timeliner.updateWebhook(hook.id, { events: [...new Set([...hook.events, ...TIMELINER_EVENTS])] });
+        log(`timeliner: the webhook now also sends ${missing.join(', ')}`);
       }
+      if (hook && !hook.active) log('timeliner: the webhook is switched off in Timeliner (left as it is; Connect in Settings → Timeliner switches it back on, and the videos are still read every few minutes)');
     } catch (err) {
       log(`timeliner: couldn't update the webhook (videos are still read every few minutes): ${err instanceof Error ? err.message : String(err)}`);
     }

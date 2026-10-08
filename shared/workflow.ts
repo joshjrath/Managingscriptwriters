@@ -366,3 +366,36 @@ export const TIMELINER_STEP_LABEL: Record<TimelinerStatusGroup, string> = {
 
 /** Videos an editor still has to work on (and so can say they're on). */
 export const isOnPlate = (s: VideoState) => s === 'to_edit' || s === 'revisions';
+
+/** The number in a video's title, for ordering and its script ("Organic 05" → 5); null when it has none. */
+export const titleNumber = (title: string): number | null => { const m = /\d+/.exec(title); return m ? Number(m[0]) : null; };
+
+/** "Organic 26", "Organic 27"… "Organic 30" → "Organic 26–30": titles that differ only by their number, as ranges. */
+export function compressTitles(titles: string[]): string {
+  const groups = new Map<string, { pre: string; post: string; nums: number[]; width: number }>();
+  const plain: string[] = [];
+  for (const raw of titles) {
+    const t = raw.trim();
+    const m = /^(.*?)(\d+)(\D*)$/.exec(t);
+    if (!m) { if (!plain.includes(t)) plain.push(t); continue; }
+    const key = `${m[1]}\u0000${m[3]}`;
+    const g = groups.get(key) ?? { pre: m[1], post: m[3], nums: [], width: 1 };
+    g.nums.push(Number(m[2]));
+    if (m[2].length > 1 && m[2].startsWith('0')) g.width = Math.max(g.width, m[2].length);
+    groups.set(key, g);
+  }
+  return [
+    ...[...groups.values()].map((g) => `${g.pre}${compressRanges(g.nums).replace(/\d+/g, (d) => d.padStart(g.width, '0'))}${g.post}`),
+    ...plain,
+  ].join(', ');
+}
+
+/** An "I'm on this" still running after this long is almost certainly one they forgot to pause. */
+export const FOCUS_STALE_HOURS = 10;
+
+/**
+ * Still marked as editing, but probably not: the current stretch has run FOCUS_STALE_HOURS or more, or the
+ * editor is outside their working hours. The Editors tab shows it as still marked, not as editing now.
+ */
+export const isFocusStale = (f: { state: 'on' | 'paused'; since: string }, offHours: boolean, now: number) =>
+  f.state === 'on' && (offHours || now - Date.parse(f.since) >= FOCUS_STALE_HOURS * 3600_000);

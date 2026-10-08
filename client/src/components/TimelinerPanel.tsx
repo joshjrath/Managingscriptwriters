@@ -8,13 +8,10 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCheck, CircleHelp, Clapperboard, FileText, Plug, RefreshCw, Send } from 'lucide-react';
 import { api, useSave } from '../api';
-import type { EditingBoard, TimelinerEvent, TimelinerStatus } from '../../../shared/types';
+import { TIMELINER_KEY_PERMISSIONS, type EditingBoard, type TimelinerEvent, type TimelinerStatus } from '../../../shared/types';
 import { fmtAgo, fmtStamp } from '../../../shared/format';
 import { useDisplayTz } from './Shell';
 import { Button, Chip, FormError, Panel, useToast } from './ui';
-
-/** the permissions the Timeliner key needs (server/timeliner.ts says the same in its errors) */
-const KEY_PERMISSIONS = 'Tasks (read), Projects (read), Workspace (read) and Webhooks (read & write)';
 
 const OUTCOME: Record<TimelinerEvent['outcome'], { label: string; color: string }> = {
   delivered: { label: 'Delivered', color: 'mint' },
@@ -46,7 +43,7 @@ export function TimelinerPanel() {
         <div className="stack s3">
           <FormError error={err} />
           {!s.keySet ? (
-            <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>In Timeliner → Settings → Developers, create an API key with <b>{KEY_PERMISSIONS}</b>. Add it to the server’s environment as <b>TIMELINER_API_KEY</b>, redeploy, then connect here.</p>
+            <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>In Timeliner → Settings → Developers, create an API key with <b>{TIMELINER_KEY_PERMISSIONS}</b>. Add it to the server’s environment as <b>TIMELINER_API_KEY</b>, redeploy, then connect here.</p>
           ) : !s.webhookUrl ? (
             <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>The server doesn’t know its public address. Set <b>PUBLIC_URL</b> (like https://scripts.example.com) in its environment, then connect.</p>
           ) : s.connected ? (
@@ -58,7 +55,7 @@ export function TimelinerPanel() {
               </div>
             </div>
           ) : (
-            <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>The key is set. Connect to have Timeliner tell this site about uploads, and the batches deliver themselves. The key needs <b>{KEY_PERMISSIONS}</b> in Timeliner (a read-only key can’t connect, but it’s enough to read the editors’ videos).</p>
+            <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>The key is set. Connect to have Timeliner tell this site about uploads, and the batches deliver themselves. The key needs <b>{TIMELINER_KEY_PERMISSIONS}</b> in Timeliner (a read-only key can’t connect, but it’s enough to read the editors’ videos).</p>
           )}
           {s.keySet && <VideosRead />}
           {s.events.length > 0 && (

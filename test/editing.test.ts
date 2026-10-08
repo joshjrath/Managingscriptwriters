@@ -8,9 +8,8 @@ import { buildApp } from '../server/app';
 import type { Db } from '../server/db';
 import type { Ctx } from '../server/core';
 import { connectOnStart, TIMELINER_EVENTS, TimelinerError, type TimelinerApi, type TimelinerTask } from '../server/timeliner';
-import { compressTitles } from '../server/editing';
 import { onShift } from '../shared/cities';
-import { isOnPlate, videoState } from '../shared/workflow';
+import { compressTitles, isFocusStale, isOnPlate, videoState } from '../shared/workflow';
 import type { BatchDetail, EditingBoard, EditingVideo, EditorRow, MyEditing } from '../shared/types';
 import { freshDb } from './db';
 
@@ -207,6 +206,17 @@ describe('where a video stands', () => {
     expect(compressTitles(['Organic 26', 'Organic 27', 'Organic 28', 'Organic 30', 'Ad 09', 'Ad 10', 'Teaser'])).toBe('Organic 26–28, 30, Ad 09–10, Teaser');
   });
 
+  it('takes an I’m on this left running for still marked, not editing now', () => {
+    const since = '2026-10-08T03:00:00Z';
+    const after = (hours: number) => Date.parse(since) + hours * 3600_000;
+    expect(isFocusStale({ state: 'on', since }, false, after(9.9))).toBe(false);
+    expect(isFocusStale({ state: 'on', since }, false, after(10))).toBe(true);
+    // outside their working hours
+    expect(isFocusStale({ state: 'on', since }, true, after(1))).toBe(true);
+    // paused is paused, however long
+    expect(isFocusStale({ state: 'paused', since }, true, after(20))).toBe(false);
+  });
+
   it('knows who is within their working hours, where they are', () => {
     expect(onShift([9, 18], 'Europe/Lisbon', NOW)).toBe(true); // 2:40 PM
     expect(onShift([9, 18], 'Asia/Manila', NOW)).toBe(false); // 9:40 PM
@@ -266,7 +276,11 @@ describe('reading Timeliner', () => {
     expect(leoRow.lastFinished).toEqual({ title: 'Organic 01', at: '2026-10-07T17:15:00.000Z', onSite: false });
     expect(leoRow.scripts.map((s) => s.href)).toEqual(['https://docs.example/organic-oct6-edited']);
     expect(editor(b, 'Maya Reyes').dueToday).toBe(1);
-    expect(b.unassigned).toEqual([{ folder: 'My Videos › Organic', clientName: 'Joshua Shalimar', count: 2, titles: 'Organic 07–08', due: '2026-10-09' }]);
+    // with the document whoever gets them will cut from
+    expect(b.unassigned).toEqual([{
+      folder: 'My Videos › Organic', clientName: 'Joshua Shalimar', count: 2, titles: 'Organic 07–08', due: '2026-10-09', videoTitles: ['Organic 07', 'Organic 08'],
+      scripts: [{ href: 'https://docs.example/organic-oct6-edited', name: null, edited: true, ranges: '1–8', batchId: ids.oct6, batchTitle: 'Organic · Oct 6' }],
+    }]);
     expect(b.unknownAssignees).toEqual([{ name: 'Gus Ghost', email: 'ghost@freelance.test', count: 1 }]);
   });
 
@@ -388,22 +402,27 @@ describe('Timeliner’s messages', () => {
     hooks = [{ id: 'wh_1', url: 'https://scripts.example.com/hooks/timeliner', events: ['version.uploaded', 'file.uploaded'], active: true }];
     const log: string[] = [];
     await connectOnStart(ctx, (m) => log.push(m));
-    expect(calls.at(-1)).toBe('update wh_1 version.uploaded,file.uploaded,task.created,task.updated,task.status_changed,task.trashed,project.trashed active');
+    expect(calls.at(-1)).toBe('update wh_1 version.uploaded,file.uploaded,task.created,task.updated,task.status_changed,task.trashed,project.trashed');
     readOnly = true;
     await connectOnStart(ctx, (m) => log.push(m));
     expect(log.at(-1)).toMatch(/^timeliner: couldn't update the webhook/);
     readOnly = false;
   });
 
-  it('switches the webhook back on at start-up when Timeliner switched it off', async () => {
+  it('leaves a webhook switched off in Timeliner as it is at start-up, and says so', async () => {
+    // paused in Timeliner (by someone, or by Timeliner after failed deliveries): only Connect in Settings switches it back on
     hooks = [{ id: 'wh_1', url: 'https://scripts.example.com/hooks/timeliner', events: [...TIMELINER_EVENTS], active: false }];
     const log: string[] = [];
     const before = calls.length;
     await connectOnStart(ctx, (m) => log.push(m));
-    expect(calls.slice(before)).toEqual([`update wh_1 ${TIMELINER_EVENTS.join(',')} active`]);
-    expect(log).toEqual(['timeliner: the webhook was switched off in Timeliner (it does that after deliveries keep failing); it’s on again']);
+    expect(calls.length).toBe(before);
+    expect(log).toEqual([expect.stringMatching(/^timeliner: the webhook is switched off in Timeliner \(left as it is/)]);
+    // missing messages are still added, without switching it on
+    hooks = [{ ...hooks[0], events: ['version.uploaded', 'file.uploaded'] }];
+    await connectOnStart(ctx, (m) => log.push(m));
+    expect(calls.slice(before)).toEqual([`update wh_1 ${TIMELINER_EVENTS.join(',')}`]);
     // on and complete: left alone
-    hooks = [{ ...hooks[0], active: true }];
+    hooks = [{ ...hooks[0], events: [...TIMELINER_EVENTS], active: true }];
     await connectOnStart(ctx, (m) => log.push(m));
     expect(calls.length).toBe(before + 1);
   });
@@ -616,5 +635,80 @@ describe('reading Timeliner while it changes', () => {
     const r = await hook('project.trashed', { projectId: 'p_bright', brandId: 'b_bright', name: 'Spring campaign' });
     expect([r.statusCode, JSON.parse(r.body).outcome]).toEqual([200, 'video']);
     expect(editor(await board(), 'Priya Nair').videos.map((v) => v.title)).not.toContain('Video 01');
+  });
+});
+
+// ── what ends a focus ────────────────────────────────────────────────────
+
+describe('what ends what an editor is on', () => {
+  const leoFocus = () => db.query<{ task_id: string }>(`select f.task_id from editor_focus f join users u on u.id = f.user_id where u.email = 'leo@scale.test'`);
+
+  it('switches to another video, ending the one they were on', async () => {
+    const leos = { assigneeIds: ['m_leo'], internalDeadline: '2026-10-12' };
+    tasks = [...tasks, video('t_f1', 'Organic 41', 'toDo', leos), video('t_f2', 'Organic 42', 'toDo', leos), video('t_f3', 'Organic 43', 'toDo', leos)];
+    for (const id of ['t_f1', 't_f2', 't_f3']) expect((await hook('task.created', { taskId: id, projectId: 'p_mine' })).statusCode).toBe(200);
+    later(1);
+    expect((await focus(leo, 't_f1', 'start')).status).toBe(200);
+    later(10);
+    const r = await focus(leo, 't_f2', 'start');
+    expect(r.status).toBe(200);
+    // a fresh start on the new one; the old one just ends (not paused, not done)
+    expect((r.body as MyEditing).focus).toMatchObject({ video: { id: 't_f2' }, state: 'on', since: clock.toISOString(), workedSeconds: 0, pausedAt: null });
+    expect(await leoFocus()).toEqual([{ task_id: 't_f2' }]);
+    expect(find((r.body as MyEditing).toEdit, 'Organic 41')).toMatchObject({ doneAt: null });
+  });
+
+  it('ends it when Timeliner gives the video to someone else', async () => {
+    const at = later(5);
+    tasks = tasks.map((t) => (t.id === 't_f2' ? { ...t, assigneeIds: ['m_maya'], updatedAt: at } : t));
+    expect((await hook('task.updated', { taskId: 't_f2', projectId: 'p_mine' })).statusCode).toBe(200);
+    // still to be edited, but not Leo's any more
+    expect(await leoFocus()).toEqual([]);
+    expect((await mine(leo)).focus).toBeNull();
+    expect((await mine(maya)).focus).toBeNull();
+  });
+
+  it('ends it when the video is trashed in Timeliner', async () => {
+    later(1);
+    expect((await focus(leo, 't_f1', 'start')).status).toBe(200);
+    tasks = tasks.map((t) => (t.id === 't_f1' ? { ...t, status: 'trashed' } : t));
+    expect((await hook('task.trashed', { taskId: 't_f1', projectId: 'p_mine' })).statusCode).toBe(200);
+    expect(await leoFocus()).toEqual([]);
+  });
+
+  it('takes a done mark back when they start the video again', async () => {
+    later(1);
+    expect((await focus(leo, 't_f3', 'done')).status).toBe(200);
+    expect(find((await mine(leo)).waiting, 'Organic 43')).toMatchObject({ doneAt: clock.toISOString() });
+    later(1);
+    const r = await focus(leo, 't_f3', 'start');
+    expect(r.status).toBe(200);
+    const m = r.body as MyEditing;
+    expect(find(m.toEdit, 'Organic 43')).toMatchObject({ doneAt: null });
+    expect(m.waiting.map((v) => v.title)).not.toContain('Organic 43');
+    expect(await db.one(`select 1 from editing_done where task_id = 't_f3'`)).toBeUndefined();
+  });
+
+  it('doesn’t count one left running as editing now, or put it first', async () => {
+    // both work around the clock, so only the time on it decides
+    await db.query(`update users set work_start = 0, work_end = 24 where email in ('leo@scale.test', 'maya@scale.test')`);
+    let b = await board();
+    expect(b.totals.editingNow).toBe(1);
+    expect(b.editors[0].name).toBe('Leo Martins');
+
+    // ten hours later, Leo is still on Organic 43, and Maya starts the video she was given
+    later(10 * 60);
+    expect((await focus(maya, 't_f2', 'start')).status).toBe(200);
+    b = await board();
+    expect(b.totals.editingNow).toBe(1);
+    expect(b.editors.map((e) => [e.name, e.focus?.state ?? null]).slice(0, 2)).toEqual([['Maya Reyes', 'on'], ['Leo Martins', 'on']]);
+
+    // a fresh stretch outside their working hours (9 to 6 in Lisbon; the middle of the night there) is still marked, not editing now
+    await db.query(`update users set work_start = 9, work_end = 18 where email = 'leo@scale.test'`);
+    expect((await focus(leo, 't_f3', 'pause')).status).toBe(200);
+    expect((await focus(leo, 't_f3', 'resume')).status).toBe(200);
+    b = await board();
+    expect(b.totals.editingNow).toBe(1);
+    expect(editor(b, 'Leo Martins')).toMatchObject({ offHours: true, focus: { state: 'on' } });
   });
 });

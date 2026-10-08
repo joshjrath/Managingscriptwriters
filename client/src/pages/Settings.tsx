@@ -8,7 +8,7 @@ import { useQuery } from '@tanstack/react-query';
 import { api, useSave } from '../api';
 import type { Editor, Settings, UserSummary } from '../../../shared/types';
 import { computeDeadlines, DEFAULT_RULES, isValidTimeZone } from '../../../shared/dates';
-import { fmtCutoff, fmtLong, fmtStamp, plural } from '../../../shared/format';
+import { fmtCutoff, fmtHour, fmtLong, fmtStamp, plural } from '../../../shared/format';
 import { CITIES, cityLabel, findCity, shiftLength, shiftOf, timeZoneList, zoneOffset } from '../../../shared/cities';
 import { ACCENT_LABEL, ACCENTS, darkTextContrast, DEFAULT_PALETTE, HEX, MIN_ACCENT_CONTRAST, PALETTES, resolveTheme, SURFACE_LABEL, SURFACES, surfaceSwatch, type Accent, type WorkspaceTheme } from '../../../shared/palettes';
 import { applyTheme, restoreTheme } from '../theme';
@@ -18,7 +18,6 @@ import { PageHeader, useBoot } from '../components/Shell';
 import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, Term, useFieldId, useToast } from '../components/ui';
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
-const fmtHour = (h: number) => `${((h + 11) % 12) + 1}:00 ${h < 12 ? 'AM' : 'PM'}`;
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 // the common head-office zones first, then every zone there is
 const ZONES = ['America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles', 'America/Toronto', 'Europe/London', 'Europe/Berlin', 'Asia/Dubai', 'Asia/Kolkata', 'Asia/Singapore', 'Australia/Sydney'];
@@ -521,7 +520,7 @@ function EditorsPanel() {
               <Avatar name={e.name} id={100000 + e.id} />
               <div className="body">
                 <div className="title">{e.name}</div>
-                <div className="meta">{e.city} · {e.workHours[1] - e.workHours[0] >= 24 ? 'Around the clock' : `${fmtHour(e.workHours[0])} to ${fmtHour(e.workHours[1] % 24)}`}</div>
+                <div className="meta">{e.city} · {e.workHours[1] - e.workHours[0] >= 24 ? 'Around the clock' : `${fmtHour(e.workHours[0], true)} to ${fmtHour(e.workHours[1] % 24, true)}`}</div>
               </div>
             </div>
             <div className="side">
@@ -614,9 +613,9 @@ function PlaceFields({ city, tz, hours, f, optional, onChange }: {
       {placed && (
         <Field label="Working hours" htmlFor={ids.h} error={f.workEnd ?? f.workStart} help={`Their local time · ${shiftLength(shiftOf(hours[0], hours[1]))}. The same start and end means around the clock.`}>
           <div className="row-flex s2" style={{ flexWrap: 'nowrap' }}>
-            <select className="select" id={ids.h} value={hours[0]} onChange={(e) => onChange({ hours: [Number(e.target.value), hours[1]] })}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h)}</option>)}</select>
+            <select className="select" id={ids.h} value={hours[0]} onChange={(e) => onChange({ hours: [Number(e.target.value), hours[1]] })}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h, true)}</option>)}</select>
             <span className="muted">to</span>
-            <select className="select" aria-label="Working hours end" value={hours[1] % 24} onChange={(e) => onChange({ hours: [hours[0], Number(e.target.value)] })}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h)}</option>)}</select>
+            <select className="select" aria-label="Working hours end" value={hours[1] % 24} onChange={(e) => onChange({ hours: [hours[0], Number(e.target.value)] })}>{HOURS.map((h) => <option key={h} value={h}>{fmtHour(h, true)}</option>)}</select>
           </div>
         </Field>
       )}

@@ -786,6 +786,13 @@ export interface TimelinerEvent {
   batch: { id: number; title: string; clientName: string } | null;
 }
 
+/**
+ * What the Timeliner key needs: read the videos (tasks), where they and uploads sit (projects and brands), and who
+ * is who (workspace members). Registering the webhook also needs Webhooks; without it the videos are still read on
+ * a timer. Settings → Timeliner and the server's errors both say this.
+ */
+export const TIMELINER_KEY_PERMISSIONS = 'Tasks (read), Projects (read), Workspace (read) and Webhooks (read & write)';
+
 /** Settings → Timeliner. */
 export interface TimelinerStatus {
   /** TIMELINER_API_KEY is set on the server */
@@ -858,6 +865,7 @@ export interface EditorFocus {
 export interface EditorPlate {
   toEdit: number;
   revisions: number;
+  /** in review in Timeliner, or marked done here: waiting on the managers either way */
   inReview: number;
   withClient: number;
   /** approved in the last 7 days */
@@ -901,17 +909,27 @@ export interface EditingSync {
 export interface EditingBoard {
   sync: EditingSync;
   totals: {
+    /** on a video right now; one left running (isFocusStale in shared/workflow.ts) isn't counted */
     editingNow: number;
     paused: number;
     dueToday: number;
     revisions: number;
-    /** in review with Josh and Joshua (Timeliner's internal review steps) */
+    /** in review with Josh and Joshua (Timeliner's internal review steps), anyone's, or marked done here */
     waitingOnYou: number;
     notAssigned: number;
   };
   editors: EditorRow[];
   /** videos still to be edited in Timeliner with nobody assigned, by folder */
-  unassigned: { folder: string; clientName: string | null; count: number; titles: string; due: ISODate | null }[];
+  unassigned: {
+    folder: string; clientName: string | null; count: number;
+    /** "Organic 26–30" */
+    titles: string;
+    due: ISODate | null;
+    /** each video's title, in number order, for its square */
+    videoTitles: string[];
+    /** the script documents they're cut from, as far as matched */
+    scripts: ScriptDoc[];
+  }[];
   /** people assigned in Timeliner whose email doesn't match anyone on the site */
   unknownAssignees: { name: string; email: string | null; count: number }[];
 }
