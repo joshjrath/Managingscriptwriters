@@ -20,7 +20,7 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-09-28-potential-clients': ['managers'], '2026-09-28-plan-later': ['managers'], '2026-09-28-admin-name': ['managers'],
   '2026-09-28-calendar-drag': ['managers'], '2026-09-28-team': ['managers'], '2026-09-28-signin-details': ['managers'],
   '2026-10-07-my-work-redesign': ['writers', 'managers'], '2026-09-28-written-counter': ['writers', 'managers'], '2026-10-08-writers-never-miss': ['writers', 'managers'],
-  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'],
+  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -34,6 +34,19 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-08-due-tiles',
+    date: '2026-10-08',
+    title: 'Work due by day, redrawn as glowing day tiles',
+    summary: 'The Overview chart is now a row of day tiles that fill up against a full day’s work, in the same gradient style as the cards above it.',
+    changes: [
+      { tag: 'improved', text: 'Each of the next 14 days is a tile, with overdue work in its own salmon tile and today always in yellow. A tile fills against a full day’s work: everyone’s scripts per day added up (yours, on your own Overview). So a quiet day still shows how full it is, instead of a sliver next to the busiest day.' },
+      { tag: 'new', text: 'A day with more work than a full day glows pink and says how far over it is, like “+33 over”. The busiest of those gets a spinning border. With no daily capacity set, tiles fill against the busiest day instead.' },
+      { tag: 'improved', text: 'The batches behind a day sit under the tiles as cards, with their writers and a stage strip; overdue ones say how many days late they are. Today’s are shown until you pick another day.' },
+      { tag: 'improved', text: 'The Final delivery / Drafts switch slides between the two and shows each count. The chart now runs the full width of the Overview, with Upcoming shoots in columns right below it.' },
+      { tag: 'improved', text: 'Set each writer’s scripts per day in Settings → Team; the chart’s “Full tile =” chip links there and says if anyone isn’t counted yet.' },
+    ],
+  },
   {
     id: '2026-10-08-feedback-match-fix',
     date: '2026-10-08',

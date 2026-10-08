@@ -330,6 +330,18 @@ describe('dashboard', () => {
     expect(kinds).toEqual(expect.arrayContaining(['overdue', 'blocked', 'unassigned', 'revisions', 'date_review']));
     expect(d.due.final[0].date).toBe('overdue');
     expect(d.due.final).toHaveLength(15);
+    // each batch on the chart says which deadline it's counted against and whose scripts are in the count
+    const items = [...d.due.final, ...d.due.draft].flatMap((x) => x.items.map((it) => ({ ...it, day: x.date })));
+    expect(items.length).toBeGreaterThan(0);
+    for (const it of items) {
+      expect(it.dueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      if (it.day === 'overdue') expect(it.dueDate < d.clock.today).toBe(true);
+      else expect(it.dueDate).toBe(it.day);
+      expect(new Set(it.writerIds).size).toBe(it.writerIds.length);
+    }
+    const people = new Set(Object.values(ids));
+    expect(items.flatMap((it) => it.writerIds).every((id) => people.has(id))).toBe(true);
+    expect(items.some((it) => it.writerIds.length > 0)).toBe(true);
     // numbers come from records: the chart total equals undelivered scripts due in the window
     const flagged = await manager.get('/api/batches?flag=blocked');
     expect(flagged.body.batches.map((b: any) => b.id)).toEqual([batchId]);

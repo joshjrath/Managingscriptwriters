@@ -8,7 +8,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ArrowRight, Camera, CheckCheck, ChevronDown, Send, Sparkles } from 'lucide-react';
 import { api } from '../api';
-import type { Dashboard } from '../../../shared/types';
+import type { Dashboard, WriterLoad } from '../../../shared/types';
 import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
 import { isManager, ROLE_LABEL, scriptsLabel } from '../../../shared/workflow';
 import { PipLegend, TodayBump, WritingFeed } from '../components/WritingPulse';
@@ -17,7 +17,7 @@ import { CalendarShootsPanel } from '../components/CalendarShoots';
 import { TodayPill } from '../components/TodayPill';
 import { StatCards } from '../components/StatCards';
 import { PageHeader, useBoot, useNewWork, useDisplayTz } from '../components/Shell';
-import { DueChart } from '../components/DueChart';
+import { DueChart, type DueCapacity } from '../components/DueChart';
 import { AttentionRow, BatchItem } from '../components/BatchBits';
 import { Avatar, Chip, DateTile, Empty, ErrorState, Loading, Panel } from '../components/ui';
 
@@ -77,7 +77,7 @@ export function Overview() {
           <StatCards d={d} />
 
           <div className="dash ov-dash ov-first">
-            <Panel className="a-chart"><DueChart draft={d.due.draft} final={d.due.final} today={clock.today} /></Panel>
+            <Panel className="a-chart"><DueChart draft={d.due.draft} final={d.due.final} today={clock.today} capacity={dueCapacity(d.workload)} mine={d.scope === 'mine'} canEdit={isManager(me.role)} /></Panel>
             <Panel className="a-shoots" title="Upcoming shoots" sub="next 45 days">
               {!d.upcomingShoots.length ? (
                 <Empty boxed icon={<Camera />} title="No shoots scheduled" action={isManager(me.role) ? <button className="btn sm" onClick={() => openNew('shoot')}>Schedule a shoot</button> : undefined} />
@@ -191,4 +191,11 @@ export function Overview() {
       )}
     </>
   );
+}
+
+/** A full day on the chart: everyone's scripts per day added up (one decimal), and the writers with none set. */
+function dueCapacity(workload: WriterLoad[]): DueCapacity {
+  const perDay = Math.round(workload.reduce((n, w) => n + (w.capacityPerDay ?? 0), 0) * 10) / 10;
+  const missing = workload.filter((w) => w.capacityPerDay == null && w.role === 'writer').map((w) => w.name.split(/\s+/)[0]);
+  return { perDay: perDay > 0 ? perDay : null, missing };
 }

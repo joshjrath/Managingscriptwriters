@@ -435,6 +435,10 @@ export interface DueBucketItem {
   clientName: string;
   count: number;
   byCategory: Record<DueCategory, number>;
+  /** the deadline this batch is counted against (an overdue one is before today) */
+  dueDate: ISODate;
+  /** writers with scripts in this count */
+  writerIds: number[];
 }
 
 export type DueCategory = 'not_started' | 'writing' | 'in_review' | 'to_deliver';

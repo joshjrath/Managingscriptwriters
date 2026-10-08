@@ -461,7 +461,7 @@ function PersonDialog({ user, team = [], preset, onCreated, onClose }: { user?: 
             {(me.role === 'owner' || role === 'owner') && <option value="owner">Admin</option>}
           </select>
         </Field>
-        {role !== 'editor' && <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates and over-capacity warnings."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>}
+        {role !== 'editor' && <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates, over-capacity warnings and what counts as a full day on the Overview chart."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>}
         <PlaceFields optional city={city} tz={tz} hours={hours} f={f}
           onChange={(v) => { if (save.error) save.reset(); if (v.city !== undefined) setCity(v.city); if (v.tz !== undefined) setTz(v.tz); if (v.hours) setHours(v.hours); }} />
         <Field label={user ? 'Reset password' : 'Temporary password'} optional={!!user} htmlFor={ids.p} error={f.password} help={user ? 'Leave empty to keep their password. Setting one signs them out everywhere, and you’ll get a message to send them.' : 'At least 10 characters. After saving you’ll get a ready-to-send message with this and the sign-in link.'}>
