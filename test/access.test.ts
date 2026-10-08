@@ -15,9 +15,9 @@ import { freshDb } from './db';
 
 /**
  * public: no sign-in needed · user: anyone signed in (the route checks ownership itself)
- * manager: admins and managers · admin: admins only · cleared: an admin cleared for the Control Center
+ * manager: admins and managers · admin: admins only
  */
-type Access = 'public' | 'user' | 'manager' | 'admin' | 'cleared';
+type Access = 'public' | 'user' | 'manager' | 'admin';
 
 const ACCESS: Record<string, Access> = {
   'GET /healthz': 'public',
@@ -25,10 +25,6 @@ const ACCESS: Record<string, Access> = {
   'POST /api/auth/login': 'public',
   'POST /api/auth/logout': 'public',
   'POST /api/auth/setup': 'public',
-  'GET /api/control/status': 'public',
-  'POST /api/control/authorize': 'public',
-  'POST /api/control/lock': 'public',
-  'GET /api/control/world': 'cleared',
 
   'POST /api/me/password': 'user',
   'POST /api/me/whats-new': 'user',
@@ -189,7 +185,7 @@ describe('route access', () => {
       if (access === 'public') continue;
       const [method, url] = route.split(' ');
       const status = await call(method, concrete(url));
-      if (status !== 401 && !(access === 'cleared' && status === 403)) let_in.push(`${route} → ${status}`);
+      if (status !== 401) let_in.push(`${route} → ${status}`);
     }
     expect(let_in).toEqual([]);
   });
@@ -197,7 +193,7 @@ describe('route access', () => {
   it('refuses writers on every manager and admin route', async () => {
     const let_in: string[] = [];
     for (const [route, access] of Object.entries(ACCESS)) {
-      if (access !== 'manager' && access !== 'admin' && access !== 'cleared') continue;
+      if (access !== 'manager' && access !== 'admin') continue;
       const [method, url] = route.split(' ');
       const status = await call(method, concrete(url), writer);
       if (status !== 403) let_in.push(`${route} → ${status}`);
@@ -208,7 +204,7 @@ describe('route access', () => {
   it('refuses managers on every admin-only route', async () => {
     const let_in: string[] = [];
     for (const [route, access] of Object.entries(ACCESS)) {
-      if (access !== 'admin' && access !== 'cleared') continue;
+      if (access !== 'admin') continue;
       const [method, url] = route.split(' ');
       const status = await call(method, concrete(url), manager);
       if (status !== 403) let_in.push(`${route} → ${status}`);

@@ -1,4 +1,4 @@
-import { lazy, StrictMode, Suspense, useEffect, type ReactElement } from 'react';
+import { StrictMode, useEffect, type ReactElement } from 'react';
 import { isManager } from '../../shared/workflow';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
@@ -27,13 +27,9 @@ import { SettingsPage } from './pages/Settings';
 import { MasterLogPage } from './pages/MasterLog';
 import { WhatsNewPage } from './pages/WhatsNew';
 import { MotionProvider } from './motion';
-import { loadControlCenter } from './control/leave';
 import { applyRememberedTheme, applyTheme } from './theme';
 
 applyRememberedTheme();
-
-// The Control Center is its own world (and brings three.js), so it loads only when visited.
-const ControlCenter = lazy(loadControlCenter);
 
 function Gate() {
   const status = useQuery({ queryKey: ['auth-status'], queryFn: () => api<AuthStatus>('/api/auth/status'), staleTime: Infinity });
@@ -106,7 +102,6 @@ createRoot(document.getElementById('root')!).render(
         <ToastProvider>
           <BrowserRouter>
             <Routes>
-              <Route path="/control-center/*" element={<Suspense fallback={<div style={{ position: 'fixed', inset: 0, background: '#010206' }} />}><ControlCenter /></Suspense>} />
               <Route path="*" element={<Gate />} />
             </Routes>
           </BrowserRouter>

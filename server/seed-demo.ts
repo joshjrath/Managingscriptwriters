@@ -46,7 +46,7 @@ async function seed(db: Db, now: Date): Promise<boolean> {
     ids[name.split(' ')[0].toLowerCase()] = r!.id;
   }
   await db.query(`update settings set is_demo = true where id = 1`);
-  // where everyone works from, so the Control Center runs on the demo team
+  // where everyone on the demo team works from
   for (const [key, city, hours] of [['josh', 'Toronto', [9, 18]], ['sarah', 'London', [9, 18]], ['marcus', 'Cape Town', [8, 17]], ['priya', 'Bengaluru', [10, 19]], ['leo', 'Mexico City', [9, 18]]] as const) {
     const c = findCity(city)!;
     await db.query(`update users set city = $2, city_code = $3, country = $4, lat = $5, lon = $6, timezone = $7, work_start = $8, work_end = $9 where id = $1`,

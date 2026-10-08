@@ -92,8 +92,11 @@ export async function loadSubmissionData(db: Db, batchIds: number[]): Promise<Su
        from reviews r join users u on u.id = r.reviewed_by left join files f on f.id = r.file_id
       where r.batch_id in (${inList(batchIds, p3)}) order by r.id`, p3,
   );
+  // which scripts each decision covered, by id (numbers repeat from batch to batch)
+  const reviewScripts = new Map<number, Set<number>>();
   const reviews: ReviewRecord[] = revs.map((r) => {
     const ids = typeof r.script_ids === 'string' ? (JSON.parse(r.script_ids) as number[]) : r.script_ids;
+    reviewScripts.set(r.id, new Set(ids.map(Number)));
     return {
       id: r.id, batchId: r.batch_id, submissionId: r.submission_id, action: r.action, note: r.note, url: r.url, fileId: r.file_id,
       fileName: r.file_name, fileSize: r.file_size, reviewedByName: r.reviewed_by_name, createdAt: r.created_at,
@@ -126,10 +129,18 @@ export async function loadSubmissionData(db: Db, batchIds: number[]): Promise<Su
     }
     const state: SubmissionState = !currentIds.length ? 'superseded' : SUBMISSION_STATE[documentState(currentIds.map((id) => numbers.get(id)!.status))];
     const num = (ids: number[]) => ids.map((id) => numbers.get(id)!.number).sort((a, b) => a - b);
-    // the send-back this document answers: the latest one on any of its scripts before it was sent
-    const mineNums = new Set(num(scriptIds));
+    // the send-back this document answers: the latest one on these same scripts (same batch, by id)
+    // before it was sent, provided no earlier document already answered it
+    const mine = new Set(scriptIds.map(Number));
     const sentAt = new Date(s.created_at).getTime();
-    const fb = [...reviews].reverse().find((r) => r.action === 'revisions' && new Date(r.createdAt).getTime() <= sentAt && r.scriptNumbers.some((x) => mineNums.has(x)));
+    const covers = (r: ReviewRecord) => r.batchId === s.batch_id && [...(reviewScripts.get(r.id) ?? [])].some((id) => mine.has(id));
+    let fb = [...reviews].reverse().find((r) => r.action === 'revisions' && covers(r) && new Date(r.createdAt).getTime() <= sentAt);
+    if (fb) {
+      const at = new Date(fb.createdAt).getTime();
+      const answered = subs.some((x) => x.id !== s.id && x.id < s.id && x.batch_id === s.batch_id && new Date(x.created_at).getTime() >= at
+        && (bySub.get(x.id) ?? []).some((id) => mine.has(Number(id))));
+      if (answered) fb = undefined;
+    }
     return {
       afterFeedback: fb ? { note: fb.note, byName: fb.reviewedByName, at: fb.createdAt } : null,
       id: s.id, batchId: s.batch_id, writerId: s.writer_id, writerName: s.writer_name, submittedByName: s.submitted_by_name, version: s.version,

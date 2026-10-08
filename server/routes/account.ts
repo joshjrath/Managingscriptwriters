@@ -147,7 +147,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
 
   /**
    * The Admin role can only be given, taken away or edited by the Admin. Managers manage the team, but
-   * the admin-only tools (Master log, View as, Recording mode, the Control Center) only mean something
+   * the admin-only tools (Master log, View as, Recording mode, Editors) only mean something
    * if a manager can't become an admin, or sign in as one, on their own.
    */
   function guardAdmin(me: Me, target: { role: Role } | null, nextRole?: Role) {

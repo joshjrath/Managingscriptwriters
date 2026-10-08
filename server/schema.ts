@@ -536,7 +536,7 @@ create table work_seen (
   primary key (user_id, batch_id)
 );
 `,
-  // 26 · the Master log and the Control Center read the newest changes across the whole workspace, and each person's latest
+  // 26 · the Master log reads the newest changes across the whole workspace, or one person's newest
   `
 create index if not exists activity_created_idx on activity (created_at desc);
 create index if not exists activity_actor_idx on activity (actor_id, created_at desc);

@@ -1,4 +1,4 @@
-// Cities a team member can be placed in on the Control Center globe: name,
+// Cities a team member or editor can be placed in: name,
 // three-letter code, country, latitude, longitude and IANA timezone.
 
 export interface City {

@@ -311,6 +311,18 @@ describe('dashboard', () => {
     expect(kinds).toEqual(expect.arrayContaining(['overdue', 'blocked', 'unassigned', 'revisions', 'date_review']));
     expect(d.due.final[0].date).toBe('overdue');
     expect(d.due.final).toHaveLength(15);
+    // each batch on the chart says which deadline it's counted against and whose scripts are in the count
+    const items = [...d.due.final, ...d.due.draft].flatMap((x) => x.items.map((it) => ({ ...it, day: x.date })));
+    expect(items.length).toBeGreaterThan(0);
+    for (const it of items) {
+      expect(it.dueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      if (it.day === 'overdue') expect(it.dueDate < d.clock.today).toBe(true);
+      else expect(it.dueDate).toBe(it.day);
+      expect(new Set(it.writerIds).size).toBe(it.writerIds.length);
+    }
+    const people = new Set(Object.values(ids));
+    expect(items.flatMap((it) => it.writerIds).every((id) => people.has(id))).toBe(true);
+    expect(items.some((it) => it.writerIds.length > 0)).toBe(true);
     // numbers come from records: the chart total equals undelivered scripts due in the window
     const flagged = await manager.get('/api/batches?flag=blocked');
     expect(flagged.body.batches.map((b: any) => b.id)).toEqual([batchId]);
@@ -1292,17 +1304,6 @@ describe('view as and recording mode', () => {
     } finally {
       await manager.patch(`/api/users/${o2Id}`, { role: 'owner' });
     }
-  });
-
-  it('locks the Control Center from a page whose practice copy is gone', async () => {
-    const on = await manager.post('/api/admin/recording/start');
-    const headers = { 'x-scale-recording': on.body.recording.startedAt };
-    const authorize = await call('POST', '/api/control/authorize', { cookie: manager.cookie, body: { password: 'correct-horse-battery' }, headers });
-    expect(authorize.status).toBe(200);
-    await manager.post('/api/admin/recording/stop');
-    // locking only changes the real sign-in, so the stale recording page can still do it
-    expect((await call('POST', '/api/control/lock', { cookie: manager.cookie, body: {}, headers })).status).toBe(200);
-    expect((await manager.get('/api/control/status')).body.cleared).toBe(false);
   });
 
   it('cleans up only its own leftover practice copies, never other schemas', async () => {
@@ -2300,5 +2301,28 @@ describe('overview cards', () => {
     if (c.awaitingReviewScripts > 0) expect(typeof c.oldestInReviewAt).toBe('string');
     else expect(c.oldestInReviewAt).toBeNull();
     expect(c.lastReviewAt === null || typeof c.lastReviewAt === 'string').toBe(true);
+  });
+});
+
+describe('revised after feedback', () => {
+  it('only quotes a send-back on the same scripts in the same batch, and only for the version that answered it', async () => {
+    const a = await manager.post('/api/batches', { clientId: acmeId, title: 'Feedback batch A', targetCount: 2, split: [{ writerId: ids.sarah, count: 2 }] });
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Feedback batch B', targetCount: 2, split: [{ writerId: ids.marcus, count: 2 }] });
+    const sa = (await manager.get(`/api/batches/${a.body.batchId}`)).body.scripts.map((s: any) => s.id);
+    const sb = (await manager.get(`/api/batches/${b.body.batchId}`)).body.scripts.map((s: any) => s.id);
+    const a1 = await sarah.post(`/api/batches/${a.body.batchId}/submissions`, { scriptIds: sa, url: 'https://docs.google.com/document/d/fb-a1' });
+    await manager.post(`/api/batches/${a.body.batchId}/review`, { action: 'revisions', scriptIds: sa, submissionId: a1.body.submissionId, note: 'Only for batch A' });
+    // batch B has scripts 1–2 too, but nobody gave it feedback
+    const b1 = await marcus.post(`/api/batches/${b.body.batchId}/submissions`, { scriptIds: sb, url: 'https://docs.google.com/document/d/fb-b1' });
+    // the Review queue loads every batch at once, which is where the numbers used to collide
+    const queue = (await manager.get('/api/review')).body;
+    const subB = queue.waiting.find((g: any) => g.submission?.id === b1.body.submissionId).submission;
+    expect(subB.afterFeedback).toBeNull();
+    // batch A's revised version answers it; a newer version after that, with no new feedback, doesn't repeat it
+    const a2 = await sarah.post(`/api/batches/${a.body.batchId}/submissions`, { scriptIds: sa, url: 'https://docs.google.com/document/d/fb-a2' });
+    const a3 = await sarah.post(`/api/batches/${a.body.batchId}/submissions`, { scriptIds: sa, url: 'https://docs.google.com/document/d/fb-a3' });
+    const subsA = (await manager.get(`/api/batches/${a.body.batchId}`)).body.submissions;
+    expect(subsA.find((s: any) => s.id === a2.body.submissionId).afterFeedback).toMatchObject({ note: 'Only for batch A' });
+    expect(subsA.find((s: any) => s.id === a3.body.submissionId).afterFeedback).toBeNull();
   });
 });

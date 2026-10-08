@@ -107,8 +107,7 @@ export function setSessionCookie(reply: FastifyReply, token: string, secure: boo
 // ── sign-in throttling (per process) ─────────────────────────────────────
 // Wrong passwords are counted per address and account (8 in 15 minutes) and
 // per account from any address (30): the address comes from a proxy header
-// and can be forged, the account can't. Used by sign-in and Control Center
-// clearance, which check the same passwords.
+// and can be forged, the account can't. Used by sign-in.
 
 const WINDOW_MS = 15 * 60_000;
 const LIMIT = { address: 8, account: 30 };

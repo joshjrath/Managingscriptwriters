@@ -4,9 +4,6 @@
 // used, so a typo can never become, say, a reminder loop that runs every
 // millisecond.
 
-/** Where the Control Center's world comes from: the real workspace, or (only when set on the server) the simulated network. */
-export type ControlData = 'simulated' | 'workspace';
-
 export interface Config {
   /** running on a host (NODE_ENV=production, Render or Railway): needs a real database, secure cookies, no browser setup */
   production: boolean;
@@ -24,7 +21,6 @@ export interface Config {
   uploadLimitBytes: number;
   /** turns on Paste notes (Claude); the SDK reads the key from the environment itself */
   anthropicApiKey: string | undefined;
-  controlData: ControlData;
   /** the built client; an empty STATIC_DIR (the dev runner) serves no client */
   staticDir: string | undefined;
   remindersEnabled: boolean;
@@ -88,11 +84,6 @@ export function loadConfig(
     return fallback;
   };
 
-  const control = set(env.CONTROL_CENTER_DATA);
-  if (control && control !== 'simulated' && control !== 'workspace') {
-    warn(`CONTROL_CENTER_DATA=${JSON.stringify(control)} is not "workspace" or "simulated"; using workspace`);
-  }
-
   const production = env.NODE_ENV === 'production' || !!env.RENDER || !!env.RAILWAY_ENVIRONMENT;
   return {
     production,
@@ -105,7 +96,6 @@ export function loadConfig(
     // files are stored in the database in pieces appended together, which gets slow and heavy for very large files
     uploadLimitBytes: number('UPLOAD_LIMIT_MB', 25, 1, 100, { clamp: true }) * 1024 * 1024,
     anthropicApiKey: set(env.ANTHROPIC_API_KEY),
-    controlData: control === 'simulated' ? 'simulated' : 'workspace',
     staticDir: env.STATIC_DIR !== undefined ? env.STATIC_DIR || undefined : defaults.staticDir,
     remindersEnabled: flag('REMINDERS', true),
     reminderIntervalMinutes: number('REMINDER_INTERVAL_MINUTES', 10, 1, 24 * 60),

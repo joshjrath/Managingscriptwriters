@@ -312,7 +312,7 @@ function TeamPanel() {
           </div>
         ))}
       </div>
-      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>Managers can do everything the Admin can, except change the Admin’s account and use the Admin-only parts (Control Center, Master log, View as and the colour palette). The temporary password stays copyable here until the person sets their own. Writers only show as over capacity when a capacity is set.</p>
+      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>Managers can do everything the Admin can, except change the Admin’s account and use the Admin-only parts (Editors, Master log, View as and the colour palette). The temporary password stays copyable here until the person sets their own. Writers only show as over capacity when a capacity is set.</p>
       {adding && <PersonDialog onClose={() => setAdding(false)} />}
       {editing && <PersonDialog user={editing} team={team} onClose={() => setEditing(null)} />}
       {sharing && <ShareDetails name={firstName(sharing.name)} onClose={() => setSharing(null)}
@@ -475,7 +475,7 @@ function PersonDialog({ user, team = [], preset, onCreated, onClose }: { user?: 
             {(isAdmin(me.role) || isAdmin(role)) && <option value="owner">Admin</option>}
           </select>
         </Field>
-        {role !== 'editor' && <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates and over-capacity warnings."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>}
+        {role !== 'editor' && <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates, over-capacity warnings and what counts as a full day on the Overview chart."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>}
         <PlaceFields optional city={city} tz={tz} hours={hours} f={f}
           onChange={(v) => { if (save.error) save.reset(); if (v.city !== undefined) setCity(v.city); if (v.tz !== undefined) setTz(v.tz); if (v.hours) setHours(v.hours); }} />
         <Field label={user ? 'Reset password' : 'Temporary password'} optional={!!user} htmlFor={ids.p} error={f.password} help={user ? 'Leave empty to keep their password. Setting one signs them out everywhere, and you’ll get a message to send them.' : 'At least 10 characters. After saving you’ll get a ready-to-send message with this and the sign-in link.'}>
@@ -496,20 +496,20 @@ function PersonDialog({ user, team = [], preset, onCreated, onClose }: { user?: 
   );
 }
 
-// ── editors: shown in the Control Center, not part of the platform ───────
+// ── editors: people with a city and hours, not part of the platform ─────
 
 function EditorsPanel() {
   const q = useQuery({ queryKey: ['editors'], queryFn: () => api<{ editors: Editor[] }>('/api/editors') });
   const [editing, setEditing] = useState<Editor | 'new' | null>(null);
   const toast = useToast();
-  const remove = useSave((id: number) => api(`/api/editors/${id}`, { method: 'DELETE' }), { onSuccess: () => toast('Removed from the map') });
+  const remove = useSave((id: number) => api(`/api/editors/${id}`, { method: 'DELETE' }), { onSuccess: () => toast('Editor removed') });
   const { users } = useBoot();
   const signedIn = users.filter((u) => u.role === 'editor' && u.active);
-  // once they have a sign-in they're on the team (and in the Control Center from there), so the list entry goes
+  // once they have a sign-in they're on the team, so the list entry goes
   const [inviting, setInviting] = useState<Editor | null>(null);
   const editors = q.data?.editors ?? [];
   return (
-    <Panel title="Editors on the map" sub="no sign-in · shown in the Control Center" count={editors.length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setEditing('new')}>Add editor</Button>}>
+    <Panel title="Editors" sub="no sign-in" count={editors.length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setEditing('new')}>Add editor</Button>}>
       {q.isLoading && <Loading height={80} />}
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
       <div className="rows">
@@ -526,7 +526,7 @@ function EditorsPanel() {
               <div className="row-flex s2">
                 <Button variant="sm" icon={<KeyRound aria-hidden />} onClick={() => setInviting(e)}>Give site access</Button>
                 <Button variant="sm ghost" onClick={() => setEditing(e)}>Edit</Button>
-                <Button variant="sm ghost" busy={remove.isPending && remove.variables === e.id} onClick={() => { if (window.confirm(`Remove ${e.name} from the map? They don’t have a sign-in, so nothing else changes.`)) remove.mutate(e.id); }}>Remove</Button>
+                <Button variant="sm ghost" busy={remove.isPending && remove.variables === e.id} onClick={() => { if (window.confirm(`Remove ${e.name} from this list? They don’t have a sign-in, so nothing else changes.`)) remove.mutate(e.id); }}>Remove</Button>
               </div>
             </div>
           </div>
@@ -543,7 +543,7 @@ function EditorsPanel() {
         </div>
       )}
       {q.data && !editors.length && !signedIn.length && <p className="muted" style={{ fontSize: 13 }}>No editors yet.</p>}
-      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>People here only appear in the Control Center, with their local time and working hours. To let one sign in and see the calendar and finished scripts, click Give site access: they move to the Team as an Editor. Only admins see this list.</p>
+      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>People here are kept with their city and working hours, and can’t sign in. To let one sign in and see the calendar and finished scripts, click Give site access: they move to the Team as an Editor. Only admins see this list.</p>
       {editing && <EditorDialog editor={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />}
       {inviting && <PersonDialog preset={{ name: inviting.name, role: 'editor', city: inviting.city, timezone: inviting.timezone, hours: inviting.workHours }}
         onCreated={() => { const id = inviting.id; api(`/api/editors/${id}?reason=access`, { method: 'DELETE' }).then(() => q.refetch(), () => {}); }} onClose={() => setInviting(null)} />}

@@ -21,7 +21,6 @@ import { MomentsHost } from './Moments';
 import { ModeBar, RecordingDialog, RecordingOffDialog, ViewAsDialog } from './ModeBar';
 import { SPRING, setMotionEnabled, useMotionSetting } from '../motion';
 import { LATEST_CHANGE } from '../../../shared/changelog';
-import { ControlCenterLink } from '../control/Link';
 import { openTimezoneDialog, TimezonePrompt } from './TimezonePrompt';
 
 // ── bootstrap context ────────────────────────────────────────────────────
@@ -183,7 +182,6 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
         <span className="full">&nbsp;</span>
         <span>{collapsed && !mobile ? 'S' : 'Media'}</span>
       </NavLink>
-      {isAdmin(me.role) && !mode?.viewingAs && !mobile && <ControlCenterLink />}
       {(mode?.recording || mode?.viewingAs) && (
         <div className={`rail-mode${mode.recording ? ' rec' : ''}`} role="status" title={mode.recording ? 'Recording mode: a practice copy, nothing is kept' : `Viewing as ${mode.viewingAs!.name}: view only`}>
           {mode.recording ? <i className="rec-dot" aria-hidden /> : <Eye size={14} aria-hidden />}

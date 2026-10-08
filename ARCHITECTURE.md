@@ -12,7 +12,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 
 - **Server:** Fastify 5 on Node 22 in `server/`. It serves the JSON API under `/api/` and, in production, the built client.
 - **Database:** PostgreSQL via `pg` in production. Locally, in the demo and in tests it uses PGlite, an embedded Postgres. Both engines run the same SQL and the same migrations.
-- **Client:** React 19, react-query 5 and react-router 7, built with Vite, in `client/`. The Control Center uses three.js.
+- **Client:** React 19, react-query 5 and react-router 7, built with Vite, in `client/`.
 - **Shared:** domain rules used by both sides live in `shared/`. That folder imports nothing from `server/` or `client/`.
 
 ## Where things live
@@ -41,7 +41,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 | Master log (activity and audit) | `server/audit.ts` |
 | Reminders (in-process timer, or `npm run reminders` from cron) | `server/reminders.ts`, `server/reminders-cli.ts` |
 | Paste notes (Anthropic API) | `server/notes-import.ts` |
-| Control Center (server side) | `server/control/` |
+| Editors who don't sign in (Settings → Editors) | `server/control/editors.ts` |
 | Demo data | `server/seed-demo.ts`, `server/seed-cli.ts` |
 | Dates, deadlines, clock, due state | `shared/dates.ts` |
 | Statuses, roles, action rules, progress, document state, ranges | `shared/workflow.ts` |
@@ -75,7 +75,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
    - This sets `req.realUser` (who signed in) and `req.user` (who the request acts as). They differ only during View as.
    - **View as** is read-only on the real workspace. Writes are refused, except a few background writes that quietly do nothing.
    - **Recording mode** sends the session's requests to a cloned `rec_<12 hex>` schema through `AsyncLocalStorage`, so `ctx.db` is the practice copy and route code doesn't need to know.
-   - It **fails closed**: a write whose `x-scale-recording` header names a practice copy that no longer exists gets 409 `recording_ended`. It never falls through to the real data. The same applies once an admin is demoted. Sign-in, `/api/admin/*` and Control Center clearance calls are exempt, because they only change the real sign-in.
+   - It **fails closed**: a write whose `x-scale-recording` header names a practice copy that no longer exists gets 409 `recording_ended`. It never falls through to the real data. The same applies once an admin is demoted. Sign-in and `/api/admin/*` calls are exempt, because they only change the real sign-in.
    - `/api/auth/*` and `/api/admin/*` always use the real database.
 3. **Handler:** guard → `parse` → work. A change to a batch or its scripts runs in `db.tx` and locks rows first: the batch row (`for no key update`) for batch-wide changes, then the script rows (`for update`) it touches. Other transactional changes lock their own row (a client, a shoot). Simple single-record edits (a team member, client, shoot or editor) write the row and its history line without a transaction.
 4. **Errors** (`app.ts`):
@@ -100,14 +100,13 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 - **Script actions:** every status change goes through `applyScriptAction`. It locks the rows and checks each one with `checkAction` and `ACTION_RULES`. Writers can act only on their own scripts.
 - **Ownership checks** live in the route: the assignee on a script edit, `isAssignedTo` for blockers and resources. A personal view (My work, Today, to-dos) always gives a writer their own data, from the session. A manager may name someone with `?userId=`, and may ask for the whole team on Today (no `userId`) and to-dos (`?all=1`). Notifications always use the session user.
 - **Admin protection:** only an Admin can grant the Admin role or change anything on an Admin's account. The last Admin can't be removed or demoted. Temporary passwords are shown only to managers, and never an Admin's to a non-admin.
-- **Control Center:** an Admin re-enters their password, which sets `sessions.control_until` (12 hours). This is checked against `realUser`.
 - **Sign-in throttle:** 8 wrong passwords per address and account, and 30 per account from any address, in 15 minutes. The address comes from `X-Forwarded-For`, trusted as far as `TRUST_PROXY` allows.
 
 ## Data
 
 - **`Db`** (`server/db.ts`) has `query`, `one`, `tx`, `close` and `withSchema`.
   - Route code always uses `ctx.db`, which follows Recording mode.
-  - `ctx.realDb` is only for session and sign-in plumbing (`recording.ts`, `control/routes.ts`), and for streaming file contents that stay on the real workspace (`/api/files/:id`).
+  - `ctx.realDb` is only for session and sign-in plumbing (`recording.ts`), and for streaming file contents that stay on the real workspace (`/api/files/:id`).
 - **Migrations** run at start-up, in order, one transaction each, under `LOCKS.migrations`.
   - SQL migrations are split into statements on `;` at a line end. Anything that can't be split that way is written as a function migration.
   - Function migrations import `shared/dates.ts`. Changing those helpers changes what a fresh database's backfill produces.

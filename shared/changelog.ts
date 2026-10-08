@@ -15,12 +15,12 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-10-07-calendar-shoots-match': ['managers'], '2026-10-07-editors': ['managers', 'editors'], '2026-10-07-calendar-shoots': ['managers'],
   '2026-10-07-calendar-embed': ['managers'], '2026-10-02-fill-missing-deadlines': ['managers'], '2026-10-02-drafts-from-final': ['managers'],
   '2026-10-01-palettes': ['managers'], '2026-09-30-control-center-people': ['managers'], '2026-09-30-control-center-admin-editors': ['managers'],
-  '2026-09-30-control-center': ['managers'], '2026-09-30-batch-delivery-catch-up': ['managers'], '2026-09-30-batch-delivery': ['managers'],
+  '2026-09-30-control-center': ['managers'], '2026-10-08-control-center-removed': ['managers'], '2026-09-30-batch-delivery-catch-up': ['managers'], '2026-09-30-batch-delivery': ['managers'],
   '2026-09-29-potential-label': ['managers'], '2026-09-29-view-as-recording': ['managers'], '2026-09-28-paste-notes': ['managers'],
   '2026-09-28-potential-clients': ['managers'], '2026-09-28-plan-later': ['managers'], '2026-09-28-admin-name': ['managers'],
   '2026-09-28-calendar-drag': ['managers'], '2026-09-28-team': ['managers'], '2026-09-28-signin-details': ['managers'],
   '2026-10-07-my-work-redesign': ['writers', 'managers'], '2026-09-28-written-counter': ['writers', 'managers'], '2026-10-08-writers-never-miss': ['writers', 'managers'],
-  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'],
+  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -34,36 +34,6 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
-  {
-    id: '2026-10-08-control-center-rests-more',
-    date: '2026-10-08',
-    title: 'The Control Center rests even more',
-    summary: 'Follow-ups from checking the lighter Control Center side by side with the old one.',
-    changes: [
-      { tag: 'improved', text: 'Follow the sun now updates the screen only when the globe moves, about half as often as before, at the same speed.' },
-      { tag: 'improved', text: 'With the Control Center open in a window that isn’t in front, it wakes the computer about 15 times a second instead of 60.' },
-      { tag: 'improved', text: 'The System view and the signal feed no longer keep updating behind the scenes.' },
-      { tag: 'fixed', text: 'Sound left on from an earlier visit no longer starts by itself when you come back to the tab before touching anything.' },
-      { tag: 'fixed', text: 'In People, the city suggestions now show above the time zone and working hours fields, and clicking one picks that city. The fields underneath used to show through the list and take the click.' },
-    ],
-  },
-  {
-    id: '2026-10-08-control-center-lighter',
-    date: '2026-10-08',
-    title: 'The Control Center is lighter on battery and memory',
-    summary: 'It looks the same, does far less work while you watch, and rests while the tab is in the background.',
-    changes: [
-      { tag: 'improved', text: 'It no longer rebuilds the whole scene once a minute. On a big team that caused a brief stutter, and the constellation’s lines blinked.' },
-      { tag: 'improved', text: 'Each frame takes much less work: labels fade more cheaply, people and the planet’s surface cost less to draw, and rings or layers that have faded out aren’t drawn at all.' },
-      { tag: 'improved', text: 'Follow the sun redraws half as often while it plays, and works out who is under pressure a few times a second instead of on every frame.' },
-      { tag: 'improved', text: 'Moving the pointer over the globe updates only the LAT/LON readout, not the whole screen. The breathing dot and the pressure marks keep pace with the globe instead of keeping the screen busy on their own.' },
-      { tag: 'improved', text: 'While the tab is in the background, the clock, the replayed transfers and the hum all pause, and pick up when you come back.' },
-      { tag: 'improved', text: 'Turning sound off, or leaving the Control Center, now fully releases the audio. Switching sound off and straight back on keeps the hum playing (it used to stop).' },
-      { tag: 'improved', text: 'It uses less memory: the globe’s three spheres share one shape, and the land map is let go when you leave.' },
-      { tag: 'fixed', text: 'A transfer’s label no longer gets stuck and rides along on later transfers between the same two people.' },
-      { tag: 'improved', text: 'The flat 2D globe, for devices without 3D graphics, draws several times faster.' },
-    ],
-  },
   {
     id: '2026-10-08-faster-large-uploads',
     date: '2026-10-08',
@@ -86,7 +56,6 @@ export const CHANGELOG: ChangelogEntry[] = [
       { tag: 'improved', text: 'Paste notes: text files count toward the same 60,000-character limit as pasted text, each person runs one read at a time (up to 30 an hour), and when two teammates share the first name in the notes, those scripts are left unassigned with a warning naming both instead of guessing.' },
       { tag: 'fixed', text: 'Past-document links must be web links (https://), like every other link.' },
       { tag: 'fixed', text: 'Editors’ read-only access can’t be got round by writing a page’s web address in a different form: they still only see finished scripts.' },
-      { tag: 'improved', text: 'Control Center (admins): old batches with open work stay on the globe, up to 128 people show, the view recovers by itself if the graphics stop, the sound stops when you leave, and NETWORK reflects the latest refresh.' },
       { tag: 'improved', text: 'Behind the scenes: the server keeps running if its database connection drops for a moment, two copies starting at once no longer clash, and expired sign-ins are cleared out.' },
     ],
   },
@@ -112,6 +81,38 @@ export const CHANGELOG: ChangelogEntry[] = [
     ],
   },
   {
+    id: '2026-10-08-due-tiles',
+    date: '2026-10-08',
+    title: 'Work due by day, redrawn as glowing day tiles',
+    summary: 'The Overview chart is now a row of day tiles that fill up against a full day’s work, in the same gradient style as the cards above it.',
+    changes: [
+      { tag: 'improved', text: 'Each of the next 14 days is a tile, with overdue work in its own salmon tile and today always in yellow. A tile fills against a full day’s work: everyone’s scripts per day added up (yours, on your own Overview). So a quiet day still shows how full it is, instead of a sliver next to the busiest day.' },
+      { tag: 'new', text: 'A day with more work than a full day glows pink and says how far over it is, like “+33 over”. The busiest of those gets a spinning border. With no daily capacity set, tiles fill against the busiest day instead.' },
+      { tag: 'improved', text: 'The batches behind a day sit under the tiles as cards, with their writers and a stage strip; overdue ones say how many days late they are. Today’s are shown until you pick another day.' },
+      { tag: 'improved', text: 'The Final delivery / Drafts switch slides between the two and shows each count. The chart now runs the full width of the Overview, with Upcoming shoots in columns right below it.' },
+      { tag: 'improved', text: 'Set each writer’s scripts per day in Settings → Team; the chart’s “Full tile =” chip links there and says if anyone isn’t counted yet.' },
+    ],
+  },
+  {
+    id: '2026-10-08-feedback-match-fix',
+    date: '2026-10-08',
+    title: 'Review cards quote the right feedback',
+    summary: 'A fix to “Revised after this feedback” on review cards.',
+    changes: [
+      { tag: 'fixed', text: 'A review card only shows “Revised after this feedback” when that document really answers a send-back on the same scripts in the same batch. Before, a batch could show another batch’s feedback when their script numbers matched, and a later version kept repeating feedback an earlier one had already answered.' },
+    ],
+  },
+  {
+    id: '2026-10-08-control-center-removed',
+    date: '2026-10-08',
+    title: 'The Control Center has been retired',
+    summary: 'The admin-only Control Center (the globe view of the team) is gone. Everything else works as before.',
+    changes: [
+      { tag: 'improved', text: 'The Control Center link and page are gone. The rest of the site has less code to keep up to date.' },
+      { tag: 'improved', text: 'Nothing else changes: each person’s city, time zone and working hours stay, and Settings → Editors (now just called Editors, since there’s no map) and Give site access work as before.' },
+    ],
+  },
+  {
     id: '2026-10-08-writers-overview-back',
     date: '2026-10-08',
     title: 'Writers have Overview and Production back',
@@ -125,11 +126,12 @@ export const CHANGELOG: ChangelogEntry[] = [
     id: '2026-10-08-overview-cards',
     date: '2026-10-08',
     title: 'New summary cards on the Overview',
-    summary: 'The four cards at the top of the Overview have a new look, and each one now says what’s behind its number.',
+    summary: 'The four cards at the top of the Overview are now gradient cards in their own colours, a little shorter, and each one says what’s behind its number.',
     changes: [
-      { tag: 'improved', text: 'Overdue batches always has its warm gradient. When something is late it says “Needs you” and names the batches and how many days late; when nothing is, it says “All clear” and shows the next deadline.' },
-      { tag: 'improved', text: 'Batches due today always has its yellow gradient too. When something is due it shows the cutoff time and a bar for how much of today’s work is done; otherwise it says “Nothing due” and shows what’s due next.' },
-      { tag: 'improved', text: 'Scripts in review shows how long the oldest one has been waiting and which batches they’re in. Delivered this week has a small bar for each day, Monday to Sunday.' },
+      { tag: 'improved', text: 'Every card keeps its gradient, busy day or quiet: warm for Overdue, yellow for Due today, violet for In review and mint for Delivered this week.' },
+      { tag: 'improved', text: 'Overdue says “Needs you” and names the late batches and how many days late, or “All clear” and the next deadline.' },
+      { tag: 'improved', text: 'Due today shows the cutoff time and a bar for how much of today’s work is done, or “Nothing due” and what’s next.' },
+      { tag: 'improved', text: 'In review shows how long the oldest script has waited and which batches they’re in (“Queue clear” when empty). Delivered this week has a small bar for each day, Monday to Sunday.' },
       { tag: 'fixed', text: 'Under More on the Overview, Active batches and Writing progress sit side by side again instead of being pushed apart.' },
     ],
   },

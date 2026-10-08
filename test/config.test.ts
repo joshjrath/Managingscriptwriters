@@ -15,7 +15,7 @@ describe('configuration', () => {
     const { config, warnings } = load({}, { staticDir: '/app/client' });
     expect(config).toMatchObject({
       production: false, databaseUrl: undefined, dataDirSet: false, dataDir: 'data/pglite', allowSetup: true,
-      uploadLimitBytes: 25 * 1024 * 1024, controlData: 'workspace', staticDir: '/app/client',
+      uploadLimitBytes: 25 * 1024 * 1024, staticDir: '/app/client',
       remindersEnabled: true, reminderIntervalMinutes: 10, port: 3001, host: '0.0.0.0', trustProxy: true,
     });
     expect(warnings).toEqual([]);
@@ -49,13 +49,6 @@ describe('configuration', () => {
     const odd = load({ TRUST_PROXY: 'render' });
     expect(odd.config.trustProxy).toBe(true);
     expect(odd.warnings).toHaveLength(1);
-  });
-
-  it('shows the simulated Control Center only when asked for exactly', () => {
-    expect(load({ CONTROL_CENTER_DATA: 'simulated' }).config.controlData).toBe('simulated');
-    const typo = load({ CONTROL_CENTER_DATA: 'simulate' });
-    expect(typo.config.controlData).toBe('workspace');
-    expect(typo.warnings).toHaveLength(1);
   });
 
   it('trims pasted manager values', () => {

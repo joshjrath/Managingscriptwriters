@@ -96,7 +96,7 @@ export async function runReminders(ctx: Ctx): Promise<{ created: number; skipped
 
     await t.query(`update settings set reminders_last_run_at = now() where id = 1`);
     // keep a year of page views (and of sign-in records not tied to an account: failed sign-ins for
-    // unknown emails, and signed-out Control Center attempts) in the master log; changes and other
+    // unknown emails) in the master log; changes and other
     // sign-in records are kept. Expired sessions are no use to anyone.
     await t.query(`delete from audit_log where (kind = 'view' or (kind = 'auth' and user_id is null)) and created_at < now() - interval '400 days'`);
     await t.query(`delete from sessions where expires_at < now()`);

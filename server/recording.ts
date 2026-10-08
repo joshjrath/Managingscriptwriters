@@ -26,8 +26,6 @@ import { RECORDING_ENDED, RECORDING_HEADER, type Me, type SessionMode } from '..
 import { isAdmin, ROLE_LABEL } from '../shared/workflow';
 
 const IDLE_MS = 6 * 3600_000;
-/** Writes that change only the signed-in session (on the real workspace), never workspace data. */
-const SIGN_IN_ONLY = new Set(['/api/control/authorize', '/api/control/lock']);
 const MAX_SANDBOXES = 2;
 
 interface Sandbox {
@@ -201,12 +199,11 @@ export function registerRecording(app: FastifyInstance, ctx: Ctx, realDb: Db, al
     const m = modes.get(key);
     // The page thinks it's recording but its practice copy is gone (the server restarted, the copy
     // was closed to make room or after hours idle, or its admin was demoted): refuse changes rather
-    // than make them for real. Sign-in, admin and Control Center clearance calls only touch the real
-    // sign-in, so they go through.
+    // than make them for real. Sign-in and admin calls only touch the real sign-in, so they go through.
     const claimed = req.headers[RECORDING_HEADER];
     if (typeof claimed === 'string' && claimed && m?.sandbox?.startedAt !== claimed && req.method !== 'GET' && req.method !== 'HEAD') {
       const path = requestPath(req);
-      if (!path.startsWith('/api/admin/') && !path.startsWith('/api/auth/') && !SIGN_IN_ONLY.has(path)) {
+      if (!path.startsWith('/api/admin/') && !path.startsWith('/api/auth/')) {
         throw new HttpError(409, 'Recording mode has ended (the practice copy was closed), so nothing was saved. Reload the page to carry on.', undefined, RECORDING_ENDED);
       }
     }

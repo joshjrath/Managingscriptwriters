@@ -195,7 +195,7 @@ export function newlyAdded<T extends { status: ScriptStatus; assignedAt: string 
 
 /** Admins (stored as 'owner') can do everything managers can. */
 export const isManager = (role: Role) => role === 'manager' || role === 'owner';
-/** Admin-only features: Master log, View as, Recording mode, the Control Center and its editors, the colour palette. */
+/** Admin-only features: Master log, View as, Recording mode, Settings → Editors, the colour palette. */
 export const isAdmin = (role: Role) => role === 'owner';
 /** Editors cut the videos: they see the calendar, finished scripts, clients and resources, read-only. */
 export const isEditor = (role: Role) => role === 'editor';

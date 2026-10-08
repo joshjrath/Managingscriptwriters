@@ -36,7 +36,7 @@ export interface UserSummary extends Me {
   workHours: [number, number] | null;
 }
 
-/** Someone shown in the Control Center (city, local time, hours) who doesn't use the platform. */
+/** An editor kept in Settings → Editors (city, local time, hours) who doesn't use the platform. */
 export interface Editor {
   id: number;
   name: string;
@@ -445,6 +445,10 @@ export interface DueBucketItem {
   clientName: string;
   count: number;
   byCategory: Record<DueCategory, number>;
+  /** the deadline this batch is counted against (an overdue one is before today) */
+  dueDate: ISODate;
+  /** writers with scripts in this count */
+  writerIds: number[];
 }
 
 export type DueCategory = 'not_started' | 'writing' | 'in_review' | 'to_deliver';

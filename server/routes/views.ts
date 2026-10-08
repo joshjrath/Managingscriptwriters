@@ -48,17 +48,19 @@ function dueByDay(kind: 'draft' | 'final', batches: BatchSummary[], scripts: Map
     if (!bucket) continue;
     const cats = emptyCats();
     let count = 0;
+    const writers = new Set<number>();
     for (const s of scripts.get(b.id) ?? []) {
       if (kind === 'draft' && isDraftReady(s.status)) continue;
       const c = category(s.status);
       if (!c) continue;
       cats[c]++;
       count++;
+      if (s.assignee_id != null) writers.add(Number(s.assignee_id));
     }
     if (!count) continue;
     bucket.total += count;
     for (const c of Object.keys(cats) as DueCategory[]) bucket.byCategory[c] += cats[c];
-    bucket.items.push({ batchId: b.id, batchTitle: b.title, clientName: b.clientName, count, byCategory: cats });
+    bucket.items.push({ batchId: b.id, batchTitle: b.title, clientName: b.clientName, count, byCategory: cats, dueDate: m.date, writerIds: [...writers] });
   }
   return days;
 }
