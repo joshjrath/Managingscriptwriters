@@ -1,4 +1,4 @@
-# Scale Media · Script production
+# SCALE Media · Script production
 
 One place to run script production: clients and their briefing material, shoots, script batches, who is writing what, exact progress, reviews, and delivery to Timeliner. Managers see every writer's work and what is due; writers get a focused view of their own scripts, briefs and deadlines.
 
@@ -101,7 +101,7 @@ Change a shoot's dates from **Change dates** on the batch or client page, by cli
 
 **Sending approved work back.** On a batch page, each writer's row has **Send back for revisions…** for managers whenever that writer has approved or in-review scripts: pick the scripts (all by default) and write what to change.
 
-**Colour palette** (Settings, admin only) changes the colours of the whole site for everyone, the sign-in page included. Six presets keep the house look (near-black shell, bright pastel accents): Scale Media (the original), Sunset, Rose gold, Glacier, Citrus and Iris. **Customise colours** changes any of the seven accents (brand, action, in progress, review, done, revisions, alert) and the background tone; the server refuses an accent too dark for the dark text drawn on it (under 4.5:1). Picking previews instantly; Save applies it. The palette is stored in `settings.theme` and each browser remembers the last one so pages open in the right colours.
+**Colour palette** (Settings, admin only) changes the colours of the whole site for everyone, the sign-in page included. Six presets keep the house look (near-black shell, bright pastel accents): SCALE Media (the original), Sunset, Rose gold, Glacier, Citrus and Iris. **Customise colours** changes any of the seven accents (brand, action, in progress, review, done, revisions, alert) and the background tone; the server refuses an accent too dark for the dark text drawn on it (under 4.5:1). Picking previews instantly; Save applies it. The palette is stored in `settings.theme` and each browser remembers the last one so pages open in the right colours.
 
 **Writing progress** on the Overview shows the latest + / − counter updates (newest first, from the past week): who, which batch, how many are written and how long ago. Each writer's share is drawn as one block per script (delivered, approved, sent for review, sent back for revisions, written but not sent, still to write), and the ones counted today glow. A **+N today** badge shows how far a counter went up today, on the Overview, the batch page's Assignments and the batch cards. The counter remembers where it stood at the start of each day (workspace time) to work this out. Writers see only their own.
 

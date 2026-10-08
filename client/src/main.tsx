@@ -53,7 +53,7 @@ function Gate() {
   useEffect(() => { if (theme !== undefined) applyTheme(theme); }, [themeKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (status.isLoading || (status.data?.signedIn && boot.isLoading)) {
-    return <div className="loading-center" role="status"><span className="wordmark" style={{ fontSize: 28 }}>Scale&nbsp;<span>Media</span></span><span>Loading…</span></div>;
+    return <div className="loading-center" role="status"><span className="wordmark" style={{ fontSize: 28 }}>SCALE&nbsp;<span>Media</span></span><span>Loading…</span></div>;
   }
   if (status.isError) return <main className="login"><ErrorState error={status.error} retry={() => status.refetch()} /></main>;
   // signed out without pressing Sign out (a password reset, or the session ended): say so

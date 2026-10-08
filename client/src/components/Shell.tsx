@@ -111,7 +111,7 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
                 </button>
               );
             })()}
-            <span className="wordmark"><span className="full">Scale</span>&nbsp;<span>Media</span></span>
+            <span className="wordmark"><span className="full">SCALE</span>&nbsp;<span>Media</span></span>
             <div className="end">
               {isManager(boot.me.role) && <button className="icon-btn" onClick={() => setNewWork({ tab: 'shoot' })} aria-label="Create a shoot, batch or client"><Plus /></button>}
               <NotificationsButton />
@@ -177,8 +177,8 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
   ];
   return (
     <div className="rail">
-      <NavLink to={manager ? '/overview' : me.role === 'editor' ? '/editor' : '/my-work'} className="wordmark" aria-label="Scale Media home">
-        <span className="full">Scale</span>
+      <NavLink to={manager ? '/overview' : me.role === 'editor' ? '/editor' : '/my-work'} className="wordmark" aria-label="SCALE Media home">
+        <span className="full">SCALE</span>
         <span className="full">&nbsp;</span>
         <span>{collapsed && !mobile ? 'S' : 'Media'}</span>
       </NavLink>
@@ -461,7 +461,7 @@ export function PageHeader({ title, sub, crumbs, children, hideNewWork }: { titl
   const displayTz = useDisplayTz();
   const { me, settings } = useBoot();
   const openNew = useNewWork();
-  useEffect(() => { if (typeof title === 'string') document.title = `${title} · Scale Media`; }, [title]);
+  useEffect(() => { if (typeof title === 'string') document.title = `${title} · SCALE Media`; }, [title]);
   return (
     <header className="page-head">
       <div style={{ minWidth: 0 }}>

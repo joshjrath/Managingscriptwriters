@@ -51,7 +51,7 @@ async function main() {
   const stopCalendars = config.calendarSyncEnabled ? startCalendarSync(ctx, config.calendarSyncMinutes, (m) => console.log(m)) : () => {};
 
   await app.listen({ port: config.port, host: config.host });
-  console.log(`Scale Media scripts listening on :${config.port}`);
+  console.log(`SCALE Media scripts listening on :${config.port}`);
 
   let stopping = false;
   const shutdown = () => {

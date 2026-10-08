@@ -295,7 +295,7 @@ export function ErrorState({ error, retry }: { error: unknown; retry?: () => voi
 
 /** A page or record that isn't there, with a way back instead of a dead end. */
 export function NotFound({ what = 'page' }: { what?: string }) {
-  useEffect(() => { const t = document.title; document.title = `Not found · Scale Media`; return () => { document.title = t; }; }, []);
+  useEffect(() => { const t = document.title; document.title = `Not found · SCALE Media`; return () => { document.title = t; }; }, []);
   return (
     <div className="panel not-found">
       <h1>That {what} isn’t here</h1>

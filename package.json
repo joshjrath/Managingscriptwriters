@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
-  "description": "Scale Media script production management: clients, shoots, batches, writers, reviews and Timeliner delivery",
+  "description": "SCALE Media script production management: clients, shoots, batches, writers, reviews and Timeliner delivery",
   "engines": {
     "node": "^22.13.0 || ^24.0.0 || >=26.0.0"
   },

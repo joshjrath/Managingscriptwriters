@@ -45,7 +45,7 @@ export interface Palette {
 }
 
 export const PALETTES: Palette[] = [
-  { id: 'scale', name: 'Scale Media', vibe: 'The original: salmon and lemon on charcoal', surfaces: 'neutral',
+  { id: 'scale', name: 'SCALE Media', vibe: 'The original: salmon and lemon on charcoal', surfaces: 'neutral',
     colors: { brand: '#F2A599', action: '#F4ED70', info: '#55C7E8', review: '#9D89EF', done: '#60D1BE', revisions: '#E77AB5', alert: '#F16C63' } },
   { id: 'sunset', name: 'Sunset', vibe: 'Tangerine and marigold, a little warmer', surfaces: 'warm',
     colors: { brand: '#FF9F7A', action: '#FFD166', info: '#5BC0EB', review: '#A18CF2', done: '#5DD6B0', revisions: '#F081B3', alert: '#F4665C' } },

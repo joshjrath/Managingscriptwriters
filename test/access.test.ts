@@ -225,6 +225,10 @@ describe('sessions and first-run setup', () => {
   };
   const signedIn = async (cookie: string) => (await app.inject({ method: 'GET', url: '/api/bootstrap', headers: { cookie } })).statusCode === 200;
 
+  it('a workspace set up without a name is called SCALE Media', async () => {
+    expect((await db.one<{ org_name: string }>(`select org_name from settings where id = 1`))?.org_name).toBe('SCALE Media');
+  });
+
   it('setup only ever creates the first account', async () => {
     const again = await json('POST', '/api/auth/setup', { name: 'Late Comer', email: 'late@scale.test', password: 'late-password-1' });
     expect(again.statusCode).toBe(409);

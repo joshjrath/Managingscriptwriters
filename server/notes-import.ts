@@ -89,7 +89,7 @@ const PlanSchema = z4.object({
   })).describe('Only real ambiguities, e.g. which date "next Wednesday" means'),
 });
 
-const SYSTEM = `You help a short-form video agency (Scale Media) turn a manager's rough notes into records in their script production app.
+const SYSTEM = `You help a short-form video agency (SCALE Media) turn a manager's rough notes into records in their script production app.
 
 The app has:
 - Clients (status active, or prospect = potential client not signed yet), each with a description, brand voice and guidance (standing instructions).

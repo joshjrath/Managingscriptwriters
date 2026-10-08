@@ -34,7 +34,7 @@ export function WhatsNewPage() {
   }, [whatsNewSeen]);
   return (
     <>
-      <PageHeader title="What’s new" sub={all ? `Every change to Scale Media since day one · ${CHANGELOG.length} updates` : `What changed for ${mine === 'managers' ? 'managers' : mine === 'editors' ? 'editors' : 'writers'} · ${shown.length} updates`} hideNewWork>
+      <PageHeader title="What’s new" sub={all ? `Every change to SCALE Media since day one · ${CHANGELOG.length} updates` : `What changed for ${mine === 'managers' ? 'managers' : mine === 'editors' ? 'editors' : 'writers'} · ${shown.length} updates`} hideNewWork>
         <Seg role="group" aria-label="Which updates">
           <button aria-pressed={!all} onClick={() => setAll(false)}>For you</button>
           <button aria-pressed={all} onClick={() => setAll(true)}>Everything</button>

@@ -1,4 +1,4 @@
-/* Scale Media · components. Every value comes from tokens.css. */
+/* SCALE Media · components. Every value comes from tokens.css. */
 
 *, *::before, *::after { box-sizing: border-box; }
 html { background: var(--bg); -webkit-text-size-adjust: 100%; }

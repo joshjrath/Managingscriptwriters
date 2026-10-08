@@ -20,7 +20,7 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-09-28-potential-clients': ['managers'], '2026-09-28-plan-later': ['managers'], '2026-09-28-admin-name': ['managers'],
   '2026-09-28-calendar-drag': ['managers'], '2026-09-28-team': ['managers'], '2026-09-28-signin-details': ['managers'],
   '2026-10-07-my-work-redesign': ['writers', 'managers'], '2026-09-28-written-counter': ['writers', 'managers'], '2026-10-08-writers-never-miss': ['writers', 'managers'],
-  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-editors-never-get-scripts': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'],
+  '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-editors-never-get-scripts': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'], '2026-10-08-master-log-everything': ['managers'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -34,6 +34,24 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-08-master-log-everything',
+    date: '2026-10-08',
+    title: 'The Master log opens on Everything',
+    summary: 'The Master log shows every kind of entry when you open it.',
+    changes: [
+      { tag: 'improved', text: 'The Master log now opens on Everything (changes, views, sign-ins and blocked attempts together) instead of just Changes. The filters above it still narrow it down.' },
+    ],
+  },
+  {
+    id: '2026-10-08-scale-caps',
+    date: '2026-10-08',
+    title: 'It’s SCALE Media',
+    summary: 'The name is now written SCALE Media everywhere on the site.',
+    changes: [
+      { tag: 'fixed', text: 'The wordmark, the sign-in page, browser tab titles and the original colour palette now read SCALE Media. A workspace still using the original name is renamed to match; one you renamed yourself keeps its name.' },
+    ],
+  },
   {
     id: '2026-10-08-editors-never-get-scripts',
     date: '2026-10-08',
@@ -321,7 +339,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     title: 'HQ time at the top',
     summary: 'People outside HQ’s time zone see HQ time under their own clock.',
     changes: [
-      { tag: 'new', text: 'If your time zone isn’t HQ’s (EST for Scale Media), the clock at the top of every page shows your time with HQ time underneath, e.g. “HQ · 3:07 AM EDT”, plus the day when it’s different. Deadlines follow HQ time.' },
+      { tag: 'new', text: 'If your time zone isn’t HQ’s (EST for SCALE Media), the clock at the top of every page shows your time with HQ time underneath, e.g. “HQ · 3:07 AM EDT”, plus the day when it’s different. Deadlines follow HQ time.' },
       { tag: 'improved', text: 'Settings calls the workspace time zone the HQ time zone.' },
     ],
   },
@@ -385,7 +403,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     title: 'Colour palettes',
     summary: 'The admin can change the site’s colours for everyone: six palettes with the same feel, or your own tweaks.',
     changes: [
-      { tag: 'new', text: 'Settings → Colour palette (admin only): pick Scale Media (the original), Sunset, Rose gold, Glacier, Citrus or Iris. Each keeps the dark look with bright pastel accents. You see it as you click, and Save applies it across the whole site for everyone, the sign-in page included.' },
+      { tag: 'new', text: 'Settings → Colour palette (admin only): pick SCALE Media (the original), Sunset, Rose gold, Glacier, Citrus or Iris. Each keeps the dark look with bright pastel accents. You see it as you click, and Save applies it across the whole site for everyone, the sign-in page included.' },
       { tag: 'new', text: 'Customise colours: change any of the seven colours (brand, action, in progress, review, done, revisions, alert) and the background tone (charcoal, warm, cool or plum). Colours too dark for the dark text on them are flagged and can’t be saved. Reset goes back to the palette.' },
       { tag: 'improved', text: 'Confetti and celebrations use the palette’s colours.' },
     ],
@@ -440,7 +458,7 @@ export const CHANGELOG: ChangelogEntry[] = [
     title: 'The Control Center',
     summary: 'For admins and managers: a private view of the whole operation on a live globe.',
     changes: [
-      { tag: 'new', text: 'Admins and managers can open the Control Center from the small link under the Scale Media wordmark, or from the sign-in page. It asks for your password first, and stays open for 12 hours on that device. Writers can’t open it.' },
+      { tag: 'new', text: 'Admins and managers can open the Control Center from the small link under the SCALE Media wordmark, or from the sign-in page. It asks for your password first, and stays open for 12 hours on that device. Writers can’t open it.' },
       { tag: 'new', text: 'Everyone on the team appears on a globe at their city, with their local time, whether they’re on shift, what they’re working on and their next deadline. The planet is lit by the real sun, so you can see who is in daylight.' },
       { tag: 'new', text: 'Other views show each batch and where its scripts are, deadlines as orbits (the closer the deadline, the tighter the orbit), a 24-hour dial of who covers which hours, scripts travelling between writers and reviewers, the team as a network, every script as a star, and delivered work as an archive.' },
       { tag: 'new', text: 'It points out pressure: several deadlines landing on one person, someone with too much on, revisions piling up, reviews waiting too long, blocked batches and hours nobody covers.' },
@@ -729,7 +747,7 @@ export const CHANGELOG: ChangelogEntry[] = [
   {
     id: '2026-09-28-launch',
     date: '2026-09-28',
-    title: 'Scale Media scripts launches',
+    title: 'SCALE Media scripts launches',
     summary: 'The first version: one place to run script production from shoot to Timeliner.',
     changes: [
       { tag: 'new', text: 'Clients with briefing calls, recordings, documents, brand voice and resources.' },

@@ -541,4 +541,9 @@ create table work_seen (
 create index if not exists activity_created_idx on activity (created_at desc);
 create index if not exists activity_actor_idx on activity (actor_id, created_at desc);
 `,
+  // 27 · the name is written SCALE Media: new workspaces start with it, and one still on the old default spelling takes it
+  `
+alter table settings alter column org_name set default 'SCALE Media';
+update settings set org_name = 'SCALE Media' where org_name = 'Scale Media';
+`,
 ];
