@@ -1653,7 +1653,7 @@ describe('editors', () => {
 
     // everything else is closed, whatever the address
     for (const [method, url] of [['GET', '/api/dashboard'], ['GET', '/api/batches'], ['GET', `/api/batches/${b.body.batchId}`], ['GET', '/api/review'], ['GET', '/api/my-work'],
-      ['GET', '/api/settings'], ['GET', '/api/users'], ['GET', '/api/search?q=acme'], ['GET', '/api/calendar-shoots'], ['POST', '/api/resources'],
+      ['GET', '/api/settings'], ['GET', '/api/users'], ['GET', '/api/calendar-shoots'], ['POST', '/api/resources'],
       ['POST', `/api/batches/${b.body.batchId}/scripts/action`], ['PATCH', `/api/clients/${acmeId}`], ['POST', '/api/clients']] as const) {
       const r = await call(method, url, { cookie: eddie.cookie, body: method === 'GET' ? undefined : {} });
       expect([method, url, r.status]).toEqual([method, url, 403]);
@@ -1876,5 +1876,60 @@ describe('round 2: writers never miss work', () => {
     expect(one.description).toBeNull();
     expect((await sarah.get(`/api/clients/${acmeId}`)).body.activity).toEqual([]);
     expect((await manager.get(`/api/clients/${acmeId}`)).body.activity.length).toBeGreaterThan(0);
+  });
+});
+
+describe('round 3: manager and editor screens', () => {
+  it('tells editors whether each shoot’s scripts are ready, and when they’re final', async () => {
+    await manager.post('/api/users', { name: 'Readiness Editor', email: 'ready-ed@scale.test', role: 'editor', password: 'ready-editor-pass' });
+    const ed = as(await login('ready-ed@scale.test', 'ready-editor-pass'));
+    const today = (await manager.get('/api/bootstrap')).body.clock.today as string;
+    const start = new Date(Date.parse(today) + 20 * 86400_000).toISOString().slice(0, 10);
+    const r = await manager.post('/api/shoots', { clientId: acmeId, startDate: start, batch: { targetCount: 2, split: [{ writerId: ids.sarah, count: 2 }] } });
+    expect(r.status).toBe(200);
+    const shootId = r.body.shootId ?? r.body.shoot?.id;
+    let row = (await ed.get('/api/shoot-readiness')).body.shoots.find((x: any) => x.shoot.id === shootId);
+    expect(row).toMatchObject({ total: 2, finished: 0, state: 'on_track' });
+    const sc = (await manager.get(`/api/batches/${r.body.batchId}`)).body.scripts.map((s: any) => s.id);
+    await sarah.post(`/api/batches/${r.body.batchId}/scripts/action`, { action: 'submit', scriptIds: sc });
+    await manager.post(`/api/batches/${r.body.batchId}/scripts/action`, { action: 'approve', scriptIds: sc });
+    row = (await ed.get('/api/shoot-readiness')).body.shoots.find((x: any) => x.shoot.id === shootId);
+    expect(row).toMatchObject({ finished: 2, state: 'ready' });
+    const n = (await ed.get('/api/notifications')).body.notifications;
+    expect(n.some((x: any) => x.title.startsWith('Scripts final · '))).toBe(true);
+    // editors can search, but only find what they can open
+    const found = (await ed.get('/api/search?q=acme')).body;
+    expect(found.batches).toEqual([]);
+    expect(found.clients.length).toBeGreaterThan(0);
+  });
+
+  it('searches people, shoots, script numbers and briefing calls', async () => {
+    const people = (await manager.get('/api/search?q=sarah')).body.people;
+    expect(people.some((p: any) => p.id === ids.sarah)).toBe(true);
+    const nums = (await manager.get(`/api/search?q=${encodeURIComponent('#1')}`)).body.scripts;
+    expect(nums.length).toBeGreaterThan(0);
+    expect(nums.every((x: any) => x.number === 1)).toBe(true);
+    // writers only find their own script numbers
+    const hers = (await sarah.get(`/api/search?q=${encodeURIComponent('script 1')}`)).body.scripts;
+    const all = (await manager.get(`/api/search?q=${encodeURIComponent('script 1')}`)).body.scripts;
+    expect(hers.length).toBeLessThanOrEqual(all.length);
+    const shoots = (await manager.get('/api/search?q=acme')).body.shoots;
+    expect(Array.isArray(shoots)).toBe(true);
+  });
+
+  it('names both missed deadlines the same way when drafts and final delivery are late', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Both late', targetCount: 1, draftDue: '2026-01-05', finalDue: '2026-01-07', split: [{ writerId: ids.sarah, count: 1 }] });
+    const att = (await manager.get('/api/dashboard')).body.attention.find((a: any) => a.batch.id === b.body.batchId);
+    expect(att.issues[0].text).toMatch(/^Drafts \d+ days overdue · Final delivery \d+ days overdue/);
+  });
+
+  it('names the document version in the history when deciding on it', async () => {
+    const b = await manager.post('/api/batches', { clientId: acmeId, title: 'Versioned log', targetCount: 1, split: [{ writerId: ids.sarah, count: 1 }] });
+    const id = b.body.batchId;
+    const sc = (await manager.get(`/api/batches/${id}`)).body.scripts.map((s: any) => s.id);
+    const v = await sarah.post(`/api/batches/${id}/submissions`, { scriptIds: sc, url: 'https://docs.google.com/document/d/log-v1' });
+    await manager.post(`/api/batches/${id}/review`, { action: 'approve', scriptIds: sc, submissionId: v.body.submissionId });
+    const act = (await manager.get(`/api/batches/${id}`)).body.activity;
+    expect(act.some((a: any) => /\(document version 1\)/.test(a.summary))).toBe(true);
   });
 });

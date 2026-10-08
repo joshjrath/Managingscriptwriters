@@ -7,7 +7,7 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Check, ListTodo, Pencil, Plus, Trash2 } from 'lucide-react';
 import { api, qs, useSave } from '../api';
-import type { Todo } from '../../../shared/types';
+import type { BatchSummary, Todo } from '../../../shared/types';
 import { isManager } from '../../../shared/workflow';
 import { fmtDate, plural } from '../../../shared/format';
 import { useBoot } from './Shell';
@@ -96,15 +96,19 @@ export function TodoDialog({ todo, userId, batchId, pickPerson, onClose }: { tod
   const [text, setText] = useState(todo?.text ?? '');
   const [due, setDue] = useState(todo?.due ?? '');
   const [who, setWho] = useState<number>(todo?.userId ?? userId ?? me.id);
-  const ids = { t: useFieldId('todo'), d: useFieldId('due'), w: useFieldId('who') };
+  const [onBatch, setOnBatch] = useState<number | ''>(batchId ?? '');
+  const ids = { t: useFieldId('todo'), d: useFieldId('due'), w: useFieldId('who'), b: useFieldId('tb') };
+  // tie it to one of their batches (optional), unless it was opened from a batch already
+  const theirs = useQuery({ queryKey: ['batches', { writerId: who }], queryFn: () => api<{ batches: BatchSummary[] }>(`/api/batches?writerId=${who}`), enabled: !todo && batchId === undefined && manager });
+  const person = users.find((u) => u.id === who);
   const save = useSave(() => todo
     ? api(`/api/todos/${todo.id}`, { method: 'PATCH', body: { text, due: due || null } })
-    : api('/api/todos', { body: { userId: who, text, due: due || null, batchId: batchId ?? null } }), {
+    : api('/api/todos', { body: { userId: who, text, due: due || null, batchId: onBatch || null } }), {
     onSuccess: () => { toast(todo ? 'To-do updated' : who === me.id ? 'To-do added' : `To-do sent to ${users.find((u) => u.id === who)?.name ?? 'them'}`); onClose(); },
   });
   const f = save.error?.fields ?? {};
   return (
-    <Dialog open onClose={onClose} title={todo ? 'Edit to-do' : 'Add a to-do'} size="narrow"
+    <Dialog open onClose={onClose} title={todo ? 'Edit to-do' : who === me.id ? 'Add a to-do for yourself' : `To-do for ${person?.name ?? 'them'}`} size="narrow"
       sub={!todo && who !== me.id ? 'They’ll get a notification, and it shows on their My work and Overview.' : undefined}
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={save.isPending} disabled={!text.trim()} onClick={() => save.mutate(undefined)}>{todo ? 'Save' : 'Add to-do'}</Button></div>}>
       <form className="form" onSubmit={(e) => { e.preventDefault(); if (text.trim()) save.mutate(undefined); }}>
@@ -118,6 +122,14 @@ export function TodoDialog({ todo, userId, batchId, pickPerson, onClose }: { tod
         )}
         <Field label="To-do" htmlFor={ids.t} error={f.text}><input className="input" autoFocus value={text} maxLength={500} onChange={(e) => setText(e.target.value)} placeholder="e.g. Rewrite the hooks on scripts 3 and 7" {...inputProps(ids.t, f.text)} /></Field>
         <Field label="Due" optional htmlFor={ids.d} error={f.due}><input className="input" type="date" value={due} onChange={(e) => setDue(e.target.value)} {...inputProps(ids.d, f.due)} /></Field>
+        {!todo && batchId === undefined && manager && (theirs.data?.batches.length ?? 0) > 0 && (
+          <Field label="About a batch" optional htmlFor={ids.b} help="Shows on that batch’s page too.">
+            <select className="select" id={ids.b} value={onBatch} onChange={(e) => setOnBatch(e.target.value ? Number(e.target.value) : '')}>
+              <option value="">No batch</option>
+              {theirs.data!.batches.map((b) => <option key={b.id} value={b.id}>{b.clientName} · {b.title}</option>)}
+            </select>
+          </Field>
+        )}
       </form>
     </Dialog>
   );

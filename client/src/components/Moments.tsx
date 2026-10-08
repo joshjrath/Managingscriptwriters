@@ -15,7 +15,7 @@ import { fmtStamp, plural } from '../../../shared/format';
 import { celebrate, confetti } from '../fx';
 import { SPRING } from '../motion';
 import { useDisplayTz } from './Shell';
-import { Button } from './ui';
+import { Button, useToast } from './ui';
 
 // a send-back is the thing to act on, so it leads; the celebrations follow
 const RANK: Record<MomentKind, number> = { revisions: -1, batch_done: 0, team_batch_done: 1, drafts_done: 2, team_drafts_done: 3, approved: 4 };
@@ -83,12 +83,22 @@ export function MomentsHost() {
   const q = useQuery({ queryKey: ['moments'], queryFn: () => api<Moment[]>('/api/moments'), refetchInterval: 60_000, staleTime: 0 });
   const shown = useRef(new Set<number>());
   const [playing, setPlaying] = useState<Moment[] | null>(null);
+  const toast = useToast();
+  const nav = useNavigate();
   useEffect(() => {
     if (playing) return;
     const fresh = (q.data ?? []).filter((x) => !shown.current.has(x.id));
     if (!fresh.length) return;
     fresh.forEach((x) => shown.current.add(x.id));
-    setPlaying(merge(fresh));
+    // the team's milestones are good news, not something to stop and read: a toast, so the page stays in view
+    const team = fresh.filter((x) => x.kind === 'team_batch_done' || x.kind === 'team_drafts_done');
+    const own = fresh.filter((x) => !team.includes(x));
+    if (team.length) {
+      const [first] = merge(team);
+      const t = tell(first);
+      toast(team.length > 1 ? `${t.title} · and ${team.length - 1} more` : t.title, 'ok', { label: 'Open', run: () => nav(t.cta.to) });
+    }
+    if (own.length) setPlaying(merge(own));
     api('/api/moments/seen', { body: { ids: fresh.map((x) => x.id) } }).then(() => qc.setQueryData(['moments'], [])).catch(() => { /* shown once per visit either way */ });
   }, [q.data, playing, qc]);
   if (!playing) return null;

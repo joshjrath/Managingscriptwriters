@@ -5,10 +5,10 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useInfiniteQuery, keepPreviousData, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Archive, ExternalLink, FileText, Library, Link2, PenLine, Trash2, Upload, X } from 'lucide-react';
 import { api, qs, useSave, type ApiError } from '../api';
-import type { Deliverable, DeliverableState, ScriptBankPage } from '../../../shared/types';
+import type { Deliverable, DeliverableState, ScriptBankPage, ShootReadiness } from '../../../shared/types';
 import { fmtDate, fmtStamp, plural } from '../../../shared/format';
 import { STATUS_SHORT, compressRanges, isManager, type ScriptStatus } from '../../../shared/workflow';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
@@ -17,7 +17,7 @@ import { Button, Chip, Dialog, Empty, ErrorState, Field, FormError, Loading, Pan
 const STATE: Record<DeliverableState, { label: string; color: string }> = {
   in_progress: { label: 'Writing', color: 'cyan' },
   in_review: { label: 'In review', color: 'lavender' },
-  revisions: { label: 'Revisions', color: 'pink' },
+  revisions: { label: 'Sent back', color: 'pink' },
   approved: { label: 'Approved', color: 'mint' },
   delivered: { label: 'Delivered', color: 'mint' },
 };
@@ -64,6 +64,16 @@ export function ScriptBankPage() {
   const items = bank.data?.pages.flatMap((p) => p.deliverables) ?? [];
   const first = bank.data?.pages[0];
   const filtered = !!(q || clientId || writerId || status || shootId);
+  // for editors, say where the client's (or shoot's) scripts are instead of a generic empty page
+  const readiness = useQuery({ queryKey: ['shoot-readiness'], queryFn: () => api<{ shoots: ShootReadiness[] }>('/api/shoot-readiness'), enabled: editor && !!(clientId || shootId) });
+  const editorWhy = (() => {
+    const rs = (readiness.data?.shoots ?? []).filter((r) => (shootId ? String(r.shoot.id) === shootId : String(r.shoot.clientId) === clientId) && r.total > 0);
+    if (!rs.length) return null;
+    const total = rs.reduce((n, r) => n + r.total, 0);
+    const done = rs.reduce((n, r) => n + r.finished, 0);
+    const due = rs.map((r) => r.finalDue).filter((d): d is string => !!d).sort()[0];
+    return `${done} of ${total} scripts for the upcoming ${rs.length === 1 ? 'shoot' : 'shoots'} approved so far${due ? ` · final delivery due ${fmtDate(due)}` : ''}. They appear here once approved.`;
+  })();
   const clientName = clients.find((c) => String(c.id) === clientId)?.name;
   const people = users.filter((u) => !u.removed && u.role !== 'editor').sort((a, b) => a.name.localeCompare(b.name));
   const num = scriptNumber(q);
@@ -112,7 +122,7 @@ export function ScriptBankPage() {
               ? (clientName ? `No finished scripts for ${clientName} yet` : filtered ? 'No finished scripts match' : 'No finished scripts yet')
               : filtered ? 'Nothing matches' : 'Nothing sent yet'}>
               {editor
-                ? (q ? 'Try fewer words, or clear the filters.' : 'Scripts show up here as soon as a manager approves them. The Calendar shows when each shoot’s scripts are due.')
+                ? (q ? 'Try fewer words, or clear the filters.' : editorWhy ?? 'Scripts show up here as soon as a manager approves them. The Calendar shows when each shoot’s scripts are due.')
                 : q ? 'Try fewer words, or clear the filters.' : filtered ? 'Nothing here with these filters. Clear them to see everything.' : 'Documents appear here as soon as a writer sends their scripts for review.'}
             </Empty>
           ) : (

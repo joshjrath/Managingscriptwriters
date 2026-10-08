@@ -10,7 +10,7 @@ import { HttpError } from './http';
 const ALLOW: Record<string, ReadonlySet<string>> = {
   GET: new Set([
     '/api/auth/status', '/api/bootstrap', '/api/counts', '/api/moments', '/api/notifications',
-    '/api/calendar', '/api/script-bank', '/api/files/:id',
+    '/api/calendar', '/api/script-bank', '/api/files/:id', '/api/shoot-readiness', '/api/search',
     '/api/clients', '/api/clients/:id', '/api/resources',
     '/api/messages', '/api/messages/:userId', '/api/todos',
   ]),

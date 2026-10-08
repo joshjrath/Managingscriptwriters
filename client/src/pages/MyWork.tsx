@@ -72,7 +72,7 @@ export function MyWorkPage() {
   const summary = [
     sentBackN > 0 && `${plural(sentBackN, 'script')} sent back`,
     by.new.length && `${plural(by.new.length, 'new batch', 'new batches')}`,
-    by.todo.length && `${by.todo.length} to work on`,
+    by.todo.length && `${plural(by.todo.length, 'batch', 'batches')} to work on`,
     by.waiting.length && `${by.waiting.length} waiting on review`,
   ].filter(Boolean).join(' · ');
   const first = who?.name.split(' ')[0] ?? 'Their';

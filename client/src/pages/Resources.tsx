@@ -19,7 +19,8 @@ const ICON: Record<ResourceCategory, typeof Link2> = { folder: FolderOpen, examp
 
 export function ResourcesPage() {
   const displayTz = useDisplayTz();
-  const { clients } = useBoot();
+  const { clients, me } = useBoot();
+  const editor = me.role === 'editor';
   const [params, setParams] = useSearchParams();
   const [text, setText] = useState(params.get('q') ?? '');
   const q = params.get('q') ?? '';
@@ -66,7 +67,7 @@ export function ResourcesPage() {
                       <div className="t">{r.title}</div>
                       <div className="s">
                         <Link className="link" to={`/clients/${r.clientId}`}>{r.clientName}</Link>
-                        {r.batchId && <> › <Link className="link" to={`/batches/${r.batchId}`}>{r.batchTitle}</Link></>}
+                        {r.batchId && <> › {editor ? <span>{r.batchTitle}</span> : <Link className="link" to={`/batches/${r.batchId}`}>{r.batchTitle}</Link>}</>}
                         {r.briefingTitle && <> › {r.briefingTitle}</>}
                         {' · '}{RESOURCE_LABEL[r.category]}{r.kind === 'file' ? ` · ${fmtBytes(r.fileSize)}` : ''} · {r.createdByName}, {fmtStamp(r.createdAt, displayTz)}
                       </div>

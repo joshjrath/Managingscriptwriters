@@ -2,7 +2,7 @@
 
 import { fileStream, isBlockedFile, spool, storeFile, type UploadedFile } from '../files';
 import type { FastifyInstance } from 'fastify';
-import { isManager } from '../../shared/workflow';
+import { isManager, type Role } from '../../shared/workflow';
 import { z } from 'zod';
 import { clockFor, isAssignedTo, loadBatches, loadSettings, logActivity, type Ctx } from '../core';
 import { requireManager, requireUser } from '../auth';
@@ -394,9 +394,33 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
   });
 
   app.get('/api/search', async (req) => {
-    requireUser(req);
+    const me = requireUser(req);
     const { q } = parse(z.object({ q: z.string().trim().min(1).max(100) }), req.query);
     const like = `%${q.toLowerCase()}%`;
+    const num = /^(?:#|script\s*#?\s*)(\d{1,4})$/i.exec(q)?.[1] ?? (/^\d{1,4}$/.test(q) ? q : null);
+    const [people, shoots, scripts, briefings] = await Promise.all([
+      db.query<{ id: number; name: string; role: Role }>(`select id, name, role from users where active and (lower(name) like $1 or lower(email) like $1) order by lower(name) limit 5`, [like]),
+      db.query<{ id: number; title: string | null; client_id: number; client_name: string; start_date: string; batch_id: number | null }>(
+        `select s.id, s.title, s.client_id, c.name as client_name, s.start_date::text as start_date,
+                (select min(b.id) from batches b where b.shoot_id = s.id and b.archived_at is null) as batch_id
+           from shoots s join clients c on c.id = s.client_id
+          where s.cancelled_at is null and (lower(coalesce(s.title, '')) like $1 or lower(c.name) like $1) and s.start_date >= current_date - 60
+          order by s.start_date limit 6`, [like]),
+      num ? db.query<{ batch_id: number; batch_title: string; client_name: string; number: number; title: string | null }>(
+        `select s.batch_id, b.title as batch_title, c.name as client_name, s.number, s.title from scripts s join batches b on b.id = s.batch_id join clients c on c.id = b.client_id
+          where s.removed_at is null and b.archived_at is null and s.number = $1 ${me.role === 'writer' ? 'and s.assignee_id = $2' : ''} order by b.final_due nulls last limit 8`,
+        me.role === 'writer' ? [Number(num), me.id] : [Number(num)]) : Promise.resolve([]),
+      db.query<{ id: number; title: string; client_id: number; client_name: string; call_date: string | null }>(
+        `select br.id, br.title, br.client_id, c.name as client_name, br.call_date::text as call_date from briefings br join clients c on c.id = br.client_id
+          where lower(br.title) like $1 or lower(coalesce(br.instructions, '')) like $1 or lower(coalesce(br.summary, '')) like $1 or ($2 and br.recording_url is not null)
+          order by br.call_date desc nulls last limit 5`, [like, /^(call )?recordings?$/i.test(q)]),
+    ]);
+    const extra = {
+      people: me.role === 'editor' ? [] : people,
+      shoots: shoots.map((s) => ({ id: s.id, title: s.title ?? 'Shoot', clientId: s.client_id, clientName: s.client_name, startDate: s.start_date, batchId: me.role === 'editor' ? null : s.batch_id })),
+      scripts: me.role === 'editor' ? [] : scripts.map((s) => ({ batchId: s.batch_id, batchTitle: s.batch_title, clientName: s.client_name, number: s.number, title: s.title })),
+      briefings: briefings.map((b) => ({ id: b.id, title: b.title, clientId: b.client_id, clientName: b.client_name, callDate: b.call_date })),
+    };
     const [clients, batches, resources] = await Promise.all([
       db.query<{ id: number; name: string; status: 'prospect' | 'active' | 'archived' }>(`select id, name, status from clients where lower(name) like $1 order by status, lower(name) limit 6`, [like]),
       db.query<{ id: number; title: string; client_name: string }>(
@@ -404,12 +428,14 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
           where b.archived_at is null and (lower(b.title) like $1 or lower(c.name) like $1) order by b.final_due nulls last limit 8`, [like]),
       db.query<{ id: number; title: string; client_name: string; url: string | null; file_id: number | null }>(
         `select r.id, r.title, c.name as client_name, r.url, r.file_id from resources r join clients c on c.id = r.client_id
-          where r.removed_at is null and lower(r.title) like $1 order by r.created_at desc limit 6`, [like]),
+          where r.removed_at is null and (lower(r.title) like $1 or lower(coalesce(r.notes, '')) like $1 or ($2 and r.category = 'recording'))
+          order by r.created_at desc limit 6`, [like, /^(call )?recordings?$/i.test(q)]),
     ]);
     return {
       clients,
-      batches: batches.map((b) => ({ id: b.id, title: b.title, clientName: b.client_name })),
+      batches: me.role === 'editor' ? [] : batches.map((b) => ({ id: b.id, title: b.title, clientName: b.client_name })),
       resources: resources.map((r) => ({ id: r.id, title: r.title, clientName: r.client_name, url: r.url, fileId: r.file_id })),
+      ...extra,
     };
   });
 

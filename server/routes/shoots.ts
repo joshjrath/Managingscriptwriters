@@ -7,7 +7,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { Db } from '../db';
-import { assigneesOf, batchLink, clockFor, loadBatch, loadSettings, logActivity, notify, rulesOf, type Ctx } from '../core';
+import { assigneesOf, batchLink, clockFor, editorIds, loadBatch, loadSettings, logActivity, notify, rulesOf, type Ctx } from '../core';
 import { requireManager, requireUser } from '../auth';
 import { HttpError, notFound, optionalDate, parse, zs } from '../http';
 import { loadShoots } from '../records';
@@ -186,13 +186,15 @@ export function registerShootRoutes(app: FastifyInstance, ctx: Ctx) {
     const endDate = input.endDate && input.endDate !== input.startDate ? input.endDate : null;
 
     const preview = await db.tx(async (t) => {
-      const old = await t.one<{ client_id: number; start_date: ISODate; end_date: ISODate | null }>(`select client_id, start_date, end_date from shoots where id = $1 for update`, [id]);
+      const old = await t.one<{ client_id: number; start_date: ISODate; end_date: ISODate | null; client_name: string | null }>(
+        `select s.client_id, s.start_date, s.end_date, (select name from clients c where c.id = s.client_id) as client_name from shoots s where s.id = $1 for update`, [id]);
       if (!old) throw notFound('Shoot');
       const p = await reschedulePreview(t, settings, clock, id, input.startDate, endDate, input.shiftManual);
       if (old.start_date === input.startDate && old.end_date === endDate) return p;
       await t.query(`update shoots set start_date = $2, end_date = $3, updated_at = now() where id = $1`, [id, input.startDate, endDate]);
       const moved = `Shoot moved ${fmtRange(old.start_date, old.end_date)} → ${fmtRange(input.startDate, endDate)}`;
       await logActivity(t, { actor: me, action: 'shoot.rescheduled', entityType: 'shoot', entityId: id, clientId: old.client_id, summary: moved });
+      await notify(t, await editorIds(t), { type: 'deadline_change', title: `Shoot moved · ${old.client_name ?? 'a client'}`, body: `${moved}.`, link: '/calendar' }, me.id);
 
       for (const batchId of [...new Set(p.changes.map((c) => c.batchId))]) {
         const rows = p.changes.filter((c) => c.batchId === batchId);

@@ -87,16 +87,23 @@ export function ClientsPage() {
                       <Link to={`/clients/${c.id}`} className="client-card" draggable={false}>
                         <div className="row-flex s2" style={{ justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'nowrap' }}>
                           <h3>{c.name}</h3>
-                          {c.overdueBatches > 0 && <Chip color="red" icon={<AlertTriangle aria-hidden />}>{c.overdueBatches} overdue</Chip>}
+                          {c.overdueBatches > 0 && me.role !== 'editor' && <Chip color="red" icon={<AlertTriangle aria-hidden />}>{c.overdueBatches} overdue</Chip>}
                           {c.becameClientAt && Date.now() - Date.parse(c.becameClientAt) < 7 * 86400_000 && !c.overdueBatches && <Chip color="mint" icon={<Sparkles aria-hidden />}>New client</Chip>}
                         </div>
                         {c.description ? <p className="desc">{c.description}</p> : <p className="desc">No description yet.</p>}
                         <span className="muted" style={{ fontSize: 12.5 }}>Account lead: {c.ownerName ?? '—'}</span>
-                        <div className="stats">
-                          <div><b>{c.activeBatches}</b><span>active batches</span></div>
-                          <div><b className="num">{c.scriptsDelivered}/{c.scriptsTotal}</b><span>delivered</span></div>
-                          <div><b>{c.nextShoot ? fmtDate(c.nextShoot) : '—'}</b><span>next shoot</span></div>
-                        </div>
+                        {me.role === 'editor' ? (
+                          <div className="stats">
+                            <div><b>{c.nextShoot ? fmtDate(c.nextShoot) : '—'}</b><span>next shoot</span></div>
+                            <div><b className="num">{c.scriptsDelivered}</b><span>{c.scriptsDelivered === 1 ? 'finished script' : 'finished scripts'}</span></div>
+                          </div>
+                        ) : (
+                          <div className="stats">
+                            <div><b>{c.activeBatches}</b><span>{c.activeBatches === 1 ? 'active batch' : 'active batches'}</span></div>
+                            <div><b className="num">{c.scriptsDelivered}/{c.scriptsTotal}</b><span>delivered</span></div>
+                            <div><b>{c.nextShoot ? fmtDate(c.nextShoot) : '—'}</b><span>next shoot</span></div>
+                          </div>
+                        )}
                       </Link>
                       </div>
                     </m.div>
@@ -187,19 +194,22 @@ export function ClientPage() {
               <div><div className="section-title">Description</div><p className={`prose${c.description ? '' : ' muted'}`}>{c.description ?? 'No description yet.'}</p></div>
               <div><div className="section-title">Brand voice</div><p className={`prose${c.brandVoice ? '' : ' muted'}`}>{c.brandVoice ?? 'Not written yet.'}</p></div>
               <div><div className="section-title">Writing guidance</div><p className={`prose${c.guidance ? '' : ' muted'}`}>{c.guidance ?? 'Not written yet.'}</p></div>
+              {c.briefings.filter((b) => b.instructions).map((b) => (
+                <div key={b.id}><div className="section-title">From the {b.title} call{b.callDate ? ` · ${fmtDate(b.callDate)}` : ''}</div><p className="prose">{b.instructions}</p></div>
+              ))}
             </div>
           </Panel>
           <Panel title="Shoots" count={upcoming.length || undefined} sub={upcoming.length ? 'upcoming' : undefined}
-            tools={editor ? <Link to={`/scripts?clientId=${c.id}`} className="btn sm">Finished scripts <ArrowRight size={14} aria-hidden /></Link> : undefined}>
+            tools={<Link to={`/scripts?clientId=${c.id}`} className="btn sm">{editor ? 'Finished scripts' : 'Scripts'} <ArrowRight size={14} aria-hidden /></Link>}>
             {!c.shoots.length ? <Empty boxed icon={<Camera />} title="No shoots" action={manager && c.status !== 'archived' ? <Button variant="sm" onClick={() => openNew('shoot', { clientId: c.id })}>Schedule a shoot</Button> : undefined} /> : (
               <div className="rows">
                 {[...upcoming, ...past.slice(-3).reverse()].map((s) => (
                   <div key={s.id} className="item with-tile">
                     <DateTile date={s.startDate} color={(s.endDate ?? s.startDate) < today ? 'var(--text-3)' : undefined} />
-                    <div className="body"><div className="title">{s.title ?? 'Shoot'}</div><div className="meta"><span>{fmtRange(s.startDate, s.endDate)}</span>{s.location && <span>{s.location}</span>}<span>{s.batchIds.length ? plural(s.batchIds.length, 'batch', 'batches') : 'No scripts planned yet'}</span></div></div>
+                    <div className="body"><div className="title">{s.batchIds.length ? <Link className="link" to={`/scripts?shootId=${s.id}`} title="This shoot’s scripts in the Script bank">{s.title ?? 'Shoot'}</Link> : (s.title ?? 'Shoot')}</div><div className="meta"><span>{fmtRange(s.startDate, s.endDate)}</span>{s.location && <span>{s.location}</span>}<span>{s.batchIds.length ? plural(s.batchIds.length, 'batch', 'batches') : 'No scripts planned yet'}</span></div></div>
                     <div className="side">{(s.endDate ?? s.startDate) < today ? <Chip>Past</Chip> : manager ? <div className="row-flex s2">
                       {!s.batchIds.length && <Button variant="sm salmon" onClick={() => openNew('batch', { clientId: c.id, shootId: s.id })}>Add scripts</Button>}
-                      <Button variant="sm" onClick={() => setResched({ id: s.id, start: s.startDate, end: s.endDate })}>Change dates</Button>
+                      <Button variant="sm" onClick={() => setResched({ id: s.id, start: s.startDate, end: s.endDate })}>Move shoot…</Button>
                     </div> : null}</div>
                   </div>
                 ))}
@@ -216,32 +226,33 @@ export function ClientPage() {
         </div>
         <div className="stack" style={{ gap: 'var(--gap)' }}>
           {/* recordings and documents live in Resources now; older briefing records still show here */}
-          {c.briefings.length > 0 && <Panel title="Briefing calls" count={c.briefings.length}>
-            {(
-              <div className="stack s2">
-                {c.briefings.map((b) => (
-                  <div key={b.id} className="brief">
-                    <div className="row-flex s2"><h4>{b.title}</h4>{b.callDate && <Chip color="plain">Call {fmtDate(b.callDate)}</Chip>}<span className="spacer" />{manager && <Button variant="sm ghost" onClick={() => setBrief(b)}>Edit</Button>}{manager && <Button variant="sm ghost" onClick={() => setRes({ briefingId: b.id })}>Attach file</Button>}</div>
-                    <div className="links">
-                      {b.recordingUrl && <ExtLink href={b.recordingUrl} className="btn sm salmon"><PlayCircle aria-hidden />Recording</ExtLink>}
-                      {b.documentUrl && <ExtLink href={b.documentUrl} className="btn sm"><FileText aria-hidden />Document</ExtLink>}
-                      {b.resources.map((r) => <a key={r.id} className="btn sm" href={r.kind === 'file' ? `/api/files/${r.fileId}` : r.url!} target="_blank" rel="noopener noreferrer"><FileText aria-hidden />{r.title}</a>)}
-                    </div>
-                    {b.summary && <p className="prose" style={{ fontSize: 13.5 }}>{b.summary}</p>}
-                    {b.instructions && <div><div className="section-title">Writing instructions</div><p className="prose" style={{ fontSize: 13.5 }}>{b.instructions}</p></div>}
-                    {!editor && <div className="muted" style={{ fontSize: 12 }}>{b.batchIds.length ? `Applies to ${plural(b.batchIds.length, 'batch', 'batches')}: ${c.batches.filter((x) => b.batchIds.includes(x.id)).map((x) => x.title).join(', ')}` : 'Not attached to a batch yet'}</div>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Panel>}
+
           {!editor && <Panel title="Batches" tools={<Seg role="group" aria-label="Batches"><button aria-pressed={tab === 'active'} onClick={() => setTab('active')}>Active {active.length}</button><button aria-pressed={tab === 'done'} onClick={() => setTab('done')}>Completed {done.length}</button></Seg>}>
             {(tab === 'active' ? active : done).length === 0 ? <Empty boxed title={tab === 'active' ? 'No active batches' : 'Nothing completed yet'} /> : (
               <div className="rows">{(tab === 'active' ? active : done).map((b) => <BatchItem key={b.id} b={b} ring />)}</div>
             )}
           </Panel>}
           <Panel title="Resources" tools={manager ? <Button variant="sm" icon={<Link2 aria-hidden />} onClick={() => setRes({})}>Add</Button> : undefined}>
-            {!c.resources.length ? <Empty boxed title="No folders, examples or assets yet" /> : (
+            {c.briefings.length > 0 && (
+              <div className="stack s2" style={{ marginBottom: c.resources.length ? 18 : 0 }}>
+                <div className="section-title">Briefing calls</div>
+                <div className="stack s2">
+                  {c.briefings.map((b) => (
+                    <div key={b.id} className="brief">
+                      <div className="row-flex s2"><h4>{b.title}</h4>{b.callDate && <Chip color="plain">Call {fmtDate(b.callDate)}</Chip>}<span className="spacer" />{manager && <Button variant="sm ghost" onClick={() => setBrief(b)}>Edit</Button>}{manager && <Button variant="sm ghost" onClick={() => setRes({ briefingId: b.id })}>Attach file</Button>}</div>
+                      <div className="links">
+                        {b.recordingUrl && <ExtLink href={b.recordingUrl} className="btn sm salmon"><PlayCircle aria-hidden />Recording</ExtLink>}
+                        {b.documentUrl && <ExtLink href={b.documentUrl} className="btn sm"><FileText aria-hidden />Document</ExtLink>}
+                        {b.resources.map((r) => <a key={r.id} className="btn sm" href={r.kind === 'file' ? `/api/files/${r.fileId}` : r.url!} target="_blank" rel="noopener noreferrer"><FileText aria-hidden />{r.title}</a>)}
+                      </div>
+                      {b.summary && <p className="prose" style={{ fontSize: 13.5 }}>{b.summary}</p>}
+                      {!editor && <div className="muted" style={{ fontSize: 12 }}>{b.batchIds.length ? `Applies to ${plural(b.batchIds.length, 'batch', 'batches')}: ${c.batches.filter((x) => b.batchIds.includes(x.id)).map((x) => x.title).join(', ')}` : 'Not attached to a batch yet'}</div>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {!c.resources.length ? (!c.briefings.length && <Empty boxed title="No folders, examples, assets or call recordings yet" />) : (
               <div className="stack s4">
                 {(['folder', 'example', 'asset', 'document', 'recording', 'other'] as const).filter((k) => byCat(k).length).map((k) => (
                   <div key={k} className="stack s2">

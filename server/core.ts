@@ -78,6 +78,11 @@ export async function loadUsers(db: Db): Promise<UserSummary[]> {
   }));
 }
 
+/** Editors who can sign in: they hear when a shoot's scripts are final, or the shoot moves. */
+export async function editorIds(db: Db): Promise<number[]> {
+  return (await db.query<{ id: number }>(`select id from users where role = 'editor' and active and removed_at is null`)).map((r) => r.id);
+}
+
 export async function managerIds(db: Db): Promise<number[]> {
   return (await db.query<{ id: number }>(`select id from users where role in ('owner', 'manager') and active and removed_at is null`)).map((r) => r.id);
 }

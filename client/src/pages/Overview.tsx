@@ -1,10 +1,12 @@
-// Overview: the operations dashboard. Four summary cards, work due by day,
-// what needs attention, upcoming shoots, active batches, writer workload
-// and recent deliveries — every number derived from script records.
+// Overview: the operations dashboard, in the order a manager needs it. What
+// needs attention (with today and the team's to-dos beside it) and shoots to
+// plan come first; then the four summary cards, work due by day, upcoming
+// shoots, writer workload and recent deliveries; active batches and writing
+// progress fold away under More. Every number is derived from script records.
 
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, ArrowRight, CalendarClock, Camera, CheckCheck, ClipboardCheck, Send, Sparkles } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CalendarClock, Camera, CheckCheck, ChevronDown, ClipboardCheck, Send, Sparkles } from 'lucide-react';
 import { api } from '../api';
 import type { Dashboard } from '../../../shared/types';
 import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
@@ -44,7 +46,22 @@ export function Overview() {
               <ArrowRight aria-hidden className="go" />
             </Link>
           )}
-          <div style={{ marginBottom: 'var(--gap)' }}><TodayPill /></div>
+          <div className="ov-top">
+            <Panel className="ov-attn" title="Needs attention" sub={d.attention.length ? 'most urgent first' : undefined} count={d.attention.length} tools={d.unassignedScripts ? <Chip color="pink">{plural(d.unassignedScripts, 'unassigned script')}</Chip> : undefined}>
+              {!d.attention.length ? (
+                <Empty boxed icon={<CheckCheck />} title="Nothing needs you right now">No overdue, blocked or unassigned work.</Empty>
+              ) : (
+                <div className="rows">
+                  {d.attention.map((a) => <AttentionRow key={a.batch.id} a={a} />)}
+                </div>
+              )}
+            </Panel>
+            <div className="ov-today">
+              <TodayPill />
+                {d.scope === 'mine' ? <TodoPanel title="Your to-dos" /> : <TodoPanel all title="Team to-dos" sub="open, for everyone" />}
+            </div>
+          </div>
+          {isManager(me.role) && <CalendarShootsPanel siteShoots={d.upcomingShoots.filter((s) => !s.batches.length)} batches={d.activeBatches} />}
           <div className="cards4">
             <button className="stat-card salmon" onClick={() => nav('/production?flag=overdue&view=table')} aria-label={`${d.cards.overdueBatches} overdue batches, ${d.cards.overdueScripts} scripts behind. Show them.`}>
               <span className="corner"><AlertTriangle /></span>
@@ -68,25 +85,13 @@ export function Overview() {
             </button>
           </div>
 
-          {isManager(me.role) && <CalendarShootsPanel />}
-          <div className="dash">
+          <div className="dash ov-dash">
             <Panel className="a-chart"><DueChart draft={d.due.draft} final={d.due.final} today={clock.today} /></Panel>
-
-            <Panel className="a-attn" title="Needs attention" count={d.attention.length} tools={d.unassignedScripts ? <Chip color="pink">{plural(d.unassignedScripts, 'unassigned script')}</Chip> : undefined}>
-              {!d.attention.length ? (
-                <Empty boxed icon={<CheckCheck />} title="Nothing needs you right now">No overdue, blocked or unassigned work.</Empty>
-              ) : (
-                <div className="rows fill">
-                  {d.attention.map((a) => <AttentionRow key={a.batch.id} a={a} />)}
-                </div>
-              )}
-            </Panel>
-
             <Panel className="a-shoots" title="Upcoming shoots" sub="next 45 days">
               {!d.upcomingShoots.length ? (
                 <Empty boxed icon={<Camera />} title="No shoots scheduled" action={isManager(me.role) ? <button className="btn sm" onClick={() => openNew('shoot')}>Schedule a shoot</button> : undefined} />
               ) : (
-                <div className="rows fill">
+                <div className="rows">
                   {d.upcomingShoots.map((s) => {
                     const total = s.batches.reduce((n, b) => n + b.progress.total, 0);
                     const ready = s.batches.reduce((n, b) => n + b.progress.draftReady, 0);
@@ -110,22 +115,6 @@ export function Overview() {
                 </div>
               )}
             </Panel>
-            <Panel className="a-batches" title={d.scope === 'mine' ? 'Your active batches' : 'Active batches'} count={d.activeBatches.length} tools={<Link to="/production" className="btn sm ghost">Production board <ArrowRight size={14} /></Link>}>
-              {!d.activeBatches.length ? (
-                <Empty boxed icon={<Sparkles />} title="No active batches" action={isManager(me.role) ? <button className="btn sm" onClick={() => openNew('shoot')}>Create work</button> : undefined} />
-              ) : (
-                <div className="rows">{d.activeBatches.slice(0, 10).map((b) => <BatchItem key={b.id} b={b} ring />)}</div>
-              )}
-              {d.activeBatches.length > 10 && <div className="panel-foot"><Link className="btn sm ghost" to="/production?view=table">All {d.activeBatches.length} batches <ArrowRight size={14} /></Link></div>}
-            </Panel>
-
-            <div className="a-side">
-              {d.scope === 'mine' ? <TodoPanel title="Your to-dos" /> : <TodoPanel all title="Team to-dos" sub="open, for everyone" />}
-              <Panel title={d.scope === 'mine' ? 'Your writing progress' : 'Writing progress'} sub="from the + / − counters"
-                tools={d.activeBatches.some((b) => b.writtenToday) ? <TodayBump n={d.activeBatches.reduce((n, b) => n + b.writtenToday, 0)} /> : undefined}>
-                <WritingFeed batches={d.activeBatches} />
-                <PipLegend />
-              </Panel>
               <Panel title={d.scope === 'mine' ? 'Your workload' : 'Writer workload'}>
                 {!d.workload.length ? <Empty boxed title="No writers yet">Add your team in Settings → Team.</Empty> : (
                   <div className="rows">
@@ -170,8 +159,25 @@ export function Overview() {
                   </div>
                 )}
               </Panel>
-            </div>
           </div>
+          <details className="ov-more">
+            <summary><ChevronDown aria-hidden />More: active batches and writing progress</summary>
+            <div className="ov-more-body">
+            <Panel className="a-batches" title={d.scope === 'mine' ? 'Your active batches' : 'Active batches'} count={d.activeBatches.length} tools={<Link to="/production" className="btn sm ghost">Production board <ArrowRight size={14} /></Link>}>
+              {!d.activeBatches.length ? (
+                <Empty boxed icon={<Sparkles />} title="No active batches" action={isManager(me.role) ? <button className="btn sm" onClick={() => openNew('shoot')}>Create work</button> : undefined} />
+              ) : (
+                <div className="rows">{d.activeBatches.slice(0, 10).map((b) => <BatchItem key={b.id} b={b} ring />)}</div>
+              )}
+              {d.activeBatches.length > 10 && <div className="panel-foot"><Link className="btn sm ghost" to="/production?view=table">All {d.activeBatches.length} batches <ArrowRight size={14} /></Link></div>}
+            </Panel>
+              <Panel title={d.scope === 'mine' ? 'Your writing progress' : 'Writing progress'} sub="from the + / − counters"
+                tools={d.activeBatches.some((b) => b.writtenToday) ? <TodayBump n={d.activeBatches.reduce((n, b) => n + b.writtenToday, 0)} /> : undefined}>
+                <WritingFeed batches={d.activeBatches} />
+                <PipLegend />
+              </Panel>
+            </div>
+          </details>
         </>
       )}
     </>

@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { Db } from '../db';
 import {
   assigneesOf, batchLink, buildSummary, clockFor, isAssignedTo, lastDeliveredAt, loadBatch, loadBatches,
-  loadSettings, loadUsers, loadWritten, logActivity, managerIds, markSeen, notify, rulesOf, type BatchRow, type Ctx, BATCH_SELECT, loadScriptsFor,
+  editorIds, loadSettings, loadUsers, loadWritten, logActivity, managerIds, markSeen, notify, rulesOf, type BatchRow, type Ctx, BATCH_SELECT, loadScriptsFor,
 } from '../core';
 import { requireManager, requireUser } from '../auth';
 import { buildGroups, publicSubmission } from '../submissions';
@@ -850,9 +850,13 @@ export async function applyScriptAction(
       approve: 'Approved', request_revisions: 'Sent back', deliver: 'Confirmed delivery to Timeliner for', undo_delivery: 'Undid delivery of',
     };
     const scriptsWord = `script${rows.length > 1 ? 's' : ''} ${nums}`;
+    // a decision on a document names which version it was
+    const decided = opts.review?.submissionId && (action === 'approve' || action === 'request_revisions')
+      ? await t.one<{ version: number }>(`select version from submissions where id = $1`, [opts.review.submissionId]) : null;
+    const versionNote = decided ? ` (document version ${decided.version})` : '';
     const summary = action === 'submit' && opts.submission
       ? `Sent ${scriptsWord} for review as one document: “${opts.submission.label}”${opts.submission.version > 1 ? ` (version ${opts.submission.version})` : ''}${onBehalf}`
-      : `${verb[action]} ${scriptsWord}${onBehalf}${opts.note && action !== 'deliver' ? ` — “${opts.note}”` : ''}${attached ? (action === 'approve' ? ' (edited version attached)' : ' (changes attached)') : ''}`;
+      : `${verb[action]} ${scriptsWord}${versionNote}${onBehalf}${opts.note && action !== 'deliver' ? ` — “${opts.note}”` : ''}${attached ? (action === 'approve' ? ' (edited version attached)' : ' (changes attached)') : ''}`;
     await logActivity(t, {
       actor: me, action: `scripts.${action}`, entityType: 'batch', entityId: batchId, batchId, clientId: b.client_id,
       summary,
@@ -915,6 +919,19 @@ export async function applyScriptAction(
       for (const uid of writers) {
         const w = theirs(uid);
         await notify(t, [uid], { type: 'delivery', title: `Delivery undone · ${b.client_name} · ${b.title}`, body: `${me.name} moved your ${w.word} back to approved.${opts.note ? ` “${opts.note}”` : ''}`, link: '/my-work' }, me.id);
+      }
+    }
+    // editors hear when every script for a shoot is final, so they can start cutting
+    if (action === 'approve') {
+      const left = await t.one<{ n: number; shoot: string | null }>(
+        `select (select count(*)::int from scripts where batch_id = $1 and removed_at is null and status not in ('approved', 'delivered')) as n,
+                (select sh.start_date::text from batches bb join shoots sh on sh.id = bb.shoot_id where bb.id = $1) as shoot`, [batchId]);
+      if (left && left.n === 0) {
+        await notify(t, await editorIds(t), {
+          type: 'approval', title: `Scripts final · ${b.client_name}`,
+          body: `Every script in ${b.title} is approved${left.shoot ? ` for the ${fmtDate(left.shoot as ISODate)} shoot` : ''}. They’re in the Script bank.`,
+          link: '/scripts', dedupeKey: `final:${batchId}`,
+        }, me.id);
       }
     }
     await recordMoments(t, me, batchId, action, rows, b, { note: opts.note, attached });

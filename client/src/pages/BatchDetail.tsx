@@ -52,6 +52,7 @@ function BatchView({ b }: { b: BatchDetail }) {
   const mine = b.writers.find((w) => w.userId === me.id);
   const [todoFor, setTodoFor] = useState<number | null>(null);
   const [sendBack, setSendBack] = useState<number | null>(null);
+  const [moveFrom, setMoveFrom] = useState<number | null>(null);
   const tz = fmtTimeZoneAbbr(settings.timezone); // deadlines are the workspace's
   // a writer opening a batch has seen what's new in it; their own scripts come first
   const qc = useQueryClient();
@@ -138,6 +139,9 @@ function BatchView({ b }: { b: BatchDetail }) {
                         {b.scripts.some((s) => s.assigneeId === w.userId && (s.status === 'approved' || s.status === 'ready_for_review')) && (
                           <Button variant="sm ghost" icon={<RotateCcw aria-hidden />} onClick={() => setSendBack(w.userId)}>Send back…</Button>
                         )}
+                        {b.scripts.some((s) => s.assigneeId === w.userId && (s.status === 'not_started' || s.status === 'in_progress' || s.status === 'revisions_needed')) && (
+                          <Button variant="sm ghost" icon={<UserPlus aria-hidden />} onClick={() => setMoveFrom(w.userId)}>Move scripts…</Button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -159,7 +163,7 @@ function BatchView({ b }: { b: BatchDetail }) {
               <div className="deadline" style={{ ['--c' as string]: 'var(--salmon)' }}>
                 <span className="ic"><Camera /></span>
                 <div><div className="k">Shoot</div><div className="v">{b.shootStart ? fmtRange(b.shootStart, b.shootEnd) : 'No shoot'}</div>{b.shootStart && <div className="rule">Deadlines count back from {fmtDate(b.shootStart)}</div>}</div>
-                <div className="right">{manager && b.shootId && <Button variant="sm" onClick={() => setResched(true)}>Change dates</Button>}</div>
+                <div className="right">{manager && b.shootId && <Button variant="sm" icon={<Camera aria-hidden />} onClick={() => setResched(true)} title="Moves the shoot and every batch on it; writers are told">Move shoot…</Button>}</div>
               </div>
               <div className="deadline" style={{ ['--c' as string]: 'var(--cyan)' }}>
                 <span className="ic"><Pencil /></span>
@@ -218,6 +222,7 @@ function BatchView({ b }: { b: BatchDetail }) {
 
       {todoFor != null && <TodoDialog userId={todoFor} batchId={b.id} onClose={() => setTodoFor(null)} />}
       {sendBack != null && <SendBackDialog b={b} writerId={sendBack} onClose={() => setSendBack(null)} />}
+      {moveFrom != null && <MoveScriptsDialog b={b} fromId={moveFrom} onClose={() => setMoveFrom(null)} />}
       {manager && <EditBatchDialog b={b} open={edit} onClose={() => setEdit(false)} />}
       {manager && target && <TargetDialog b={b} onClose={() => setTarget(false)} />}
       {manager && resched && b.shootId && <RescheduleDialog shootId={b.shootId} start={b.shootStart!} end={b.shootEnd} onClose={() => setResched(false)} />}
@@ -643,6 +648,63 @@ export function DeliverDialog({ scripts, submissions = [], also = null, forName,
         <FormError error={error} />
         <Field label="Timeliner link" optional htmlFor={a} error={err || error?.fields.timelinerUrl}><input className="input" type="url" placeholder="https://" value={url} onChange={(e) => { setUrl(e.target.value); setErr(''); }} {...inputProps(a, err)} /></Field>
         <Field label="Delivery note" optional htmlFor={c}><textarea className="textarea" id={c} value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. Scheduled for next Tuesday" /></Field>
+      </div>
+    </Dialog>
+  );
+}
+
+/**
+ * Hand some of a writer's unfinished scripts to someone else, saying what's being handed over
+ * (how far along they are, and whether their deadline has already passed).
+ */
+function MoveScriptsDialog({ b, fromId, onClose }: { b: BatchDetail; fromId: number; onClose: () => void }) {
+  const { users, clock } = useBoot();
+  const toast = useToast();
+  const from = b.writers.find((w) => w.userId === fromId);
+  const open = b.scripts.filter((s) => s.assigneeId === fromId && (s.status === 'not_started' || s.status === 'in_progress' || s.status === 'revisions_needed'));
+  // the last scripts first: they're the least likely to be under way
+  const [range, setRange] = useState(compressRanges(open.filter((s) => s.status === 'not_started').map((s) => s.number)) || compressRanges(open.map((s) => s.number)));
+  const [to, setTo] = useState('');
+  const [reset, setReset] = useState(false);
+  const [err, setErr] = useState('');
+  const ids = { r: useFieldId('mvr'), t: useFieldId('mvt') };
+  const nums = parseRanges(range, Math.max(0, ...open.map((s) => s.number)));
+  const picked = nums ? open.filter((s) => nums.includes(s.number)) : [];
+  const writing = picked.filter((s) => s.status === 'in_progress');
+  const back = picked.filter((s) => s.status === 'revisions_needed');
+  const late = b.draft.overdue && picked.length > 0;
+  const target = users.find((u) => u.id === Number(to));
+  const move = useSave(async () => {
+    await api(`/api/batches/${b.id}/scripts/assign`, { body: { scriptIds: picked.map((s) => s.id), assigneeId: Number(to) } });
+    if (reset && writing.length) await api(`/api/batches/${b.id}/scripts/action`, { body: { action: 'reset', scriptIds: writing.map((s) => s.id), note: null } });
+  }, { onSuccess: () => { toast(`Moved ${plural(picked.length, 'script')} (${compressRanges(picked.map((s) => s.number))}) to ${target?.name ?? 'them'}`); onClose(); } });
+  const submit = () => {
+    if (!picked.length) { setErr(`Use ${from?.name.split(' ')[0] ?? 'their'} unfinished scripts: ${compressRanges(open.map((s) => s.number))}`); return; }
+    if (!to) { setErr('Choose who gets them'); return; }
+    setErr('');
+    move.mutate(undefined);
+  };
+  return (
+    <Dialog open onClose={onClose} title={`Move scripts from ${from?.name ?? 'this writer'}`} sub={`${b.title} · ${plural(open.length, 'unfinished script')}: ${compressRanges(open.map((s) => s.number))}`} size="narrow"
+      footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={move.isPending} onClick={submit}>Move {plural(picked.length, 'script')}</Button></div>}>
+      <div className="form">
+        <FormError error={move.error} />
+        <Field label="Which scripts" htmlFor={ids.r} error={err && !picked.length ? err : undefined} help="Unstarted ones are picked first. Approved and delivered scripts stay with who wrote them.">
+          <input className="input" id={ids.r} value={range} onChange={(e) => setRange(e.target.value)} />
+        </Field>
+        <Field label="Give them to" htmlFor={ids.t} error={err && picked.length && !to ? err : undefined}>
+          <select className="select" id={ids.t} value={to} onChange={(e) => setTo(e.target.value)}>
+            <option value="">Choose…</option>
+            {users.filter((u) => u.active && canWrite(u.role) && u.id !== fromId).map((u) => <option key={u.id} value={u.id}>{u.name}{u.role !== 'writer' ? ` (${ROLE_LABEL[u.role]})` : ''}</option>)}
+          </select>
+        </Field>
+        {picked.length > 0 && (writing.length > 0 || back.length > 0 || late) && (
+          <div className="banner yellow"><AlertTriangle aria-hidden /><div className="txt">
+            <b>You’re handing over {[writing.length && `${writing.length} already being written`, back.length && `${back.length} sent back with notes`].filter(Boolean).join(' and ') || plural(picked.length, 'script')}</b>
+            <span>{late ? `Drafts were due ${fmtDate(b.draftDue, clock.today)}, so ${target?.name.split(' ')[0] ?? 'they'} will start overdue. Consider new deadlines after moving them.` : 'Their notes and any documents stay on the batch.'}</span>
+          </div></div>
+        )}
+        {writing.length > 0 && <label className="check"><input type="checkbox" checked={reset} onChange={(e) => setReset(e.target.checked)} />Mark the {plural(writing.length, 'script')} being written as not started</label>}
       </div>
     </Dialog>
   );

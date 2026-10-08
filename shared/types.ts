@@ -316,6 +316,18 @@ export interface Shoot {
   calendarUid: string | null;
 }
 
+/** Editors' view of a shoot: are its scripts ready to cut from? */
+export interface ShootReadiness {
+  shoot: Shoot;
+  total: number;
+  /** approved or delivered */
+  finished: number;
+  /** the earliest final-delivery date among its batches */
+  finalDue: ISODate | null;
+  /** ready = every script finished; late = final delivery has passed (or the shoot is here) without them; on_track otherwise */
+  state: 'ready' | 'on_track' | 'late' | 'no_scripts';
+}
+
 export interface Delivery {
   id: number;
   batchId: number;
@@ -496,6 +508,11 @@ export interface ExternalEventInfo {
   endAt: string;
   location: string | null;
   description: string | null;
+  /** the event's id in its calendar */
+  uid: string;
+  /** the site shoot planned from this event, if any (and its first batch) */
+  linkedShootId: number | null;
+  linkedBatchId: number | null;
 }
 
 /** A synced calendar, as managers see it in Settings (the secret address is never sent back in full). */
@@ -681,6 +698,11 @@ export interface SearchResults {
   clients: ClientLite[];
   batches: { id: number; title: string; clientName: string }[];
   resources: { id: number; title: string; clientName: string; url: string | null; fileId: number | null }[];
+  people: { id: number; name: string; role: Role }[];
+  shoots: { id: number; title: string; clientId: number; clientName: string; startDate: string; batchId: number | null }[];
+  /** "#12" or "script 12": that script number in every active batch */
+  scripts: { batchId: number; batchTitle: string; clientName: string; number: number; title: string | null }[];
+  briefings: { id: number; title: string; clientId: number; clientName: string; callDate: string | null }[];
 }
 
 export interface ApiErrorBody {

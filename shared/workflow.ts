@@ -160,6 +160,15 @@ export function nextMilestone(draft: Milestone, final: Milestone): Milestone | n
   return null;
 }
 
+/**
+ * Both deadlines missed: "Drafts 4 days overdue · Final delivery 2 days overdue", worded the
+ * same on every page. Null unless both are overdue (one late deadline is just the next milestone).
+ */
+export function bothLate(draft: Milestone, final: Milestone): string | null {
+  if (!draft.overdue || !final.overdue) return null;
+  return `Drafts ${draft.label.toLowerCase()} · Final delivery ${final.label.toLowerCase()}`;
+}
+
 // ── actions & permissions ────────────────────────────────────────────────
 
 export type Role = 'owner' | 'manager' | 'writer' | 'editor';

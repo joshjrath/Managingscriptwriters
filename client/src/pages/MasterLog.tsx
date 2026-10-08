@@ -32,7 +32,7 @@ function localParts(iso: string, timeZone: string) {
 export function MasterLogPage() {
   const displayTz = useDisplayTz();
   const { me, users, clock } = useBoot();
-  const [kind, setKind] = useState<Kind>('all');
+  const [kind, setKind] = useState<Kind>('change');
   const [userId, setUserId] = useState('');
   const [text, setText] = useState('');
   const [q, setQ] = useState('');

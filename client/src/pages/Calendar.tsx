@@ -5,7 +5,7 @@
 // choose "Change dates"); a preview shows everything that moves with it
 // before anything changes. Month grid on desktop, agenda list on phones.
 
-import { useMemo, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, m } from 'framer-motion';
@@ -14,7 +14,7 @@ import { api, qs } from '../api';
 import type { CalendarEvent } from '../../../shared/types';
 import { addDays, addMonths, diffDays, eachDay, startOfMonth, startOfWeek, type ISODate } from '../../../shared/dates';
 import { isManager } from '../../../shared/workflow';
-import { fmtMonth, fmtWeekday, fmtDate, fmtRange } from '../../../shared/format';
+import { fmtMonth, fmtWeekday, fmtDate, fmtRange, plural } from '../../../shared/format';
 import { PageHeader, useBoot, useDisplayTz, useNewWork } from '../components/Shell';
 import { Button, Dialog, Empty, ErrorState, Loading, Seg } from '../components/ui';
 import { SOFT } from '../motion';
@@ -44,7 +44,9 @@ export function CalendarPage() {
   const nav = useNavigate();
   const [params, setParams] = useSearchParams();
   const month = params.get('m') && /^\d{4}-\d{2}$/.test(params.get('m')!) ? `${params.get('m')}-01` : startOfMonth(clock.today);
-  const writerId = params.get('writerId') ?? '';
+  // writers start on their own work; "all" shows everyone's
+  const writerParam = params.get('writerId');
+  const writerId = writerParam === 'all' ? '' : writerParam ?? (!manager && !editor ? String(me.id) : '');
   const clientId = params.get('clientId') ?? '';
   const phone = window.matchMedia('(max-width: 760px)').matches;
   const view = (['days', 'month', 'list'] as const).find((v) => v === params.get('view')) ?? (phone ? 'list' : 'month');
@@ -53,7 +55,9 @@ export function CalendarPage() {
   const lastMonth = useRef(month);
   const dir = month > lastMonth.current ? 1 : month < lastMonth.current ? -1 : 0;
   lastMonth.current = month;
-  const [hidden, setHidden] = useState<Set<CalendarEvent['type']>>(new Set());
+  // writing periods are long stripes that crowd the month grid, so they start hidden there
+  const [hidden, setHidden] = useState<Set<CalendarEvent['type']>>(() => new Set(view === 'month' ? ['writing'] : []));
+  const [dayOpen, setDayOpen] = useState<ISODate | null>(null);
   const [drag, setDrag] = useState<{ e: CalendarEvent; offset: number; over: ISODate | null } | null>(null);
   const [move, setMove] = useState<Move | null>(null);
   const [picked, setPicked] = useState<CalendarEvent | null>(null);
@@ -69,7 +73,9 @@ export function CalendarPage() {
   });
   const setP = (k: string, v: string) => { const p = new URLSearchParams(params); if (v) p.set(k, v); else p.delete(k); setParams(p, { replace: true }); };
   const setView = (v: 'days' | 'month' | 'list') => setP('view', v);
-  const events = (q.data?.events ?? []).filter((e) => !hidden.has(e.type));
+  // a calendar event that a shoot was planned from shows once, as the shoot
+  const shootIds = new Set((q.data?.events ?? []).filter((e) => e.type === 'shoot' && e.shootId != null).map((e) => e.shootId));
+  const events = (q.data?.events ?? []).filter((e) => !hidden.has(e.type) && !(e.external?.linkedShootId && !hidden.has('shoot') && shootIds.has(e.external.linkedShootId)));
   const byDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
     const order = { shoot: 0, final: 1, draft: 2, writing: 3, external: 4 };
@@ -78,6 +84,12 @@ export function CalendarPage() {
     return map;
   }, [events, gridStart, gridEnd]);
   const days = eachDay(gridStart, gridEnd);
+  // the list starts at today, not the 1st
+  useEffect(() => {
+    if (view !== 'list' || !q.data || month.slice(0, 7) !== clock.today.slice(0, 7)) return;
+    const el = document.querySelector('.agenda-day.is-today, .agenda-day.after-today');
+    if (el) el.scrollIntoView({ block: 'start', behavior: 'auto' });
+  }, [view, q.data, month, clock.today]);
 
   const canMove = (e: CalendarEvent) => manager && e.type === 'shoot' && e.shootId != null;
   const open = (e: CalendarEvent) => {
@@ -171,7 +183,7 @@ export function CalendarPage() {
         <Button variant="sm ghost" onClick={() => setP('m', '')}>Today</Button>
         </>}
         <span className="spacer" />
-        {!editor && <select className="select sm" style={{ width: 'auto' }} value={writerId} onChange={(e) => setP('writerId', e.target.value)} aria-label="Writer"><option value="">All writers</option>{users.filter((u) => u.active && u.role !== 'editor').map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>}
+        {!editor && <select className="select sm" style={{ width: 'auto' }} value={writerId} onChange={(e) => setP('writerId', e.target.value || (manager ? '' : 'all'))} aria-label="Writer"><option value="">All writers</option>{users.filter((u) => u.active && u.role !== 'editor').map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}</select>}
         <select className="select sm" style={{ width: 'auto', maxWidth: 220 }} value={clientId} onChange={(e) => setP('clientId', e.target.value)} aria-label="Client"><option value="">All clients</option>{clients.filter((c) => c.status !== 'archived').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
       </div>
       <div className="quick" role="group" aria-label="Show event types">
@@ -210,7 +222,7 @@ export function CalendarPage() {
                   <span className="dn"><span>{Number(d.slice(8))}</span>{d === clock.today && <span style={{ fontSize: 10, letterSpacing: '.12em', textTransform: 'uppercase' }}>Today</span>}</span>
                   {land && landing && d === landing.from && <span className="landing-tag"><Camera aria-hidden />{drag ? 'Drop to move here' : 'Moving here…'}</span>}
                   {list.slice(0, 5).map((e) => ev(e, d))}
-                  {list.length > 5 && <button className="more" onClick={() => setView('list')}>+{list.length - 5} more</button>}
+                  {list.length > 5 && <button className="more" onClick={() => setDayOpen(d)}>+{list.length - 5} more</button>}
                 </div>
               );
             })}
@@ -224,7 +236,7 @@ export function CalendarPage() {
           {!events.length ? <Empty title="Nothing scheduled this month" /> : (
             <div className="agenda">
               {days.filter((d) => d.slice(0, 7) === month.slice(0, 7) && (byDay.get(d)?.some((e) => e.type !== 'writing' || e.start === d) ?? false)).map((d) => (
-                <div key={d} className="agenda-day">
+                <div key={d} className={`agenda-day${d === clock.today ? ' is-today' : ''}${d > clock.today ? ' after-today' : ''}`}>
                   <h3>{fmtWeekday(d)}{d === clock.today && <span>today</span>}</h3>
                   <div className="rows">
                     {(byDay.get(d) ?? []).filter((e) => e.type !== 'writing' || e.start === d).map((e) => {
@@ -272,13 +284,24 @@ export function CalendarPage() {
       )}
       {synced?.external && (
         <Dialog open onClose={() => setSynced(null)} size="narrow" title={synced.title} sub={`${synced.external.feedName} · ${whenText(synced, tz)}`}
-          footer={<div className="form-actions"><Button variant="ghost" onClick={() => setSynced(null)}>Close</Button></div>}>
+          footer={<div className="form-actions">
+            <Button variant="ghost" onClick={() => setSynced(null)}>Close</Button>
+            {manager && synced.external.linkedBatchId && <Button variant="primary pill" icon={<ArrowRight aria-hidden />} onClick={() => { const id = synced.external!.linkedBatchId; setSynced(null); nav(`/batches/${id}`); }}>Open its batch</Button>}
+            {manager && !synced.external.linkedShootId && <Button variant="primary pill" icon={<Camera aria-hidden />} onClick={() => { const e = synced; setSynced(null); openNew('shoot', { start: e.start, end: e.end !== e.start ? e.end : null, title: e.title, calendarUid: e.external!.uid }); }}>Plan scripts for it</Button>}
+          </div>}>
           <div className="stack s3 synced-ev">
             <span className="chip" style={{ ['--c' as string]: synced.external.color, alignSelf: 'flex-start' }}><i className="d" aria-hidden />{synced.external.feedName}</span>
             {synced.external.location && <div><div className="section-title">Where</div><p className="prose"><Linked text={synced.external.location} /></p></div>}
             {synced.external.description && <div><div className="section-title">Details</div><p className="prose" style={{ whiteSpace: 'pre-wrap' }}><Linked text={synced.external.description} /></p></div>}
+            {synced.external.linkedShootId && <p style={{ fontSize: 13.5 }}><b>Planned on the site.</b> This event has a shoot{synced.external.linkedBatchId ? ' with scripts' : ', no scripts yet'}.</p>}
             <p className="muted" style={{ fontSize: 12.5 }}>From Google Calendar. Change it there; it updates here within 15 minutes.</p>
           </div>
+        </Dialog>
+      )}
+      {dayOpen && (
+        <Dialog open onClose={() => setDayOpen(null)} size="narrow" title={fmtWeekday(dayOpen)} sub={plural((byDay.get(dayOpen) ?? []).length, 'thing', 'things') + ' on this day'}
+          footer={<div className="form-actions"><Button variant="ghost" onClick={() => setDayOpen(null)}>Close</Button></div>}>
+          <div className="day-pop">{(byDay.get(dayOpen) ?? []).map((e) => <div key={e.id} onClickCapture={() => setDayOpen(null)}>{ev(e, dayOpen, true)}</div>)}</div>
         </Dialog>
       )}
       {move && <RescheduleDialog shootId={move.shootId} start={move.start} end={move.end} initialStart={move.toStart} initialEnd={move.toEnd} onClose={() => setMove(null)} />}

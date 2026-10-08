@@ -1,7 +1,8 @@
-// Writers (managers) / Messages (writers): everyone on the team in one place,
+// Team (managers) / Messages (writers): everyone on the team in one place,
 // with the latest message and a button that opens the chat window. Managers
 // also see each person's workload, open to-dos and local time, with shortcuts
-// to their work and to give them a to-do.
+// to their work and to give them a to-do. Anyone writing scripts is listed
+// (an Admin who writes too, themselves included); editors have their own section.
 
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -33,37 +34,47 @@ export function WritersPage() {
 
   const people = useMemo(() => {
     const thread = new Map((inbox.data?.threads ?? []).map((t) => [t.userId, t]));
-    const list = users.filter((u) => u.active && u.id !== me.id && (!q || u.name.toLowerCase().includes(q.toLowerCase())));
+    const hasWork = (id: number) => !!dash.data?.workload.some((w) => w.userId === id && w.assigned > 0);
+    const list = users.filter((u) => u.active && (u.id !== me.id || (manager && hasWork(u.id))) && (!q || u.name.toLowerCase().includes(q.toLowerCase())));
     // writers first for managers; then whoever you talked to most recently
     return list.sort((a, b) => (manager ? Number(a.role !== 'writer') - Number(b.role !== 'writer') : 0)
       || (thread.get(b.id)?.last.id ?? 0) - (thread.get(a.id)?.last.id ?? 0) || a.name.localeCompare(b.name));
-  }, [users, me.id, q, inbox.data, manager]);
+  }, [users, me.id, q, inbox.data, manager, dash.data]);
+  const writers = manager ? people.filter((u) => u.role !== 'editor') : people;
+  const editors = manager ? people.filter((u) => u.role === 'editor') : [];
+  const card = (u: UserSummary) => (
+    <WriterCard key={u.id} u={u} manager={manager} self={u.id === me.id}
+      load={dash.data?.workload.find((w) => w.userId === u.id)}
+      thread={inbox.data?.threads.find((t) => t.userId === u.id)}
+      openTodos={(todos.data?.todos ?? []).filter((t) => t.userId === u.id && !t.doneAt).length}
+      today={clock.today} onMessage={() => chat.open(u.id)} onTodo={() => setTodoFor(u.id)} />
+  );
 
   return (
     <>
-      <PageHeader title={manager ? 'Writers' : 'Messages'} sub={manager ? 'Your team: what they’re working on, and a message away.' : 'Message anyone on the team. Chats open in the bottom-right corner.'} hideNewWork>
+      <PageHeader title={manager ? 'Team' : 'Messages'} sub={manager ? 'Everyone writing scripts: what they’re working on, and a message away.' : 'Message anyone on the team. Chats open in the bottom-right corner.'} hideNewWork>
         <label className="search-inline"><Search aria-hidden /><input className="input" placeholder="Find someone" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Find someone" /></label>
       </PageHeader>
       {!people.length ? (
         <Panel><Empty icon={<MessageCircle />} title={q ? 'Nobody matches' : 'No one else on the team yet'}>{manager && !q ? 'Add people in Settings → Team.' : undefined}</Empty></Panel>
       ) : (
-        <div className="writer-grid">
-          {people.map((u) => (
-            <WriterCard key={u.id} u={u} manager={manager}
-              load={dash.data?.workload.find((w) => w.userId === u.id)}
-              thread={inbox.data?.threads.find((t) => t.userId === u.id)}
-              openTodos={(todos.data?.todos ?? []).filter((t) => t.userId === u.id && !t.doneAt).length}
-              today={clock.today} onMessage={() => chat.open(u.id)} onTodo={() => setTodoFor(u.id)} />
-          ))}
-        </div>
+        <>
+          <div className="writer-grid">{writers.map(card)}</div>
+          {editors.length > 0 && (
+            <>
+              <h2 className="team-sub">Editors <span className="muted">cut the videos; they see finished scripts and the calendar</span></h2>
+              <div className="writer-grid">{editors.map(card)}</div>
+            </>
+          )}
+        </>
       )}
       {todoFor != null && <TodoDialog userId={todoFor} onClose={() => setTodoFor(null)} />}
     </>
   );
 }
 
-function WriterCard({ u, manager, load, thread, openTodos, today, onMessage, onTodo }: {
-  u: UserSummary; manager: boolean; load?: Dashboard['workload'][number]; thread?: NonNullable<ReturnType<typeof useInbox>['data']>['threads'][number];
+function WriterCard({ u, manager, self, load, thread, openTodos, today, onMessage, onTodo }: {
+  u: UserSummary; manager: boolean; self?: boolean; load?: Dashboard['workload'][number]; thread?: NonNullable<ReturnType<typeof useInbox>['data']>['threads'][number];
   openTodos: number; today: string; onMessage: () => void; onTodo: () => void;
 }) {
   const { me } = useBoot();
@@ -73,7 +84,7 @@ function WriterCard({ u, manager, load, thread, openTodos, today, onMessage, onT
       <div className="writer-top">
         <Avatar name={u.name} id={u.id} />
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div className="writer-name ellipsis">{u.name}</div>
+          <div className="writer-name ellipsis">{u.name}{self && <span className="muted" style={{ fontWeight: 500 }}> (you)</span>}</div>
           <div className="muted" style={{ fontSize: 12.5 }}>{ROLE_LABEL[u.role]}{u.city ? ` · ${u.city.split(',')[0]}` : ''}{time ? ` · ${time} there` : ''}</div>
         </div>
         {thread?.unread ? <span className="chat-badge inline">{thread.unread}</span> : null}
@@ -94,13 +105,13 @@ function WriterCard({ u, manager, load, thread, openTodos, today, onMessage, onT
         </div>
       )}
 
-      <button type="button" className={`writer-last${thread?.unread ? ' unread' : ''}`} onClick={onMessage}>
+      {!self && <button type="button" className={`writer-last${thread?.unread ? ' unread' : ''}`} onClick={onMessage}>
         {thread ? <><span className="ellipsis">{thread.last.fromId === me.id ? 'You: ' : ''}{thread.last.body}</span><span className="muted nowrap">{fmtAgo(thread.last.createdAt)}</span></> : <span className="muted">No messages yet</span>}
-      </button>
+      </button>}
 
       <div className="row-flex s2 writer-actions">
-        <Button variant="sm primary pill" icon={<MessageCircle aria-hidden />} onClick={onMessage}>Message</Button>
-        {manager && u.role !== 'editor' && <Link to={`/my-work?userId=${u.id}`} className="btn sm"><PenLine aria-hidden />Their work</Link>}
+        {!self && <Button variant="sm primary pill" icon={<MessageCircle aria-hidden />} onClick={onMessage}>Message</Button>}
+        {manager && u.role !== 'editor' && <Link to={self ? '/my-work' : `/my-work?userId=${u.id}`} className="btn sm"><PenLine aria-hidden />{self ? 'My work' : 'Their work'}</Link>}
         {manager && <Button variant="sm ghost" icon={<ListTodo aria-hidden />} onClick={onTodo}>Add to-do</Button>}
       </div>
     </section>

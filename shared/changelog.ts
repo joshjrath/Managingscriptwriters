@@ -17,6 +17,25 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-08-manager-editor-screens',
+    date: '2026-10-08',
+    title: 'Clearer Overview, Production, Calendar and search, and a better editor home',
+    summary: 'The third round of fixes: manager and editor screens show what needs you first and say the same thing everywhere.',
+    changes: [
+      { tag: 'improved', text: 'Overview starts with Needs attention, at full height, with Today and the team’s to-dos beside it. Shoots to plan is one list for calendar events and site shoots with no scripts, and offers to link a batch that has no shoot. Active batches and writing progress fold away under More.' },
+      { tag: 'improved', text: 'When drafts and final delivery are both missed, every page says both: “Drafts 4 days overdue · Final delivery 2 days overdue”. The chart says it counts scripts.' },
+      { tag: 'improved', text: 'Production board: columns show how many scripts are at each stage, and batches that have scripts further along are listed there too, so In review is never empty while scripts wait. The table shows flags under each batch name and fits on smaller screens.' },
+      { tag: 'improved', text: 'On a batch page, “Change dates” for the shoot is now “Move shoot…”, and each writer row has “Move scripts…”, which says what you’re handing over and can mark half-written scripts as not started.' },
+      { tag: 'improved', text: 'Deadline fields point out weekends and say when drafts come from the final delivery date. The shoot and batch names are on the main form, defaulting to the client and date or the calendar event’s title.' },
+      { tag: 'improved', text: 'Calendar: writing periods start hidden in Month view, names wrap instead of being cut off, “+N more” opens that day, List starts at today, writers start on their own work, and a Google event can be planned from the calendar (and shows once when it already has a shoot).' },
+      { tag: 'improved', text: 'Search finds people, shoots, briefing calls, recordings and script numbers (“#12”), opens the first result on Enter, and its results are no longer cut off by the sidebar. Editors can search too.' },
+      { tag: 'improved', text: 'To-dos say who they’re for and can be tied to one of the person’s batches. Writers is now Team: anyone writing scripts is listed (the Admin included), with editors in their own section.' },
+      { tag: 'improved', text: 'Sidebar numbers say what they count when you hover them, and the Review queue counts scripts the same way. Celebrations about the whole team are a short notice instead of a full-screen pop-up. The Master log opens on Changes and names the document version a decision was made on. Paste notes is hidden until it’s set up.' },
+      { tag: 'new', text: 'Editors: the home page lists each upcoming shoot with “6 of 10 scripts final” and Ready, On track or Late, opening just that shoot’s scripts. Editors are notified when a shoot’s scripts are all final or a shoot moves.' },
+      { tag: 'improved', text: 'Client pages: briefing calls sit with the other Resources and their writing instructions move to About & guidance. Everyone gets a Scripts link, and shoot names open their scripts. Editors see next shoot and finished scripts on client cards, and no links that send them home.' },
+    ],
+  },
+  {
     id: '2026-10-08-writers-never-miss',
     date: '2026-10-08',
     title: 'Writers never miss new work, and one set of words everywhere',

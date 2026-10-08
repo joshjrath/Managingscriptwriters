@@ -10,7 +10,13 @@ import { NotesImport } from './NotesImport';
 import { api, ApiError, queryClient, useSave } from '../api';
 import { useBoot } from './Shell';
 import { Button, Dialog, Field, FormError, inputProps, Seg, Term, useFieldId, useToast } from './ui';
-import { addDays, computeDeadlines, draftFromFinal, dueState, suggestStart, type ISODate } from '../../../shared/dates';
+import { addDays, computeDeadlines, draftFromFinal, dueState, suggestStart, weekendName, type ISODate } from '../../../shared/dates';
+
+/** Adds "Falls on a Saturday." to a field's help when the date is on a weekend. */
+const withWeekend = (help: string | undefined, d: string | null | undefined) => {
+  const w = d ? weekendName(d) : null;
+  return [help, w && `Falls on a ${w}.`].filter(Boolean).join(' · ') || undefined;
+};
 import { canWrite, evenSplit, isManager, ROLE_LABEL } from '../../../shared/workflow';
 import { fmtBytes, fmtDate, fmtLong, fmtRange, plural } from '../../../shared/format';
 import { parseEntry, type ParsedEntry } from '../../../shared/parse';
@@ -18,7 +24,7 @@ import type { BatchSummary, ClientDetail, Priority, ResourceCategory } from '../
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
 
 export type NewWorkTab = 'notes' | 'quick' | 'shoot' | 'batch' | 'client';
-export interface NewWorkPreset { prospect?: boolean; clientId?: number; shootId?: number; text?: string; start?: ISODate; end?: ISODate | null; count?: number; split?: SplitPart[]; newClientName?: string; calendarUid?: string }
+export interface NewWorkPreset { prospect?: boolean; title?: string; clientId?: number; shootId?: number; text?: string; start?: ISODate; end?: ISODate | null; count?: number; split?: SplitPart[]; newClientName?: string; calendarUid?: string }
 
 interface Created {
   kind: 'shoot' | 'batch' | 'client';
@@ -38,6 +44,7 @@ const TABS: { id: NewWorkTab; label: string; icon: ReactNode }[] = [
 ];
 
 export function NewWorkDialog({ state, onClose }: { state: { tab: NewWorkTab; preset?: NewWorkPreset } | null; onClose: () => void }) {
+  const boot = useBoot();
   const [tab, setTab] = useState<NewWorkTab>('shoot');
   const [created, setCreated] = useState<Created | null>(null);
   const [preset, setPreset] = useState<NewWorkPreset | undefined>();
@@ -53,7 +60,8 @@ export function NewWorkDialog({ state, onClose }: { state: { tab: NewWorkTab; pr
       ) : (
         <>
           <Seg role="tablist" aria-label="What to create" style={{ marginBottom: 20 }}>
-            {TABS.map((t) => (
+            {/* Paste notes needs an AI key; until it's set only the Admin sees the tab (with how to turn it on) */}
+            {TABS.filter((t) => t.id !== 'notes' || boot.notesImport || boot.me.role === 'owner').map((t) => (
               <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>{t.icon}{t.label}</button>
             ))}
           </Seg>
@@ -178,8 +186,8 @@ function DeadlinePreview({ start, draftOverride, finalOverride, draftFollowsFina
   return (
     <div className="stack s2">
       <div className="preview-dates" aria-live="polite">
-        <div><span className="k">Drafts due</span><span className="v">{fmtLong(draft)}</span><span className="r">{draftOverride ? (draftFollowsFinal ? 'From final delivery' : 'Manual override') : d.draftRule}</span></div>
-        <div><span className="k">Final delivery to <Term k="Timeliner" /></span><span className="v">{fmtLong(final)}</span><span className="r">{finalOverride ? 'Manual override' : d.finalRule}</span></div>
+        <div><span className="k">Drafts due</span><span className="v">{fmtLong(draft)}</span><span className="r">{draftOverride ? (draftFollowsFinal ? 'From final delivery' : 'Manual override') : d.draftRule}{weekendName(draft) && ` · a ${weekendName(draft)}`}</span></div>
+        <div><span className="k">Final delivery to <Term k="Timeliner" /></span><span className="v">{fmtLong(final)}</span><span className="r">{finalOverride ? 'Manual override' : d.finalRule}{weekendName(final) && ` · a ${weekendName(final)}`}</span></div>
       </div>
       {past.map((p) => <div key={p} className="banner red"><AlertTriangle aria-hidden /><div className="txt"><b>{p}</b><span>You can still save; the batch will show as overdue straight away.</span></div></div>)}
     </div>
@@ -373,7 +381,7 @@ const attachedLine = (saved: string[]) => (saved.length ? [{ k: 'Attached', v: s
 // ── new shoot ────────────────────────────────────────────────────────────
 
 function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (c: Created) => void }) {
-  const { me, settings } = useBoot();
+  const { me, settings, clients } = useBoot();
   const names = useNames();
   const p = preset;
   const [clientId, setClientId] = useState<number | ''>(p?.clientId ?? '');
@@ -385,7 +393,7 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   // scripts can be planned later, when the count and writers are known
   const [later, setLater] = useState(false);
   const [parts, setParts] = useState<SplitPart[]>(p?.split ?? [{ writerId: me.role === 'writer' ? me.id : '', count: '' }]);
-  const [title, setTitle] = useState('');
+  const [title, setTitle] = useState(p?.title ?? '');
   const [batchTitle, setBatchTitle] = useState('');
   const [priority, setPriority] = useState<Priority>('normal');
   const [planned, setPlanned] = useState('');
@@ -477,6 +485,8 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
         {newClient !== null && <Field label="New client’s name" htmlFor={ids.nc} error={f.newClientName} className="full" help="They’re added to Clients with this shoot. Add their brand voice and resources from their page later."><input className="input" value={newClient} onChange={(e) => setNewClient(e.target.value)} {...inputProps(ids.nc, f.newClientName)} /></Field>}
         <Field label="Shoot starts" htmlFor={ids.start} error={f.startDate}><input className="input" type="date" value={start} onChange={(e) => setStart(e.target.value)} {...inputProps(ids.start, f.startDate)} /></Field>
         <Field label="Shoot ends" optional htmlFor={ids.end} error={f.endDate} help="Leave empty for a one-day shoot. Deadlines count back from the first day."><input className="input" type="date" value={end} min={start || undefined} onChange={(e) => setEnd(e.target.value)} {...inputProps(ids.end, f.endDate)} /></Field>
+          <Field label="Shoot name" optional htmlFor={ids.title}><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Autumn range shoot (or the calendar event’s title)" id={ids.title} /></Field>
+        {!later && <Field label="Batch name" optional htmlFor={ids.bt} help={`Leave empty for “${(newClient ?? clients.find((c) => c.id === clientId)?.name) || 'Client'}${start ? ` · ${fmtDate(start)}` : ''}”.`}><input className="input" value={batchTitle} onChange={(e) => setBatchTitle(e.target.value)} id={ids.bt} /></Field>}
         <div className="field full">
           <span className="lbl">Scripts</span>
           <Seg role="group" aria-label="When to plan the scripts" style={{ alignSelf: 'flex-start' }}>
@@ -493,8 +503,6 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
       {clientId !== '' && !later && <div className="field"><span className="lbl">Client resources for the writers <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional · they get these with the batch</span></span><ResourcePicker client={client.data} value={resourceIds} onChange={setResourceIds} /></div>}
       <Advanced>
         <div className="form-grid">
-          <Field label="Shoot name" optional htmlFor={ids.title}><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Autumn range shoot" id={ids.title} /></Field>
-          <Field label="Batch name" optional htmlFor={ids.bt} help="Defaults to the shoot name and dates."><input className="input" value={batchTitle} onChange={(e) => setBatchTitle(e.target.value)} id={ids.bt} /></Field>
           <Field label="Priority" htmlFor={ids.pr}><select className="select" id={ids.pr} value={priority} onChange={(e) => setPriority(e.target.value as Priority)}>{PRIORITIES.map((x) => <option key={x} value={x}>{PRIORITY_LABEL[x]}</option>)}</select></Field>
           <PlannedStart id={ids.ps} value={planned} onChange={setPlanned} draftDue={(draftOverride || (start ? computeDeadlines(start, settings).draftDue : '')) as ISODate} parts={parts} error={f['batch.plannedStart']} />
           <Field label="Override final delivery" optional htmlFor={ids.fd} error={f['batch.finalDue']} help="Drafts move with it, by the same gap as your shoot rules."><input className="input" type="date" value={finalOverride} onChange={(e) => overrideFinal(e.target.value)} id={ids.fd} /></Field>
@@ -598,10 +606,10 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
             {shoots.map((s) => <option key={s.id} value={s.id}>{s.title ? `${s.title} · ` : ''}{fmtRange(s.startDate, s.endDate)}</option>)}
           </select>
         </Field>
-        <Field label={shoot ? 'Drafts due (override)' : 'Drafts due'} optional={!!shoot} htmlFor={ids.draft} error={f.draftDue} help={draftFollows && final && draft ? `Set from final delivery: ${draftFromFinal(final as ISODate, settings).rule}` : auto && !draft ? `${fmtDate(auto.draftDue)} · ${auto.draftRule}` : undefined}>
+        <Field label={shoot ? 'Drafts due (override)' : 'Drafts due'} optional={!!shoot} htmlFor={ids.draft} error={f.draftDue} help={withWeekend(draftFollows && final && draft ? `From final delivery: ${draftFromFinal(final as ISODate, settings).rule}` : auto && !draft ? `${fmtDate(auto.draftDue)} · ${auto.draftRule}` : undefined, draft || auto?.draftDue)}>
           <input className="input" type="date" value={draft} onChange={(e) => { setDraft(e.target.value); setDraftFollows(!e.target.value); }} {...inputProps(ids.draft, f.draftDue)} />
         </Field>
-        <Field label={shoot ? 'Final delivery (override)' : 'Final delivery to Timeliner'} optional={!!shoot} htmlFor={ids.final} error={f.finalDue} help={auto && !final ? `${fmtDate(auto.finalDue)} · ${auto.finalRule}` : undefined}>
+        <Field label={shoot ? 'Final delivery (override)' : 'Final delivery to Timeliner'} optional={!!shoot} htmlFor={ids.final} error={f.finalDue} help={withWeekend(auto && !final ? `${fmtDate(auto.finalDue)} · ${auto.finalRule}` : undefined, final || auto?.finalDue)}>
           <input className="input" type="date" value={final} onChange={(e) => { const v = e.target.value; setFinal(v); if (draftFollows) setDraft(v ? draftFromFinal(v as ISODate, settings).date : ''); }} {...inputProps(ids.final, f.finalDue)} />
         </Field>
         <div className="field full"><span className="lbl">Writers</span><SplitEditor total={Number(count) || 0} parts={parts} onChange={setParts} error={f.split} /></div>
@@ -740,8 +748,8 @@ function ClientForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: 
         <div className="form-grid">
           <Field label="Batch name" htmlFor={ids.bt} error={f['initialBatch.title']}><input className="input" value={batch.title} onChange={(e) => setBatch({ ...batch, title: e.target.value })} {...inputProps(ids.bt, f['initialBatch.title'])} /></Field>
           <Field label="Scripts" htmlFor={ids.bn} error={f['initialBatch.targetCount']}><input className="input num" type="number" min={1} value={batch.targetCount} onChange={(e) => setBatch({ ...batch, targetCount: e.target.value === '' ? '' : Number(e.target.value) })} {...inputProps(ids.bn, f['initialBatch.targetCount'])} /></Field>
-          <Field label="Final delivery" optional htmlFor={ids.bf} error={f['initialBatch.finalDue']}><input className="input" type="date" id={ids.bf} value={batch.finalDue} onChange={(e) => { const v = e.target.value; setBatch({ ...batch, finalDue: v, draftDue: batchDraftFollows ? (v ? draftFromFinal(v as ISODate, settings).date : '') : batch.draftDue }); }} /></Field>
-          <Field label="Drafts due" optional htmlFor={ids.bd} error={f['initialBatch.draftDue'] ?? f.draftDue} help={batchDraftFollows && batch.finalDue ? `Set from final delivery: ${draftFromFinal(batch.finalDue as ISODate, settings).rule}` : undefined}><input className="input" type="date" id={ids.bd} value={batch.draftDue} onChange={(e) => { setBatchDraftFollows(false); setBatch({ ...batch, draftDue: e.target.value }); }} /></Field>
+          <Field label="Final delivery" optional htmlFor={ids.bf} error={f['initialBatch.finalDue']} help={withWeekend(batch.finalDue ? undefined : 'Drafts are worked out from it', batch.finalDue)}><input className="input" type="date" id={ids.bf} value={batch.finalDue} onChange={(e) => { const v = e.target.value; setBatch({ ...batch, finalDue: v, draftDue: batchDraftFollows ? (v ? draftFromFinal(v as ISODate, settings).date : '') : batch.draftDue }); }} /></Field>
+          <Field label="Drafts due" optional htmlFor={ids.bd} error={f['initialBatch.draftDue'] ?? f.draftDue} help={withWeekend(batchDraftFollows && batch.finalDue ? `From final delivery: ${draftFromFinal(batch.finalDue as ISODate, settings).rule}` : undefined, batch.draftDue)}><input className="input" type="date" id={ids.bd} value={batch.draftDue} onChange={(e) => { setBatchDraftFollows(false); setBatch({ ...batch, draftDue: e.target.value }); }} /></Field>
           <div className="field full"><span className="lbl">Writers</span><SplitEditor total={Number(batch.targetCount) || 0} parts={parts} onChange={setParts} error={f['initialBatch.split']} /></div>
         </div>
       )}

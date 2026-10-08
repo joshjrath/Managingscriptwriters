@@ -10,12 +10,12 @@ import { buildGroups, loadReviewQueue, publicSubmission } from '../submissions';
 import { parse, zs } from '../http';
 import { loadBriefings, loadDeliveries, loadResources, loadScripts, loadShoots } from '../records';
 import { addDays, diffDays, nowInZone, startOfWeek, workingDaysBetween, type Clock, type ISODate } from '../../shared/dates';
-import { isDraftReady, isNewWork, milestone, nextMilestone, summarize, type Milestone, type ScriptStatus } from '../../shared/workflow';
+import { bothLate, isDraftReady, isNewWork, milestone, nextMilestone, summarize, type Milestone, type ScriptStatus } from '../../shared/workflow';
 import { plural } from '../../shared/format';
 import { sessionMode } from '../recording';
 import type {
   AttentionItem, AttentionKind, BatchSummary, Bootstrap, CalendarEvent, Counts, Dashboard, DueCategory, DueDay, Me,
-  MyWork, ReviewQueue, WriterLoad,
+  MyWork, ReviewQueue, ShootReadiness, WriterLoad,
 } from '../../shared/types';
 
 const emptyCats = (): Record<DueCategory, number> => ({ not_started: 0, writing: 0, in_review: 0, to_deliver: 0 });
@@ -81,7 +81,9 @@ export function attentionFor(batches: BatchSummary[], inactive: Map<number, stri
       const left = w.count - w.delivered;
       if (w.userId != null && inactive.has(w.userId) && left > 0) issues.push({ kind: 'unassigned', text: `${plural(left, 'script')} still with ${w.name}, who’s deactivated · reassign them` });
     }
-    if (b.final.overdue) issues.push({ kind: 'overdue', text: `Final delivery ${b.final.label.toLowerCase()} · ${plural(b.final.remaining, 'script')} not delivered` });
+    const both = bothLate(b.draft, b.final);
+    if (both) issues.push({ kind: 'overdue', text: `${both} · ${plural(b.final.remaining, 'script')} not delivered` });
+    else if (b.final.overdue) issues.push({ kind: 'overdue', text: `Final delivery ${b.final.label.toLowerCase()} · ${plural(b.final.remaining, 'script')} not delivered` });
     else if (b.draft.overdue) issues.push({ kind: 'overdue', text: `Drafts ${b.draft.label.toLowerCase()} · ${plural(b.draft.remaining, 'script')} with drafts not sent` });
     if (b.blocked) issues.push({ kind: 'blocked', text: `Blocked: ${b.blockerNote ?? 'no details'}` });
     if (b.final.dueToday) issues.push({ kind: 'due_today', text: `Final delivery due today · ${b.final.remaining} left` });
@@ -248,6 +250,16 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
         order by e.start_at limit 2000`, [from, to],
     );
     const dayIn = (at: string | Date) => nowInZone(tz, new Date(at)).date;
+    // shoots planned from these events, so the calendar can show them as one
+    const uids = [...new Set(rows.map((r) => r.uid))];
+    const linked = new Map<string, { shoot: number; batch: number | null }>();
+    if (uids.length) {
+      const ls = await db.query<{ id: number; calendar_uid: string; batch_id: number | null }>(
+        `select s.id, s.calendar_uid, (select min(b.id) from batches b where b.shoot_id = s.id and b.archived_at is null) as batch_id
+           from shoots s where s.calendar_uid = any($1) and s.cancelled_at is null`, [uids],
+      );
+      for (const l of ls) linked.set(l.calendar_uid, { shoot: Number(l.id), batch: l.batch_id == null ? null : Number(l.batch_id) });
+    }
     const out: CalendarEvent[] = [];
     for (const r of rows) {
       const start = r.all_day ? r.start_date! : dayIn(r.start_at);
@@ -260,6 +272,7 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
         external: {
           feedId: Number(r.feed_id), feedName: r.feed_name, color: r.color, allDay: r.all_day,
           startAt: new Date(r.start_at).toISOString(), endAt: new Date(r.end_at).toISOString(), location: r.location, description: r.description,
+          uid: r.uid, linkedShootId: linked.get(r.uid)?.shoot ?? null, linkedBatchId: linked.get(r.uid)?.batch ?? null,
         },
       });
     }
@@ -304,6 +317,25 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/api/review', async (req): Promise<ReviewQueue> => {
     requireUser(req);
     return loadReviewQueue(ctx);
+  });
+
+  // editors: each upcoming shoot and how many of its scripts are final
+  app.get('/api/shoot-readiness', async (req): Promise<{ shoots: ShootReadiness[] }> => {
+    requireUser(req);
+    const clock = await clockFor(ctx);
+    const shoots = (await loadShoots(db, { from: addDays(clock.today, -2), to: addDays(clock.today, 42), activeClientsOnly: true })).filter((s) => !s.cancelledAt);
+    const { summaries } = await loadBatches(ctx, {}, clock);
+    const out: ShootReadiness[] = shoots.map((s) => {
+      const bs = summaries.filter((b) => b.shootId === s.id);
+      const total = bs.reduce((n, b) => n + b.progress.total, 0);
+      const finished = bs.reduce((n, b) => n + b.progress.approved, 0);
+      const finals = bs.map((b) => b.finalDue).filter((d): d is ISODate => !!d).sort();
+      const finalDue = finals[0] ?? null;
+      const state: ShootReadiness['state'] = !total ? 'no_scripts' : finished >= total ? 'ready'
+        : (finalDue && finalDue < clock.today) || s.startDate <= clock.today ? 'late' : 'on_track';
+      return { shoot: s, total, finished, finalDue, state };
+    }).sort((a, b) => a.shoot.startDate.localeCompare(b.shoot.startDate));
+    return { shoots: out };
   });
 
   app.get('/api/my-work', async (req): Promise<MyWork> => {
