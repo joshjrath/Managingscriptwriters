@@ -32,6 +32,8 @@ const on = (member: (typeof members)[number], role: string, automatic = false): 
 beforeAll(async () => {
   w = await makeWorld();
   w.api.members = async () => members;
+  // every video here counts for the one-editor-per-client rule: it began before any of them was made
+  expect((await w.send('PATCH', '/api/settings', w.admin, { oneEditorSince: '2026-01-01' })).status).toBe(200);
   expect((await w.send('POST', '/api/users', w.admin, { name: 'Sam Lee', email: 'sam@scale.test', role: 'editor', password: 'team-password-1' })).status).toBe(200);
   const login = await w.app.inject({ method: 'POST', url: '/api/auth/login', headers: { 'x-scale-media': '1', 'content-type': 'application/json' }, payload: JSON.stringify({ email: 'sam@scale.test', password: 'team-password-1' }) });
   sam = String(login.headers['set-cookie']).split(';')[0];
