@@ -1,5 +1,6 @@
 // Pieces the Editors tab and an editor's Home share: how fresh the copy of Timeliner is, time on a video,
-// a video's name ("Raw clip C0045") and square, how sure its shoot is, and the script document it's cut from
+// a video's name ("Raw clip C0045", or "#2 · Dentist Rates Viral Dental Hacks" on one line in lists) and square,
+// how sure its shoot is, and the script document it's cut from
 // ("Scripts PDF · v3 · from Timeliner", with the site's version as a quieter second link). Due words, time
 // worked and title ranges ("Organic 26–30") are in shared/format.ts and shared/workflow.ts, which the server
 // uses too.
@@ -98,6 +99,20 @@ export const videoName = (v: Pick<EditingVideo, 'title' | 'raw'>) => (v.raw ? `R
 /** The same, with "Raw clip" as a quiet word before the camera's name. */
 export function VideoName({ v }: { v: Pick<EditingVideo, 'title' | 'raw'> }) {
   return v.raw ? <><span className="ed-raw">Raw clip</span> {v.title}</> : <>{v.title}</>;
+}
+
+/** A video by name with its script number up front when it's known: "#2 · Dentist Rates Viral Dental Hacks". */
+export const numberedName = (v: Pick<EditingVideo, 'title' | 'raw' | 'scriptNumber'>) =>
+  (!v.raw && v.scriptNumber != null ? `#${v.scriptNumber} · ${v.title}` : videoName(v));
+
+/** The same on one line, cut short with an ellipsis (the whole name on hover), for lists of videos. */
+export function VideoLine({ v, className = '' }: { v: Pick<EditingVideo, 'title' | 'raw' | 'scriptNumber'>; className?: string }) {
+  return (
+    <span className={`ed-vline ${className}`} title={numberedName(v)}>
+      {!v.raw && v.scriptNumber != null && <span className="ed-vnum">#{v.scriptNumber} · </span>}
+      <VideoName v={v} />
+    </span>
+  );
 }
 
 /** Several videos in a few words: "Organic 01–05", with raw clips counted ("Organic 01–05 and 24 raw clips"). */

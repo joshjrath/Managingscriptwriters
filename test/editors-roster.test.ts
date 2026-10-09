@@ -176,6 +176,7 @@ describe('one editor per client', () => {
         expect.objectContaining({ name: 'Sam Lee', userId: ids.sam, memberId: 'm_sam', count: 1 }),
       ],
       flags: ['Joshua Shalimar: 5 with Maya, 4 with Leo, 1 with Sam — one editor per client', 'Joshua Shalimar · 2 clips not assigned (usually Leo)'],
+      beforeRule: false,
     });
     // a tie (two each in 60 days): whoever had one most recently, Gus. His are approved, so it isn't split
     expect(b.clients.find((c) => c.name === 'Brightside')).toMatchObject({ editor: { name: 'Gus Ghost', userId: null, memberId: 'm_gus', key: 'mm_gus' }, open: 2, split: [], flags: [] });

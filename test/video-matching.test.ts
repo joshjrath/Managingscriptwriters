@@ -69,8 +69,9 @@ describe('which shoot a video is from', () => {
   });
 
   it('flags two videos with the same title in one folder on the same batch', async () => {
-    add(['t_c1', 'Organic 15', 'supervisorApproval', { assigneeIds: ['m_ada'], createdAt: '2026-10-15T15:00:00Z' }],
-      ['t_c2', 'Organic 15', 'supervisorApproval', { assigneeIds: ['m_ada'], createdAt: '2026-10-16T15:00:00Z' }]);
+    // Leo's: a card's videos are what's counted (the site's Admin is nobody's editor, so not on a card)
+    add(['t_c1', 'Organic 15', 'supervisorApproval', { assigneeIds: ['m_leo'], createdAt: '2026-10-15T15:00:00Z' }],
+      ['t_c2', 'Organic 15', 'supervisorApproval', { assigneeIds: ['m_leo'], createdAt: '2026-10-16T15:00:00Z' }]);
     const b = await w.sync();
     expect([await row('t_c1'), await row('t_c2')]).toMatchObject([{ batch_id: ids.B, match_check: true }, { batch_id: ids.B, match_check: true }]);
     expect(b.totals.toCheck).toBe(2);
@@ -194,9 +195,10 @@ describe('which shoot a video is from', () => {
   });
 
   it('gives an Ad no number when a non-Ad video of the same batch uses it, and still the shoot’s PDF', async () => {
-    for (const n of range(1, 5)) add([`t_org${n}`, `Organic 0${n}`, 'supervisorApproval', { assigneeIds: ['m_ada'], createdAt: '2026-10-16T15:00:00Z' }]);
-    add(['t_adA', 'Ad 01', 'supervisorApproval', { subFolderId: 'sf_ads', assigneeIds: ['m_ada'], createdAt: '2026-10-16T15:00:00Z' }],
-      ['t_adB', 'Ad 02', 'supervisorApproval', { subFolderId: 'sf_ads', assigneeIds: ['m_ada'], createdAt: '2026-10-16T15:00:00Z' }]);
+    // Leo's, so they're on a card (the site's Admin is nobody's editor)
+    for (const n of range(1, 5)) add([`t_org${n}`, `Organic 0${n}`, 'supervisorApproval', { assigneeIds: ['m_leo'], createdAt: '2026-10-16T15:00:00Z' }]);
+    add(['t_adA', 'Ad 01', 'supervisorApproval', { subFolderId: 'sf_ads', assigneeIds: ['m_leo'], createdAt: '2026-10-16T15:00:00Z' }],
+      ['t_adB', 'Ad 02', 'supervisorApproval', { subFolderId: 'sf_ads', assigneeIds: ['m_leo'], createdAt: '2026-10-16T15:00:00Z' }]);
     const b = await w.sync();
     expect([await row('t_org1'), await row('t_adA'), await row('t_adB')]).toMatchObject([
       { batch_id: ids.B, script_number: 1 }, { batch_id: ids.B, script_number: null }, { batch_id: ids.B, script_number: null },

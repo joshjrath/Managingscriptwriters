@@ -22,7 +22,7 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-10-07-my-work-redesign': ['writers', 'managers'], '2026-09-28-written-counter': ['writers', 'managers'], '2026-10-08-writers-never-miss': ['writers', 'managers'],
   '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-editors-never-get-scripts': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'], '2026-10-08-master-log-everything': ['managers'], '2026-10-08-no-script-titles': ['managers', 'writers'], '2026-10-08-timeliner-auto-delivery': ['managers', 'writers'], '2026-10-08-timeliner-key-permissions': ['managers'],
   '2026-10-08-editors-tab-timeliner': ['managers', 'editors'], '2026-10-08-timeliner-matching': ['managers', 'editors'],
-  '2026-10-09-editors-everyone-in-timeliner': ['managers', 'editors'],
+  '2026-10-09-editors-everyone-in-timeliner': ['managers', 'editors'], '2026-10-09-one-editor-since': ['managers', 'editors'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -36,6 +36,19 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-09-one-editor-since',
+    date: '2026-10-09',
+    title: 'One editor per client counts from Oct 9, and a calmer Editors tab',
+    summary: 'Giving each client one editor started on Oct 9, so only videos made since then are checked against it. Writers and managers in Timeliner no longer count as editors, and each editor’s card is quieter.',
+    changes: [
+      { tag: 'new', text: 'Settings → Timeliner → One editor per client since (Oct 9 to start with). Only videos made in Timeliner since that day decide whether a client is split across editors, has two editors, or whom its videos usually go to. Older videos still show on their editor’s card and in every count.' },
+      { tag: 'improved', text: 'Editors by client says “one editor per client since Oct 9” and lists the clients on the rule first. A client with no videos since then reads “Before the one-editor rule”.' },
+      { tag: 'fixed', text: 'Someone on the site as a writer, manager or Admin is never counted as an editor, even when they’re on a client in Timeliner (to upload its scripts, say): no card on the Editors tab, and not one of the client’s editors.' },
+      { tag: 'improved', text: 'Each editor’s card is calmer: their biggest client (“Dentist Mike + 2 more”), two pills at most, what they’re on in one line, one line of counts, and their last finished video beside Videos. A client’s warnings show only on its tile in Editors by client, and videos not matched to a shoot are counted once, above it.' },
+      { tag: 'improved', text: 'In an editor’s Videos, and in the video lists on an editor’s Home, each video is one row with its script number up front (“#2 · Dentist Rates Viral Dental Hacks”); “via client”, “no scripts on the site” and “not matched” are small words on its row.' },
+    ],
+  },
   {
     id: '2026-10-09-editors-everyone-in-timeliner',
     date: '2026-10-09',

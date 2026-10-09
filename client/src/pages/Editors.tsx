@@ -1,17 +1,17 @@
 // Editors (managers): what each editor is doing right now and what's on their plate, read from Timeliner.
 // Videos are given to editors in Timeliner (on the video, or to the client's dedicated editor on its brand); this
-// page never assigns them. On top, what the last read found and Read Timeliner now; then the summary cards and
-// "Editors by client" (each client's editor, its open videos, and a chip when its videos are split across editors
-// or some aren't assigned). The roster has a card for everyone in Timeliner with videos and every editor on the
-// site; people to fix (not on the site, or another email here) are flagged on their card and listed in one line
-// above the cards. Each card leads with its clients ("Joshua Shalimar · 32 videos") and says what they're on (the
-// video they tapped "I'm on this" for, or paused), else what's next by deadline, or that they're off hours; their
-// videos by state; what's due today; the last one they finished; and the script documents they cut from ("Scripts
-// PDF · v3 · from Timeliner"). Raw camera clips count as clips ("24 clips to edit"). Videos the site couldn't match
-// to a shoot, or whose match is worth a look, carry "Not matched" and "Check" chips; a client without scripts on
-// the site is "No scripts on the site", never "Not matched". In an editor's Videos, tapping a video shows how it was
-// matched, and "Wrong shoot? Pin it" pins it to a batch (and maybe a script), or to none. Then the videos nobody has
-// in Timeliner yet (raw clips by shoot), with whom to give them ("usually Leo").
+// page never assigns them. On top, what the last read found and Read Timeliner now; then the summary cards, the
+// one count of videos not matched to a shoot, and "Editors by client" (each client's editor since the one-editor
+// rule began, its open videos, and its warnings as chips: split across editors, two editors, some not assigned).
+// The roster has a card for everyone in Timeliner with videos and every editor on the site; people to fix (not on
+// the site, or another email here) are flagged on their card and listed in one line above the cards. Each card is
+// calm: their name and biggest client ("Dentist Mike + 2 more"), at most two pills, what they're on (the video they
+// tapped "I'm on this" for, or paused), else what's next by deadline, or that they're off hours, on one line with
+// one line under it; their plate as a bar and one line of counts; and a foot with the last one they finished and
+// Videos. Raw camera clips count as clips ("24 clips to edit"). Videos lists their videos one row each ("#2 ·
+// Title", with its client, "via client", "no scripts on the site" or "not matched" in small words); tapping one
+// shows how it was matched, its script, and "Wrong shoot? Pin it" pins it to a batch (and maybe a script), or to
+// none. Then the videos nobody has in Timeliner yet (raw clips by shoot), with whom to give them ("usually Leo").
 
 import { useId, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
@@ -30,8 +30,8 @@ import { Avatar, Button, Chip, Empty, ErrorState, Field, FormError, inputProps, 
 import { KpiCard } from '../components/StatCards';
 import { motionAllowed } from '../motion';
 import {
-  AgainTag, byTitle, clientName, clockTime, docKind, docName, docSource, midSentence, fmtWhen, focusSeconds, hoursText, localTime, noScripts, notMatched, readWords,
-  reviewWords, ScriptLink, shootLabel, shootWords, squareOf, tileTime, TIMELINER_APP, useNow, VideoName, videoName, videoTitles,
+  AgainTag, byTitle, clientName, clockTime, docKind, docName, docSource, midSentence, fmtWhen, focusSeconds, hoursText, localTime, noScripts, notMatched, numberedName,
+  readWords, reviewWords, ScriptLink, shootLabel, shootWords, squareOf, tileTime, TIMELINER_APP, useNow, VideoLine, VideoName, videoName, videoTitles,
 } from '../components/EditingBits';
 
 const first = (name: string) => name.trim().split(/\s+/)[0] || name;
@@ -182,6 +182,8 @@ export function EditorsPage() {
           {read.error && <div className="ed-banner"><FormError error={read.error} /></div>}
           {/* nobody and nothing on the board: zeros and all-clears would only look like nothing to do */}
           {(b.editors.length > 0 || b.unassigned.length > 0) && <SummaryCards b={b} now={now} today={clock.today} workspaceTz={clock.timezone} />}
+          {/* the one place the videos not matched to a shoot are counted: each card leaves them to its Videos */}
+          <MatchStrip b={b} />
           <ClientStrip b={b} today={clock.today} />
           <Panel title="Roster" count={b.editors.length} className="ed-roster"
             sub="Editing now first, then paused, due today, revisions, and who’s free"
@@ -462,7 +464,6 @@ function Roster({ b, now, tz, today }: { b: EditingBoard; now: number; tz: strin
     <>
       {!b.editors.length && <NoEditors b={b} now={now} />}
       <FixPeople list={b.editors} />
-      <MatchStrip b={b} />
       {b.editors.length > 0 && (
         <div className="ed-colhead" aria-hidden><span>Editor</span><span>Right now</span><span>On their plate this week</span></div>
       )}
@@ -521,20 +522,17 @@ function FixPeople({ list }: { list: EditorRow[] }) {
   );
 }
 
-/** One client on a card ("Joshua Shalimar · 32 videos"), with whether they're its editor in Timeliner and whether it has scripts here. */
-interface CardClient { key: string; name: string; count: number; via: boolean; noScripts: boolean }
+/** One client on a card ("Joshua Shalimar · 32 videos"; 0 when they're only its editor in Timeliner). */
+interface CardClient { key: string; name: string; count: number }
 
 /** Their clients, most first: the card's, then any client they're the editor of in Timeliner with none of its videos theirs. */
 function cardClients(e: EditorRow, b: EditingBoard): CardClient[] {
   const same = (name: string, a: string) => name.trim().toLowerCase() === a.trim().toLowerCase();
-  const out: CardClient[] = e.clients.map((c, i) => {
-    const vids = e.videos.filter((v) => (c.clientId != null ? v.client?.id === c.clientId : !v.client && same(clientName(v) ?? '', c.name)));
-    return { key: `${c.clientId ?? 'b'}|${c.name}|${i}`, name: c.name, count: c.count, via: c.viaClient, noScripts: vids.length > 0 && vids.every(noScripts) };
-  });
+  const out: CardClient[] = e.clients.map((c, i) => ({ key: `${c.clientId ?? 'b'}|${c.name}|${i}`, name: c.name, count: c.count }));
   for (const c of b.clients) {
     if (!c.editors.some((x) => x.key === e.key)) continue;
     if (e.clients.some((k) => (k.clientId != null ? k.clientId === c.clientId : c.clientId == null && same(k.name, c.name)))) continue;
-    out.push({ key: c.key, name: c.name, count: 0, via: true, noScripts: false });
+    out.push({ key: c.key, name: c.name, count: 0 });
   }
   return out;
 }
@@ -563,6 +561,16 @@ function FlagLine({ f }: { f: EditorFlag }) {
   );
 }
 
+/** What a card's video line says after its client: why it has no shoot, else what Timeliner says it's at. */
+const videoStatus = (v: EditingVideo): string =>
+  (notMatched(v) ? 'Not matched to a shoot' : noScripts(v) ? 'No scripts on the site' : `Timeliner: ${v.step}${v.state === 'revisions' && v.revisionRound ? ` · round ${v.revisionRound}` : ''}`);
+
+/**
+ * One editor, calmly: their name and biggest client ("Dentist Mike + 2 more"), at most two pills (overdue,
+ * revisions, off hours), what they're on (or next) on one line with one line under it, their plate as a bar and one
+ * line of counts, and a foot with their last finished video and Videos. A client's warnings are on its tile in
+ * Editors by client, and how each video was matched is in Videos.
+ */
 function EditorCard({ e, b, scale, now, tz, today, open, onToggle }: {
   e: EditorRow; b: EditingBoard; scale: number; now: number; tz: string; today: ISODate; open: boolean; onToggle: () => void;
 }) {
@@ -571,9 +579,10 @@ function EditorCard({ e, b, scale, now, tz, today, open, onToggle }: {
   const f = e.focus;
   const city = e.city?.split(',')[0] ?? null;
   const local = localTime(e.timezone, now);
-  // the clients they edit for lead the card ("Joshua Shalimar · 32 videos"); a client split across editors is flagged
+  // their biggest client leads ("Dentist Mike + 2 more"); the rest are in the tooltip and in Videos
   const clients = cardClients(e, b);
-  const splits = [...new Set(e.clients.map((c) => c.split).filter((x): x is string => !!x))];
+  const clientWords = clients.length ? `${clients[0].name}${clients.length > 1 ? ` + ${clients.length - 1} more` : ''}` : null;
+  const clientList = clients.map((c) => `${c.name} · ${c.count ? plural(c.count, 'video') : 'its editor in Timeliner'}`).join('\n');
   const fix = needsFix(e.flag) ? e.flag : null;
   // a site editor with nothing in Timeliner: a quiet note where Right now would say what they're on
   const nothing = e.flag?.kind === 'nothing_assigned' ? e.flag.text : null;
@@ -582,57 +591,50 @@ function EditorCard({ e, b, scale, now, tz, today, open, onToggle }: {
   const overdue = plate.filter((v) => v.due && v.due < today).length;
   const soonest = plate.map((v) => v.due).filter((d): d is string => !!d).sort()[0] ?? null;
 
-  // the pills under their name
+  // two pills at most, the most pressing first: overdue (else due today), revisions, then off hours
   const pills: ReactNode[] = [];
   if (overdue) pills.push(<Chip key="late" color="red" icon={<AlertTriangle aria-hidden />}>{overdue} overdue</Chip>);
   else if (e.dueToday) pills.push(<Chip key="due" color="yellow" dot>{e.dueToday} due today</Chip>);
   if (e.plate.revisions) pills.push(<Chip key="rv" color="pink">{plural(e.plate.revisions, 'revision')}</Chip>);
   const off = offLabel(e, now);
   if (off) pills.push(<Chip key="off" color="plain">{off}</Chip>);
-  // their open videos the site couldn't match to a shoot, or whose match is worth a look (Videos shows which)
-  const unmatched = e.videos.filter(notMatched).length;
-  const toCheck = e.videos.filter(needsCheck).length;
-  if (unmatched) pills.push(<Chip key="nm" color="yellow" icon={<CircleHelp aria-hidden />} title="Not matched to a shoot: open Videos to pin them">{unmatched} not matched</Chip>);
-  if (toCheck) pills.push(<Chip key="ck" color="plain" icon={<AlertTriangle aria-hidden />} title="Two videos in one folder have the same title on the same shoot: open Videos to check">{toCheck} to check</Chip>);
 
-  // right now
+  // right now: a label, the video on one line, one line under it
   const video = f?.video ?? (kind === 'next' ? e.nextUp : null);
   const secs = f ? focusSeconds(f, now) : 0;
   const tt = tileTime(secs);
   const hours = e.workHours ? hoursText(e.workHours) : null;
+  const where = video ? clientName(video) : null;
+  const sub = (status: string | null | undefined) => [where, status].filter(Boolean).join(' · ');
   let tile: ReactNode;
   let eyebrow: ReactNode;
-  let big: { text: string; cls: string; raw?: boolean };
+  let big: { text: string; cls: string };
   let note: { text: string; cls?: string };
   if (kind === 'live') {
     tile = <span className="ed-tile live" role="img" aria-label={`Editing now, ${fmtWorked(secs)} on it`}><span className="dt-glint" aria-hidden /><span className="ed-tn">{tt.n}</span><span className="ed-tu">{tt.unit}</span></span>;
     eyebrow = <span className="ed-eyebrow-row"><Chip color="cyan" icon={<i className="ed-live-dot" aria-hidden />}>Editing now</Chip><span className="ed-since num">since {clockTime(f!.since, tz)}</span></span>;
-    big = { text: f!.video.title, cls: 'live', raw: f!.video.raw };
-    note = { text: `Timeliner: ${f!.video.step}${f!.video.state === 'revisions' && f!.video.revisionRound ? ` · round ${f!.video.revisionRound}` : ''}` };
+    big = { text: numberedName(f!.video), cls: 'live' };
+    note = { text: sub(videoStatus(f!.video)) };
   } else if (kind === 'stale') {
     // tapped I'm on this and never paused: say so, without claiming they're editing
     tile = <span className="ed-tile stale" role="img" aria-label={`Still marked as editing, ${fmtWorked(secs)}`}><TimerOff className="ed-ti" aria-hidden /><span className="ed-tn">{tt.n}</span><span className="ed-tu">{tt.unit}</span></span>;
     eyebrow = <span className="ed-eyebrow-row"><Chip color="plain" icon={<TimerOff aria-hidden />}>Still marked as editing</Chip><span className="ed-since num">since {fmtWhen(f!.since, tz, now)}</span></span>;
-    big = { text: f!.video.title, cls: 'quiet', raw: f!.video.raw };
-    note = { text: `${e.offHours ? 'Outside their working hours' : `Over ${FOCUS_STALE_HOURS} hours without a pause`}, so maybe left running · Timeliner: ${f!.video.step}` };
+    big = { text: numberedName(f!.video), cls: 'quiet' };
+    note = { text: sub(e.offHours ? 'outside their hours, maybe left running' : `over ${FOCUS_STALE_HOURS} hours, maybe left running`) };
   } else if (kind === 'paused') {
     tile = <span className="ed-tile paused" role="img" aria-label={`Paused, ${fmtWorked(secs)} on it`}><Pause className="ed-ti" aria-hidden /><span className="ed-tn">{tt.n}</span><span className="ed-tu">{tt.unit}</span></span>;
-    eyebrow = (
-      <span className="ed-eyebrow-row">
-        <Chip color="yellow" icon={<Pause aria-hidden />}>Paused</Chip>
-        {f!.video.state === 'revisions' && <Chip color="pink">Revisions{f!.video.revisionRound ? ` · round ${f!.video.revisionRound}` : ''}</Chip>}
-      </span>
-    );
-    big = { text: f!.video.title, cls: 'paused', raw: f!.video.raw };
-    note = { text: `Paused ${f!.pausedAt ? fmtAgo(f!.pausedAt, now) : ''} · ${fmtWorked(secs)} on it`, cls: 'paused' };
+    eyebrow = <span className="ed-eyebrow-row"><Chip color="yellow" icon={<Pause aria-hidden />}>Paused</Chip>{f!.pausedAt && <span className="ed-since num">{fmtAgo(f!.pausedAt, now)}</span>}</span>;
+    big = { text: numberedName(f!.video), cls: 'paused' };
+    note = { text: sub(videoStatus(f!.video)) };
   } else if (kind === 'next') {
     tile = <span className="ed-tile next" aria-hidden><Sunrise /><span className="ed-tu">Next</span></span>;
-    eyebrow = <span className="ed-eyebrow">Next up · {e.nextUp!.state === 'revisions' ? 'revisions first' : 'soonest due'}</span>;
-    big = { text: e.nextUp!.title, cls: 'quiet', raw: e.nextUp!.raw };
+    eyebrow = <span className="ed-eyebrow">Next up</span>;
+    big = { text: numberedName(e.nextUp!), cls: 'quiet' };
     const d = dueWords(e.nextUp!.due, today);
+    const matched = notMatched(e.nextUp!) || noScripts(e.nextUp!);
     note = e.offHours
-      ? { text: `Off hours${hours ? ` · works ${hours} their time` : ''}` }
-      : { text: [d?.text, `Timeliner: ${e.nextUp!.step}`].filter(Boolean).join(' · '), cls: d?.tone === 'late' ? 'late' : d?.tone === 'today' ? 'today' : undefined };
+      ? { text: sub(`off hours${hours ? ` · works ${hours} their time` : ''}`) }
+      : { text: sub(matched || !d ? videoStatus(e.nextUp!) : d.text), cls: !matched && d?.tone === 'late' ? 'late' : !matched && d?.tone === 'today' ? 'today' : undefined };
   } else if (kind === 'off') {
     tile = <span className="ed-tile off" aria-hidden><Moon /><span className="ed-tu">Off</span></span>;
     eyebrow = <span className="ed-eyebrow off">{[city, local].filter(Boolean).join(' ') || 'Off hours'}</span>;
@@ -665,38 +667,21 @@ function EditorCard({ e, b, scale, now, tz, today, open, onToggle }: {
     : soonest ? { text: dueWords(soonest, today)!.text, cls: 'plain' }
     : e.plate.inReview && !plate.length ? { text: 'All waiting on your review', cls: 'review' } : null;
   const segs = plateSegments(e);
+  const counts = stateCounts(e.videos).filter((c) => c.n > 0);
 
   const last = e.lastFinished;
-  // when it was in their zone, unless this browser doesn't know that zone
-  const lastLocal = last && e.timezone && e.timezone !== tz && now - Date.parse(last.at) >= 3600_000 ? localTime(e.timezone, Date.parse(last.at)) : null;
-  const theirs = lastLocal ? ` (${lastLocal} ${city ? `in ${city}` : 'their time'})` : '';
+  const lastText = last ? `Last finished ${last.title} · ${last.onSite ? 'marked done' : 'sent to review'} ${fmtWhen(last.at, tz, now)}` : 'Nothing finished yet';
 
   return (
     <article id={cardId(e.key)} tabIndex={-1} className={`ed-card ${kind}`} aria-label={e.name}>
-      {(fix || splits.length > 0) && (
-        <div className="ed-flags">
-          {fix && <FlagLine f={fix} />}
-          {splits.map((t) => <span key={t} className="ed-flag split"><Users aria-hidden /><span className="ed-flag-t">{t}</span></span>)}
-        </div>
-      )}
+      {fix && <div className="ed-flags"><FlagLine f={fix} /></div>}
       <div className="ed-who">
         <span className="ed-av"><Avatar name={e.name} id={e.userId} /></span>
         <div className="ed-who-txt">
           <h3 className="ed-name ellipsis">{e.name}</h3>
-          {clients.length > 0 && (
-            <div className="ed-clients-line">
-              {clients.slice(0, 2).map((c) => (
-                <span key={c.key} className="ed-cli">
-                  <b>{c.name}</b> · {c.count ? plural(c.count, 'video') : 'its editor in Timeliner'}
-                  {c.via && c.count > 0 && <span className="ed-via" title="Assigned to this client in Timeliner, so its videos nobody else is on are theirs">via client</span>}
-                  {c.noScripts && <span className="ed-via" title="This client has no scripts on the site">no scripts on the site</span>}
-                </span>
-              ))}
-              {clients.length > 2 && <span className="muted" title={clients.slice(2).map((c) => `${c.name} · ${c.count ? plural(c.count, 'video') : 'its editor in Timeliner'}`).join(', ')}>+{clients.length - 2} more</span>}
-            </div>
-          )}
+          {clientWords && <div className="ed-clients-line ellipsis" title={clientList}>{clientWords}</div>}
           <div className="ed-place num">{[city, local].filter(Boolean).join(' · ') || (e.site ? 'Time zone not set' : 'Only in Timeliner')}</div>
-          {pills.length > 0 && <div className="ed-pills">{pills}</div>}
+          {pills.length > 0 && <div className="ed-pills">{pills.slice(0, 2)}</div>}
         </div>
       </div>
 
@@ -704,9 +689,8 @@ function EditorCard({ e, b, scale, now, tz, today, open, onToggle }: {
         {tile}
         <div className="ed-now-txt">
           {eyebrow}
-          <span className={`ed-big ${big.cls}${big.text.length > 22 ? ' long' : ''}`}>{big.raw ? <VideoName v={{ title: big.text, raw: true }} /> : big.text}</span>
-          {video && <span className="ed-line"><ScriptLink v={video} who="manager" today={today} />{shootLabel(video, today) && <> · {shootLabel(video, today)}</>}</span>}
-          <span className={`ed-note${note.cls ? ` ${note.cls}` : ''}`}>{note.text}</span>
+          <span className={`ed-big ${big.cls}`} title={big.text}>{big.text}</span>
+          <span className={`ed-note${note.cls ? ` ${note.cls}` : ''}`} title={note.text}>{note.text}</span>
         </div>
       </div>
 
@@ -718,21 +702,16 @@ function EditorCard({ e, b, scale, now, tz, today, open, onToggle }: {
         <div className="ed-bar" role="img" aria-label={segs.length ? segs.map((s) => s.label).join(', ') : 'No videos'}>
           {segs.map((s) => <span key={s.c} className={`c-${s.c}`} style={{ width: `calc(${(s.n / scale) * 100}% - 2px)` }} title={s.label} />)}
         </div>
-        <Counts list={stateCounts(e.videos)} />
+        {counts.length > 0 && (
+          <div className="ed-cline num" title={counts.map((c) => `${c.n} ${c.label.toLowerCase()}`).join(' · ')}>
+            {counts.map((c) => <span key={c.c}><i className={`ed-sw c-${c.c}`} aria-hidden />{c.n} {c.label.toLowerCase()}</span>)}
+          </div>
+        )}
       </div>
 
       <div className="ed-foot">
-        {e.scripts.slice(0, 3).map((d) => <DocLink key={d.href} d={d} />)}
-        {e.scripts.length > 3 && <span className="muted">+{e.scripts.length - 3} more</span>}
-        <span className="ed-last">
-          {last ? (
-            <>
-              <span><History className="ed-last-ic" aria-hidden /><b className={last.onSite ? 'site' : undefined}>Last finished {last.title}</b> · {last.onSite ? 'marked done' : 'sent to review'} {fmtWhen(last.at, tz, now)}{theirs}</span>
-              {last.onSite
-                ? <span className="ed-src site" title="Marked done on the site"><Check aria-hidden />on the site</span>
-                : <span className="ed-src tl" title="Moved on in Timeliner">in Timeliner</span>}
-            </>
-          ) : <span><History className="ed-last-ic" aria-hidden />Nothing finished yet</span>}
+        <span className="ed-last" title={last ? `${lastText}${last.onSite ? ' (on the site)' : ' (in Timeliner)'}` : undefined}>
+          <History className="ed-last-ic" aria-hidden />{lastText}
         </span>
         {e.videos.length > 0 && (
           <button type="button" className="ed-vbtn" aria-expanded={open} aria-controls={drillId} onClick={onToggle}>
@@ -774,22 +753,27 @@ function plateSegments(e: EditorRow): { c: string; n: number; label: string }[] 
   return parts.filter((p) => p.n > 0).map((p) => ({ ...p, label: p.c === 'now' || p.c === 'pa' ? p.label : `${p.n} ${p.label}` }));
 }
 
-/** Squares shown in each of the drill-down's groups before "+N". */
-const SQUARES = 60;
+/** Rows shown in each of the drill-down's groups before "Show all". */
+const ROWS = 8;
 
-/** The drill-down: their videos by state, one square each. Tap one for its shoot, how it was matched, and a pin. */
+/**
+ * The drill-down: their videos by state, one row each ("#2 · Dentist Rates Viral Dental Hacks" on one line), with
+ * its client and how it came to them in small words: via client, no scripts on the site, not matched. Tap one for
+ * its shoot, how it was matched, and a pin.
+ */
 function Drill({ id, e, today, tz, now }: { id: string; e: EditorRow; today: ISODate; tz: string; now: number }) {
   const [picked, setPicked] = useState<string | null>(null);
+  const [all, setAll] = useState<Set<string>>(() => new Set());
   const detailId = useId();
   const f = e.focus;
   const rest = e.videos.filter((v) => v.id !== f?.video.id);
-  // what needs a manager (not matched, to check) first, so it's never folded into "+N"
+  // what needs a manager (not matched, to check) first, so it's never folded away
   const flagged = (v: EditingVideo) => notMatched(v) || needsCheck(v);
   const pick = (fn: (v: EditingVideo) => boolean) => rest.filter(fn).sort((a, b) => Number(flagged(b)) - Number(flagged(a)) || byTitle(a, b));
   const soon = (vs: EditingVideo[]) => { const d = vs.map((v) => v.due).filter((x): x is string => !!x).sort()[0]; return d ? midSentence(dueWords(d, today)!.text) : 'no deadline'; };
   const stepsOf = (vs: EditingVideo[]) => [...new Set(vs.map((v) => v.step))].join(', ');
   const groups: { key: string; c: string; label: string; sub: string; vids: EditingVideo[] }[] = [];
-  if (f) groups.push({ key: 'now', c: f.state === 'on' ? 'now' : 'pa', label: f.state === 'on' ? 'Editing now' : 'Paused', sub: `${shootLabel(f.video, today) || f.video.step} · ${fmtWorked(focusSeconds(f, now))} on it`, vids: [f.video] });
+  if (f) groups.push({ key: 'now', c: f.state === 'on' ? 'now' : 'pa', label: f.state === 'on' ? 'Editing now' : 'Paused', sub: `${fmtWorked(focusSeconds(f, now))} on it`, vids: [f.video] });
   const rv = pick((v) => v.state === 'revisions' && !v.doneAt);
   if (rv.length) groups.push({ key: 'rv', c: 'rv', label: 'Revisions', sub: `round ${Math.max(...rv.map((v) => v.revisionRound)) || 1} · ${soon(rv)}`, vids: rv });
   const ed = pick((v) => v.state === 'to_edit' && !v.doneAt);
@@ -801,43 +785,51 @@ function Drill({ id, e, today, tz, now }: { id: string; e: EditorRow; today: ISO
   const cl = pick((v) => v.state === 'with_client');
   if (cl.length) groups.push({ key: 'cl', c: 'cl', label: 'With client', sub: stepsOf(cl), vids: cl });
   const ap = pick((v) => v.state === 'approved');
-  if (ap.length) groups.push({ key: 'ap', c: 'ap', label: 'Approved this week', sub: [...new Set(ap.map((v) => shootLabel(v, today)).filter(Boolean))].join(', ') || 'Approved', vids: ap });
-  const all = groups.flatMap((g) => g.vids.map((v) => ({ v, c: g.c })));
-  const sel = all.find((x) => x.v.id === picked) ?? null;
-  const unmatched = all.filter((x) => notMatched(x.v)).length;
-  const toCheck = all.filter((x) => needsCheck(x.v)).length;
+  if (ap.length) groups.push({ key: 'ap', c: 'ap', label: 'Approved this week', sub: 'Approved', vids: ap });
+  const every = groups.flatMap((g) => g.vids.map((v) => ({ v, c: g.c })));
+  const sel = every.find((x) => x.v.id === picked) ?? null;
   // a client without scripts on the site has no shoot to match its videos to
-  const noneToMatch = all.length > 0 && all.every((x) => x.v.match.how === 'no_scripts');
+  const noneToMatch = every.length > 0 && every.every((x) => x.v.match.how === 'no_scripts');
   return (
     <div className="ed-drill" id={id}>
       <p className="ed-drill-hint">
         {noneToMatch ? 'No scripts on the site for these videos, so there’s no shoot to match them to. Tap one to see it.' : 'Tap a video to see which shoot it was matched to, and pin it if that’s wrong.'}
-        {unmatched > 0 && <span className="ed-drill-key"><i className="ed-sq c-ed lg nm" aria-hidden /><b>{unmatched} not matched</b></span>}
-        {toCheck > 0 && <span className="ed-drill-key"><i className="ed-sq c-ed lg ck" aria-hidden /><b>{toCheck} to check</b></span>}
       </p>
       {groups.map((g) => {
-        // sixty squares a group, and every one that needs a manager however many there are
-        const shown = Math.max(SQUARES, g.vids.filter(flagged).length);
+        // a few rows a group, and every one that needs a manager however many there are
+        const shown = all.has(g.key) ? g.vids.length : Math.max(ROWS, g.vids.filter(flagged).length);
         return (
-        <div key={g.key} className="ed-group">
-          <div className="ed-group-h">{g.label} · {videoTitles(g.vids)} <span>· {g.sub}</span></div>
-          <ul className="ed-sqs pick">
-            {g.vids.slice(0, shown).map((v) => {
-              const nm = notMatched(v);
-              const ck = !nm && needsCheck(v);
-              return (
-                <li key={v.id}>
-                  <button type="button" className={`ed-sqb${picked === v.id ? ' on' : ''}`} aria-expanded={picked === v.id} aria-controls={detailId}
-                    title={`${videoName(v)} · ${v.step}${nm ? ' · not matched' : ck ? ' · check' : ''}`} onClick={() => setPicked((p) => (p === v.id ? null : v.id))}>
-                    <span className={`ed-sq c-${g.c}${nm ? ' nm' : ck ? ' ck' : ''}`} aria-hidden>{squareOf(v)}</span>
-                    <span className="sr-only">{videoName(v)}, {v.step}{nm ? ', not matched to a shoot' : ck ? ', worth a check' : ''}</span>
-                  </button>
-                </li>
-              );
-            })}
-            {g.vids.length > shown && <li className="ed-sq more">+{g.vids.length - shown}</li>}
-          </ul>
-        </div>
+          <div key={g.key} className="ed-group">
+            <div className="ed-group-h">{g.label} · {plural(g.vids.length, 'video')} <span>· {g.sub}</span></div>
+            <ul className="ed-vrows">
+              {g.vids.slice(0, shown).map((v) => {
+                const nm = notMatched(v);
+                const ck = !nm && needsCheck(v);
+                const bits = [
+                  shootLabel(v, today) || null,
+                  v.assignedBy === 'client' ? 'via client' : null,
+                  noScripts(v) ? 'no scripts on the site' : null,
+                ].filter((x): x is string => !!x);
+                return (
+                  <li key={v.id}>
+                    <button type="button" className={`ed-vrow${picked === v.id ? ' on' : ''}`} aria-expanded={picked === v.id} aria-controls={detailId}
+                      onClick={() => setPicked((p) => (p === v.id ? null : v.id))}>
+                      <span className={`ed-sw c-${g.c}`} aria-hidden />
+                      <VideoLine v={v} />
+                      <span className="ed-vrow-meta">
+                        {bits.join(' · ')}
+                        {nm && <span className="ed-vrow-warn">{bits.length ? ' · ' : ''}not matched</span>}
+                        {ck && <span className="ed-vrow-warn">{bits.length ? ' · ' : ''}check its shoot</span>}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+            {g.vids.length > shown && (
+              <button type="button" className="ed-vrows-more" onClick={() => setAll((s) => new Set(s).add(g.key))}>Show all {g.vids.length}</button>
+            )}
+          </div>
         );
       })}
       <div id={detailId} className="ed-vd-slot">
@@ -1125,13 +1117,12 @@ function Legend() {
       </div>
       <div><span className="ed-legend-h">Shoots</span>
         <span className="ed-lg"><i className="ed-sq c-ed lg" aria-hidden><Film className="sq-raw" /></i>Raw clip (camera footage, no script number)</span>
-        <span className="ed-lg"><i className="ed-sq c-ed lg nm" aria-hidden />Not matched to a shoot</span>
-        <span className="ed-lg"><i className="ed-sq c-ed lg ck" aria-hidden />Check: two videos with one title on a shoot</span>
+        <span className="ed-lg wrap"><span className="ed-vrow-warn">not matched</span>no shoot found for it: open Videos, tap it and pin it</span>
+        <span className="ed-lg wrap"><span className="ed-vrow-warn">check its shoot</span>two videos with one title on a shoot</span>
         <span className="ed-lg wrap"><Chip color="plain" icon={<FileX aria-hidden />}>No scripts on the site</Chip>a client we don’t write scripts for: its videos are normal work</span>
       </div>
       <div><span className="ed-legend-h">Last finished</span>
-        <span className="ed-lg wrap"><span className="ed-src site"><Check aria-hidden />on the site</span>marked done here, until Timeliner moves it to Needs review</span>
-        <span className="ed-lg"><span className="ed-src tl">in Timeliner</span>sent to review in Timeliner</span>
+        <span className="ed-lg wrap">“marked done” here on the site, until Timeliner moves it to Needs review; “sent to review” in Timeliner</span>
       </div>
       <p>“Editing now” is the video an editor tapped “I’m on this” for. They can pause it, then mark it done. It clears itself when Timeliner moves that video to Needs review. Left running for {FOCUS_STALE_HOURS} hours, or outside the editor’s working hours, it shows as still marked as editing instead.</p>
       <p>A video is the editor’s it’s assigned to in Timeliner; one nobody is on is its client’s editor’s there (“via client”). Each client has one editor: a client whose videos are with more than one is flagged. Only videos made since the rule began (Settings → Timeliner) count for that.</p>

@@ -28,7 +28,7 @@ import { burst, centerOf } from '../fx';
 import { motionAllowed } from '../motion';
 import {
   AgainTag, AltLink, byTitle, clientName, docKind, docName, docSource, fmtWhen, likelyWords, midSentence, focusSeconds, noScripts, noScriptWords, openWords,
-  reviewWords, ScriptLink, scriptWhat, shootLabel, shootWords, squareOf, syncWords, TIMELINER_APP, useNow, VideoName, videoName, videoTitles,
+  reviewWords, ScriptLink, scriptWhat, shootLabel, shootWords, squareOf, syncWords, TIMELINER_APP, useNow, VideoLine, videoName, videoTitles,
 } from '../components/EditingBits';
 import { DeliverableRow } from './ScriptBank';
 
@@ -595,7 +595,7 @@ function VideoRow({ v, kind, multi, inGroup, now, tz, today, acting }: {
       <span className={`eh-vq ${kind}${v.raw ? ' raw' : ''}`} aria-hidden>{squareOf(v)}</span>
       <div className="eh-row-body">
         <div className="eh-row-top">
-          <b className="eh-row-title"><VideoName v={v} /></b>
+          <b className="eh-row-title"><VideoLine v={v} /></b>
           {kind === 'rv' && v.revisionRound > 0 && <Chip color="pink">Round {v.revisionRound}</Chip>}
         </div>
         {meta.length > 0 && <div className="eh-row-meta">{meta.map((m, i) => <span key={i}>{i > 0 && ' · '}{m}</span>)}</div>}

@@ -2,7 +2,8 @@
 //
 // Videos are given to editors in Timeliner; this site never assigns them and editors never claim them here.
 // Each client has its dedicated editor, assigned on the client's brand in Timeliner, so a video nobody is on
-// belongs to its brand's editors (OWNER_IDS); one given to someone on the video is theirs.
+// belongs to its brand's editors (OWNER_IDS); one given to someone on the video is theirs. Only editors are
+// editors: someone the site knows as a writer, manager or Admin (by email) is never anyone's editor there.
 // Every TIMELINER_SYNC_MINUTES (and on "Read Timeliner now") the server reads Timeliner's members, brands (and who
 // is on each) and tasks and keeps a copy. After every write to the copy (a read, a video message, a manager's
 // pin) every video is matched again to a client, a batch and a script by the rules in server/matching.ts: by
@@ -34,8 +35,8 @@ import { loadEditorRows } from './control/editors';
 import { isISODate, isValidTimeZone, makeClock, onOrAfterDay, type ISODate } from '../shared/dates';
 import { cityLabel, onShift } from '../shared/cities';
 import {
-  compressRanges, compressTitles, hasNoScripts, isApproved, isEditor, isFocusStale, isManager, isNotMatched, isOnPlate, isRawTitle, needsCheck, TIMELINER_STEP_LABEL, titleNumber,
-  videoState, type ScriptStatus, type TimelinerStatusGroup, type VideoState,
+  compressRanges, compressTitles, hasNoScripts, isApproved, isEditor, isFocusStale, isManager, isNotMatched, isOnPlate, isRawTitle, needsCheck, ROLE_LABEL, TIMELINER_STEP_LABEL,
+  titleNumber, videoState, type Role, type ScriptStatus, type TimelinerStatusGroup, type VideoState,
 } from '../shared/workflow';
 import { fmtWorked } from '../shared/format';
 import type {
@@ -349,18 +350,38 @@ async function readMoves(api: TimelinerApi, tasks: Task[], prev: Map<string, Pre
  */
 const REVIEW_ROLES = ['admin', 'supervisor', 'guest'];
 
+/** The site's roles that aren't editors (writers, managers, the Admin): isEditor says which. */
+const NOT_EDITOR_ROLES = (Object.keys(ROLE_LABEL) as Role[]).filter((r) => !isEditor(r));
+
+/**
+ * SQL: the Timeliner member id `id` is someone on the site who isn't an editor (a writer, manager or the Admin, matched
+ * by email). Only editors are editors: they're never anyone's editor, on a video or on its brand (a writer is often on
+ * a brand to upload its scripts PDFs). Someone in Timeliner the site doesn't know still counts.
+ */
+const SITE_NON_EDITOR = (id: string) => `exists (select 1 from timeliner_members sm join users su on lower(su.email) = lower(sm.email)
+  where sm.id = ${id} and su.removed_at is null and su.role in (${NOT_EDITOR_ROLES.map((r) => `'${r}'`).join(', ')}))`;
+
 /**
  * SQL: `bm` (a row of timeliner_brand_members, `m` its member, left joined) is one of that brand's editors: an
- * editor there, assigned rather than automatic (a workspace admin's access to every brand), still active, and not
- * a workspace admin, supervisor or guest (they review; they aren't anyone's editor).
+ * editor there, assigned rather than automatic (a workspace admin's access to every brand), still active, not
+ * a workspace admin, supervisor or guest (they review; they aren't anyone's editor), and not someone the site knows
+ * as anything but an editor (SITE_NON_EDITOR).
  */
 const IS_BRAND_EDITOR = (bm: string, m: string) =>
-  `${bm}.role = 'editor' and not ${bm}.automatic and coalesce(${m}.active, true) and coalesce(${m}.role, 'editor') not in (${REVIEW_ROLES.map((r) => `'${r}'`).join(', ')})`;
+  `${bm}.role = 'editor' and not ${bm}.automatic and coalesce(${m}.active, true) and coalesce(${m}.role, 'editor') not in (${REVIEW_ROLES.map((r) => `'${r}'`).join(', ')})
+   and not ${SITE_NON_EDITOR(`${bm}.member_id`)}`;
 
-/** SQL: the Timeliner member ids the task `tt` belongs to (rule A): its assignees, else its brand's editors. */
-export const OWNER_IDS = (tt: string) => `(case when cardinality(${tt}.assignee_ids) > 0 then ${tt}.assignee_ids
-  else array(select ob.member_id from timeliner_brand_members ob left join timeliner_members om on om.id = ob.member_id
-              where ob.brand_id = ${tt}.brand_id and ${IS_BRAND_EDITOR('ob', 'om')} order by ob.member_id)::text[] end)`;
+/** SQL: the task `tt`'s assignees in Timeliner, in order, but for anyone the site knows as anything but an editor. */
+const ASSIGNEES = (tt: string) =>
+  `array(select a.id from unnest(${tt}.assignee_ids) with ordinality as a(id, n) where not ${SITE_NON_EDITOR('a.id')} order by a.n)::text[]`;
+
+/**
+ * SQL: the Timeliner member ids the task `tt` belongs to (rule A): its assignees, else its brand's editors. A writer,
+ * manager or Admin on the site is neither (on a video alone, it goes to its brand's editors as if nobody were on it).
+ */
+export const OWNER_IDS = (tt: string) => `coalesce(nullif(${ASSIGNEES(tt)}, '{}'::text[]),
+  array(select ob.member_id from timeliner_brand_members ob left join timeliner_members om on om.id = ob.member_id
+         where ob.brand_id = ${tt}.brand_id and ${IS_BRAND_EDITOR('ob', 'om')} order by ob.member_id)::text[])`;
 
 // ── keeping the copy ─────────────────────────────────────────────────────
 
@@ -1152,8 +1173,8 @@ function toVideo(L: Loaded, t: TaskRow, userId: number | null): EditingVideo {
     folder: t.folder,
     client: t.client_id != null && L.clients.has(Number(t.client_id)) ? { id: Number(t.client_id), name: L.clients.get(Number(t.client_id))! } : null,
     brand: t.brand_id ? L.brands.get(t.brand_id) ?? null : null,
-    // nobody on the video: it's its client's, whose editor is assigned on the brand (rule A)
-    assignedBy: t.assignee_ids.length ? 'video' : 'client',
+    // nobody (or no editor) on the video: it's its client's, whose editor is assigned on the brand (rule A)
+    assignedBy: t.owner_ids.some((m) => t.assignee_ids.includes(m)) ? 'video' : 'client',
     batch: batch && batchId != null ? { id: batchId, title: batch.title, shootDate: batch.shootDate } : null,
     scriptNumber: t.script_number,
     script: doc.script,
