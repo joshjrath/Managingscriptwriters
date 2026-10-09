@@ -23,6 +23,7 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-editors-never-get-scripts': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'], '2026-10-08-master-log-everything': ['managers'], '2026-10-08-no-script-titles': ['managers', 'writers'], '2026-10-08-timeliner-auto-delivery': ['managers', 'writers'], '2026-10-08-timeliner-key-permissions': ['managers'],
   '2026-10-08-editors-tab-timeliner': ['managers', 'editors'], '2026-10-08-timeliner-matching': ['managers', 'editors'],
   '2026-10-09-editors-everyone-in-timeliner': ['managers', 'editors'], '2026-10-09-one-editor-since': ['managers', 'editors'],
+  '2026-10-09-editors-match-timeliner-assignees': ['managers', 'editors'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -36,6 +37,16 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-09-editors-match-timeliner-assignees',
+    date: '2026-10-09',
+    title: 'The Editors tab matches Timeliner’s assignees exactly',
+    summary: 'Each editor now sees exactly the videos assigned to them in Timeliner, the same as filtering Timeliner by that person, and videos in Needs review count as in review.',
+    changes: [
+      { tag: 'fixed', text: 'A video is an editor’s only when it’s assigned to them in Timeliner. Videos nobody is assigned to no longer show up for every editor on their client (no more “via client”): they’re listed under Not assigned, with the client’s editor as whom to give them.' },
+      { tag: 'fixed', text: 'Videos in Needs review in Timeliner now count as in review, waiting on the managers, instead of still to edit. What an editor is on clears when the video moves to Needs review.' },
+    ],
+  },
   {
     id: '2026-10-09-one-editor-since',
     date: '2026-10-09',

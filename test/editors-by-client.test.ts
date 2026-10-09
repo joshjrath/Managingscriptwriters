@@ -1,11 +1,11 @@
-// Each client has its dedicated editor, and in Timeliner that's who is on the client's brand: most videos aren't
-// assigned one by one. So a video nobody is on belongs to its brand's editors (an editor there, assigned rather
-// than a workspace admin's automatic access), and an explicit assignee on the video wins. The board, an editor's
-// Home, I'm on this, the scripts PDF link, the shoot an editor's raw clips are from and the last video they
-// finished all go by that. Timeliner is a stand-in.
+// A video belongs to its assignees in Timeliner and nobody else, as Timeliner's assignee filter shows it. Who is
+// on a client's brand there (an editor, assigned rather than a workspace admin's automatic access) only names the
+// client's editor: in Editors by client, as whom to give its unassigned videos ("usually Leo"), and in the flag for
+// a client with two editors. A video nobody is assigned to is nobody's: not on a card, not on anyone's Home, not
+// theirs to say they're on, and no reason to open its shoot's scripts PDF. Timeliner is a stand-in.
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { EditingBoard, EditingVideo, EditorRow } from '../shared/types';
+import type { EditingBoard, EditorRow } from '../shared/types';
 import { TimelinerError, timelinerClient, type TimelinerApi, type TimelinerBrandMember } from '../server/timeliner';
 import { syncTimeliner } from '../server/editing';
 import { makeWorld, pdfTask, versionUploaded, video, type World } from './timeliner-world';
@@ -16,7 +16,6 @@ let sam = '';
 const ids = { js: 0, oct6: 0 };
 const card = (name: string) => b.editors.find((e) => e.name === name) as EditorRow;
 const titles = (e: EditorRow | undefined) => (e?.videos ?? []).map((v) => v.title).sort();
-const find = (list: EditingVideo[], title: string) => list.find((v) => v.title === title) as EditingVideo;
 const add = (...t: Parameters<typeof video>[]) => { for (const x of t) w.tl.tasks.push(video(...x)); };
 type Members = Awaited<ReturnType<TimelinerApi['members']>>;
 const person = (id: string, email: string, firstName: string, lastName: string, role: string) => ({ id, email, firstName, lastName, role, deactivated: false });
@@ -81,61 +80,72 @@ afterAll(async () => {
   await w.close();
 });
 
-describe('a video nobody is on belongs to its client’s editor in Timeliner', () => {
-  it('puts it on the client editor’s card, quietly “via client”', () => {
-    expect(titles(card('Leo Martins'))).toEqual(['Bright 01', 'C0101', 'C0102', 'Organic 01', 'Organic 03']);
-    expect(find(card('Leo Martins').videos, 'Organic 01')).toMatchObject({ assignedBy: 'client', client: { id: ids.js }, batch: { id: ids.oct6 } });
-    expect(card('Leo Martins')).toMatchObject({
-      // next by deadline: Brightside's, due today
-      flag: null, nextUp: { title: 'Bright 01' }, plate: { toEdit: 4, rawToEdit: 2, inReview: 1 },
-      // a titled video he put straight into review: his last finished, though nobody was on it
-      lastFinished: { title: 'Organic 03' },
-      clients: [
-        { name: 'Joshua Shalimar', clientId: ids.js, count: 4, split: 'Joshua Shalimar: 4 with Leo, 1 with Sam — one editor per client', viaClient: true },
-        { name: 'Brightside', count: 1, split: 'Brightside has 2 editors in Timeliner — one editor per client', viaClient: true },
-      ],
-    });
+describe('a video nobody is assigned to in Timeliner', () => {
+  it('is on nobody’s card, not even its client’s editor’s', () => {
+    expect(titles(card('Leo Martins'))).toEqual([]);
+    expect(titles(card('Maya Reyes'))).toEqual([]);
+    expect(card('Leo Martins')).toMatchObject({ flag: null, nextUp: null, lastFinished: null, clients: [], plate: { toEdit: 0, rawToEdit: 0, inReview: 0 } });
+    expect(b.editors.flatMap((e) => e.videos).map((v) => v.title).sort()).toEqual(['Glow 02', 'Glow 03', 'Organic 02']);
   });
 
-  it('gives it to them on their Home, and lets them say they’re on it; nobody else can', async () => {
+  it('is on nobody’s Home, and nobody can say they’re on it', async () => {
     const mine = await w.mine(w.leo);
-    expect(mine.toEdit.map((v) => v.title).sort()).toEqual(['Bright 01', 'C0101', 'C0102', 'Organic 01']);
+    expect([...mine.toEdit, ...mine.revisions, ...mine.waiting]).toEqual([]);
     // what the read found across the workspace (its people, its clients) is the managers'
     expect(mine.sync).toMatchObject({ error: null, counts: null });
     expect(b.sync.counts).not.toBeNull();
-    expect(find(mine.toEdit, 'Organic 01').assignedBy).toBe('client');
-    expect((await w.send('POST', '/api/editing/focus', w.leo, { videoId: 't_o1', action: 'start' })).status).toBe(200);
-    const other = await w.send('POST', '/api/editing/focus', sam, { videoId: 't_o1', action: 'start' });
-    expect([other.status, other.body.error.message]).toEqual([403, 'That video isn’t assigned to you in Timeliner.']);
-    // the next read doesn't take it for someone else's and end it
-    b = await w.sync();
-    expect(card('Leo Martins').focus).toMatchObject({ state: 'on', video: { title: 'Organic 01' } });
+    for (const cookie of [w.leo, sam]) {
+      const r = await w.send('POST', '/api/editing/focus', cookie, { videoId: 't_o1', action: 'start' });
+      expect([r.status, r.body.error.message]).toEqual([403, 'That video isn’t assigned to you in Timeliner.']);
+    }
   });
 
-  it('opens the shoot’s scripts PDF to them (there isn’t one yet), never to an editor with no video from it', async () => {
-    // past the ownership check: the shoot has no scripts PDF linked
-    expect((await w.send('GET', `/api/editing/script-pdf/${ids.oct6}`, w.leo)).status).toBe(404);
+  it('opens the shoot’s scripts PDF only to an editor with a video assigned from it', async () => {
+    // Sam has Organic 02 from the Oct 6 shoot: past the ownership check, there's no scripts PDF linked yet
+    expect((await w.send('GET', `/api/editing/script-pdf/${ids.oct6}`, sam)).status).toBe(404);
+    // Leo is the client's editor, but nobody gave him a video from it
+    expect((await w.send('GET', `/api/editing/script-pdf/${ids.oct6}`, w.leo)).status).toBe(403);
     expect((await w.send('GET', `/api/editing/script-pdf/${ids.oct6}`, w.maya)).status).toBe(403);
   });
 
-  it('remembers the shoot of the raw clips they cut', async () => {
-    expect(await w.db.query(`select distinct member_id, batch_id::int as batch_id from timeliner_editor_clips order by member_id`)).toEqual([{ member_id: 'm_leo', batch_id: ids.oct6 }]);
+  it('remembers no editor’s shoot for raw clips nobody is assigned to', async () => {
+    expect(await w.db.query(`select distinct member_id, batch_id::int as batch_id from timeliner_editor_clips order by member_id`)).toEqual([]);
   });
 
-  it('lets an assignee on the video win over the client’s editor', () => {
-    expect(titles(card('Sam Lee'))).toEqual(['Glow 02', 'Glow 03', 'Organic 02']);
-    expect(find(card('Sam Lee').videos, 'Organic 02').assignedBy).toBe('video');
-    expect(card('Sam Lee').clients).toEqual([
-      { name: 'Glow Skincare', clientId: null, count: 2, split: 'Glow Skincare: 2 with Sam, 1 with Maya — one editor per client', viaClient: false },
-      { name: 'Joshua Shalimar', clientId: ids.js, count: 1, split: 'Joshua Shalimar: 4 with Leo, 1 with Sam — one editor per client', viaClient: false },
+  it('is listed under Not assigned, with its client’s editor in Timeliner as whom to give it', () => {
+    const leo = expect.objectContaining({ name: 'Leo Martins', memberId: 'm_leo' });
+    expect([...b.unassigned].sort((x, y) => x.titles.localeCompare(y.titles))).toEqual([
+      expect.objectContaining({ titles: 'Bright 01', brand: 'Brightside', suggested: leo }),
+      expect.objectContaining({ titles: 'C0101–0102', raw: true, batch: expect.objectContaining({ id: ids.oct6 }), suggested: leo }),
+      expect.objectContaining({ titles: 'Glow 01', brand: 'Glow Skincare', suggested: expect.objectContaining({ name: 'Maya Reyes', memberId: 'm_maya' }) }),
+      expect.objectContaining({ titles: 'Organic 01', brand: 'Joshua Shalimar', suggested: leo }),
+      // nobody edits Zen Yoga in Timeliner
+      expect.objectContaining({ titles: 'Zen 01', brand: 'Zen Yoga', suggested: null }),
     ]);
+    // Organic 03 is in review: not waiting to be given to anyone
+    expect(b.totals).toMatchObject({ notAssigned: 6, waitingOnYou: 1, dueToday: 0 });
+    expect(b.clients.find((c) => c.name === 'Joshua Shalimar')).toMatchObject({
+      editor: { name: 'Leo Martins', memberId: 'm_leo' }, editorFrom: 'client', open: 5, notAssigned: 3, split: [],
+      flags: ['Joshua Shalimar · 3 videos not assigned (usually Leo)'],
+    });
+  });
+});
+
+describe('a video assigned in Timeliner', () => {
+  it('is its assignee’s alone, whoever is on its client’s brand', () => {
+    expect(titles(card('Sam Lee'))).toEqual(['Glow 02', 'Glow 03', 'Organic 02']);
+    expect(card('Sam Lee').clients).toEqual([
+      { name: 'Glow Skincare', clientId: null, count: 2, split: null },
+      { name: 'Joshua Shalimar', clientId: ids.js, count: 1, split: null },
+    ]);
+    // people with videos: Sam alone
+    expect(b.sync.counts).toEqual({ videos: 10, people: 1, clients: 4, skipped: 0 });
   });
 
-  it('names the editor on the client in Timeliner as its editor, whoever has more of its videos', () => {
+  it('leaves the editor on the client in Timeliner named as its editor, whoever has more of its videos', () => {
     expect(b.clients.find((c) => c.name === 'Glow Skincare')).toMatchObject({
       editor: { name: 'Maya Reyes', memberId: 'm_maya' }, editorFrom: 'client', editors: [expect.objectContaining({ name: 'Maya Reyes' })],
-      open: 3, split: [expect.objectContaining({ name: 'Sam Lee', count: 2 }), expect.objectContaining({ name: 'Maya Reyes', count: 1 })],
-      flags: ['Glow Skincare: 2 with Sam, 1 with Maya — one editor per client'],
+      open: 3, notAssigned: 1, split: [], flags: ['Glow Skincare · 1 video not assigned (usually Maya)'],
     });
   });
 });
@@ -144,33 +154,19 @@ describe('who isn’t a client’s editor', () => {
   it('ignores automatic access (a workspace admin’s) and a supervisor on the brand', () => {
     // Ada (the site's admin) has no card of her own; Sue isn't on the site and isn't anyone's editor
     expect(b.editors.map((e) => e.name).sort()).toEqual(['Leo Martins', 'Maya Reyes', 'Sam Lee']);
-    const js = b.clients.find((c) => c.name === 'Joshua Shalimar')!;
-    expect(js).toMatchObject({ editor: { name: 'Leo Martins', memberId: 'm_leo' }, editorFrom: 'client', editors: [expect.objectContaining({ memberId: 'm_leo' })], notAssigned: 0 });
-  });
-
-  it('leaves a video not assigned only when nobody is on it or on its client', () => {
-    expect(b.unassigned).toEqual([expect.objectContaining({ titles: 'Zen 01', count: 1, brand: 'Zen Yoga', suggested: null })]);
+    expect(b.clients.find((c) => c.name === 'Joshua Shalimar')).toMatchObject({ editors: [expect.objectContaining({ memberId: 'm_leo' })] });
     expect(b.clients.find((c) => c.name === 'Zen Yoga')).toMatchObject({ editor: null, editorFrom: null, editors: [], notAssigned: 1, flags: ['Zen Yoga · 1 video not assigned'] });
-    expect(b.totals.notAssigned).toBe(1);
   });
 });
 
 describe('a client with two editors in Timeliner', () => {
-  it('gives the video to both, counts it once, and flags the client', () => {
-    expect(titles(card('Maya Reyes'))).toEqual(['Bright 01', 'Glow 01']);
-    expect(card('Leo Martins').videos.some((v) => v.title === 'Bright 01')).toBe(true);
-    // due today: Bright 01, once
-    expect(b.totals).toMatchObject({ dueToday: 1, notAssigned: 1, waitingOnYou: 1 });
+  it('is flagged, and its video nobody is assigned to is neither’s', () => {
     expect(b.clients.find((c) => c.name === 'Brightside')).toMatchObject({
-      editorFrom: 'client', editors: [expect.objectContaining({ name: 'Leo Martins' }), expect.objectContaining({ name: 'Maya Reyes' })],
-      open: 1, flags: ['Brightside has 2 editors in Timeliner — one editor per client'],
+      editor: { name: 'Leo Martins' }, editorFrom: 'client', editors: [expect.objectContaining({ name: 'Leo Martins' }), expect.objectContaining({ name: 'Maya Reyes' })],
+      open: 1, notAssigned: 1,
+      flags: ['Brightside has 2 editors in Timeliner — one editor per client', 'Brightside · 1 video not assigned (usually Leo)'],
     });
-    expect(card('Maya Reyes').clients).toEqual([
-      { name: 'Brightside', clientId: expect.any(Number), count: 1, split: 'Brightside has 2 editors in Timeliner — one editor per client', viaClient: true },
-      { name: 'Glow Skincare', clientId: null, count: 1, split: 'Glow Skincare: 2 with Sam, 1 with Maya — one editor per client', viaClient: true },
-    ]);
-    // people with videos: Leo, Maya and Sam
-    expect(b.sync.counts).toEqual({ videos: 10, people: 3, clients: 4, skipped: 0 });
+    expect(b.editors.some((e) => e.videos.some((v) => v.title === 'Bright 01'))).toBe(false);
   });
 });
 
@@ -194,12 +190,12 @@ describe('reading who is on each brand', () => {
     expect(logged).toContain('timeliner: couldn\'t read who is on a brand: Timeliner answered 500: Internal server error.');
     b = await w.board();
     expect(b.sync).toMatchObject({ error: null, counts: { videos: 10, skipped: 3 } });
-    // Brightside as last read: still both editors'
-    expect(titles(card('Maya Reyes'))).toEqual(['Bright 01', 'Glow 01']);
-    // Zen Yoga is now Sam's: nothing left unassigned
-    expect(titles(card('Sam Lee'))).toEqual(['Glow 02', 'Glow 03', 'Organic 02', 'Zen 01']);
-    expect(b.unassigned).toEqual([]);
-    expect(b.clients.find((c) => c.name === 'Zen Yoga')).toMatchObject({ editor: { name: 'Sam Lee' }, editorFrom: 'client', notAssigned: 0, flags: [] });
+    // Brightside as last read: still both editors
+    expect(b.clients.find((c) => c.name === 'Brightside')).toMatchObject({ editors: [expect.objectContaining({ name: 'Leo Martins' }), expect.objectContaining({ name: 'Maya Reyes' })] });
+    // Sam is Zen Yoga's editor now: whom to give its video, which still isn't his
+    expect(b.clients.find((c) => c.name === 'Zen Yoga')).toMatchObject({ editor: { name: 'Sam Lee' }, editorFrom: 'client', notAssigned: 1, flags: ['Zen Yoga · 1 video not assigned (usually Sam)'] });
+    expect(b.unassigned.find((g) => g.brand === 'Zen Yoga')).toMatchObject({ titles: 'Zen 01', suggested: expect.objectContaining({ name: 'Sam Lee' }) });
+    expect(titles(card('Sam Lee'))).toEqual(['Glow 02', 'Glow 03', 'Organic 02']);
   });
 
   it('never takes anyone off a brand when an entry in its list can’t be read, and adds whoever it could read', async () => {
@@ -223,19 +219,19 @@ describe('reading who is on each brand', () => {
       w.api.brandMembers = real;
     }
     b = await w.board();
-    // Leo keeps his client's videos and the one he's on (with the time on it)
-    expect(card('Leo Martins').focus).toMatchObject({ state: 'on', video: { title: 'Organic 01' } });
-    expect(titles(card('Leo Martins'))).toEqual(['Bright 01', 'C0101', 'C0102', 'Organic 01', 'Organic 03']);
-    expect(b.unassigned).toEqual([]);
-    // Glow Skincare keeps Maya and gains Sam
-    expect(titles(card('Maya Reyes'))).toEqual(['Bright 01', 'Glow 01']);
-    expect(titles(card('Sam Lee'))).toEqual(['Glow 01', 'Glow 02', 'Glow 03', 'Organic 02', 'Zen 01']);
-    expect(b.clients.find((c) => c.name === 'Glow Skincare')).toMatchObject({ editors: [expect.objectContaining({ name: 'Sam Lee' }), expect.objectContaining({ name: 'Maya Reyes' })] });
+    // Leo is still Joshua Shalimar's and Brightside's editor
+    expect(b.clients.find((c) => c.name === 'Joshua Shalimar')).toMatchObject({ editor: { name: 'Leo Martins' }, editors: [expect.objectContaining({ name: 'Leo Martins' })] });
+    expect(b.clients.find((c) => c.name === 'Brightside')).toMatchObject({ editors: [expect.objectContaining({ name: 'Leo Martins' }), expect.objectContaining({ name: 'Maya Reyes' })] });
+    // Glow Skincare keeps Maya and gains Sam (who has the most of its videos), and is flagged; its videos stay where they were
+    expect(b.clients.find((c) => c.name === 'Glow Skincare')).toMatchObject({
+      editors: [expect.objectContaining({ name: 'Sam Lee' }), expect.objectContaining({ name: 'Maya Reyes' })],
+      flags: ['Glow Skincare has 2 editors in Timeliner — one editor per client', 'Glow Skincare · 1 video not assigned (usually Sam)'],
+    });
+    expect(titles(card('Sam Lee'))).toEqual(['Glow 02', 'Glow 03', 'Organic 02']);
 
     // a list that reads cleanly replaces what was kept: Glow Skincare is Maya's alone again
     b = await w.sync();
-    expect(card('Leo Martins').focus).toMatchObject({ state: 'on', video: { title: 'Organic 01' } });
-    expect(titles(card('Sam Lee'))).toEqual(['Glow 02', 'Glow 03', 'Organic 02', 'Zen 01']);
+    expect(b.clients.find((c) => c.name === 'Glow Skincare')).toMatchObject({ editors: [expect.objectContaining({ name: 'Maya Reyes' })] });
     expect(b.sync.counts).toMatchObject({ skipped: 0 });
   });
 
@@ -276,16 +272,16 @@ describe('a Timeliner admin or supervisor on a video', () => {
     );
     try {
       b = await w.sync();
-      // not a split: Sue isn't one of Joshua Shalimar's editors
+      // Sue isn't one of Joshua Shalimar's editors: its open videos are Leo's one and Sam's one
       expect(b.clients.find((c) => c.name === 'Joshua Shalimar')).toMatchObject({
-        editor: { name: 'Leo Martins' }, split: [expect.objectContaining({ name: 'Leo Martins', count: 5 }), expect.objectContaining({ name: 'Sam Lee', count: 1 })],
-        flags: ['Joshua Shalimar: 5 with Leo, 1 with Sam — one editor per client'],
+        editor: { name: 'Leo Martins' }, split: [expect.objectContaining({ name: 'Leo Martins', count: 1 }), expect.objectContaining({ name: 'Sam Lee', count: 1 })],
+        flags: ['Joshua Shalimar: 1 with Leo, 1 with Sam — one editor per client', 'Joshua Shalimar · 3 videos not assigned (usually Leo)'],
       });
       // her card holds only the video nobody else is on, and asks nobody to make her an editor
       expect(card('Sue Supervisor')).toMatchObject({ site: false, flag: null });
       expect(titles(card('Sue Supervisor'))).toEqual(['Organic 04']);
       expect(b.editors.filter((e) => e.flag && e.flag.kind !== 'nothing_assigned')).toEqual([]);
-      expect(titles(card('Leo Martins'))).toContain('Organic 05');
+      expect(titles(card('Leo Martins'))).toEqual(['Organic 05']);
     } finally {
       w.tl.tasks = w.tl.tasks.filter((t) => t.id !== 't_o4' && t.id !== 't_o5');
     }
@@ -293,19 +289,20 @@ describe('a Timeliner admin or supervisor on a video', () => {
 });
 
 describe('a new version of a shoot’s scripts PDF', () => {
-  it('is told to the client’s editor in Timeliner, whose videos from that shoot nobody is on', async () => {
+  it('is told to the editors assigned to that shoot’s videos, not to the client’s editor on its brand', async () => {
     const told = async (cookie: string) => ((await w.send('GET', '/api/notifications', cookie)).body.notifications as { title: string; body: string }[])
       .filter((n) => n.title.startsWith('New scripts PDF'));
-    // nobody is on any of the shoot's videos: Leo's are his through the client alone
+    // Sam has the shoot's one assigned video; the rest are nobody's
     b = await w.sync();
-    expect(b.editors.flatMap((e) => e.videos).filter((v) => v.batch?.id === ids.oct6 && v.assignedBy === 'video').map((v) => v.title)).toEqual(['Organic 02']);
+    expect(b.editors.flatMap((e) => e.videos).filter((v) => v.batch?.id === ids.oct6).map((v) => v.title)).toEqual(['Organic 02']);
     w.tl.tasks.push(pdfTask('t_pdf6', '2026-10-05T15:00:00Z', { id: 'f_61', name: 'JS scripts Oct 6.pdf' }));
     expect((await w.hook('version.uploaded', versionUploaded({ taskId: 't_pdf6', fileName: 'JS scripts Oct 6.pdf', version: 1, uploadedAt: '2026-10-05T15:00:00Z', fileId: 'f_61' }))).outcome).toBe('delivered');
     const t = w.tl.tasks.find((x) => x.id === 't_pdf6')!;
     t.media = { ...t.media!, fileId: 'f_62', downloadUrl: 'https://s3.example/f_62?sig' };
     expect((await w.hook('version.uploaded', versionUploaded({ taskId: 't_pdf6', fileName: 'JS scripts Oct 6.pdf', version: 2, uploadedAt: '2026-10-08T12:00:00Z', fileId: 'f_62' }))).outcome).toBe('new_version');
-    // Leo's videos from the Oct 6 shoot are his through the client; Maya has none from it
-    expect(await told(w.leo)).toEqual([expect.objectContaining({ title: 'New scripts PDF · Joshua Shalimar', body: 'The scripts PDF for the Oct 6 shoot has a new version (v2).' })]);
+    expect(await told(sam)).toEqual([expect.objectContaining({ title: 'New scripts PDF · Joshua Shalimar', body: 'The scripts PDF for the Oct 6 shoot has a new version (v2).' })]);
+    // Leo is on the client's brand, with nothing from that shoot assigned to him; Maya has none either
+    expect(await told(w.leo)).toEqual([]);
     expect(await told(w.maya)).toEqual([]);
   });
 });
@@ -328,7 +325,7 @@ describe('brands that aren’t clients on the site', () => {
       ['t_a1', 'Alpha 01', 'toDo', alpha], ['t_be1', 'Beta 01', 'toDo', beta],
     );
     b = await w.sync();
-    expect([...b.unassigned].sort((x, y) => x.titles.localeCompare(y.titles))).toEqual([
+    expect(b.unassigned.filter((g) => g.folder === 'Content').sort((x, y) => x.titles.localeCompare(y.titles))).toEqual([
       expect.objectContaining({ folder: 'Content', titles: 'Alpha 01', count: 1, brand: 'Alpha Gym', suggested: expect.objectContaining({ name: 'Maya Reyes' }) }),
       expect.objectContaining({ folder: 'Content', titles: 'Beta 01', count: 1, brand: 'Beta Cafe', suggested: null }),
     ]);
@@ -339,11 +336,13 @@ describe('brands that aren’t clients on the site', () => {
     w.tl.brands.b_delta = 'Delta Dance';
     w.tl.onBrand.b_delta = [on(maya, 'editor')];
     const delta = place('delta', 'Delta Reels');
-    add(['t_dl1', 'Delta 01', 'toDo', delta], ['t_dl2', 'Delta 02', 'toDo', delta], ['t_dl3', 'Delta 03', 'toDo', delta]);
+    // all three given to Maya, its editor: nothing to look at
+    const maya3 = { ...delta, assigneeIds: ['m_maya'] };
+    add(['t_dl1', 'Delta 01', 'toDo', maya3], ['t_dl2', 'Delta 02', 'toDo', maya3], ['t_dl3', 'Delta 03', 'toDo', maya3]);
     b = await w.sync();
     expect(b.clients.find((c) => c.name === 'Delta Dance')).toMatchObject({ editor: { name: 'Maya Reyes' }, open: 3, flags: [] });
     // flagged (most open videos first), then the rest
-    expect(b.clients.map((c) => c.name)).toEqual(['Joshua Shalimar', 'Glow Skincare', 'Alpha Gym', 'Beta Cafe', 'Brightside', 'Delta Dance', 'Zen Yoga']);
+    expect(b.clients.map((c) => c.name)).toEqual(['Joshua Shalimar', 'Glow Skincare', 'Alpha Gym', 'Beta Cafe', 'Brightside', 'Zen Yoga', 'Delta Dance']);
   });
 
   it('never names someone who has left Timeliner as a client’s editor', async () => {

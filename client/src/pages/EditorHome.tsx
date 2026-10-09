@@ -3,9 +3,9 @@
 // with the script it's cut from: the shoot's scripts PDF from Timeliner, else the manager's edited version, with
 // the other as a quieter second link. Raw camera clips ("Raw clip C0045") are folded by shoot under To edit and
 // open the shoot's whole scripts PDF; a video the site couldn't match says a manager has been asked, and one for a
-// client without scripts on the site says so. A video nobody is on in Timeliner is theirs as its client's editor
-// there ("via client"). Done tells the managers and never changes Timeliner; the video moves on here once Timeliner
-// has it in review, and tapping I'm on this on a video marked done takes the mark back. Below: each shoot coming up
+// client without scripts on the site says so. Only the videos assigned to them in Timeliner are theirs. Done tells
+// the managers and never changes Timeliner; the video moves on here once Timeliner has it in review (Needs review),
+// and tapping I'm on this on a video marked done takes the mark back. Below: each shoot coming up
 // with how many of its scripts are final (Ready, On track or Late, opening just that shoot's scripts), the newest
 // finished scripts, and their to-dos.
 
@@ -538,8 +538,6 @@ function RawClips({ g, now, tz, today, acting }: { g: ClipGroup; now: number; tz
   const soonest = g.clips.map((v) => v.due).filter((x): x is string => !!x).sort()[0];
   const due = soonest ? dueWords(soonest, today) : null;
   const likely = likelyWords(g.clips[0]);
-  // nobody is on these clips in Timeliner: they're yours as their client's editor there
-  const via = g.clips.every((v) => v.assignedBy === 'client');
   // every clip of a shoot opens the same scripts: shown once, beside the group
   const lead = g.clips.find((v) => v.script) ?? g.clips[0];
   return (
@@ -549,7 +547,7 @@ function RawClips({ g, now, tz, today, acting }: { g: ClipGroup; now: number; tz
           <span className="eh-vq ed raw" aria-hidden><Film className="sq-raw" /></span>
           <span className="eh-wtxt">
             <b>{label}</b>
-            <span>{[due ? <span key="d" className={`eh-due ${due.tone}`}>{due.text}</span> : 'No deadline in Timeliner', likely, via ? 'via client' : null].filter(Boolean).map((x, i) => <span key={i}>{i > 0 && ' · '}{x}</span>)}</span>
+            <span>{[due ? <span key="d" className={`eh-due ${due.tone}`}>{due.text}</span> : 'No deadline in Timeliner', likely].filter(Boolean).map((x, i) => <span key={i}>{i > 0 && ' · '}{x}</span>)}</span>
           </span>
           <span className="eh-wmore">{open ? 'Hide' : 'Show'}<ChevronDown className={`chev${open ? ' up' : ''}`} aria-hidden /></span>
         </button>
@@ -557,7 +555,7 @@ function RawClips({ g, now, tz, today, acting }: { g: ClipGroup; now: number; tz
       </div>
       {open && (
         <div id={listId} className="eh-rows eh-clip-rows">
-          {g.clips.map((v) => <VideoRow key={v.id} v={v} kind="ed" multi={false} inGroup={{ due: soonest ?? null, via }} now={now} tz={tz} today={today} acting={acting} />)}
+          {g.clips.map((v) => <VideoRow key={v.id} v={v} kind="ed" multi={false} inGroup={{ due: soonest ?? null }} now={now} tz={tz} today={today} acting={acting} />)}
         </div>
       )}
     </div>
@@ -566,9 +564,9 @@ function RawClips({ g, now, tz, today, acting }: { g: ClipGroup; now: number; tz
 
 type RowKind = 'rv' | 'ed' | 'dn' | 'ir' | 'cl';
 
-/** `inGroup`: a raw clip in its shoot's folded list, which already says the shoot, its scripts, the soonest deadline and (`via`) that they all came through their client. */
+/** `inGroup`: a raw clip in its shoot's folded list, which already says the shoot, its scripts and the soonest deadline. */
 function VideoRow({ v, kind, multi, inGroup, now, tz, today, acting }: {
-  v: EditingVideo; kind: RowKind; multi: boolean; inGroup?: { due: ISODate | null; via: boolean }; now: number; tz: string; today: ISODate; acting: Acting;
+  v: EditingVideo; kind: RowKind; multi: boolean; inGroup?: { due: ISODate | null }; now: number; tz: string; today: ISODate; acting: Acting;
 }) {
   const due = dueWords(v.due, today);
   const likely = inGroup ? null : likelyWords(v);
@@ -586,8 +584,6 @@ function VideoRow({ v, kind, multi, inGroup, now, tz, today, acting }: {
     if (kind === 'rv' && v.movedAt) meta.push(`sent back ${fmtWhen(v.movedAt, tz, now)}`);
   }
   if (!inGroup || v.state !== 'to_edit' || v.step !== 'To be edited') meta.push(<span className="nowrap">Timeliner: {v.step}</span>);
-  // nobody is on it in Timeliner: it's theirs as its client's editor there (a shoot's list of clips that all are says so once, above)
-  if (v.assignedBy === 'client' && !inGroup?.via) meta.push(<span className="ed-via" title="Assigned to you through its client in Timeliner">via client</span>);
   const canStart = kind === 'rv' || kind === 'ed' || kind === 'dn';
   const err = acting.error(v.id);
   return (

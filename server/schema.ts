@@ -10,7 +10,7 @@
 //   nullable columns, indexes), and backfill in a separate function migration.
 
 import type { Db } from './db';
-import { fillMissingDeadlines, linkDeliveredPdfs } from './backfill';
+import { fillMissingDeadlines, linkDeliveredPdfs, rereadNeedsReview } from './backfill';
 
 export type Migration = string | ((t: Db) => Promise<void>);
 
@@ -733,4 +733,7 @@ create index timeliner_brand_members_member_idx on timeliner_brand_members (memb
   `
 alter table settings add column one_editor_since date not null default '2026-10-09';
 `,
+  // 36 · the team's Needs review is Timeliner's inProgress step group, whose exact step name and the time a video
+  // moved there weren't read before (it counted as still to edit): videos there read them on the next reads
+  rereadNeedsReview,
 ];

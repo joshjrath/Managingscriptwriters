@@ -929,7 +929,7 @@ export interface VideoMatch {
   note: string | null;
 }
 
-/** One video (a Timeliner task) assigned to an editor: on the video itself, or through its client (`assignedBy`). */
+/** One video (a Timeliner task) assigned to an editor in Timeliner (its assignees; never through its client's brand). */
 export interface EditingVideo {
   /** Timeliner's task id */
   id: string;
@@ -943,11 +943,6 @@ export interface EditingVideo {
   client: { id: number; name: string } | null;
   /** the Timeliner brand (client) it's under, by its name there: shown where the client's name goes when there's no site client */
   brand: string | null;
-  /**
-   * how it came to its editor in Timeliner: assigned on the video (`video`), or nobody is on the video and it's its
-   * client's, whose dedicated editor is assigned on the brand (`client`, shown quietly as "via client")
-   */
-  assignedBy: 'video' | 'client';
   /** the batch whose scripts it's cut from, when it could be matched */
   batch: { id: number; title: string; shootDate: ISODate | null } | null;
   /**
@@ -1048,8 +1043,6 @@ export interface EditorClient {
    * Sam — one editor per client", or "Brightside has 2 editors in Timeliner — one editor per client"), else null
    */
   split: string | null;
-  /** they're this client's editor in Timeliner (on its brand), so its videos nobody is on are theirs ("via client") */
-  viaClient: boolean;
 }
 
 /** One editor on the Editors tab: everyone in Timeliner with videos, and the site's editors. */
@@ -1130,7 +1123,7 @@ export interface ClientEditing {
   open: number;
   /**
    * its videos still to be edited that nobody has been given (made in the last 60 days, as in `unassigned`): no
-   * assignee on the video, and nobody assigned to the client
+   * editor assigned to the video in Timeliner, whoever is on the client's brand
    */
   notAssigned: number;
   /**
@@ -1183,7 +1176,7 @@ export interface EditingBoard {
    */
   editors: EditorRow[];
   /**
-   * videos still to be edited in Timeliner with nobody assigned (nobody on the video, nobody on its client), by
+   * videos still to be edited in Timeliner with nobody assigned to them (whoever is on their client's brand), by
    * folder; raw clips by the shoot they matched (else by folder)
    */
   unassigned: {
@@ -1207,7 +1200,7 @@ export interface EditingBoard {
   /** each client with videos in Timeliner (open ones, or made in the last 60 days), the most open videos first */
   clients: ClientEditing[];
   /**
-   * people in Timeliner with open videos (on the video, or through their client) whose email doesn't match anyone
+   * people in Timeliner with open videos assigned to them whose email doesn't match anyone
    * on the site. Kept for older screens: each of them now has a card in `editors`, flagged
    */
   unknownAssignees: { name: string; email: string | null; count: number }[];

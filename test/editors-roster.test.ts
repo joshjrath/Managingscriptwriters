@@ -122,11 +122,11 @@ describe('everyone in Timeliner has a card', () => {
     expect(b.editors.map((e) => e.name)).toEqual(['Gus Ghost', 'Dana Diaz', 'Leo Martins', 'Maya Reyes', 'Sam Lee', 'Nia North']);
     const split = 'Joshua Shalimar: 5 with Maya, 4 with Leo, 1 with Sam — one editor per client';
     // nobody is on these clients' brands in Timeliner here: every video was given on the video
-    expect(card('Leo Martins').clients).toEqual([{ name: 'Joshua Shalimar', clientId: ids.js, count: 4, split, viaClient: false }]);
-    expect(card('Maya Reyes').clients).toEqual([{ name: 'Joshua Shalimar', clientId: ids.js, count: 5, split, viaClient: false }]);
-    expect(card('Dana Diaz').clients).toEqual([{ name: 'Brightside', clientId: ids.bright, count: 2, split: null, viaClient: false }]);
+    expect(card('Leo Martins').clients).toEqual([{ name: 'Joshua Shalimar', clientId: ids.js, count: 4, split }]);
+    expect(card('Maya Reyes').clients).toEqual([{ name: 'Joshua Shalimar', clientId: ids.js, count: 5, split }]);
+    expect(card('Dana Diaz').clients).toEqual([{ name: 'Brightside', clientId: ids.bright, count: 2, split: null }]);
     // a Timeliner brand that's no site client, by its name there
-    expect(card('Gus Ghost').clients).toEqual([{ name: 'Zen Yoga', clientId: null, count: 1, split: null, viaClient: false }]);
+    expect(card('Gus Ghost').clients).toEqual([{ name: 'Zen Yoga', clientId: null, count: 1, split: null }]);
   });
 });
 

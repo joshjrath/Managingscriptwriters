@@ -298,7 +298,7 @@ export interface VideoIn {
   id: string;
   title: string;
   state: VideoState;
-  /** still at Timeliner's To be edited step (not In progress): a number only when the title says it outright */
+  /** still at Timeliner's To be edited step (not yet in Needs review): a number only when the title says it outright */
   toDo: boolean;
   createdAt: string | null;
   projectId: string | null;

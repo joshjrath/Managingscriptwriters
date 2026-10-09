@@ -64,10 +64,10 @@ beforeAll(async () => {
     ['t_b3', 'Beta 03', 'approved', { ...beta, ...finished('2026-10-03T15:00:00Z'), assigneeIds: ['m_maya'] }],
     ['t_b4', 'Beta 04', 'approved', { ...beta, ...finished('2026-10-10T15:00:00Z'), assigneeIds: ['m_leo'] }],
     ['t_b5', 'Beta 05', 'toDo', { ...beta, ...made('2026-10-10T16:00:00Z') }],
-    // Cove Dental's only video is from before the rule
-    ['t_c1', 'Cove 01', 'toDo', { ...cove, ...made('2026-10-07T15:00:00Z') }],
-    // Delta Dance's only video is from before the rule; Maya is its one editor in Timeliner
-    ['t_d1', 'Delta 01', 'toDo', { ...delta, ...made('2026-10-06T15:00:00Z') }],
+    // Cove Dental's only video is from before the rule, Leo's
+    ['t_c1', 'Cove 01', 'toDo', { ...cove, ...made('2026-10-07T15:00:00Z'), assigneeIds: ['m_leo'] }],
+    // Delta Dance's only video is from before the rule, Maya's; she is its one editor in Timeliner
+    ['t_d1', 'Delta 01', 'toDo', { ...delta, ...made('2026-10-06T15:00:00Z'), assigneeIds: ['m_maya'] }],
   );
   b = await w.sync();
 });
@@ -148,7 +148,7 @@ describe('only videos made since the rule began judge it', () => {
       editor: null, editorFrom: null, beforeRule: true, flags: [],
       editors: [expect.objectContaining({ name: 'Leo Martins' }), expect.objectContaining({ name: 'Maya Reyes' })],
     });
-    add(['t_c2', 'Cove 02', 'toDo', { ...brand('cove', 'Cove Dental'), ...made('2026-10-10T15:00:00Z') }]);
+    add(['t_c2', 'Cove 02', 'toDo', { ...brand('cove', 'Cove Dental'), ...made('2026-10-10T15:00:00Z'), assigneeIds: ['m_leo'] }]);
     try {
       b = await w.sync();
       expect(client('Cove Dental')).toMatchObject({
@@ -191,9 +191,13 @@ describe('only editors are editors', () => {
     add(['t_e1', 'Echo 01', 'toDo', { ...echo, ...made('2026-10-10T15:00:00Z') }]);
     b = await w.sync();
     expect(card('Wes Writer')).toBeUndefined();
-    expect(client('Echo Dentist')).toMatchObject({ editor: expect.objectContaining({ name: 'Leo Martins' }), editors: [expect.objectContaining({ name: 'Leo Martins' })], flags: [] });
-    // the editor still has it, through the client
-    expect(card('Leo Martins')!.videos.find((v) => v.title === 'Echo 01')).toMatchObject({ assignedBy: 'client' });
+    expect(client('Echo Dentist')).toMatchObject({
+      editor: expect.objectContaining({ name: 'Leo Martins' }), editors: [expect.objectContaining({ name: 'Leo Martins' })],
+      flags: ['Echo Dentist · 1 video not assigned (usually Leo)'],
+    });
+    // nobody is assigned to it: it's nobody's, the client's editor there named as whom to give it
+    expect(card('Leo Martins')!.videos.some((v) => v.title === 'Echo 01')).toBe(false);
+    expect(b.unassigned.find((g) => g.brand === 'Echo Dentist')).toMatchObject({ titles: 'Echo 01', suggested: expect.objectContaining({ name: 'Leo Martins' }) });
     // nor is it the writer's to say they're on it
     expect((await w.mine(w.writer)).toEdit).toEqual([]);
     expect((await w.send('POST', '/api/editing/focus', w.writer, { videoId: 't_e1', action: 'start' })).status).toBe(403);
@@ -203,9 +207,9 @@ describe('only editors are editors', () => {
     add(['t_e2', 'Echo 02', 'toDo', { ...brand('echo', 'Echo Dentist'), ...made('2026-10-10T16:00:00Z'), assigneeIds: ['m_mo'] }]);
     b = await w.sync();
     expect(card('Mo Manager')).toBeUndefined();
-    // as if nobody were on it: its client's editor's, and no split
-    expect(card('Leo Martins')!.videos.find((v) => v.title === 'Echo 02')).toMatchObject({ assignedBy: 'client' });
-    expect(client('Echo Dentist')).toMatchObject({ open: 2, split: [], flags: [] });
+    // as if nobody were assigned to it: not assigned, and no split
+    expect(b.editors.some((e) => e.videos.some((v) => v.title === 'Echo 02'))).toBe(false);
+    expect(client('Echo Dentist')).toMatchObject({ open: 2, notAssigned: 2, split: [], flags: ['Echo Dentist · 2 videos not assigned (usually Leo)'] });
   });
 
   it('still counts someone in Timeliner the site doesn’t know', async () => {
@@ -213,11 +217,20 @@ describe('only editors are editors', () => {
     w.tl.onBrand.b_fox = [on(gus)];
     add(['t_f1', 'Fox 01', 'toDo', { ...fox, ...made('2026-10-10T15:00:00Z') }]);
     b = await w.sync();
-    expect(card('Gus Ghost')).toMatchObject({ site: false, flag: expect.objectContaining({ kind: 'not_on_site' }) });
     expect(client('Fox Fitness')).toMatchObject({ editor: expect.objectContaining({ name: 'Gus Ghost' }), editorFrom: 'client' });
+    expect(b.unassigned.find((g) => g.brand === 'Fox Fitness')).toMatchObject({ titles: 'Fox 01', suggested: expect.objectContaining({ name: 'Gus Ghost' }) });
+    // on a brand with nothing assigned to him, he has no card (nothing to fix until he's given a video)
+    expect(card('Gus Ghost')).toBeUndefined();
+    add(['t_f2', 'Fox 02', 'toDo', { ...fox, ...made('2026-10-10T16:00:00Z'), assigneeIds: ['m_gus'] }]);
+    b = await w.sync();
+    expect(card('Gus Ghost')).toMatchObject({ site: false, flag: expect.objectContaining({ kind: 'not_on_site' }) });
+    expect(card('Gus Ghost')!.videos.map((v) => v.title)).toEqual(['Fox 02']);
     // and one of two editors the site does know still makes two
     w.tl.onBrand.b_echo = [on(wes), on(leo), on(gus)];
     b = await w.sync();
-    expect(client('Echo Dentist')).toMatchObject({ editors: [expect.anything(), expect.anything()], flags: ['Echo Dentist has 2 editors in Timeliner — one editor per client'] });
+    expect(client('Echo Dentist')).toMatchObject({
+      editors: [expect.anything(), expect.anything()],
+      flags: ['Echo Dentist has 2 editors in Timeliner — one editor per client', expect.stringMatching(/^Echo Dentist · 2 videos not assigned/)],
+    });
   });
 });

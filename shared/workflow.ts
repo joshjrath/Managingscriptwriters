@@ -341,11 +341,15 @@ export const VIDEO_STATE_LABEL: Record<VideoState, string> = {
   approved: 'Approved',
 };
 
-/** Timeliner's step group → the site's state. "In progress" isn't used by the team, so it still counts as to edit. */
+/**
+ * Timeliner's step group → the site's state. The team's steps: To be edited (toDo) → Needs review (inProgress) →
+ * Revisions requested (inRevision) → Internal approval (supervisorApproval) → Awaiting client review (clientApproval)
+ * → Approved. So the inProgress group is their Needs review: in review, off the editor's plate.
+ */
 export function videoState(group: string): VideoState {
   switch (group) {
     case 'inRevision': return 'revisions';
-    case 'supervisorApproval': return 'in_review';
+    case 'inProgress': case 'supervisorApproval': return 'in_review';
     case 'clientApproval': case 'endClientApproval': return 'with_client';
     case 'approved': case 'posted': return 'approved';
     default: return 'to_edit';
@@ -355,9 +359,9 @@ export function videoState(group: string): VideoState {
 /** Timeliner's step in the team's words, when its exact name (from the task's history) isn't known. */
 export const TIMELINER_STEP_LABEL: Record<TimelinerStatusGroup, string> = {
   toDo: 'To be edited',
-  inProgress: 'In progress',
+  inProgress: 'Needs review',
   inRevision: 'Revisions requested',
-  supervisorApproval: 'Needs review',
+  supervisorApproval: 'Internal approval',
   clientApproval: 'Awaiting client review',
   endClientApproval: 'End-client review',
   approved: 'Approved',

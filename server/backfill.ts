@@ -86,3 +86,12 @@ export async function linkDeliveredPdfs(t: Db): Promise<void> {
     );
   }
 }
+
+/**
+ * Migration 36: the team's Needs review is Timeliner's inProgress step group, which used to count as still to edit,
+ * so its exact step name and the time a video moved there were never read. Forgetting which group a video's step
+ * name was read for makes the next reads fetch it.
+ */
+export async function rereadNeedsReview(t: Db): Promise<void> {
+  await t.query(`update timeliner_tasks set history_group = null where status_group = 'inProgress'`);
+}

@@ -1,9 +1,10 @@
 // Editing: the videos editors cut, read from Timeliner.
 //
 // Videos are given to editors in Timeliner; this site never assigns them and editors never claim them here.
-// Each client has its dedicated editor, assigned on the client's brand in Timeliner, so a video nobody is on
-// belongs to its brand's editors (OWNER_IDS); one given to someone on the video is theirs. Only editors are
-// editors: someone the site knows as a writer, manager or Admin (by email) is never anyone's editor there.
+// A video belongs only to its assignees in Timeliner (OWNER_IDS), as Timeliner's own assignee filter shows it; one
+// nobody is assigned to is nobody's ("not assigned"). Only editors are editors: someone the site knows as a
+// writer, manager or Admin (by email) is never anyone's editor there. Who is on a client's brand in Timeliner only
+// names the client's editor (Editors by client, whom to give its unassigned videos, two editors on one client).
 // Every TIMELINER_SYNC_MINUTES (and on "Read Timeliner now") the server reads Timeliner's members, brands (and who
 // is on each) and tasks and keeps a copy. After every write to the copy (a read, a video message, a manager's
 // pin) every video is matched again to a client, a batch and a script by the rules in server/matching.ts: by
@@ -17,7 +18,8 @@
 // tasks too: a read keeps their step, version and whether they were trashed, and never takes them for videos.
 //
 // The site's own layer is what each editor is doing right now: "I'm on this", Pause, Resume and Done. Done
-// tells the managers and never changes Timeliner; the video moves on here when Timeliner has it in review.
+// tells the managers and never changes Timeliner; the video moves on here when Timeliner has it in review (Needs
+// review, the inProgress step group, or later).
 // A focus ends by itself when Timeliner moves its video on (that becomes the editor's last finished video),
 // gives it to someone else or removes it (then it's just over: the video isn't theirs any more).
 
@@ -59,8 +61,8 @@ const MOVES_PER_READ = 40;
 /** videos nobody has been given are listed when created this recently */
 const NOT_ASSIGNED_DAYS = 60;
 const DAY_MS = 86400_000;
-/** steps whose exact name matters (Needs review or Internal approval) and whose time is shown */
-const STEP_GROUPS = new Set(['inRevision', 'supervisorApproval', 'clientApproval', 'endClientApproval']);
+/** steps whose exact name matters (Needs review, Internal approval…) and whose time is shown */
+const STEP_GROUPS = new Set(['inProgress', 'inRevision', 'supervisorApproval', 'clientApproval', 'endClientApproval']);
 
 const time = (v: string | null | undefined) => (v ? Date.parse(v) : NaN);
 const iso = (v: string | Date | null | undefined) => {
@@ -339,10 +341,11 @@ async function readMoves(api: TimelinerApi, tasks: Task[], prev: Map<string, Pre
 
 // ── whom a video belongs to ──────────────────────────────────────────────
 //
-// Each client has its dedicated editor, and in Timeliner that's who is on the client's brand: most videos are
-// assigned on the brand, not one by one. So a video belongs to its assignees when it has any, otherwise to its
-// brand's editors (rule A). This is the one place that rule lives: the board, an editor's Home, I'm on this, the
-// scripts PDF link, the shoot an editor's raw clips are from and the new-version notice all read it from here.
+// A video belongs to its assignees in Timeliner and nobody else, exactly as Timeliner's assignee filter shows it.
+// One nobody is assigned to is nobody's, however many editors its client's brand has (old brands keep editors from
+// before the one-editor rule). This is the one place that rule lives: the board, an editor's Home, I'm on this,
+// the scripts PDF link, the shoot an editor's raw clips are from and the new-version notice all read it from here.
+// Who is on a brand (IS_BRAND_EDITOR) only names a client's editor: never whose a video is.
 
 /**
  * Timeliner's workspace roles that review rather than edit: `admin` and `supervisor` manage the work, `guest` is an
@@ -355,8 +358,8 @@ const NOT_EDITOR_ROLES = (Object.keys(ROLE_LABEL) as Role[]).filter((r) => !isEd
 
 /**
  * SQL: the Timeliner member id `id` is someone on the site who isn't an editor (a writer, manager or the Admin, matched
- * by email). Only editors are editors: they're never anyone's editor, on a video or on its brand (a writer is often on
- * a brand to upload its scripts PDFs). Someone in Timeliner the site doesn't know still counts.
+ * by email). Only editors are editors: they're never anyone's editor, on a video or as its client's editor on a brand
+ * (a writer is often on a brand to upload its scripts PDFs). Someone in Timeliner the site doesn't know still counts.
  */
 const SITE_NON_EDITOR = (id: string) => `exists (select 1 from timeliner_members sm join users su on lower(su.email) = lower(sm.email)
   where sm.id = ${id} and su.removed_at is null and su.role in (${NOT_EDITOR_ROLES.map((r) => `'${r}'`).join(', ')}))`;
@@ -365,23 +368,19 @@ const SITE_NON_EDITOR = (id: string) => `exists (select 1 from timeliner_members
  * SQL: `bm` (a row of timeliner_brand_members, `m` its member, left joined) is one of that brand's editors: an
  * editor there, assigned rather than automatic (a workspace admin's access to every brand), still active, not
  * a workspace admin, supervisor or guest (they review; they aren't anyone's editor), and not someone the site knows
- * as anything but an editor (SITE_NON_EDITOR).
+ * as anything but an editor (SITE_NON_EDITOR). It names a client's editor; it never makes a video theirs.
  */
 const IS_BRAND_EDITOR = (bm: string, m: string) =>
   `${bm}.role = 'editor' and not ${bm}.automatic and coalesce(${m}.active, true) and coalesce(${m}.role, 'editor') not in (${REVIEW_ROLES.map((r) => `'${r}'`).join(', ')})
    and not ${SITE_NON_EDITOR(`${bm}.member_id`)}`;
 
-/** SQL: the task `tt`'s assignees in Timeliner, in order, but for anyone the site knows as anything but an editor. */
-const ASSIGNEES = (tt: string) =>
-  `array(select a.id from unnest(${tt}.assignee_ids) with ordinality as a(id, n) where not ${SITE_NON_EDITOR('a.id')} order by a.n)::text[]`;
-
 /**
- * SQL: the Timeliner member ids the task `tt` belongs to (rule A): its assignees, else its brand's editors. A writer,
- * manager or Admin on the site is neither (on a video alone, it goes to its brand's editors as if nobody were on it).
+ * SQL: the Timeliner member ids the task `tt` belongs to: its assignees in Timeliner, in order, but for anyone the
+ * site knows as anything but an editor (a video only a writer, manager or Admin is on is nobody's: not assigned).
+ * Never its brand's editors: a video nobody is assigned to is nobody's.
  */
-export const OWNER_IDS = (tt: string) => `coalesce(nullif(${ASSIGNEES(tt)}, '{}'::text[]),
-  array(select ob.member_id from timeliner_brand_members ob left join timeliner_members om on om.id = ob.member_id
-         where ob.brand_id = ${tt}.brand_id and ${IS_BRAND_EDITOR('ob', 'om')} order by ob.member_id)::text[])`;
+export const OWNER_IDS = (tt: string) =>
+  `array(select a.id from unnest(${tt}.assignee_ids) with ordinality as a(id, n) where not ${SITE_NON_EDITOR('a.id')} order by a.n)::text[]`;
 
 // ── keeping the copy ─────────────────────────────────────────────────────
 
@@ -598,7 +597,7 @@ async function write(db: Db, f: Found): Promise<void> {
     await rematch(t, f.at);
     await endLeftFocus(t);
     if (f.fullRead) {
-      // the people with videos in this read: whom each belongs to (its assignees, else its client's editors)
+      // the people with videos in this read: whom each belongs to (its assignees)
       const people = f.counts ? (await t.one<{ n: number }>(
         `select count(distinct o)::int as n from (select unnest(${OWNER_IDS('tt')}) as o from timeliner_tasks tt where tt.id = any($1::text[])) x`, [listed],
       ))?.n ?? 0 : 0;
@@ -697,7 +696,7 @@ export async function rematch(t: Db, now: Date): Promise<void> {
     return {
       id: r.id, title: r.title, state: videoState(r.status_group), toDo: r.status_group === 'toDo', createdAt: iso(r.created_at),
       projectId: r.project_id, subFolderId: r.sub_folder_id, brandId: r.brand_id, deadline: dues[0] ?? null,
-      // whom it belongs to (rule A): an editor's raw clips are theirs whether given on the clip or on the client
+      // whom it belongs to (OWNER_IDS): an editor's raw clips are the ones assigned to them
       assignees: r.owner_ids ?? [], parentId: r.parent_task_id, leftPlate: !!r.left_plate_at,
       prev: { how: (r.match_how as VideoMatchHow | null) ?? null, batchId: r.batch_id != null ? Number(r.batch_id) : null, note: r.match_note },
     };
@@ -803,7 +802,7 @@ export async function syncTimeliner(db: Db, api: TimelinerApi, now: Date, log?: 
     for (const b of brands) names.set(b.id, { name: b.name });
     for (const [id, p] of projects) if (p) { names.set(id, p); for (const s of p.subFolders) names.set(s.id, s); }
     const rows = tasks.map((t) => buildRow(t, prev.get(t.id), moves.get(t.id), names, now));
-    // the people are counted as written, by whom each video belongs to (its brand's editors when nobody is on it)
+    // the people are counted as written, by whom each video belongs to (OWNER_IDS)
     const counts = { videos: rows.length, people: 0, clients: new Set(rows.map((r) => r.brand_id).filter(Boolean)).size, skipped: skips.length };
     const known = new Set(members.map((x) => x.id));
     await write(db, {
@@ -920,7 +919,7 @@ export function startTimelinerSync(ctx: Ctx, minutes: number, log: (m: string) =
 
 interface TaskRow extends Row {
   synced_at: string;
-  /** whom it belongs to (rule A, OWNER_IDS): its assignees, else its brand's editors in Timeliner */
+  /** whom it belongs to (OWNER_IDS): its assignees in Timeliner who aren't the site's writers, managers or Admin */
   owner_ids: string[];
   client_id: number | null; batch_id: number | null; script_number: number | null;
   match_how: string | null; match_note: string | null; match_check: boolean; match_kept: boolean;
@@ -1034,7 +1033,7 @@ interface Loaded {
   members: Map<string, { name: string | null; email: string | null; role: string | null; active: boolean }>;
   /** Timeliner brand id → its name */
   brands: Map<string, string>;
-  /** Timeliner brand id → its editors there (the client's dedicated editors), as OWNER_IDS counts them */
+  /** Timeliner brand id → its editors there (IS_BRAND_EDITOR): only to name the client's editor, never whose a video is */
   brandEditors: Map<string, string[]>;
   /** Settings → Editors: editors who don't sign in, with where they are and their hours */
   offSite: { name: string; city: string; timezone: string; workHours: [number, number] }[];
@@ -1173,8 +1172,6 @@ function toVideo(L: Loaded, t: TaskRow, userId: number | null): EditingVideo {
     folder: t.folder,
     client: t.client_id != null && L.clients.has(Number(t.client_id)) ? { id: Number(t.client_id), name: L.clients.get(Number(t.client_id))! } : null,
     brand: t.brand_id ? L.brands.get(t.brand_id) ?? null : null,
-    // nobody (or no editor) on the video: it's its client's, whose editor is assigned on the brand (rule A)
-    assignedBy: t.owner_ids.some((m) => t.assignee_ids.includes(m)) ? 'video' : 'client',
     batch: batch && batchId != null ? { id: batchId, title: batch.title, shootDate: batch.shootDate } : null,
     scriptNumber: t.script_number,
     script: doc.script,
@@ -1218,7 +1215,7 @@ const personKey = (name: string) => name.normalize('NFKD').replace(/[̀-ͯ]/g, '
 const isReviewer = (L: Loaded, m: string) => REVIEW_ROLES.includes(L.members.get(m)?.role ?? '');
 
 /**
- * Who does the editing of a video, for its client's editor and split: whom it belongs to (rule A) who are editors
+ * Who does the editing of a video, for its client's editor and split: whom it belongs to (OWNER_IDS) who are editors
  * in Timeliner. An admin, supervisor or guest on it is reviewing it, even alone on it.
  */
 function editorsOn(L: Loaded, t: TaskRow): string[] {
@@ -1226,7 +1223,7 @@ function editorsOn(L: Loaded, t: TaskRow): string[] {
 }
 
 /**
- * Whose card on the Editors tab a video is on: its editors (rule A). One only reviewers are on is theirs, so it
+ * Whose card on the Editors tab a video is on: its editors (editorsOn). One only reviewers are on is theirs, so it
  * isn't on nobody's card (it isn't "not assigned" either: someone is on it in Timeliner).
  */
 function onCardOf(L: Loaded, t: TaskRow): string[] {
@@ -1242,7 +1239,7 @@ function onCardOf(L: Loaded, t: TaskRow): string[] {
  * nothing in Timeliner get a quiet note.
  */
 function peopleOf(L: Loaded): Person[] {
-  // their videos: on the video, or through their client (rule A); not one they're only reviewing
+  // their videos: assigned to them in Timeliner; not one they're only reviewing
   const work = new Map<string, { all: number; open: number }>();
   for (const t of L.tasks) {
     const open = videoState(t.status_group) !== 'approved';
@@ -1253,8 +1250,9 @@ function peopleOf(L: Loaded): Person[] {
       work.set(m, w);
     }
   }
-  // a client's editor in Timeliner is on the board even while every video of it is someone else's: the client strip
-  // names them
+  // a client's editor in Timeliner is someone on the board even with no video of their own, so the client strip can
+  // name them; being on a brand alone never gives them a video, nor a card unless they're on the site (peopleOf's
+  // `card` below)
   const brandsWithVideos = new Set(L.tasks.map((t) => t.brand_id).filter((x): x is string => !!x));
   for (const [brand, list] of L.brandEditors) {
     if (!brandsWithVideos.has(brand)) continue;
@@ -1295,6 +1293,8 @@ function peopleOf(L: Loaded): Person[] {
     const k = who?.name ? personKey(who.name) : null;
     // someone who left Timeliner with only finished videos there: nothing to fix, nothing to show
     const gone = who?.active === false && !(work.get(m)?.open ?? 0);
+    // on a client's brand with no video assigned to them: named in the client strip, no card (nothing of theirs to show)
+    const brandOnly = !(work.get(m)?.all ?? 0);
     const u = k && !gone ? siteByName.get(k) : undefined;
     if (u && !byUser.get(u.id)?.linked) {
       const p = siteOf(u);
@@ -1315,7 +1315,7 @@ function peopleOf(L: Loaded): Person[] {
         : e
           ? { kind: 'no_site_access', timelinerEmail: email, siteEmail: null, text: `Not on the site — give them site access in Settings → Editors with ${tlEmail}` }
           : { kind: 'not_on_site', timelinerEmail: email, siteEmail: null, text: `Not on the site — add them in Settings → Team as an Editor with ${tlEmail}` },
-      card: !gone,
+      card: !gone && !brandOnly,
     });
   }
 
@@ -1339,13 +1339,13 @@ function clientOfTask(L: Loaded, t: TaskRow): { key: string; name: string; clien
 /**
  * Everything about one person's videos: the Editors tab's card and their own Home are both made from it.
  * `clientKeys` names each of the card's clients (the same objects as `row.clients`), for the board's flags.
- * `owners` is whom each video is counted for: whom it belongs to (rule A) on their Home; on the board, not someone
- * only reviewing it (onCardOf).
+ * `owners` is whom each video is counted for: whom it belongs to (OWNER_IDS) on their Home; on the board, not
+ * someone only reviewing it (onCardOf).
  */
 function editorOf(L: Loaded, p: Person, owners: (t: TaskRow) => string[] = (t) => t.owner_ids): { row: EditorRow; mine: MyEditing; clientKeys: Map<EditorClient, string> } {
   const weekAgo = L.now.getTime() - 7 * DAY_MS;
   const ids = new Set(p.memberIds);
-  // theirs: assigned on the video, or nobody is and they're its client's editor in Timeliner (rule A)
+  // theirs: assigned to them in Timeliner (never through their client's brand)
   const own = L.tasks.filter((t) => owners(t).some((m) => ids.has(m)));
   // their taps and done marks: only from a site account with their Timeliner email
   const me = p.linked ? p.userId : null;
@@ -1399,10 +1399,8 @@ function editorOf(L: Loaded, p: Person, owners: (t: TaskRow) => string[] = (t) =
   for (const t of own) {
     const c = shown.has(t.id) ? clientOfTask(L, t) : null;
     if (!c) continue;
-    const e = clients.get(c.key) ?? { name: c.name, clientId: c.clientId, count: 0, split: null, viaClient: false };
+    const e = clients.get(c.key) ?? { name: c.name, clientId: c.clientId, count: 0, split: null };
     e.count++;
-    // they're on its brand in Timeliner: the client's editor there
-    if (t.brand_id && L.brandEditors.get(t.brand_id)?.some((m) => ids.has(m))) e.viaClient = true;
     clients.set(c.key, e);
   }
   const row: EditorRow = {
@@ -1459,7 +1457,7 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
 
   // nobody given them yet: titled videos by folder, raw clips by the shoot they matched (else by folder)
   const recent = L.now.getTime() - NOT_ASSIGNED_DAYS * DAY_MS;
-  // nobody on the video and nobody on its client (rule C)
+  // nobody (no editor) is assigned to it in Timeliner, whoever is on its client's brand
   const notAssigned = (t: TaskRow) => videoState(t.status_group) === 'to_edit' && !t.owner_ids.length && !(t.created_at && time(t.created_at) < recent);
   type Group = {
     folder: string; clientName: string | null; raw: boolean; batch: EditingBoard['unassigned'][number]['batch']; titles: string[]; due: ISODate | null;
@@ -1684,7 +1682,7 @@ export async function applyFocus(ctx: Ctx, me: Me, videoId: string, action: Focu
     const focus = await t.one<FocusRow>(`select user_id, task_id, state, since, worked_seconds, paused_at from editor_focus where user_id = $1 for update`, [me.id]);
     const task = await t.one<TaskRow>(`select tt.*, ${OWNER_IDS('tt')} as owner_ids from timeliner_tasks tt where tt.id = $1`, [videoId]);
     if (!task) throw notFound('Video');
-    // theirs: assigned to them on the video, or nobody is and they're its client's editor in Timeliner (rule A)
+    // theirs: assigned to them in Timeliner (OWNER_IDS), never through their client's brand
     const theirs = await t.one(`select 1 from timeliner_members where lower(email) = lower($1) and id = any($2::text[])`, [me.email, task.owner_ids ?? []]);
     if (!theirs) throw forbidden('That video isn’t assigned to you in Timeliner.');
     const state = videoState(task.status_group);
@@ -1878,7 +1876,7 @@ export function registerEditingRoutes(app: FastifyInstance, ctx: Ctx) {
       const me = requireUser(req);
       const { batchId } = parse(z.object({ batchId: zs.id }), req.params);
       if (!isManager(me.role)) {
-        // a video of theirs from that batch: assigned to them, or to them as its client's editor (rule A)
+        // a video of theirs from that batch: assigned to them in Timeliner (OWNER_IDS)
         const theirs = await ctx.db.one(
           `select 1 from timeliner_tasks tt join timeliner_members m on m.id = any(${OWNER_IDS('tt')})
             where tt.batch_id = $1 and lower(m.email) = lower($2) limit 1`, [batchId, me.email],

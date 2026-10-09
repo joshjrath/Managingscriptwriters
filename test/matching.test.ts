@@ -364,7 +364,7 @@ describe('raw clips and the titled videos made from them', () => {
 });
 
 describe('a scripts PDF being reviewed', () => {
-  it('is in review at Needs review or Revisions requested, not at the step it was made at', () => {
+  it('is in review at Internal approval or Revisions requested, not at To be edited or the inProgress group', () => {
     expect(['supervisorApproval', 'inRevision'].map(pdfInReview)).toEqual([true, true]);
     expect(['toDo', 'inProgress', 'approved', 'posted', 'clientApproval', null].map(pdfInReview)).toEqual([false, false, false, false, false, false]);
   });

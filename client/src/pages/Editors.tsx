@@ -1,6 +1,6 @@
 // Editors (managers): what each editor is doing right now and what's on their plate, read from Timeliner.
-// Videos are given to editors in Timeliner (on the video, or to the client's dedicated editor on its brand); this
-// page never assigns them. On top, what the last read found and Read Timeliner now; then the summary cards, the
+// Videos are given to editors in Timeliner (a video is its assignees' there, as Timeliner's assignee filter shows);
+// this page never assigns them. On top, what the last read found and Read Timeliner now; then the summary cards, the
 // one count of videos not matched to a shoot, and "Editors by client" (each client's editor since the one-editor
 // rule began, its open videos, and its warnings as chips: split across editors, two editors, some not assigned).
 // The roster has a card for everyone in Timeliner with videos and every editor on the site; people to fix (not on
@@ -9,7 +9,7 @@
 // tapped "I'm on this" for, or paused), else what's next by deadline, or that they're off hours, on one line with
 // one line under it; their plate as a bar and one line of counts; and a foot with the last one they finished and
 // Videos. Raw camera clips count as clips ("24 clips to edit"). Videos lists their videos one row each ("#2 ·
-// Title", with its client, "via client", "no scripts on the site" or "not matched" in small words); tapping one
+// Title", with its client, "no scripts on the site" or "not matched" in small words); tapping one
 // shows how it was matched, its script, and "Wrong shoot? Pin it" pins it to a batch (and maybe a script), or to
 // none. Then the videos nobody has in Timeliner yet (raw clips by shoot), with whom to give them ("usually Leo").
 
@@ -758,7 +758,7 @@ const ROWS = 8;
 
 /**
  * The drill-down: their videos by state, one row each ("#2 · Dentist Rates Viral Dental Hacks" on one line), with
- * its client and how it came to them in small words: via client, no scripts on the site, not matched. Tap one for
+ * its client and what's odd about it in small words: no scripts on the site, not matched. Tap one for
  * its shoot, how it was matched, and a pin.
  */
 function Drill({ id, e, today, tz, now }: { id: string; e: EditorRow; today: ISODate; tz: string; now: number }) {
@@ -807,7 +807,6 @@ function Drill({ id, e, today, tz, now }: { id: string; e: EditorRow; today: ISO
                 const ck = !nm && needsCheck(v);
                 const bits = [
                   shootLabel(v, today) || null,
-                  v.assignedBy === 'client' ? 'via client' : null,
                   noScripts(v) ? 'no scripts on the site' : null,
                 ].filter((x): x is string => !!x);
                 return (
@@ -872,7 +871,6 @@ function VideoDetail({ v, c, today, onClose }: { v: EditingVideo; c: string; tod
         </span>
         {!v.client && v.brand && <span className="ed-via" title="Its brand (client) in Timeliner, which isn’t a client on the site">Timeliner brand</span>}
         {ns && <Chip color="plain" icon={<FileX aria-hidden />}>No scripts on the site</Chip>}
-        {v.assignedBy === 'client' && <span className="ed-via" title="Nobody is assigned on this video in Timeliner: it’s its client’s, and the client’s editor there has it">via client</span>}
         {nm && <Chip color="yellow" icon={<CircleHelp aria-hidden />}>Not matched</Chip>}
         {v.match.check && <Chip color="yellow" icon={<AlertTriangle aria-hidden />}>Check</Chip>}
         {pinned && <Chip color="plain" icon={<Pin aria-hidden />}>Pinned</Chip>}
@@ -1125,7 +1123,7 @@ function Legend() {
         <span className="ed-lg wrap">“marked done” here on the site, until Timeliner moves it to Needs review; “sent to review” in Timeliner</span>
       </div>
       <p>“Editing now” is the video an editor tapped “I’m on this” for. They can pause it, then mark it done. It clears itself when Timeliner moves that video to Needs review. Left running for {FOCUS_STALE_HOURS} hours, or outside the editor’s working hours, it shows as still marked as editing instead.</p>
-      <p>A video is the editor’s it’s assigned to in Timeliner; one nobody is on is its client’s editor’s there (“via client”). Each client has one editor: a client whose videos are with more than one is flagged. Only videos made since the rule began (Settings → Timeliner) count for that.</p>
+      <p>A video is the editor’s it’s assigned to in Timeliner, exactly as Timeliner’s assignee filter shows it; one nobody is assigned to is under “not assigned”, with the client’s editor there as whom to give it. Each client has one editor: a client whose videos are with more than one is flagged. Only videos made since the rule began (Settings → Timeliner) count for that.</p>
       <p>Each video goes with the shoot that had just happened when it was made in Timeliner; a titled video with the shoot whose raw clips its editor has been cutting. Once it has been in review it keeps that shoot. A pin always wins.</p>
     </div>
   );

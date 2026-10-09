@@ -9,7 +9,7 @@ import type { Db } from '../server/db';
 import type { Ctx } from '../server/core';
 import { connectOnStart, TIMELINER_EVENTS, TimelinerError, type TimelinerApi, type TimelinerTask } from '../server/timeliner';
 import { onShift } from '../shared/cities';
-import { compressTitles, isFocusStale, isOnPlate, videoState } from '../shared/workflow';
+import { compressTitles, isFocusStale, isOnPlate, TIMELINER_STATUS_GROUPS, TIMELINER_STEP_LABEL, videoState } from '../shared/workflow';
 import type { BatchDetail, EditingBoard, EditingVideo, EditorRow, MyEditing } from '../shared/types';
 import { freshDb } from './db';
 
@@ -26,7 +26,8 @@ const video = (id: string, title: string, statusGroup: string, more: Partial<Tim
   createdAt: '2026-10-07T15:00:00Z', updatedAt: '2026-10-07T15:00:00Z', approvedAt: null, ...more,
 });
 let tasks: TimelinerTask[] = [
-  video('t_o1', 'Organic 01', 'supervisorApproval', { assigneeIds: ['m_leo'], internalDeadline: '2026-10-09' }),
+  // in Needs review: the team's Needs review is Timeliner's inProgress step group
+  video('t_o1', 'Organic 01', 'inProgress', { assigneeIds: ['m_leo'], internalDeadline: '2026-10-09' }),
   video('t_o3', 'Organic 03', 'inRevision', { assigneeIds: ['m_leo'], internalDeadline: '2026-10-09', internalRevisions: 1 }),
   video('t_o5', 'Organic 05', 'toDo', { assigneeIds: ['m_leo'], internalDeadline: '2026-10-09' }),
   video('t_o6', 'Organic 06', 'toDo', { assigneeIds: ['m_leo'], internalDeadline: '2026-10-09' }),
@@ -203,9 +204,13 @@ afterAll(async () => {
 // ── rules ────────────────────────────────────────────────────────────────
 
 describe('where a video stands', () => {
-  it('maps Timeliner’s steps to a few plain states (the team skips In progress, so it’s still to edit)', () => {
+  it('maps Timeliner’s steps to a few plain states (the team’s Needs review is the inProgress group: in review)', () => {
     expect(['toDo', 'inProgress', 'inRevision', 'supervisorApproval', 'clientApproval', 'endClientApproval', 'approved', 'posted', 'something new'].map(videoState))
-      .toEqual(['to_edit', 'to_edit', 'revisions', 'in_review', 'with_client', 'with_client', 'approved', 'approved', 'to_edit']);
+      .toEqual(['to_edit', 'in_review', 'revisions', 'in_review', 'with_client', 'with_client', 'approved', 'approved', 'to_edit']);
+    // each step in the team's words, when its exact name isn't known from the video's history
+    expect(TIMELINER_STATUS_GROUPS.map((g) => TIMELINER_STEP_LABEL[g])).toEqual([
+      'To be edited', 'Needs review', 'Revisions requested', 'Internal approval', 'Awaiting client review', 'End-client review', 'Approved', 'Posted',
+    ]);
     expect((['to_edit', 'revisions', 'in_review', 'with_client', 'approved'] as const).map(isOnPlate)).toEqual([true, true, false, false, false]);
   });
 
@@ -389,9 +394,9 @@ describe('Timeliner’s messages', () => {
     expect((await focus(leo, 't_o6', 'start')).status).toBe(200);
 
     const sent = later(5);
-    tasks = tasks.map((t) => (t.id === 't_o6' ? { ...t, statusGroup: 'supervisorApproval', updatedAt: sent } : t));
+    tasks = tasks.map((t) => (t.id === 't_o6' ? { ...t, statusGroup: 'inProgress', updatedAt: sent } : t));
     moves.t_o6 = { at: sent, to: 'Needs review', byId: 'm_leo' };
-    const r = await hook('task.status_changed', { taskId: 't_o6', projectId: 'p_mine', title: 'Organic 06', statusGroup: 'supervisorApproval', previousStatusGroup: 'toDo', changedAt: sent });
+    const r = await hook('task.status_changed', { taskId: 't_o6', projectId: 'p_mine', title: 'Organic 06', statusGroup: 'inProgress', previousStatusGroup: 'toDo', changedAt: sent });
     expect([r.statusCode, JSON.parse(r.body).outcome]).toEqual([200, 'video']);
     const m = await mine(leo);
     expect(m.focus).toBeNull();
@@ -457,7 +462,7 @@ describe('Timeliner’s messages', () => {
 describe('reading Timeliner again', () => {
   it('removes videos gone from Timeliner, and lets Timeliner’s move outrank a done mark', async () => {
     const moved = later(5);
-    tasks = tasks.filter((t) => t.id !== 't_o9').map((t) => (t.id === 't_o5' ? { ...t, statusGroup: 'supervisorApproval', updatedAt: moved } : t));
+    tasks = tasks.filter((t) => t.id !== 't_o9').map((t) => (t.id === 't_o5' ? { ...t, statusGroup: 'inProgress', updatedAt: moved } : t));
     moves.t_o5 = { at: moved, to: 'Needs review', byId: 'm_leo' };
     const b = (await send('POST', '/api/editing/sync', admin, {})).body as EditingBoard;
     expect(b.unknownAssignees).toEqual([]);
@@ -516,7 +521,7 @@ describe('Done, once each time', () => {
   it('counts a done mark only until Timeliner moves the video, so one sent back for revisions is on the plate again', async () => {
     // Organic 03 was marked done above; then it's reviewed and sent back for another round
     const reviewed = later(30);
-    tasks = tasks.map((t) => (t.id === 't_o3' ? { ...t, statusGroup: 'supervisorApproval', updatedAt: reviewed } : t));
+    tasks = tasks.map((t) => (t.id === 't_o3' ? { ...t, statusGroup: 'inProgress', updatedAt: reviewed } : t));
     moves.t_o3 = { at: reviewed, to: 'Needs review', byId: 'm_leo' };
     expect((await hook('task.status_changed', { taskId: 't_o3', projectId: 'p_mine' })).statusCode).toBe(200);
     const back = later(60);

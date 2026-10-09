@@ -32,7 +32,7 @@ import { batchDay, clientFit, dayOf, nameKey, PDF_AHEAD, PDF_LATE, PDF_LATE_FALL
 import {
   TIMELINER_KEY_PERMISSIONS, type Me, type TimelinerEvent, type TimelinerOutcome, type TimelinerPdfHow, type TimelinerPdfLink, type TimelinerStatus,
 } from '../shared/types';
-import { compressRanges } from '../shared/workflow';
+import { compressRanges, isOnPlate, TIMELINER_STATUS_GROUPS, videoState } from '../shared/workflow';
 import { addDays, type ISODate } from '../shared/dates';
 import { fmtDate } from '../shared/format';
 
@@ -42,6 +42,8 @@ export { clientFit, nameWords, pickBatch } from './matching';
 /** uploads deliver batches; task messages (and a trashed project, which takes its tasks with it) keep the editors' videos current between reads */
 const UPLOAD_EVENTS = ['version.uploaded', 'file.uploaded'];
 const VIDEO_EVENTS = ['task.created', 'task.updated', 'task.status_changed', 'task.trashed', 'project.trashed'];
+/** Timeliner's step groups past the editor's plate (in review, with the client, approved): the shared rule's, never a list kept here */
+const OFF_PLATE_GROUPS: string[] = TIMELINER_STATUS_GROUPS.filter((g) => !isOnPlate(videoState(g)));
 /** the messages this server subscribes to */
 export const TIMELINER_EVENTS = [...UPLOAD_EVENTS, ...VIDEO_EVENTS];
 export const HOOK_PATH = '/hooks/timeliner';
@@ -672,13 +674,13 @@ async function deliverFromTimeliner(
       });
     }
     // a new version (its message may come after a read already saw its file): the editors cutting this shoot's
-    // videos (assigned to them, or to them as their client's editor) hear once per version
+    // videos (assigned to them in Timeliner, and still on their plate) hear once per version
     if (info.key && known && !picked && newest && version > 1) {
       const editors = await t.query<{ id: number }>(
         `select distinct u.id from timeliner_tasks tt
            join timeliner_members m on m.id = any(${OWNER_IDS('tt')})
            join users u on lower(u.email) = lower(m.email) and u.active and u.removed_at is null
-          where tt.batch_id = $1 and tt.status_group not in ('supervisorApproval', 'clientApproval', 'endClientApproval', 'approved', 'posted')`, [target],
+          where tt.batch_id = $1 and tt.status_group <> all($2::text[])`, [target, OFF_PLATE_GROUPS],
       );
       await notify(t, editors.map((e) => Number(e.id)), {
         type: 'document', title: `New scripts PDF · ${b.client_name}`,
@@ -749,7 +751,10 @@ export async function connectOnStart(ctx: Ctx, log: (m: string) => void): Promis
 
 // ── routes ───────────────────────────────────────────────────────────────
 
-/** A scripts PDF's step in Timeliner that means it's being reviewed (Needs review, or Revisions requested), not one it was made at. */
+/**
+ * A scripts PDF's step in Timeliner that means it's being reviewed (Internal approval, or Revisions requested), not
+ * one it was made at: a PDF at To be edited or the inProgress group (Needs review, for a video) isn't flagged.
+ */
 export const pdfInReview = (step: string | null) => step === 'supervisorApproval' || step === 'inRevision';
 const SURE_PDF: Record<TimelinerPdfHow, boolean> = { name: true, date: true, earliest: false, late: false, only: true, manager: true, backfill: true };
 /** What Pick batch can place: an upload of a scripts PDF, whatever became of it (not a video's message, a test or one still being handled). */
