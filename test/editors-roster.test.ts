@@ -115,8 +115,9 @@ describe('everyone in Timeliner has a card', () => {
   });
 
   it('sorts flagged cards with their peers, and leads each card with its clients', () => {
-    // due today first (Gus's and Dana's are Timeliner-only), off hours last
-    expect(b.editors.map((e) => e.name)).toEqual(['Gus Ghost', 'Leo Martins', 'Maya Reyes', 'Nia North', 'Sam Lee', 'Dana Diaz']);
+    // due today first (Gus's and Dana's are Timeliner-only; Dana's off hours, so after Gus), then the rest with
+    // videos, and a card with nothing in Timeliner (Nia) last
+    expect(b.editors.map((e) => e.name)).toEqual(['Gus Ghost', 'Dana Diaz', 'Leo Martins', 'Maya Reyes', 'Sam Lee', 'Nia North']);
     const split = 'Joshua Shalimar: 5 with Maya, 4 with Leo, 1 with Sam — one editor per client';
     // nobody is on these clients' brands in Timeliner here: every video was given on the video
     expect(card('Leo Martins').clients).toEqual([{ name: 'Joshua Shalimar', clientId: ids.js, count: 4, split, viaClient: false }]);

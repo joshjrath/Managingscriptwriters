@@ -1388,8 +1388,14 @@ function editorOf(L: Loaded, p: Person, owners: (t: TaskRow) => string[] = (t) =
 /** On a video and editing now (not one left running: isFocusStale) */
 const editingNow = (e: EditorRow, now: Date) => e.focus?.state === 'on' && !isFocusStale(e.focus, e.offHours, now.getTime());
 
-/** Editing now → paused (or left running) → due today → revisions → the rest; off hours last (unless they're editing now). */
-const rank = (e: EditorRow, now: Date) => (editingNow(e, now) ? 0 : e.offHours ? 5 : e.focus ? 1 : e.dueToday ? 2 : e.plate.revisions ? 3 : 4);
+/**
+ * Editing now → paused (or left running) → due today → revisions → the rest with videos → nothing in Timeliner;
+ * within each, people in their working hours first (so overdue work off hours still outranks an empty card).
+ */
+const rank = (e: EditorRow, now: Date) => {
+  const bucket = editingNow(e, now) ? 0 : e.focus ? 1 : e.dueToday ? 2 : e.plate.revisions ? 3 : e.videos.length ? 4 : 5;
+  return bucket * 2 + (bucket > 0 && e.offHours ? 1 : 0);
+};
 
 const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? '' : 's'}`;
 /** First names, unless two in the list share one */
