@@ -10,7 +10,7 @@
 //   nullable columns, indexes), and backfill in a separate function migration.
 
 import type { Db } from './db';
-import { fillMissingDeadlines } from './backfill';
+import { fillMissingDeadlines, linkDeliveredPdfs } from './backfill';
 
 export type Migration = string | ((t: Db) => Promise<void>);
 
@@ -647,4 +647,66 @@ create table timeliner_removed (
   removed_at timestamptz not null
 );
 `,
+  // 31 · matching what arrives from Timeliner to shoots. A scripts PDF is linked to its batch once (by its task,
+  // or file:<id> for a file uploaded straight into a project) and every later version follows the link; the
+  // message log keeps each upload's version, file and the batch it most likely belongs to when it waited for a
+  // manager. Each video keeps how it was matched (and a note for the managers), whether to check it, whether its
+  // match was kept after review, and its parent when it's a variant; projects and sub-folders keep when they were
+  // made. Managers can pin a video to a batch (or to none). Which shoot each editor's raw clips were matched to is
+  // remembered clip by clip for a while, because raw clips are trashed soon after the titled videos are made from
+  // them. Each video row says whether its task held a video file (null for rows read before this), so a document
+  // uploaded to a task first seen empty is taken for a scripts PDF, not notes on a video.
+  `
+create table timeliner_pdfs (
+  key text primary key,
+  kind text not null check (kind in ('task', 'file')),
+  batch_id bigint not null references batches(id) on delete cascade,
+  project_id text,
+  sub_folder_id text,
+  title text,
+  file_id text,
+  file_name text,
+  name_key text,
+  version int not null default 1,
+  first_at timestamptz not null,
+  latest_at timestamptz not null,
+  step text,
+  gone_at timestamptz,
+  how text not null check (how in ('name', 'date', 'earliest', 'late', 'only', 'manager', 'backfill')),
+  linked_by bigint references users(id),
+  linked_at timestamptz not null default now()
+);
+create index timeliner_pdfs_batch_idx on timeliner_pdfs (batch_id);
+create index timeliner_pdfs_project_idx on timeliner_pdfs (project_id);
+alter table timeliner_events add column version_number int;
+alter table timeliner_events add column file_id text;
+alter table timeliner_events add column uploaded_at timestamptz;
+alter table timeliner_events add column suggested_batch_id bigint references batches(id) on delete set null;
+create index timeliner_events_task_idx on timeliner_events (task_id);
+alter table timeliner_tasks add column parent_task_id text;
+alter table timeliner_tasks add column match_how text;
+alter table timeliner_tasks add column match_note text;
+alter table timeliner_tasks add column match_check boolean not null default false;
+alter table timeliner_tasks add column match_kept boolean not null default false;
+alter table timeliner_names add column created_at timestamptz;
+create table timeliner_video_pins (
+  task_id text primary key,
+  batch_id bigint references batches(id) on delete cascade,
+  script_number int check (script_number > 0),
+  set_by bigint not null references users(id),
+  set_at timestamptz not null default now()
+);
+create table timeliner_editor_clips (
+  task_id text not null,
+  member_id text not null,
+  batch_id bigint not null references batches(id) on delete cascade,
+  clip_at timestamptz not null,
+  last_seen_at timestamptz not null,
+  primary key (task_id, member_id)
+);
+create index timeliner_editor_clips_member_idx on timeliner_editor_clips (member_id);
+alter table timeliner_tasks add column has_video boolean;
+`,
+  // 32 · scripts PDFs that delivered their batch before PDFs were linked: each keeps its batch (see backfill.ts)
+  linkDeliveredPdfs,
 ];

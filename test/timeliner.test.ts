@@ -51,9 +51,11 @@ const upload = (data: Record<string, unknown>, opts: { id?: string; type?: strin
   // no x-scale-media header: Timeliner isn't our page, the signature is what counts
   return app.inject({ method: 'POST', url: '/hooks/timeliner', headers: { 'content-type': 'application/json', 'x-timeliner-signature': (opts.signature ?? sign)(raw) }, payload: raw });
 };
-const doc = (projectId: string, brandId: string, fileName = 'Scripts 1-3.pdf') => ({
-  taskId: 't_1', projectId, brandId, taskTitle: 'Scripts', fileId: 'f_1', fileName, mimeType: fileName.endsWith('.pdf') ? 'application/pdf' : 'video/mp4',
-  size: 1000, versionNumber: 1, uploadedBy: 'm_wes', source: 'app', uploadedAt: NOW.toISOString(),
+/** an upload to its own Timeliner task, unless `taskId` says it's a version of one uploaded before */
+let tasksMade = 0;
+const doc = (projectId: string, brandId: string, fileName = 'Scripts 1-3.pdf', o: { taskId?: string; version?: number } = {}) => ({
+  taskId: o.taskId ?? `t_${++tasksMade}`, projectId, brandId, taskTitle: 'Scripts', fileId: `f_${++tasksMade}`, fileName, mimeType: fileName.endsWith('.pdf') ? 'application/pdf' : 'video/mp4',
+  size: 1000, versionNumber: o.version ?? 1, uploadedBy: 'm_wes', source: 'app', uploadedAt: NOW.toISOString(),
 });
 /** a batch of `count` scripts for the writer, sent as one document and approved */
 async function approvedBatch(clientId: number, title: string, count = 3, approve = true): Promise<number> {
@@ -191,7 +193,7 @@ describe('Timeliner uploads deliver batches', () => {
 
   it('keeps an upload it can’t place for a manager, who picks the batch', async () => {
     const lumenBatch = (await db.one<{ id: number }>(`select id from batches where title = 'Lumen launch'`))!.id;
-    const r = await upload(doc('p_odd', 'b_odd', 'Final scripts.pdf'), { id: 'evt_odd' });
+    const r = await upload(doc('p_odd', 'b_odd', 'Final scripts.pdf', { taskId: 't_odd' }), { id: 'evt_odd' });
     expect(JSON.parse(r.body).outcome).toBe('unmatched');
     const notes = (await send('GET', '/api/notifications', admin)).body.notifications;
     expect(notes[0]).toMatchObject({ title: 'Timeliner upload needs a batch', link: '/settings#timeliner' });
@@ -206,10 +208,10 @@ describe('Timeliner uploads deliver batches', () => {
     const b = await detail(lumenBatch);
     expect(b.progress.delivered).toBe(3);
     expect(b.deliveries[0]).toMatchObject({ verification: 'timeliner', confirmedByName: 'Ada Admin' });
-    // placed once is enough: that Timeliner project now goes to this batch
+    // placed once is enough: the PDF is linked to that batch, and its next version follows by itself
     expect((await send('POST', '/api/timeliner/events/evt_odd/assign', admin, { batchId: lumenBatch })).status).toBe(409);
-    const next = await upload(doc('p_odd', 'b_odd', 'Final scripts v2.pdf'));
-    expect(JSON.parse(next.body).outcome).toBe('already_delivered');
+    const next = await upload(doc('p_odd', 'b_odd', 'Final scripts v2.pdf', { taskId: 't_odd', version: 2 }));
+    expect(JSON.parse(next.body).outcome).toBe('new_version');
   });
 
   it('delivers nothing when the batch’s scripts aren’t approved yet, and says so', async () => {

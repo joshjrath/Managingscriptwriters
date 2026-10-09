@@ -148,8 +148,12 @@ async function finishedBatch(clientId: number, title: string, count: number, o: 
   const ids = ((await send('GET', `/api/batches/${id}`, admin)).body as BatchDetail).scripts.map((s) => s.id);
   expect((await send('POST', `/api/batches/${id}/submissions`, writer, { scriptIds: ids, url: o.doc })).status).toBe(200);
   expect((await send('POST', `/api/batches/${id}/review`, admin, { action: 'approve', scriptIds: ids, ...(o.edited ? { url: o.edited } : {}) })).status).toBe(200);
+  await approvedNow(id);
   return { id, shootId };
 }
+
+/** approvals are stamped by the database's clock; these tests run on their own, so the batch's approvals take it */
+const approvedNow = (batchId: number) => db.query(`update scripts set approved_at = $2 where batch_id = $1 and approved_at is not null`, [batchId, clock.toISOString()]);
 
 const ids = { sep28: 0, oct6: 0, ads: 0, bright: 0, shalimar: 0, brightside: 0 };
 
@@ -242,11 +246,19 @@ describe('reading Timeliner', () => {
     expect(b.sync).toEqual({ keySet: true, syncedAt: NOW.toISOString(), error: null });
 
     const leoRow = editor(b, 'Leo Martins');
-    // the newest shoot on or before the video was made, in the folder's batch (Organic, not Ads); the manager's edited version
+    // the newest shoot on or before the video was made, in the folder's batch (Organic, not Ads). Still to be
+    // edited, its title doesn't say which script it is (it would have to say "#5"), and there's no scripts PDF:
+    // it gets the shoot's document from the site, the edited version its scripts were approved with
     expect(find(leoRow.videos, 'Organic 05')).toMatchObject({
-      state: 'to_edit', step: 'To be edited', folder: 'My Videos › Organic', due: '2026-10-09',
-      client: { id: ids.shalimar, name: 'Joshua Shalimar' }, batch: { id: ids.oct6, title: 'Organic · Oct 6', shootDate: '2026-10-06' }, scriptNumber: 5,
-      script: { href: 'https://docs.example/organic-oct6-edited', edited: true, ranges: '1–8', batchId: ids.oct6 },
+      state: 'to_edit', step: 'To be edited', folder: 'My Videos › Organic', due: '2026-10-09', raw: false,
+      client: { id: ids.shalimar, name: 'Joshua Shalimar' }, batch: { id: ids.oct6, title: 'Organic · Oct 6', shootDate: '2026-10-06' }, scriptNumber: null,
+      script: { href: 'https://docs.example/organic-oct6-edited', edited: true, ranges: '1–8', source: 'site', alt: null }, scriptIssue: null,
+      match: { how: 'date', kept: false, sure: false, check: false, note: 'Made Oct 7, 1 day after the Oct 6 shoot (the word “organic” picks Organic · Oct 6)' },
+    });
+    // back for revisions, its title's number is its script: the manager's edited version
+    expect(find(leoRow.videos, 'Organic 03')).toMatchObject({
+      batch: { id: ids.oct6 }, scriptNumber: 3, scriptIssue: null,
+      script: { href: 'https://docs.example/organic-oct6-edited', edited: true, ranges: '1–8', batchId: ids.oct6, source: 'site', version: null, inReview: false, alt: null },
     });
     // a video made after the shoot before goes with that shoot's batch
     expect(find(leoRow.videos, 'Organic 04')).toMatchObject({ state: 'approved', batch: { id: ids.sep28 }, scriptNumber: 4, script: { href: 'https://docs.example/organic-sep28', edited: false } });
@@ -256,7 +268,7 @@ describe('reading Timeliner', () => {
 
     const mayaRow = editor(b, 'Maya Reyes');
     // the Ads folder's word picks the Ads batch of the same shoot
-    expect(find(mayaRow.videos, 'Ad 03')).toMatchObject({ folder: 'My Videos › Ads', batch: { id: ids.ads }, scriptNumber: 3, script: { href: 'https://docs.example/ads-oct6', edited: false } });
+    expect(find(mayaRow.videos, 'Ad 03')).toMatchObject({ folder: 'My Videos › Ads', batch: { id: ids.ads }, scriptNumber: null });
     // a batch linked to the Timeliner project wins
     expect(find(editor(b, 'Priya Nair').videos, 'Video 01')).toMatchObject({ step: 'Internal approval', state: 'in_review', folder: 'Spring campaign', client: { id: ids.brightside }, batch: { id: ids.bright }, scriptNumber: 1 });
 
@@ -267,19 +279,19 @@ describe('reading Timeliner', () => {
 
   it('puts the managers’ board together: plates, what’s next, last finished, nobody yet, and who isn’t on the site', async () => {
     const b = await board();
-    expect(b.totals).toEqual({ editingNow: 0, paused: 0, dueToday: 1, revisions: 1, waitingOnYou: 2, notAssigned: 2 });
+    expect(b.totals).toEqual({ editingNow: 0, paused: 0, dueToday: 1, revisions: 1, waitingOnYou: 2, notAssigned: 2, notMatched: 0, toCheck: 0 });
     // due today first, then revisions; off hours last
     expect(b.editors.map((e) => [e.name, e.offHours])).toEqual([['Maya Reyes', false], ['Leo Martins', false], ['Priya Nair', true]]);
     const leoRow = editor(b, 'Leo Martins');
-    expect(leoRow.plate).toEqual({ toEdit: 2, revisions: 1, inReview: 1, withClient: 0, approvedWeek: 1 });
+    expect(leoRow.plate).toEqual({ toEdit: 2, rawToEdit: 0, revisions: 1, inReview: 1, withClient: 0, approvedWeek: 1 });
     expect(leoRow.nextUp?.title).toBe('Organic 03');
     expect(leoRow.lastFinished).toEqual({ title: 'Organic 01', at: '2026-10-07T17:15:00.000Z', onSite: false });
     expect(leoRow.scripts.map((s) => s.href)).toEqual(['https://docs.example/organic-oct6-edited']);
     expect(editor(b, 'Maya Reyes').dueToday).toBe(1);
-    // with the document whoever gets them will cut from
+    // still to be edited, their titles don't say which scripts they are: the shoot's document from the site
     expect(b.unassigned).toEqual([{
-      folder: 'My Videos › Organic', clientName: 'Joshua Shalimar', count: 2, titles: 'Organic 07–08', due: '2026-10-09', videoTitles: ['Organic 07', 'Organic 08'],
-      scripts: [{ href: 'https://docs.example/organic-oct6-edited', name: null, edited: true, ranges: '1–8', batchId: ids.oct6, batchTitle: 'Organic · Oct 6' }],
+      folder: 'My Videos › Organic', clientName: 'Joshua Shalimar', count: 2, raw: false, batch: null, titles: 'Organic 07–08', due: '2026-10-09',
+      videoTitles: ['Organic 07', 'Organic 08'], scripts: [expect.objectContaining({ href: 'https://docs.example/organic-oct6-edited', source: 'site', edited: true })],
     }]);
     expect(b.unknownAssignees).toEqual([{ name: 'Gus Ghost', email: 'ghost@freelance.test', count: 1 }]);
   });
@@ -512,7 +524,10 @@ async function newBatch(clientId: number, title: string, count: number) {
   const scripts = ((await send('GET', `/api/batches/${r.body.batchId}`, admin)).body as BatchDetail).scripts;
   return { id: r.body.batchId as number, all: scripts.map((s) => s.id), of: (...nums: number[]) => scripts.filter((s) => nums.includes(s.number)).map((s) => s.id) };
 }
-const review = async (batchId: number, body: Record<string, unknown>) => expect((await send('POST', `/api/batches/${batchId}/review`, admin, body)).status).toBe(200);
+const review = async (batchId: number, body: Record<string, unknown>) => {
+  expect((await send('POST', `/api/batches/${batchId}/review`, admin, body)).status).toBe(200);
+  await approvedNow(batchId);
+};
 const openAsEditor = async (href: string) => (await app.inject({ method: 'GET', url: href, headers: { cookie: leo } })).statusCode;
 
 describe('which script document an editor gets', () => {
@@ -527,10 +542,15 @@ describe('which script document an editor gets', () => {
     const b = (await send('POST', '/api/editing/sync', admin, {})).body as EditingBoard;
     const leoRow = editor(b, 'Leo Martins');
     // made after the Oct 6 shoot: that shoot's batch, its folder's word deciding Organic or Ads
-    expect(find(leoRow.videos, 'Organic 05')).toMatchObject({ batch: { id: ids.oct6 }, script: { href: 'https://docs.example/organic-oct6-edited' } });
-    expect(find(editor(b, 'Maya Reyes').videos, 'Ad 03')).toMatchObject({ batch: { id: ids.ads }, script: { href: 'https://docs.example/ads-oct6' } });
-    // made before it: the linked batch
-    expect(find(leoRow.videos, 'Organic 04')).toMatchObject({ batch: { id: ids.sep28 }, script: { href: 'https://docs.example/organic-sep28' } });
+    expect(find(leoRow.videos, 'Organic 05')).toMatchObject({ batch: { id: ids.oct6 } });
+    expect(find(editor(b, 'Maya Reyes').videos, 'Ad 03')).toMatchObject({ batch: { id: ids.ads } });
+    // made before it: the Sep 28 shoot, whose scripts PDF from Timeliner comes first and the site's document second
+    expect(find(leoRow.videos, 'Organic 04')).toMatchObject({
+      batch: { id: ids.sep28 }, scriptNumber: 4,
+      script: { source: 'timeliner', href: `/api/editing/script-pdf/${ids.sep28}`, name: 'Organic Sep 28.pdf', version: 1, alt: { source: 'site', href: 'https://docs.example/organic-sep28' } },
+    });
+    // the PDF isn't a video
+    expect(await db.one(`select 1 from timeliner_tasks where id = 't_doc'`)).toBeUndefined();
   });
 
   it('gives each script the edited version it was approved with, when a batch is approved in rounds', async () => {
@@ -540,8 +560,9 @@ describe('which script document an editor gets', () => {
     await review(summer.id, { action: 'approve', scriptIds: summer.of(1, 2, 3, 4), url: 'https://docs.example/summer-edited-1to4' });
     await review(summer.id, { action: 'approve', scriptIds: summer.of(5, 6, 7, 8), url: 'https://docs.example/summer-edited-5to8' });
     await db.query(`update batches set timeliner_project_id = 'p_summer' where id = $1`, [summer.id]);
+    // sent back for revisions: their titles' numbers are their scripts
     const where = { assigneeIds: ['m_priya'], projectId: 'p_summer', brandId: 'b_sun', subFolderId: null };
-    tasks = [...tasks, video('t_s3', 'Summer 03', 'toDo', where), video('t_s6', 'Summer 06', 'toDo', where)];
+    tasks = [...tasks, video('t_s3', 'Summer 03', 'inRevision', where), video('t_s6', 'Summer 06', 'inRevision', where)];
 
     const priya = editor((await send('POST', '/api/editing/sync', admin, {})).body as EditingBoard, 'Priya Nair');
     expect(find(priya.videos, 'Summer 03')).toMatchObject({ batch: { id: summer.id }, scriptNumber: 3, script: { href: 'https://docs.example/summer-edited-1to4', edited: true, ranges: '1–4' } });
@@ -566,7 +587,7 @@ describe('which script document an editor gets', () => {
     await review(autumn.id, { action: 'revisions', scriptIds: autumn.of(8), note: 'Tighten the hook' });
     expect((await send('POST', `/api/batches/${autumn.id}/submissions`, writer, { scriptIds: autumn.of(8), url: 'https://docs.example/autumn-8' })).status).toBe(200);
     await db.query(`update batches set timeliner_project_id = 'p_autumn' where id = $1`, [autumn.id]);
-    tasks = [...tasks, video('t_au3', 'Autumn 03', 'toDo', { assigneeIds: ['m_priya'], projectId: 'p_autumn', brandId: 'b_sun', subFolderId: null })];
+    tasks = [...tasks, video('t_au3', 'Autumn 03', 'inRevision', { assigneeIds: ['m_priya'], projectId: 'p_autumn', brandId: 'b_sun', subFolderId: null })];
 
     const priya = editor((await send('POST', '/api/editing/sync', admin, {})).body as EditingBoard, 'Priya Nair');
     expect(find(priya.videos, 'Autumn 03')).toMatchObject({ batch: { id: autumn.id }, scriptNumber: 3, script: null });

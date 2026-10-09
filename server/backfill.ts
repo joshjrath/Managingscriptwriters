@@ -10,6 +10,7 @@
 import type { Db } from './db';
 import { computeDeadlines, draftFromFinal, finalFromDraft, type DeadlineRules, type ISODate } from '../shared/dates';
 import { fmtDate } from '../shared/format';
+import { nameKey } from './matching';
 
 /**
  * Batches with only one of their two deadlines get the other one: from the
@@ -51,5 +52,37 @@ export async function fillMissingDeadlines(t: Db): Promise<void> {
         [r.client_id, r.id, `Final delivery set to ${fmtDate(fill)} (${why}); it was missing`, JSON.stringify({ finalDue: fill })],
       );
     }
+  }
+}
+
+/**
+ * Scripts PDFs that delivered their batch from Timeliner before PDFs were linked keep that batch, so their next
+ * version follows it. For each task with a delivered upload: its earliest delivered upload, as long as that
+ * delivery still holds a delivered script, the task never reached another batch, and it isn't one of the editors'
+ * videos (a document uploaded to a video's task was delivered too before; it's notes on the video, not a scripts
+ * PDF). Uploads that only found a batch already delivered, or nothing approved, aren't carried over (some went to
+ * the wrong batch); their next version is matched afresh.
+ */
+export async function linkDeliveredPdfs(t: Db): Promise<void> {
+  const firsts = await t.query<{ task_id: string; batch_id: number; delivery_id: number | null; received_at: string; project_id: string | null }>(
+    `select distinct on (e.task_id) e.task_id, e.batch_id, e.delivery_id, e.received_at, e.project_id
+       from timeliner_events e
+      where e.type = 'version.uploaded' and e.outcome = 'delivered' and e.task_id is not null and e.batch_id is not null
+        and not exists (select 1 from timeliner_tasks tt where tt.id = e.task_id)
+      order by e.task_id, e.received_at, e.id`,
+  );
+  for (const r of firsts) {
+    const elsewhere = await t.one(`select 1 from timeliner_events where task_id = $1 and batch_id is not null and batch_id <> $2 limit 1`, [r.task_id, r.batch_id]);
+    if (elsewhere || r.delivery_id == null) continue;
+    const holds = await t.one(`select 1 from scripts where delivery_id = $1 and status = 'delivered' and removed_at is null limit 1`, [r.delivery_id]);
+    if (!holds) continue;
+    const latest = await t.one<{ received_at: string; file_name: string | null }>(
+      `select received_at, file_name from timeliner_events where task_id = $1 and batch_id = $2 order by received_at desc, id desc limit 1`, [r.task_id, r.batch_id],
+    );
+    await t.query(
+      `insert into timeliner_pdfs (key, kind, batch_id, project_id, file_name, name_key, version, first_at, latest_at, how)
+       values ($1, 'task', $2, $3, $4, $5, 1, $6, $7, 'backfill') on conflict (key) do nothing`,
+      [r.task_id, r.batch_id, r.project_id, latest?.file_name ?? null, nameKey(latest?.file_name) || null, r.received_at, latest?.received_at ?? r.received_at],
+    );
   }
 }

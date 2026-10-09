@@ -21,7 +21,7 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-09-28-calendar-drag': ['managers'], '2026-09-28-team': ['managers'], '2026-09-28-signin-details': ['managers'],
   '2026-10-07-my-work-redesign': ['writers', 'managers'], '2026-09-28-written-counter': ['writers', 'managers'], '2026-10-08-writers-never-miss': ['writers', 'managers'],
   '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-editors-never-get-scripts': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'], '2026-10-08-master-log-everything': ['managers'], '2026-10-08-no-script-titles': ['managers', 'writers'], '2026-10-08-timeliner-auto-delivery': ['managers', 'writers'], '2026-10-08-timeliner-key-permissions': ['managers'],
-  '2026-10-08-editors-tab-timeliner': ['managers', 'editors'],
+  '2026-10-08-editors-tab-timeliner': ['managers', 'editors'], '2026-10-08-timeliner-matching': ['managers', 'editors'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -35,6 +35,26 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-08-timeliner-matching',
+    date: '2026-10-08',
+    title: 'Scripts PDFs and videos find their shoot',
+    summary: 'Each shoot’s scripts PDF in Timeliner is matched to its batch once and every new version follows it; videos, raw clips included, are matched to their shoot by the day they were made.',
+    changes: [
+      { tag: 'improved', text: 'A shoot’s scripts PDF in Timeliner is matched to its batch the first time it arrives: by a date in its name, else the shoot waiting for its scripts around the day the PDF was made. Every new version of that same PDF goes to the same batch, whatever it’s called, and delivers anything approved since the last one. A new version with nothing new to deliver doesn’t notify the managers.' },
+      { tag: 'fixed', text: 'A scripts PDF for an upcoming shoot no longer goes to an earlier batch that was already delivered just because it sat in the same Timeliner project.' },
+      { tag: 'improved', text: 'When it can’t be sure (two shoots a few days apart, a PDF named like another shoot’s PDF, or a shoot that was delivered by hand), the upload waits in Settings → Timeliner with the batch it most likely belongs to. Picking the batch links that PDF for good, even when nothing there is approved yet, so its next versions go there by themselves.' },
+      { tag: 'new', text: 'A scripts PDF matched to the wrong shoot can be moved: undo its delivery on that batch’s page, then use “Move to another batch” on the upload in Settings → Timeliner. Its next versions follow it to the right shoot.' },
+      { tag: 'improved', text: 'Videos go to the shoot that had just happened when they were made in Timeliner. The Organic and Ads folders only decide between batches of the same shoot, and a video that has been in review keeps its shoot.' },
+      { tag: 'new', text: 'Raw camera clips (C0045, IMG_1234 and the like) are matched to the shoot they were filmed at, with no script number, and open the shoot’s whole scripts PDF (until that PDF is in Timeliner, the shoot’s approved script document from the site). The titled, numbered video an editor makes from them goes to the same shoot, even once the raw clips are deleted.' },
+      { tag: 'improved', text: 'A video still To be edited gets a script number only when its title says so (#12, Script 12, No. 12): camera numbers aren’t script numbers.' },
+      { tag: 'new', text: 'Editors open the newest version of the shoot’s scripts PDF from Timeliner straight from their videos, and hear once when it gets a new version. When a script was approved again here after that version, the site’s document comes first.' },
+      { tag: 'improved', text: 'Script links say where they’re from: “Scripts PDF · v3 · from Timeliner” (and “being reviewed again” when it’s back in review), with the site’s version as a smaller second link.' },
+      { tag: 'improved', text: 'On an editor’s Home, raw clips are folded by shoot under To edit (“Oct 6 shoot · 24 raw clips”), each still with its I’m on this, and open the shoot’s whole scripts PDF, or the shoot’s script document from the site until there is one. A video that isn’t matched to a shoot yet says so, and a titled video matched only by its date says “matched by date”.' },
+      { tag: 'new', text: 'On the Editors tab, videos that couldn’t be matched to a shoot show “Not matched”, and ones worth a look show “Check”. Tap a video in an editor’s Videos to see why it went to that shoot; “Wrong shoot? Pin it” pins it to the right batch (and script), or to none, until someone unpins it. Raw clips count as clips to edit, and ones nobody has yet are grouped by shoot.' },
+      { tag: 'improved', text: 'Settings → Timeliner shows each upload’s version, lists a later version as “New version of the scripts PDF”, picks the most likely batch for an upload waiting for one, and lists which scripts PDF is linked to which shoot.' },
+    ],
+  },
   {
     id: '2026-10-08-editors-tab-timeliner',
     date: '2026-10-08',

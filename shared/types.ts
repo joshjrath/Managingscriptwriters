@@ -770,8 +770,11 @@ export interface CalendarShoot {
 
 // ── Timeliner ─────────────────────────────────────────────────────────────
 
-/** What happened to one message from Timeliner. */
-export type TimelinerOutcome = 'delivered' | 'unmatched' | 'nothing_approved' | 'already_delivered' | 'ignored' | 'test';
+/**
+ * What happened to one message from Timeliner. `new_version`: a later version of a scripts PDF already linked to
+ * its batch, with nothing new to deliver (a version that delivers newly approved scripts is `delivered`).
+ */
+export type TimelinerOutcome = 'delivered' | 'unmatched' | 'nothing_approved' | 'already_delivered' | 'ignored' | 'test' | 'new_version';
 
 export interface TimelinerEvent {
   id: string;
@@ -780,10 +783,52 @@ export interface TimelinerEvent {
   /** the Timeliner brand / project / task it arrived in, as far as known */
   where: string | null;
   uploader: string | null;
-  outcome: TimelinerOutcome;
+  /**
+   * What became of it, among the outcomes Settings → Timeliner has always listed: a `new_version` is listed here as
+   * `already_delivered` (nothing to pick). `result` says exactly what happened.
+   */
+  outcome: Exclude<TimelinerOutcome, 'new_version'>;
+  /** exactly what became of it, `new_version` included ("New version of the scripts PDF") */
+  result: TimelinerOutcome;
+  /** the version number Timeliner gave the file (a raw project file counts up from 1); null for older messages */
+  version: number | null;
   /** why it couldn't be placed, or what was delivered */
   detail: string | null;
   batch: { id: number; title: string; clientName: string } | null;
+  /** the batch it most likely belongs to, when it couldn't be placed for sure: preselect it in Pick batch */
+  suggestedBatch: { id: number; title: string; clientName: string } | null;
+}
+
+/**
+ * How a scripts PDF in Timeliner was matched to its batch, once: a date in its name (`name`), the only shoot
+ * waiting for its scripts (`date`), the earliest of several (`earliest`), a shoot that just happened (`late`), the
+ * client's only undated batch (`only`), a manager's pick (`manager`), or carried over from a delivery made before
+ * PDFs were linked (`backfill`). Every later version of the same PDF follows the link.
+ */
+export type TimelinerPdfHow = 'name' | 'date' | 'earliest' | 'late' | 'only' | 'manager' | 'backfill';
+
+/** A scripts PDF in Timeliner linked to its batch (one per shoot); its versions follow it. */
+export interface TimelinerPdfLink {
+  /** Timeliner's task id, or `file:<id>` for a file uploaded straight into a project */
+  key: string;
+  kind: 'task' | 'file';
+  batch: { id: number; title: string; clientName: string };
+  fileName: string | null;
+  /** the task's title in Timeliner */
+  title: string | null;
+  version: number;
+  /** when the PDF was first made (its task's creation), and when its latest version arrived */
+  firstAt: string;
+  latestAt: string;
+  how: TimelinerPdfHow;
+  /** false when picked by date among several shoots, or because a shoot had just happened */
+  sure: boolean;
+  /** trashed in Timeliner (it comes back if a new version arrives or it's restored) */
+  gone: boolean;
+  /** its task is back in review in Timeliner (not approved or with the client) */
+  inReview: boolean;
+  /** the manager who picked its batch, for `manager` */
+  linkedBy: string | null;
 }
 
 /**
@@ -803,23 +848,73 @@ export interface TimelinerStatus {
   /** when Timeliner's test message last arrived and checked out */
   testAt: string | null;
   events: TimelinerEvent[];
-  /** batches with approved scripts not yet delivered, to place an upload that couldn't be matched */
+  /**
+   * batches to place an upload with (Pick batch): those with approved scripts not yet delivered, any batch an upload
+   * in `events` suggests, and every batch still without a scripts PDF whose shoot is around when those uploads came
+   * in. Picking one links the PDF to it (its later versions follow), even when nothing is approved yet; a PDF already
+   * linked elsewhere moves once its delivery there is undone.
+   */
   openBatches: { id: number; title: string; clientName: string; approved: number }[];
+  /** the scripts PDFs linked to batches, newest version first */
+  pdfs: TimelinerPdfLink[];
 }
 
 // ── Editing: the videos editors cut, read from Timeliner ─────────────────
 
 /** A script document an editor cuts from. */
 export interface ScriptDoc {
-  /** opens the file (/api/files/…) or the link */
+  /**
+   * opens the file (/api/files/…) or the link; for the scripts PDF in Timeliner, /api/editing/script-pdf/:batchId,
+   * which redirects to a fresh download link each time (Timeliner's links expire, so none is ever stored or sent)
+   */
   href: string;
   name: string | null;
   /** the manager's edited version: the one to use */
   edited: boolean;
-  /** which scripts it holds, "1–30" */
+  /** which scripts it holds, "1–30" (for the scripts PDF: the batch's delivered scripts) */
   ranges: string;
   batchId: number;
   batchTitle: string;
+  /** `timeliner`: the shoot's scripts PDF in Timeliner, its newest version ("Scripts PDF · v3 · from Timeliner"); `site`: a document sent here, or the manager's edited version */
+  source: 'site' | 'timeliner';
+  /** the scripts PDF's version in Timeliner; null for the site's documents */
+  version: number | null;
+  /** when that version arrived in Timeliner, or when the site's document was sent or approved with edits */
+  updatedAt: string | null;
+  /** the scripts PDF is in Needs review or Revisions requested in Timeliner ("being reviewed again"); false for the site's documents */
+  inReview: boolean;
+  /**
+   * the second link: the site's document for the same script when the scripts PDF comes first, or the scripts PDF
+   * when the script was approved on the site after the PDF's newest version (the site's document comes first then).
+   * Only on a video's own `script`: a list of a batch's documents (`scripts`) has none.
+   */
+  alt: ScriptDoc | null;
+}
+
+/**
+ * How a video was matched to its shoot's batch: pinned by a manager, a version of another video (`parent`), its
+ * folder made for one shoot's scripts (`place`), its folder or title naming the shoot's date (`name`), the shoot
+ * whose raw clips its editor has been cutting (`editor`), the latest shoot before it was made (`date`), the shoot
+ * just after (`next`, when it was made ahead), or the client's only undated batch (`undated`).
+ */
+export type VideoMatchHow = 'pinned' | 'parent' | 'place' | 'name' | 'editor' | 'date' | 'next' | 'undated';
+
+/** How sure the site is of a video's batch. */
+export interface VideoMatch {
+  /** null: not matched (the editor sees "Not matched yet — a manager has been asked") */
+  how: VideoMatchHow | null;
+  /** matched before and kept: it has been in review (or was made ahead of its shoot), so later changes don't move it */
+  kept: boolean;
+  /**
+   * pinned, by name, by its folder, a raw clip by its date, or a titled video by its editor's raw clips; a parent's
+   * or a kept match is as sure as the match it came from. Not sure (a titled video by its date alone, made ahead, or
+   * the only undated batch): the editor sees "matched by date"
+   */
+  sure: boolean;
+  /** another video in the same folder has the same title and batch: one of them may be from another shoot (a "Check" chip) */
+  check: boolean;
+  /** for managers: why, like "Made Oct 16, 2 days after the Oct 14 shoot", or why it couldn't be matched. Never sent to editors (null in /api/editing/me) */
+  note: string | null;
 }
 
 /** One video (a Timeliner task) assigned to an editor. */
@@ -836,10 +931,22 @@ export interface EditingVideo {
   client: { id: number; name: string } | null;
   /** the batch whose scripts it's cut from, when it could be matched */
   batch: { id: number; title: string; shootDate: ISODate | null } | null;
-  /** the script it's cut from: the number in its title, within that batch */
+  /**
+   * the script it's cut from: "#12", "Script 12", or the number standing alone in its title, within that batch.
+   * Never for a raw clip, and for a video still To be edited only when its title says "#12", "Script 12" or "No. 12"
+   */
   scriptNumber: number | null;
-  /** the document holding that script (the manager's edited version when there is one) */
+  /**
+   * the document to cut from: with a number, that script's document (the scripts PDF from Timeliner first, else
+   * the manager's edited version, else the document it was sent in); without one (a raw clip), the shoot's whole
+   * scripts PDF when it's in Timeliner
+   */
   script: ScriptDoc | null;
+  /** why there's no `script`: not matched to a batch, that script isn't approved yet ("Script 6 isn't approved yet"), or no document an editor can open */
+  scriptIssue: 'not_matched' | 'not_approved' | 'no_document' | null;
+  /** a raw camera clip ("C0045", "IMG_1234.MOV"), shown as "Raw clip C0045": footage the editor cuts into a titled video */
+  raw: boolean;
+  match: VideoMatch;
   /** Timeliner's team deadline, else the client one */
   due: ISODate | null;
   /** revision rounds so far (team and client) */
@@ -864,6 +971,8 @@ export interface EditorFocus {
 /** How many of an editor's videos are at each state. */
 export interface EditorPlate {
   toEdit: number;
+  /** of those to edit, the raw camera clips ("24 clips to edit" when they all are) */
+  rawToEdit: number;
   revisions: number;
   /** in review in Timeliner, or marked done here: waiting on the managers either way */
   inReview: number;
@@ -889,7 +998,7 @@ export interface EditorRow {
   dueToday: number;
   /** the last video that left their plate: marked done here, or moved on in Timeliner */
   lastFinished: { title: string; at: string; onSite: boolean } | null;
-  /** the script documents for what they're working on */
+  /** the script documents for what they're working on, each once (without a video's second link) */
   scripts: ScriptDoc[];
   /** their videos, for the drill-down: everything open, plus approved in the last 7 days */
   videos: EditingVideo[];
@@ -917,11 +1026,19 @@ export interface EditingBoard {
     /** in review with Josh and Joshua (Timeliner's internal review steps), anyone's, or marked done here */
     waitingOnYou: number;
     notAssigned: number;
+    /** open videos on the editors' cards not matched to a batch (`isNotMatched`; their editors see "Not matched yet"): the ones a manager can pin */
+    notMatched: number;
+    /** open videos on the editors' cards whose match is worth a look (`needsCheck`) */
+    toCheck: number;
   };
   editors: EditorRow[];
-  /** videos still to be edited in Timeliner with nobody assigned, by folder */
+  /** videos still to be edited in Timeliner with nobody assigned, by folder; raw clips by the shoot they matched (else by folder) */
   unassigned: {
     folder: string; clientName: string | null; count: number;
+    /** raw camera clips: "Oct 6 shoot · 9 clips not assigned" */
+    raw: boolean;
+    /** the batch they matched, for raw clips grouped by shoot */
+    batch: { id: number; title: string; shootDate: ISODate | null } | null;
     /** "Organic 26–30" */
     titles: string;
     due: ISODate | null;

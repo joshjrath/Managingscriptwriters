@@ -2145,6 +2145,10 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
 .tl-videos .txt { flex: 1 1 auto; color: var(--text-2); }
 .tl-videos > .row-flex > svg { color: var(--cyan); }
 .tl-videos-err { font-size: 12.5px; color: color-mix(in srgb, var(--red) 55%, white); }
+/* Settings → Timeliner: a scripts PDF's version, and the PDFs linked to their shoots */
+.tl-ver { flex: none; padding: 1px 7px; border-radius: var(--r-pill); background: var(--btn); color: var(--text-2); font-size: 11.5px; font-weight: 700; }
+.tl-hint { margin-top: 6px; font-size: 12px; color: var(--text-2); }
+.item.tl-gone .title { color: var(--text-2); text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--text-2) 50%, transparent); }
 
 /* ── an editor's Home: the hero card ── */
 .eh-top { margin-bottom: var(--gap); }
@@ -2291,6 +2295,87 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
 .eh-qlink:hover { background: var(--row); color: #fff; }
 .eh-qlink svg { width: 18px; height: 18px; color: var(--salmon); }
 .eh-qlink svg.end { margin-left: auto; width: 16px; height: 16px; color: var(--text-2); }
+
+/* ── matching: raw clips, the scripts PDF, how sure a shoot is, pins ── */
+/* a raw camera clip: "Raw clip" is a quiet word before the camera's name, and its square is a film strip */
+.ed-raw { color: var(--text-2); font-weight: 600; }
+.sq-raw { width: 52%; height: 52%; min-width: 12px; min-height: 12px; max-width: 18px; max-height: 18px; stroke-width: 2.2; }
+.eh-row.raw .eh-row-title { font-weight: 600; color: color-mix(in srgb, var(--neutral) 75%, white); }
+.eh-vq.raw { background: color-mix(in srgb, var(--neutral) 30%, var(--panel-2)); color: color-mix(in srgb, var(--neutral) 75%, white); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--neutral) 40%, transparent); }
+.eh-rawtag { display: inline-block; margin-right: 0.3em; font-size: 0.4em; font-weight: 700; letter-spacing: -0.01em; vertical-align: 0.4em; color: var(--ink-2); }
+.eh-hero:is(.next, .clear) .eh-rawtag { color: var(--text-2); }
+/* the script link: what it is on top, where it's from under it; the other version as a quieter link */
+.ed-slinks { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; min-width: 0; }
+.eh-slink-txt { display: flex; flex-direction: column; gap: 1px; min-width: 0; line-height: 1.15; text-align: left; }
+.eh-slink-txt b { font-weight: 650; }
+.eh-slink-txt small { font-size: 11px; font-weight: 600; color: var(--text-2); white-space: normal; }
+.eh-slink:has(.eh-slink-txt) { padding: 5px 16px 5px 13px; border-radius: 18px; }
+.ed-again-t { color: color-mix(in srgb, var(--yellow) 55%, white); }
+.ed-again { padding: 2px 8px; border-radius: var(--r-pill); background: color-mix(in srgb, var(--yellow) 12%, var(--panel)); color: color-mix(in srgb, var(--yellow) 55%, white); font-size: 11.5px; font-weight: 650; white-space: nowrap; }
+.ed-kind.ed-kind-tl { color: color-mix(in srgb, var(--cyan) 50%, white); background: color-mix(in srgb, var(--cyan) 10%, var(--row)); }
+.ed-alt { display: inline-flex; align-items: center; min-height: 32px; padding: 0 4px; color: var(--text-2); font-size: 12.5px; font-weight: 600; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--text-2) 45%, transparent); text-underline-offset: 3px; white-space: nowrap; }
+.ed-alt:hover { color: var(--text); text-decoration-color: currentColor; }
+@media (pointer: coarse) { .ed-alt { min-height: 44px; padding: 0 8px; } }
+.eh-row-tools .ed-alt, .eh-actions .ed-alt, .eh-clips-head .ed-alt, .eh-doc-alt .ed-alt { min-height: 44px; }
+.eh-script-alt { margin-top: 4px; font-size: 13px; color: var(--ink-2); }
+.eh-script .ed-alt { color: inherit; text-decoration-color: currentColor; padding: 0 2px; font-size: 13px; }
+.eh-hero:is(.live, .paused, .done) .eh-actions .ed-alt { color: var(--on-accent); }
+/* a shoot the site isn't sure of: said once, quietly */
+.ed-likely { color: var(--text-2); font-style: italic; }
+/* an editor's Home: one shoot's raw clips, folded */
+.eh-clips { display: flex; flex-direction: column; gap: 8px; }
+.eh-clips-head { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
+.eh-clips-head .eh-wbtn { flex: 1 1 340px; width: auto; }
+.eh-clips-head > .ed-slinks { flex: 0 1 auto; }
+.eh-clips-head .eh-wtxt > span { display: block; }
+.eh-clip-rows { padding-left: 14px; border-left: 2px solid color-mix(in srgb, var(--neutral) 22%, transparent); margin-left: 18px; }
+.eh-clip-rows .eh-row { padding: 6px 10px; }
+.eh-doc-alt { font-size: 12.5px; color: var(--text-2); }
+.eh-doc-when { color: var(--text-3); }
+@media (max-width: 560px) { .eh-clip-rows { margin-left: 6px; padding-left: 8px; } }
+
+/* the Editors tab: how many aren't matched, and the drill-down's pick and pin */
+.ed-match { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 14px; padding: 12px 16px; border-radius: var(--r-row); background: color-mix(in srgb, var(--yellow) 6%, var(--panel-2)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--yellow) 18%, transparent); font-size: 13.5px; line-height: 1.45; }
+.ed-match > svg { width: 17px; height: 17px; flex: none; margin-top: 2px; color: var(--yellow); }
+.ed-match b { font-weight: 650; }
+.ed-drill-hint { flex: 1 1 100%; font-size: 12.5px; color: var(--text-2); }
+.ed-drill-hint b { color: var(--text); font-weight: 600; }
+.ed-drill-key { display: inline-flex; align-items: center; gap: 7px; margin-left: 14px; white-space: nowrap; }
+.ed-sqs.pick { gap: 0; }
+.ed-sqb { display: grid; place-items: center; min-width: 44px; height: 44px; padding: 0; border: 0; border-radius: 12px; background: none; cursor: pointer; }
+.ed-sqb .ed-sq { min-width: 36px; height: 36px; transition: transform var(--t) var(--ease), box-shadow var(--t); }
+.ed-sqb:hover .ed-sq { transform: translateY(-1px); }
+.ed-sqb.on .ed-sq { box-shadow: 0 0 0 2px var(--panel-2), 0 0 0 4px var(--salmon); }
+.ed-sqb:focus-visible { outline: 2px solid var(--focus); outline-offset: 0; }
+.ed-sq { position: relative; }
+.ed-sq.nm::after, .ed-sq.ck::after { content: ''; position: absolute; top: -3px; right: -3px; width: 10px; height: 10px; border-radius: 50%; box-shadow: 0 0 0 2px var(--panel-2); }
+.ed-sq.nm::after { background: var(--yellow); }
+.ed-sq.ck::after { background: var(--panel-2); box-shadow: inset 0 0 0 2.5px var(--yellow), 0 0 0 2px var(--panel-2); }
+.ed-sq.lg { display: inline-grid; min-width: 18px; width: 18px; height: 18px; border-radius: 5px; }
+.ed-sq.lg .sq-raw { min-width: 11px; min-height: 11px; }
+.ed-sq.lg.nm::after, .ed-sq.lg.ck::after { width: 8px; height: 8px; top: -3px; right: -3px; }
+.ed-vd-slot { flex: 1 1 100%; min-width: 0; }
+.ed-vd-slot:empty { display: none; }
+.ed-vd { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: 16px; background: var(--panel-2); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.07); animation: rise 260ms var(--ease-out-quint) backwards; }
+.ed-vd-top { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.ed-vd-top > .ed-sq { min-width: 36px; height: 36px; flex: none; }
+.ed-vd-title { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.ed-vd-title b { font: 700 16px/1.2 var(--font-display); letter-spacing: -0.015em; overflow-wrap: anywhere; }
+.ed-vd-title .muted { font-size: 12.5px; overflow-wrap: anywhere; }
+.ed-vd-x { flex: none; background: transparent; }
+.ed-vd-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; font-size: 13px; }
+.ed-vd-shoot { font-weight: 600; }
+.ed-vd-note { font-size: 12.5px; line-height: 1.45; color: var(--text-2); max-width: 80ch; }
+.ed-vd-acts { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 10px; }
+.ed-pin { display: flex; flex-direction: column; gap: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.07); }
+.ed-pin-fields { display: flex; flex-wrap: wrap; gap: 12px 16px; align-items: flex-start; }
+.ed-pin-fields > .field:first-child { flex: 1 1 280px; min-width: 0; }
+.ed-pin-fields > .field:nth-child(2) { flex: 0 1 180px; }
+.ed-pin-err { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; font-size: 13px; color: color-mix(in srgb, var(--red) 55%, white); }
+.ed-pin-note { font-size: 12px; color: var(--text-3); }
+/* not assigned: raw clips by shoot are counted, their camera numbers quietly beside */
+.ed-na-row.raw .ed-na-t { color: color-mix(in srgb, var(--neutral) 75%, white); }
+.ed-na-raw { font-size: 12.5px; overflow-wrap: anywhere; }
 
 /* continuous glows rest when motion is off (the system setting or the Animations switch) */
 @media (prefers-reduced-motion: reduce) { .ed-live-dot, .ed-tile.live, .ed-bar > .c-now, .ed-sq.c-now, .eh-sq.now { animation: none; } }

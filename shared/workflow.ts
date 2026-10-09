@@ -367,8 +367,43 @@ export const TIMELINER_STEP_LABEL: Record<TimelinerStatusGroup, string> = {
 /** Videos an editor still has to work on (and so can say they're on). */
 export const isOnPlate = (s: VideoState) => s === 'to_edit' || s === 'revisions';
 
+/** A video as the "Not matched" and "Check" rules see it (an EditingVideo). */
+interface MatchedVideo { state: VideoState; batch: unknown; match: { how: string | null; check: boolean } }
+
+/** Open and not matched to a shoot: the "Not matched" chip and count. Pinned to no batch is a manager's answer, not a gap. */
+export const isNotMatched = (v: MatchedVideo) => v.state !== 'approved' && !v.batch && v.match.how !== 'pinned';
+
+/** Open, and another video in its folder has its title on the same shoot: the "Check" chip and count. */
+export const needsCheck = (v: MatchedVideo) => v.state !== 'approved' && v.match.check;
+
 /** The number in a video's title, for ordering and its script ("Organic 05" → 5); null when it has none. */
 export const titleNumber = (title: string): number | null => { const m = /\d+/.exec(title); return m ? Number(m[0]) : null; };
+
+const CLIP_EXT = /\.(mp4|mov|mxf|m4v|avi|braw|r3d|mts|insv)$/i;
+/** first letters that make a name a titled video, not a camera's clip ("Ad003", "EP101") */
+const TITLE_LETTERS = /^(ad|ads|ep)$/i;
+
+/**
+ * A raw camera clip rather than a titled video: after any video file extension (and a copy's " (1)"), the title
+ * is only a camera's name for a clip:
+ * - letters a camera puts first (IMG, DSC, MVI, GX, GOPR, DJI, PXL, VID, C, A, CLIP…, up to five, maybe with an
+ *   underscore) and a number of three or more digits, maybe followed by more numbers after _ or - (a date, a time,
+ *   a take) and a lens letter: "C0045", "IMG_1234.MOV", "DSC_0102", "PXL_20261006_143022", "DJI_20261006143022_0001_D";
+ * - a cinema camera's reel and clip: "A001_08241432_C001" (Blackmagic), "A001_C002_0101AB" (RED),
+ *   "A001C003_221010_R2VK" (ARRI);
+ * - only digits: four or more ("1234"), or groups joined by _ or - with six or more in all ("20261006_143022").
+ * "Ad003" and "EP101" are titles. The footage is uploaded under the client right after a shoot; editors cut it
+ * into titled, numbered videos ("05 – Morning routine", "Ad 3"), so a raw clip never says which script it is.
+ */
+export function isRawTitle(title: string): boolean {
+  const t = title.trim().replace(CLIP_EXT, '').replace(/\s*\(\d{1,3}\)$/, '');
+  if (!t || /\s/.test(t)) return false;
+  const camera = /^([A-Za-z]{1,5})_?\d{3,}(?:[_-]\d+)*(?:[_-][A-Za-z]{1,2})?$/.exec(t);
+  if (camera) return !TITLE_LETTERS.test(camera[1]);
+  if (/^[A-Za-z]\d{3}(?:[A-Za-z]\d{3})?(?:[_-](?=[A-Za-z]*\d)[A-Za-z0-9]+)+$/.test(t)) return true;
+  if (/^\d{4,}$/.test(t)) return true;
+  return /^\d+(?:[_-]\d+)+$/.test(t) && t.replace(/\D/g, '').length >= 6;
+}
 
 /** "Organic 26", "Organic 27"… "Organic 30" → "Organic 26–30": titles that differ only by their number, as ranges. */
 export function compressTitles(titles: string[]): string {
