@@ -33,8 +33,6 @@ const members: Members = [
 beforeAll(async () => {
   w = await makeWorld();
   w.api.members = async () => members;
-  // every video here counts for the one-editor-per-client rule: it began before any of them was made
-  expect((await w.send('PATCH', '/api/settings', w.admin, { oneEditorSince: '2026-01-01' })).status).toBe(200);
   for (const [name, email] of [['Sam Lee', 'sam@scale.test'], ['Nia North', 'nia@scale.test']]) {
     const r = await w.send('POST', '/api/users', w.admin, { name, email, role: 'editor', password: 'team-password-1' });
     expect(r.status).toBe(200);
@@ -80,7 +78,7 @@ describe('everyone in Timeliner has a card', () => {
   it('gives someone who isn’t on the site a card with their videos, flagged to add them', () => {
     expect(card('Gus Ghost')).toMatchObject({
       key: 'mm_gus', userId: null, memberId: 'm_gus', site: false, focus: null,
-      flag: { kind: 'not_on_site', text: 'Not on the site — Timeliner knows them as gus@freelance.test', timelinerEmail: 'gus@freelance.test', siteEmail: null, offSiteId: null },
+      flag: { kind: 'not_on_site', text: 'Not on the site — add them in Settings → Team as an Editor with gus@freelance.test', timelinerEmail: 'gus@freelance.test', siteEmail: null },
       plate: { revisions: 1 }, dueToday: 1,
       // Right now from Timeliner: what's next
       nextUp: { title: 'Zen 01' },
@@ -93,14 +91,14 @@ describe('everyone in Timeliner has a card', () => {
       key: 'mm_dana', userId: null, site: false, city: 'Manila, Philippines', timezone: 'Asia/Manila', workHours: [9, 18],
       // 9:40 PM in Manila
       offHours: true,
-      flag: { kind: 'no_site_access', text: 'In Settings → Editors without site access — Timeliner knows them as dana@studio.test', offSiteId: expect.any(Number) },
+      flag: { kind: 'no_site_access', text: 'Not on the site — give them site access in Settings → Editors with dana@studio.test' },
     });
   });
 
-  it('flags someone on the site whom Timeliner knows by another email, and still shows their Timeliner work', () => {
+  it('flags someone on the site whose email differs from Timeliner’s, and still shows their Timeliner work', () => {
     expect(card('Sam Lee')).toMatchObject({
       key: `u${ids.sam}`, userId: ids.sam, memberId: 'm_sam', site: true, focus: null,
-      flag: { kind: 'email_differs', text: 'Timeliner knows Sam Lee as sam.lee@gmail.test', timelinerEmail: 'sam.lee@gmail.test', siteEmail: 'sam@scale.test' },
+      flag: { kind: 'email_differs', text: 'Their email here (sam@scale.test) differs from Timeliner (sam.lee@gmail.test) — change one so they match' },
       videos: [expect.objectContaining({ title: 'Organic 06' })],
     });
     // one card for them, not a second one from Timeliner
@@ -110,7 +108,7 @@ describe('everyone in Timeliner has a card', () => {
   it('keeps a card for an editor on the site with nothing in Timeliner, with a quiet note', () => {
     expect(card('Nia North')).toMatchObject({
       site: true, videos: [], clients: [],
-      flag: { kind: 'nothing_assigned', text: 'Nothing assigned in Timeliner under nia@scale.test' },
+      flag: { kind: 'nothing_assigned', text: 'Nothing assigned in Timeliner (their Timeliner email must be nia@scale.test)' },
     });
     // people matched by email need nothing fixed
     expect(card('Leo Martins').flag).toBeNull();

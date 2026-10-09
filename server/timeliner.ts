@@ -27,7 +27,7 @@ import { batchLink, loadSettings, logActivity, managerIds, notify, type Ctx } fr
 import { requireManager } from './auth';
 import { HttpError, conflict, notFound, parse, zs } from './http';
 import { applyScriptAction } from './routes/batches';
-import { applyTaskMessage, dropDocumentTask, MEMBER_IS_USER, OWNER_IDS, USER_HAS_EMAIL } from './editing';
+import { applyTaskMessage, dropDocumentTask, OWNER_IDS } from './editing';
 import { batchDay, clientFit, dayOf, nameKey, PDF_AHEAD, PDF_LATE, PDF_LATE_FALLBACK, placePdf, type PdfBatch } from './matching';
 import {
   TIMELINER_KEY_PERMISSIONS, type Me, type TimelinerEvent, type TimelinerOutcome, type TimelinerPdfHow, type TimelinerPdfLink, type TimelinerStatus,
@@ -298,19 +298,12 @@ export function readMessage(raw: unknown): UploadMessage {
 interface UserRow { id: number; name: string; email: string; role: Me['role']; capacity_per_day: number | null }
 const asMe = (u: UserRow): Me => ({ id: u.id, name: u.name, email: u.email, role: u.role, capacityPerDay: u.capacity_per_day });
 
-/**
- * Whom a Timeliner delivery is recorded under: the uploader when they're on the team (their Timeliner email is the
- * one they sign in with, or their Timeliner email here), else whoever connected Timeliner, else an Admin.
- */
+/** Whom a Timeliner delivery is recorded under: the uploader when they're on the team, else whoever connected Timeliner, else an Admin. */
 async function actorFor(db: Db, uploaderEmail: string | null): Promise<Me | null> {
   const cols = `id, name, email, role, capacity_per_day`;
   const live = `active and removed_at is null and role <> 'editor'`;
   if (uploaderEmail) {
-    // the one who signs in with it first, should both name someone
-    const u = await db.one<UserRow>(
-      `select ${cols} from users u where ${USER_HAS_EMAIL('u', '$1')} and ${live} order by (lower(trim(u.email)) = lower(trim($1))) desc, id limit 1`,
-      [uploaderEmail],
-    );
+    const u = await db.one<UserRow>(`select ${cols} from users where lower(email) = lower($1) and ${live}`, [uploaderEmail]);
     if (u) return asMe(u);
   }
   const u = await db.one<UserRow>(
@@ -684,7 +677,7 @@ async function deliverFromTimeliner(
       const editors = await t.query<{ id: number }>(
         `select distinct u.id from timeliner_tasks tt
            join timeliner_members m on m.id = any(${OWNER_IDS('tt')})
-           join users u on ${MEMBER_IS_USER('m', 'u')} and u.active and u.removed_at is null
+           join users u on lower(u.email) = lower(m.email) and u.active and u.removed_at is null
           where tt.batch_id = $1 and tt.status_group not in ('supervisorApproval', 'clientApproval', 'endClientApproval', 'approved', 'posted')`, [target],
       );
       await notify(t, editors.map((e) => Number(e.id)), {

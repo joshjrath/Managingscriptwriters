@@ -240,7 +240,7 @@ describe('reading Timeliner', () => {
     expect(editor(b, 'Leo Martins').videos).toEqual([]);
     // nothing read yet: each editor's card says what Timeliner must have
     expect(editor(b, 'Leo Martins').flag).toEqual({
-      kind: 'nothing_assigned', text: 'Nothing assigned in Timeliner under leo@scale.test', timelinerEmail: null, siteEmail: 'leo@scale.test', offSiteId: null,
+      kind: 'nothing_assigned', text: 'Nothing assigned in Timeliner (their Timeliner email must be leo@scale.test)', timelinerEmail: null, siteEmail: 'leo@scale.test',
     });
   });
 
@@ -290,7 +290,7 @@ describe('reading Timeliner', () => {
     expect(b.editors.map((e) => [e.name, e.offHours])).toEqual([['Maya Reyes', false], ['Leo Martins', false], ['Gus Ghost', false], ['Priya Nair', true]]);
     expect(editor(b, 'Gus Ghost')).toMatchObject({
       key: 'mm_ghost', userId: null, memberId: 'm_ghost', site: false, focus: null, videos: [expect.objectContaining({ title: 'Organic 09' })],
-      flag: { kind: 'not_on_site', text: 'Not on the site — Timeliner knows them as ghost@freelance.test' },
+      flag: { kind: 'not_on_site', text: 'Not on the site — add them in Settings → Team as an Editor with ghost@freelance.test' },
     });
     const leoRow = editor(b, 'Leo Martins');
     expect(leoRow.plate).toEqual({ toEdit: 2, rawToEdit: 0, revisions: 1, inReview: 1, withClient: 0, approvedWeek: 1 });

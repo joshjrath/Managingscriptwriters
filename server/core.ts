@@ -4,7 +4,7 @@
 import type { Db } from './db';
 import { makeClock, type Clock, type DeadlineRules, type ISODate } from '../shared/dates';
 import {
-  compressRanges, deriveStage, milestone, nextMilestone, ONE_EDITOR_SINCE, summarize,
+  compressRanges, deriveStage, milestone, nextMilestone, summarize,
   type ScriptLite, type ScriptStatus, type Role,
 } from '../shared/workflow';
 import type { WorkspaceTheme } from '../shared/palettes';
@@ -41,7 +41,7 @@ export interface Ctx {
 interface SettingsRow {
   org_name: string; timezone: string; cutoff: string; draft_offset_days: number; final_offset_days: number;
   day_mode: 'calendar' | 'business'; working_days: number[] | string; reminder_lead_days: number; plan_reminder_days: number;
-  is_demo: boolean; reminders_last_run_at: string | null; theme: WorkspaceTheme | string | null; one_editor_since: string | null;
+  is_demo: boolean; reminders_last_run_at: string | null; theme: WorkspaceTheme | string | null;
 }
 
 /** `remindersEnabled` is the server's, not the workspace's: pages get settings through `settingsFor`, which fills it in. */
@@ -55,7 +55,6 @@ export async function loadSettings(db: Db, remindersEnabled = true): Promise<Set
     dayMode: r.day_mode, workingDays: wd, reminderLeadDays: r.reminder_lead_days, planReminderDays: r.plan_reminder_days ?? 14,
     isDemo: r.is_demo, remindersLastRunAt: r.reminders_last_run_at, remindersEnabled,
     theme: typeof r.theme === 'string' ? JSON.parse(r.theme) : r.theme ?? null,
-    oneEditorSince: r.one_editor_since ?? ONE_EDITOR_SINCE,
   };
 }
 
@@ -76,50 +75,17 @@ export async function clockFor(ctx: Ctx, settings?: Settings): Promise<Clock> {
 interface UserRow {
   id: number; name: string; email: string; role: Role; active: boolean; capacity_per_day: number | null;
   removed_at: string | null; temp_password: string | null; city: string | null; country: string | null; timezone: string | null; work_start: number | null; work_end: number | null;
-  timeliner_email: string | null;
 }
 
 export async function loadUsers(db: Db): Promise<UserSummary[]> {
-  const rows = await db.query<UserRow>(`select id, name, email, role, active, capacity_per_day, removed_at, temp_password, city, country, timezone, work_start, work_end, timeliner_email from users order by active desc, name`);
+  const rows = await db.query<UserRow>(`select id, name, email, role, active, capacity_per_day, removed_at, temp_password, city, country, timezone, work_start, work_end from users order by active desc, name`);
   // temp passwords are stripped here; only the team endpoint adds them back for owners and managers
   return rows.map((r) => ({
     id: r.id, name: r.name, email: r.email, role: r.role, active: r.active && !r.removed_at, removed: !!r.removed_at, capacityPerDay: r.capacity_per_day, tempPassword: null,
     city: r.city ? `${r.city}${r.country ? `, ${r.country}` : ''}` : null,
     timezone: r.timezone,
     workHours: r.work_start != null && r.work_end != null ? [r.work_start, r.work_end] : null,
-    timelinerEmail: r.timeliner_email,
   }));
-}
-
-/**
- * Who already has `email` (any case): someone on the team who signs in with it or has it as their Timeliner email,
- * and, with `editors`, someone in Settings → Editors with it as theirs. `except` leaves out the person being saved.
- * One email names one person, so a Timeliner member is never two people. Removed people don't count.
- */
-export async function emailHolder(
-  db: Db, email: string, opts: { exceptUserId?: number; exceptEditorId?: number; signIn?: boolean; editors?: boolean } = {},
-): Promise<{ name: string; how: 'sign-in' | 'timeliner' | 'editor' } | null> {
-  const u = await db.one<{ name: string; how: 'sign-in' | 'timeliner' }>(
-    `select name, case when lower(email) = lower($1) then 'sign-in' else 'timeliner' end as how from users
-      where removed_at is null and id is distinct from $2::bigint
-        and (($3::boolean and lower(email) = lower($1)) or lower(timeliner_email) = lower($1))
-      order by (lower(email) = lower($1)) desc, id limit 1`,
-    [email, opts.exceptUserId ?? null, opts.signIn !== false],
-  );
-  if (u) return u;
-  if (!opts.editors) return null;
-  const e = await db.one<{ name: string }>(
-    `select name from editors where removed_at is null and id is distinct from $2::bigint and lower(timeliner_email) = lower($1) order by id limit 1`,
-    [email, opts.exceptEditorId ?? null],
-  );
-  return e ? { name: e.name, how: 'editor' } : null;
-}
-
-/** "Sam Lee signs in with that email", for a refused Timeliner email (409), naming who has it. */
-export function emailTakenWords(who: { name: string; how: 'sign-in' | 'timeliner' | 'editor' }): string {
-  return who.how === 'sign-in' ? `${who.name} signs in with that email, so it can’t be someone else’s Timeliner email.`
-    : who.how === 'timeliner' ? `${who.name} already has that as their Timeliner email.`
-    : `${who.name} (Settings → Editors) already has that as their Timeliner email.`;
 }
 
 /** Editors who can sign in: they hear when a shoot's scripts are final, or the shoot moves. */

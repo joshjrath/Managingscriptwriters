@@ -6,7 +6,7 @@
 //   delivered   = delivered to Timeliner (writer-confirmed)
 // A script returned for revisions is not draft-ready until it is resubmitted.
 
-import { dueState, describeDue, onOrAfterDay, type Clock, type ISODate } from './dates';
+import { dueState, describeDue, type Clock, type ISODate } from './dates';
 
 export const SCRIPT_STATUSES = [
   'not_started',
@@ -440,19 +440,3 @@ export const FOCUS_STALE_HOURS = 10;
  */
 export const isFocusStale = (f: { state: 'on' | 'paused'; since: string }, offHours: boolean, now: number) =>
   f.state === 'on' && (offHours || now - Date.parse(f.since) >= FOCUS_STALE_HOURS * 3600_000);
-
-/**
- * The day the team began giving each client one editor (Oct 9, 2026, with its first two editors). Before it, a
- * client's videos went to whoever was free. A workspace's own date is `settings.oneEditorSince` (Settings →
- * Timeliner); this is the one migration 35 starts it with.
- */
-export const ONE_EDITOR_SINCE = '2026-10-09';
-
-/**
- * A video counts for the one-editor-per-client rule when it was made in Timeliner on or after the day the rule began
- * (`oneEditorSince`), in the workspace's time zone. Older videos were given out before the rule: they still show on
- * their editor's card and in every count, but never flag a client as split or as having two editors, and never
- * decide whom a client's videos usually go to. A video with no date never counts.
- */
-export const underOneEditorRule = (createdAt: string | null | undefined, oneEditorSince: ISODate, tz: string) =>
-  onOrAfterDay(createdAt, oneEditorSince, tz);

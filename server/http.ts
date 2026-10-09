@@ -47,15 +47,10 @@ export function parse<T extends z.ZodType>(schema: T, data: unknown): z.infer<T>
 // ── reusable field schemas ───────────────────────────────────────────────
 
 const trimmed = (max: number) => z.string().trim().max(max, `Keep this under ${max} characters`);
-const email = z.string().trim().toLowerCase().email('Enter a valid email').max(200);
 
 export const zs = {
   id: z.coerce.number().int().positive(),
   name: (label = 'Name', max = 160) => trimmed(max).min(1, `${label} is required`),
-  /** an email, trimmed and in lower case (as sign-in and Timeliner emails are kept) */
-  email,
-  /** an email that can be cleared: empty or null clears it */
-  emailOrNone: z.preprocess((v) => (typeof v === 'string' && !v.trim() ? null : v), email.nullable()),
   text: (max = 20000) => trimmed(max).transform((v) => v || null).nullable().optional(),
   // a real calendar date (shared rule) in a sane range: a year typed as "26" arrives as 0026, which date maths reads as 1926
   date: z.string().refine((v) => isISODate(v) && v >= '1900-01-01' && v <= '2999-12-31', 'Use a valid date'),
