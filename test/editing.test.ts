@@ -234,16 +234,21 @@ describe('where a video stands', () => {
 describe('reading Timeliner', () => {
   it('shows the editors before Timeliner has been read', async () => {
     const b = await board();
-    expect(b.sync).toEqual({ keySet: true, syncedAt: null, error: null });
+    expect(b.sync).toEqual({ keySet: true, syncedAt: null, error: null, counts: null });
     expect(b.editors.map((e) => e.name).sort()).toEqual(['Leo Martins', 'Maya Reyes', 'Priya Nair']);
     expect(editor(b, 'Leo Martins').videos).toEqual([]);
+    // nothing read yet: each editor's card says what Timeliner must have
+    expect(editor(b, 'Leo Martins').flag).toEqual({
+      kind: 'nothing_assigned', text: 'Nothing assigned in Timeliner (their Timeliner email must be leo@scale.test)', timelinerEmail: null, siteEmail: 'leo@scale.test',
+    });
   });
 
   it('reads every video and matches it to its client, batch, script and document', async () => {
     const r = await send('POST', '/api/editing/sync', admin, {});
     expect(r.status).toBe(200);
     const b = r.body as EditingBoard;
-    expect(b.sync).toEqual({ keySet: true, syncedAt: NOW.toISOString(), error: null });
+    // ten videos kept, given to four people, under two Timeliner brands
+    expect(b.sync).toEqual({ keySet: true, syncedAt: NOW.toISOString(), error: null, counts: { videos: 10, people: 4, clients: 2, skipped: 0 } });
 
     const leoRow = editor(b, 'Leo Martins');
     // the newest shoot on or before the video was made, in the folder's batch (Organic, not Ads). Still to be
@@ -280,8 +285,12 @@ describe('reading Timeliner', () => {
   it('puts the managers’ board together: plates, what’s next, last finished, nobody yet, and who isn’t on the site', async () => {
     const b = await board();
     expect(b.totals).toEqual({ editingNow: 0, paused: 0, dueToday: 1, revisions: 1, waitingOnYou: 2, notAssigned: 2, notMatched: 0, toCheck: 0 });
-    // due today first, then revisions; off hours last
-    expect(b.editors.map((e) => [e.name, e.offHours])).toEqual([['Maya Reyes', false], ['Leo Martins', false], ['Priya Nair', true]]);
+    // due today first, then revisions; off hours last. Gus isn't on the site: his card sorts with the rest, flagged
+    expect(b.editors.map((e) => [e.name, e.offHours])).toEqual([['Maya Reyes', false], ['Leo Martins', false], ['Gus Ghost', false], ['Priya Nair', true]]);
+    expect(editor(b, 'Gus Ghost')).toMatchObject({
+      key: 'mm_ghost', userId: null, memberId: 'm_ghost', site: false, focus: null, videos: [expect.objectContaining({ title: 'Organic 09' })],
+      flag: { kind: 'not_on_site', text: 'Not on the site — add them in Settings → Team as an Editor with ghost@freelance.test' },
+    });
     const leoRow = editor(b, 'Leo Martins');
     expect(leoRow.plate).toEqual({ toEdit: 2, rawToEdit: 0, revisions: 1, inReview: 1, withClient: 0, approvedWeek: 1 });
     expect(leoRow.nextUp?.title).toBe('Organic 03');
@@ -292,6 +301,8 @@ describe('reading Timeliner', () => {
     expect(b.unassigned).toEqual([{
       folder: 'My Videos › Organic', clientName: 'Joshua Shalimar', count: 2, raw: false, batch: null, titles: 'Organic 07–08', due: '2026-10-09',
       videoTitles: ['Organic 07', 'Organic 08'], scripts: [expect.objectContaining({ href: 'https://docs.example/organic-oct6-edited', source: 'site', edited: true })],
+      // Joshua Shalimar's editor: Leo has the most of its videos
+      brand: 'Joshua Shalimar', suggested: { name: 'Leo Martins', userId: expect.any(Number), memberId: 'm_leo', key: expect.stringMatching(/^u\d+$/) },
     }]);
     expect(b.unknownAssignees).toEqual([{ name: 'Gus Ghost', email: 'ghost@freelance.test', count: 1 }]);
   });

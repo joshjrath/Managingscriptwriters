@@ -22,6 +22,7 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-10-07-my-work-redesign': ['writers', 'managers'], '2026-09-28-written-counter': ['writers', 'managers'], '2026-10-08-writers-never-miss': ['writers', 'managers'],
   '2026-10-08-manager-editor-screens': ['managers', 'editors'], '2026-10-08-overview-cards': ['managers', 'writers'], '2026-10-08-writers-overview-back': ['writers', 'managers'], '2026-10-08-feedback-match-fix': ['managers'], '2026-10-08-editors-never-get-scripts': ['managers'], '2026-10-08-due-tiles': ['managers', 'writers'], '2026-10-08-master-log-everything': ['managers'], '2026-10-08-no-script-titles': ['managers', 'writers'], '2026-10-08-timeliner-auto-delivery': ['managers', 'writers'], '2026-10-08-timeliner-key-permissions': ['managers'],
   '2026-10-08-editors-tab-timeliner': ['managers', 'editors'], '2026-10-08-timeliner-matching': ['managers', 'editors'],
+  '2026-10-09-editors-everyone-in-timeliner': ['managers'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -35,6 +36,19 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-09-editors-everyone-in-timeliner',
+    date: '2026-10-09',
+    title: 'The Editors tab shows everyone working in Timeliner',
+    summary: 'Every editor with videos in Timeliner now has a card, whether or not they’re on the site, every client’s videos show up, and each card leads with the editor’s client.',
+    changes: [
+      { tag: 'fixed', text: 'The Editors tab no longer comes up empty when editors aren’t on the site under the same email. Everyone with videos in Timeliner has a card with their videos, what’s next and their last finished video, and the totals at the top count everyone’s work.' },
+      { tag: 'new', text: 'Someone who isn’t on the site is flagged on their card with what to do: add them in Settings → Team as an Editor with their Timeliner email, or give them site access in Settings → Editors when they’re listed there (their card then uses that city and working hours). Someone on the site under a different email than in Timeliner is flagged too, and an editor with nothing in Timeliner says which email Timeliner needs.' },
+      { tag: 'improved', text: 'Videos for clients you don’t write scripts for, and for brands in Timeliner that aren’t clients here, show up as normal work under the Timeliner brand’s name, marked “No scripts on the site”, not “Not matched”.' },
+      { tag: 'new', text: 'Each client has one editor. Each editor’s card leads with their client (“Joshua Shalimar · 32 videos”), and the tab works out each client’s editor from Timeliner: whoever has had most of its videos in the last 60 days. A client whose open videos are split across editors is flagged (“Brightside: 18 with Maya, 3 with Sam — one editor per client”), and a shoot’s clips nobody has been given yet suggest the client’s usual editor.' },
+      { tag: 'improved', text: 'The tab says how much it read (“Read 214 videos · 6 people · 9 clients from Timeliner 2 min ago”). Something in Timeliner the site can’t read is skipped and counted instead of stopping the whole read, and when Timeliner answers with an error the tab says exactly what it answered and keeps the last copy.' },
+    ],
+  },
   {
     id: '2026-10-08-timeliner-matching',
     date: '2026-10-08',

@@ -16,7 +16,8 @@
 // Timeliner, never its later versions). Raw camera clips are uploaded right after their shoot; a titled video
 // an editor makes later goes to the shoot whose raw clips that editor has been cutting. The folder's word
 // (Organic, Ads) only decides between batches of the same shoot. A video that has been in review keeps its
-// batch. A manager's pin beats everything.
+// batch. A manager's pin beats everything. A video whose brand is no site client (`no_client`), or whose client
+// has no scripts on the site (`no_scripts`), is normal work with no batch: it isn't "Not matched".
 
 import { addDays, diffDays, nowInZone, type ISODate } from '../shared/dates';
 import { fmtDate as formatDate } from '../shared/format';
@@ -435,16 +436,19 @@ export function matchVideos(videos: VideoIn[], w: World): Map<string, VideoMatch
   };
   const shootName = (b: VideoBatch) => (b.d ? (b.dFrom === 'shoot' ? `the ${fmtDate(b.d)} shoot` : `${b.title} (due ${fmtDate(b.d)})`) : b.title);
 
-  /** V4 · the client: the one whose scripts PDFs sit in the video's project, else the brand's name, else the project's */
-  const clientOf = (v: VideoIn): { id: number | null; why: string | null } => {
+  /**
+   * V4 · the client: the one whose scripts PDFs sit in the video's project, else the brand's name, else the
+   * project's. `none` when no site client fits at all (a brand the site doesn't have: normal work, not a gap)
+   */
+  const clientOf = (v: VideoIn): { id: number | null; why: string | null; none: boolean } => {
     const here = v.projectId ? projectClients.get(v.projectId) : undefined;
-    if (here?.size === 1) return { id: [...here][0], why: null };
+    if (here?.size === 1) return { id: [...here][0], why: null, none: false };
     const brand = nameOf(v.brandId);
     const project = nameOf(v.projectId);
     const fit = fitClient(w.clients, [brand, project]);
-    if (fit.client) return { id: fit.client.id, why: null };
-    if (fit.tie.length) return { id: null, why: `More than one client fits its Timeliner name: ${fit.tie.map((c) => c.name).join(', ')}.` };
-    return { id: null, why: `No client is named like ${[brand, project].filter(Boolean).map((x) => `“${x}”`).join(' or ') || 'its Timeliner brand or project'}.` };
+    if (fit.client) return { id: fit.client.id, why: null, none: false };
+    if (fit.tie.length) return { id: null, why: `More than one client fits its Timeliner name: ${fit.tie.map((c) => c.name).join(', ')}.`, none: false };
+    return { id: null, why: `No client on the site is named like ${[brand, project].filter(Boolean).map((x) => `“${x}”`).join(' or ') || 'its Timeliner brand or project'}.`, none: true };
   };
 
   /** V8 · batches of the same shoot (the legacy Organic/Ads split): the folder's word, then the project its PDF sits in */
@@ -486,11 +490,15 @@ export function matchVideos(videos: VideoIn[], w: World): Map<string, VideoMatch
     }
 
     const client = clientOf(v);
-    if (client.id == null) return none(null, client.why ?? 'No client fits.');
+    // a brand that's no site client, or a site client with no scripts here: normal work with nothing to match it to
+    if (client.id == null) return { ...none(null, client.why ?? 'No client fits.'), how: client.none ? 'no_client' : null };
+    const clientName = w.clients.find((c) => c.id === client.id)?.name ?? 'The client';
+    const all = byClient.get(client.id) ?? [];
+    if (!all.some((b) => b.numbers.size > 0 || withPdf.has(b.id))) return { ...none(client.id, `${clientName} has no scripts on the site.`), how: 'no_scripts' };
     const C = v.createdAt ? day(v.createdAt) : null;
     // its client's batches with finished scripts or a scripts PDF, never one whose shoot is after the video is due
-    const cands = (byClient.get(client.id) ?? []).filter((b) => (b.finished > 0 || withPdf.has(b.id)) && !(v.deadline && b.d && b.d > v.deadline));
-    if (!cands.length) return none(client.id, `${w.clients.find((c) => c.id === client.id)?.name ?? 'The client'} has no batch with approved scripts${v.deadline ? ` before it’s due (${fmtDate(v.deadline)})` : ''}.`);
+    const cands = all.filter((b) => (b.finished > 0 || withPdf.has(b.id)) && !(v.deadline && b.d && b.d > v.deadline));
+    if (!cands.length) return none(client.id, `${clientName} has no batch with approved scripts${v.deadline ? ` before it’s due (${fmtDate(v.deadline)})` : ''}.`);
     const done = (b: VideoBatch, how: VideoMatchHow, note: string): VideoMatchOut => ({ clientId: b.clientId, batchId: b.id, number: fitNumber(v, b), how, kept: false, check: false, note });
     const tieOrNone = (pool: VideoBatch[], how: VideoMatchHow, note: string): VideoMatchOut => {
       const s = sameShoot(pool, v);

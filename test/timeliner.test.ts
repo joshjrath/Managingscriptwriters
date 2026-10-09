@@ -114,6 +114,22 @@ describe('talking to Timeliner', () => {
     const page = '/tasks?limit=100&before=2026-10-01T00%3A00%3A00.000Z';
     expect(asked).toEqual([page, page, '/tasks/t1/activity?action=moved&limit=1']);
   });
+  it('says what Timeliner answered, and never takes an answer that isn’t a list for an empty one', async () => {
+    const answer = (status: number, body: unknown) => (async () => new Response(typeof body === 'string' ? body : JSON.stringify(body), { status })) as typeof fetch;
+    const tl = (f: typeof fetch) => timelinerClient('tlsk_test', 'https://timeliner.test', f);
+    await expect(tl(answer(500, { error: 'Internal server error' })).tasks(null)).rejects.toThrow('Timeliner answered 500: Internal server error.');
+    // an error in another shape still says what it was
+    await expect(tl(answer(502, { error: { message: 'Upstream  timed out.' } })).tasks(null)).rejects.toThrow('Timeliner answered 502: Upstream timed out.');
+    await expect(tl(answer(503, '<html>down</html>')).tasks(null)).rejects.toThrow('Timeliner answered 503.');
+    // a 200 that isn't a list (or a list that isn't there) would read as "nothing in Timeliner" and empty the copy
+    await expect(tl(answer(200, {})).tasks(null)).rejects.toThrow('Timeliner’s answer for /tasks wasn’t a list, so the last copy is kept.');
+    await expect(tl(answer(200, '<html>sign in</html>')).brands(null)).rejects.toThrow('Timeliner’s answer for /brands wasn’t a list');
+    await expect(tl(answer(404, {})).tasks(null)).rejects.toThrow('wasn’t a list');
+    await expect(tl(answer(200, { data: { id: 'm1' } })).members()).rejects.toThrow('Timeliner’s answer for /members wasn’t a list');
+    // a step move with odd fields: only what can be used
+    expect(await tl(answer(200, { data: [{ createdAt: '2026-10-07T17:15:00Z', movedTo: { name: 'x' }, actor: null }] })).lastMove('t1')).toEqual({ at: '2026-10-07T17:15:00Z', to: null, byId: null });
+    expect(await tl(answer(200, { data: [{ createdAt: 12 }] })).lastMove('t1')).toBeNull();
+  });
 });
 
 describe('matching helpers', () => {

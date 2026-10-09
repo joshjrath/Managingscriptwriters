@@ -202,10 +202,10 @@ function SyncBanner({ s, now }: { s: EditingSync; now: number }) {
 
 function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: number; today: ISODate; workspaceTz: string }) {
   const t = b.totals;
-  const kinds = new Map(b.editors.map((e) => [e.userId, nowKind(e, now)]));
-  const live = b.editors.filter((e) => kinds.get(e.userId) === 'live');
-  const paused = b.editors.filter((e) => kinds.get(e.userId) === 'paused');
-  const stale = b.editors.filter((e) => kinds.get(e.userId) === 'stale');
+  const kinds = new Map(b.editors.map((e) => [e.key, nowKind(e, now)]));
+  const live = b.editors.filter((e) => kinds.get(e.key) === 'live');
+  const paused = b.editors.filter((e) => kinds.get(e.key) === 'paused');
+  const stale = b.editors.filter((e) => kinds.get(e.key) === 'stale');
   const held = [...paused, ...stale];
   const next = b.editors.find((e) => !e.focus && e.nextUp && !e.offHours) ?? b.editors.find((e) => !e.focus && e.nextUp);
 
@@ -277,7 +277,7 @@ function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: nu
           {rev.slice(0, 3).map((e) => {
             const vids = e.videos.filter((v) => v.state === 'revisions' && !v.doneAt);
             const round = Math.max(0, ...vids.map((v) => v.revisionRound));
-            return <span key={e.userId} className="kpi-row"><span className="ellipsis">{first(e.name)} · <b>{videoTitles(vids)}</b></span><span>{round ? `Round ${round}` : ''}</span></span>;
+            return <span key={e.key} className="kpi-row"><span className="ellipsis">{first(e.name)} · <b>{videoTitles(vids)}</b></span><span>{round ? `Round ${round}` : ''}</span></span>;
           })}
           {!rev.length && <span className="kpi-row"><span>Every video is moving forward</span></span>}
         </span>
@@ -295,7 +295,7 @@ function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: nu
   const others = Math.max(0, t.waitingOnYou - mine.length);
   if (others) steps.set('Others', others);
   const oldest = mine.filter((v) => v.state === 'in_review' && v.movedAt).map((v) => v.movedAt!).sort()[0];
-  const byEditor = [...new Map(waiting.map(({ e }) => [e.userId, e])).values()]
+  const byEditor = [...new Map(waiting.map(({ e }) => [e.key, e])).values()]
     .map((e) => ({ e, vids: waiting.filter((w) => w.e === e).map((w) => w.v) })).sort((a, c) => c.vids.length - a.vids.length);
   const waitCard = (
     <KpiCard tone="review" icon={<Eye />} n={t.waitingOnYou}
@@ -306,7 +306,7 @@ function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: nu
       foot={(
         <span className="kpi-list">
           {byEditor.slice(0, others ? 2 : 3).map(({ e, vids }) => (
-            <span key={e.userId} className="kpi-row"><span className="ellipsis">{first(e.name)} · {videoTitles(vids)}</span><b className="num">{vids.length}</b></span>
+            <span key={e.key} className="kpi-row"><span className="ellipsis">{first(e.name)} · {videoTitles(vids)}</span><b className="num">{vids.length}</b></span>
           ))}
           {others > 0 && <span className="kpi-row"><span className="ellipsis">Others in Timeliner</span><b className="num">{others}</b></span>}
           {!byEditor.length && !others && <span className="kpi-row"><span>Nothing sent to review yet</span></span>}
@@ -328,8 +328,8 @@ function nextDue(b: EditingBoard, today: ISODate): string {
 // ── roster ───────────────────────────────────────────────────────────────
 
 function Roster({ b, now, tz, today }: { b: EditingBoard; now: number; tz: string; today: ISODate }) {
-  const [open, setOpen] = useState<Set<number>>(() => new Set());
-  const toggle = (id: number) => setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const [open, setOpen] = useState<Set<string>>(() => new Set());
+  const toggle = (id: string) => setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   // every bar against the fullest plate, so they compare at a glance
   const scale = Math.max(1, ...b.editors.map(plateTotal));
   return (
@@ -344,7 +344,7 @@ function Roster({ b, now, tz, today }: { b: EditingBoard; now: number; tz: strin
         <div className="ed-colhead" aria-hidden><span>Editor</span><span>Right now</span><span>On their plate this week</span></div>
       )}
       <div className="ed-list">
-        {b.editors.map((e) => <EditorCard key={e.userId} e={e} scale={scale} now={now} tz={tz} today={today} open={open.has(e.userId)} onToggle={() => toggle(e.userId)} />)}
+        {b.editors.map((e) => <EditorCard key={e.key} e={e} scale={scale} now={now} tz={tz} today={today} open={open.has(e.key)} onToggle={() => toggle(e.key)} />)}
         {b.unassigned.length > 0 && <NotAssigned b={b} today={today} />}
       </div>
       {b.unknownAssignees.length > 0 && <Unknown list={b.unknownAssignees} />}

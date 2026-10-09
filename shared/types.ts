@@ -896,12 +896,19 @@ export interface ScriptDoc {
  * folder made for one shoot's scripts (`place`), its folder or title naming the shoot's date (`name`), the shoot
  * whose raw clips its editor has been cutting (`editor`), the latest shoot before it was made (`date`), the shoot
  * just after (`next`, when it was made ahead), or the client's only undated batch (`undated`).
+ *
+ * Two answers that are normal work, not gaps (never "Not matched"): `no_scripts`, its Timeliner brand is a site
+ * client that has no scripts on the site (clientId set, no batch); `no_client`, its brand (or project) is no site
+ * client (no client, no batch; `EditingVideo.brand` names it).
  */
-export type VideoMatchHow = 'pinned' | 'parent' | 'place' | 'name' | 'editor' | 'date' | 'next' | 'undated';
+export type VideoMatchHow = 'pinned' | 'parent' | 'place' | 'name' | 'editor' | 'date' | 'next' | 'undated' | 'no_scripts' | 'no_client';
 
 /** How sure the site is of a video's batch. */
 export interface VideoMatch {
-  /** null: not matched (the editor sees "Not matched yet — a manager has been asked") */
+  /**
+   * null: not matched (the editor sees "Not matched yet — a manager has been asked"). `no_scripts` and `no_client`
+   * aren't gaps: a client without scripts on the site, or a brand that isn't a site client ("No scripts on the site")
+   */
   how: VideoMatchHow | null;
   /** matched before and kept: it has been in review (or was made ahead of its shoot), so later changes don't move it */
   kept: boolean;
@@ -929,6 +936,8 @@ export interface EditingVideo {
   /** the Timeliner folder it sits in ("My Videos › Organic") */
   folder: string | null;
   client: { id: number; name: string } | null;
+  /** the Timeliner brand (client) it's under, by its name there: shown where the client's name goes when there's no site client */
+  brand: string | null;
   /** the batch whose scripts it's cut from, when it could be matched */
   batch: { id: number; title: string; shootDate: ISODate | null } | null;
   /**
@@ -942,8 +951,11 @@ export interface EditingVideo {
    * scripts PDF when it's in Timeliner
    */
   script: ScriptDoc | null;
-  /** why there's no `script`: not matched to a batch, that script isn't approved yet ("Script 6 isn't approved yet"), or no document an editor can open */
-  scriptIssue: 'not_matched' | 'not_approved' | 'no_document' | null;
+  /**
+   * why there's no `script`: not matched to a batch, that script isn't approved yet ("Script 6 isn't approved yet"),
+   * no document an editor can open, or no scripts on the site for its client (`match.how` is `no_scripts` or `no_client`)
+   */
+  scriptIssue: 'not_matched' | 'not_approved' | 'no_document' | 'no_scripts' | null;
   /** a raw camera clip ("C0045", "IMG_1234.MOV"), shown as "Raw clip C0045": footage the editor cuts into a titled video */
   raw: boolean;
   match: VideoMatch;
@@ -981,15 +993,71 @@ export interface EditorPlate {
   approvedWeek: number;
 }
 
-/** One editor on the Editors tab. */
+/**
+ * Why an editor's card needs fixing, one line each, ready to show:
+ * - `not_on_site`: in Timeliner with videos, no site account with their Timeliner email ("Not on the site — add them
+ *   in Settings → Team as an Editor with gus@…")
+ * - `no_site_access`: the same, but their name is in Settings → Editors (the list of editors who don't sign in), whose
+ *   city, time zone and hours the card uses ("Not on the site — give them site access in Settings → Editors with gus@…")
+ * - `email_differs`: on the site under the same name with another email ("Their email here (a@…) differs from
+ *   Timeliner (b@…) — change one so they match"); their Timeliner work is on the card, but their taps (I'm on this)
+ *   can't reach it until the emails match
+ * - `nothing_assigned`: an editor on the site with nothing in Timeliner, a quiet note ("Nothing assigned in Timeliner
+ *   (their Timeliner email must be a@…)")
+ */
+export type EditorFlagKind = 'not_on_site' | 'no_site_access' | 'email_differs' | 'nothing_assigned';
+export interface EditorFlag {
+  kind: EditorFlagKind;
+  text: string;
+  /** their email in Timeliner (null when Timeliner has none, and for `nothing_assigned`) */
+  timelinerEmail: string | null;
+  /** their email on the site (`email_differs`, `nothing_assigned`) */
+  siteEmail: string | null;
+}
+
+/** Someone who cuts a client's videos, as the Editors tab names them. */
+export interface EditorRef {
+  name: string;
+  /** their site account (null when they aren't on the site) */
+  userId: number | null;
+  /** their Timeliner member id */
+  memberId: string;
+  /** their card's `key` on the board */
+  key: string;
+}
+
+/** One client on an editor's card: "Joshua Shalimar · 32 videos". */
+export interface EditorClient {
+  /** the site client's name, else the Timeliner brand's */
+  name: string;
+  clientId: number | null;
+  /** their videos of that client on the card (open, plus approved in the last 7 days) */
+  count: number;
+  /** that client's open videos are split across editors: the one-line flag ("Brightside: 18 with Maya, 3 with Sam — one editor per client"), else null */
+  split: string | null;
+}
+
+/** One editor on the Editors tab: everyone in Timeliner with videos, and the site's editors. */
 export interface EditorRow {
-  userId: number;
+  /** stable and unique on the board: `u<userId>` for someone on the site, `m<memberId>` for someone only in Timeliner */
+  key: string;
+  /** their site account: matched by email, or by name when the emails differ (`flag.kind` is `email_differs`); null when not on the site */
+  userId: number | null;
+  /** their Timeliner member id (the one with the most videos); null for a site editor with nothing in Timeliner */
+  memberId: string | null;
+  /** on the site: a site account matched by email, or by name when the emails differ. Only an email match brings their taps (`focus`) */
+  site: boolean;
+  /** something to fix about who they are (null when nothing is) */
+  flag: EditorFlag | null;
+  /** the clients whose videos are on their card, most first: the card leads with them */
+  clients: EditorClient[];
   name: string;
   city: string | null;
   timezone: string | null;
   workHours: [number, number] | null;
-  /** outside their working hours right now */
+  /** outside their working hours right now (from their site profile, or from Settings → Editors when they aren't on the site) */
   offHours: boolean;
+  /** what they tapped on the site (always null when they aren't on the site under their Timeliner email) */
   focus: EditorFocus | null;
   /** what's next by deadline (revisions first) */
   nextUp: EditingVideo | null;
@@ -1012,25 +1080,68 @@ export interface EditingSync {
   syncedAt: string | null;
   /** why the last read failed, when it did */
   error: string | null;
+  /**
+   * what the last complete read found: the videos it kept, the people with videos, the Timeliner brands (clients)
+   * with videos, and the tasks, members, brands or projects it skipped because they couldn't be read. null before
+   * the first read
+   */
+  counts: { videos: number; people: number; clients: number; skipped: number } | null;
+}
+
+/**
+ * A client on the Editors tab's "Editors by client" strip: each client has one editor, who gets every video of
+ * every shoot (worked out from Timeliner, nothing to fill in here).
+ */
+export interface ClientEditing {
+  /** stable and unique on the board: `c<clientId>` for a site client, `b<brandId>` for a Timeliner brand that isn't one */
+  key: string;
+  /** the site client's name, else the Timeliner brand's */
+  name: string;
+  clientId: number | null;
+  /** the Timeliner brand's name, when known */
+  brand: string | null;
+  /** its editor: whoever has the most of its videos made in the last 60 days (a tie: whoever had one most recently); null when nobody has had any */
+  editor: EditorRef | null;
+  /** its open videos (not approved), anyone's or nobody's */
+  open: number;
+  /** its videos still to be edited that nobody has been given (made in the last 60 days, as in `unassigned`) */
+  notAssigned: number;
+  /** who has its open videos, most first, when more than one editor does (empty otherwise) */
+  split: (EditorRef & { count: number })[];
+  /**
+   * one line each, calm, ready to show: "Brightside: 18 with Maya, 3 with Sam — one editor per client" when split,
+   * "Joshua Shalimar · 9 clips not assigned (usually Leo)" when some aren't assigned
+   */
+  flags: string[];
 }
 
 /** The managers' Editors tab. */
 export interface EditingBoard {
   sync: EditingSync;
+  /** over all the work in Timeliner, whoever has it (each video once), not only people on the site */
   totals: {
-    /** on a video right now; one left running (isFocusStale in shared/workflow.ts) isn't counted */
+    /** on a video right now (site taps only); one left running (isFocusStale in shared/workflow.ts) isn't counted */
     editingNow: number;
     paused: number;
+    /** videos still to edit or fix, due today or earlier */
     dueToday: number;
     revisions: number;
     /** in review with Josh and Joshua (Timeliner's internal review steps), anyone's, or marked done here */
     waitingOnYou: number;
     notAssigned: number;
-    /** open videos on the editors' cards not matched to a batch (`isNotMatched`; their editors see "Not matched yet"): the ones a manager can pin */
+    /**
+     * open videos on the editors' cards not matched to a batch (`isNotMatched`; their editors see "Not matched yet"):
+     * the ones a manager can pin. Never a video whose client has no scripts on the site (`no_scripts`, `no_client`)
+     */
     notMatched: number;
     /** open videos on the editors' cards whose match is worth a look (`needsCheck`) */
     toCheck: number;
   };
+  /**
+   * a card for everyone in Timeliner with videos in the copy (any state) and every editor on the site; people to
+   * fix carry a `flag` and sort with the rest. Editing now first, then paused (or left running), due today,
+   * revisions, the rest; off hours last
+   */
   editors: EditorRow[];
   /** videos still to be edited in Timeliner with nobody assigned, by folder; raw clips by the shoot they matched (else by folder) */
   unassigned: {
@@ -1046,8 +1157,17 @@ export interface EditingBoard {
     videoTitles: string[];
     /** the script documents they're cut from, as far as matched */
     scripts: ScriptDoc[];
+    /** the Timeliner brand they're under, when known */
+    brand: string | null;
+    /** whom to give them: their client's editor ("usually Leo"), when it has one */
+    suggested: EditorRef | null;
   }[];
-  /** people assigned in Timeliner whose email doesn't match anyone on the site */
+  /** each client with videos in Timeliner (open ones, or made in the last 60 days), the most open videos first */
+  clients: ClientEditing[];
+  /**
+   * people assigned in Timeliner whose email doesn't match anyone on the site, with their open videos. Kept for
+   * older screens: each of them now has a card in `editors`, flagged
+   */
   unknownAssignees: { name: string; email: string | null; count: number }[];
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  allowedFrom, canSendDocument, checkAction, compressRanges, deriveStage, documentState, evenSplit, isAdmin, isManager, isNewWork, milestone, newlyAdded, parseRanges, progressLabel, splitAssignments, summarize,
-  type ScriptStatus,
+  allowedFrom, canSendDocument, checkAction, compressRanges, deriveStage, documentState, evenSplit, isAdmin, isManager, isNewWork, isNotMatched, milestone, newlyAdded, parseRanges, progressLabel,
+  splitAssignments, summarize, type ScriptStatus,
 } from '../shared/workflow';
 import { makeClock } from '../shared/dates';
 import { parseEntry } from '../shared/parse';
@@ -207,5 +207,17 @@ describe('script numbers people type', () => {
     expect(parseRanges('#4', 10)).toEqual([4]);
     expect(parseRanges('1-30', 10)).toBeNull();
     expect(parseRanges('one', 10)).toBeNull();
+  });
+});
+
+describe('a video not matched to a shoot', () => {
+  it('is a gap only when its client has scripts here: not pinned to none, not a client without scripts, not a brand that isn’t a client', () => {
+    const v = (how: string | null, o: { batch?: unknown; state?: 'to_edit' | 'approved' } = {}) => ({ state: o.state ?? 'to_edit', batch: o.batch ?? null, match: { how, check: false } });
+    expect(isNotMatched(v(null))).toBe(true);
+    expect(isNotMatched(v('pinned'))).toBe(false);
+    expect(isNotMatched(v('no_scripts'))).toBe(false);
+    expect(isNotMatched(v('no_client'))).toBe(false);
+    expect(isNotMatched(v(null, { state: 'approved' }))).toBe(false);
+    expect(isNotMatched(v('date', { batch: { id: 1 } }))).toBe(false);
   });
 });

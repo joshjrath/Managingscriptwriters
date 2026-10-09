@@ -172,6 +172,27 @@ const vid = (id: string, title: string, created: string, o: Partial<VideoIn> = {
 const match = (videos: VideoIn[], w: World) => matchVideos(videos, w);
 
 describe('which batch a video is from', () => {
+  it('takes a brand that’s no site client, and a client with no scripts here, for normal work, not a gap', () => {
+    const names = world([]).names;
+    names.set('b_zen', { name: 'Zen Yoga', createdAt: null });
+    names.set('b_bright', { name: 'Brightside', createdAt: null });
+    // Brightside has a batch, but no scripts in it yet
+    const empty = vb(9, 'Brightside · Nov 2', '2026-11-02', 0, { clientId: 2, clientName: 'Brightside', finished: 0 });
+    const w = world([vA, vB, empty], { clients: [{ id: 1, name: 'Joshua Shalimar' }, { id: 2, name: 'Brightside' }], names });
+    const out = match([
+      vid('zen', 'Zen 01', '2026-10-16', { brandId: 'b_zen', projectId: null, subFolderId: null }),
+      vid('bright', 'Bright 01', '2026-10-16', { brandId: 'b_bright', projectId: null, subFolderId: null }),
+      // Joshua Shalimar has scripts: a video no shoot fits is still not matched
+      vid('late', 'Organic 05', '2027-03-01'),
+    ], w);
+    expect(out.get('zen')).toMatchObject({ clientId: null, batchId: null, how: 'no_client', note: 'No client on the site is named like “Zen Yoga”.' });
+    expect(out.get('bright')).toMatchObject({ clientId: 2, batchId: null, how: 'no_scripts', note: 'Brightside has no scripts on the site.' });
+    expect(out.get('late')).toMatchObject({ clientId: 1, batchId: null, how: null });
+    // two clients that fit equally: that's not "no client", it waits for a manager
+    const tie = world([vA], { clients: [{ id: 1, name: 'Joshua Shalimar' }, { id: 3, name: 'Joshua Shalimar' }] });
+    expect(match([vid('t', 'Organic 05', '2026-10-16')], tie).get('t')).toMatchObject({ clientId: null, how: null });
+  });
+
   it('goes by the date it was made, never by its folder’s word across shoots (flaw b)', () => {
     const m = match([vid('t_ad3', 'Ad 03', '2026-10-16', { subFolderId: 'sf_ads' })], world([vA, vB, vC, vL])).get('t_ad3')!;
     expect(m).toMatchObject({ batchId: 2, how: 'date', number: 3, note: 'Made Oct 16, 2 days after the Oct 14 shoot' });

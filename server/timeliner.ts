@@ -117,12 +117,23 @@ export class TimelinerError extends Error {
   }
 }
 
-/** What Timeliner's error means for the person reading Settings. */
+/** Timeliner's own words for an error: `error` as a string (its documented shape), or a message inside it, or beside it. */
+function errorWords(body: Record<string, unknown>): string | null {
+  const e = body.error;
+  const v = typeof e === 'string' ? e
+    : e && typeof e === 'object' && typeof (e as { message?: unknown }).message === 'string' ? (e as { message: string }).message
+    : typeof body.message === 'string' ? body.message : null;
+  const t = v?.replace(/\s+/g, ' ').trim().slice(0, 300);
+  return t || null;
+}
+
+/** What Timeliner's error means for the person reading Settings (and the Editors tab's banner): what it answered, exactly. */
 function explain(status: number, body: Record<string, unknown>): string {
   if (status === 401) return 'Timeliner didn’t accept the API key. Check TIMELINER_API_KEY on the server (Timeliner → Settings → Developers).';
   if (status === 403 && body.code === 'insufficient_scope') return `The Timeliner key isn’t allowed to ${String(body.requiredScope ?? 'do this').replace(':', ' ')}. In Timeliner → Settings → Developers, make a key with ${TIMELINER_KEY_PERMISSIONS}, put it in TIMELINER_API_KEY, and connect again.`;
   if (status === 429) return 'Timeliner is limiting how often this key can call it. Try again in a minute.';
-  return `Timeliner answered ${status}${typeof body.error === 'string' ? `: ${body.error}` : ''}.`;
+  const words = errorWords(body);
+  return `Timeliner answered ${status}${words ? `: ${words.replace(/[.!]$/, '')}` : ''}.`;
 }
 
 /** Timeliner's REST API at `base` (https://timeliner.io), called with a workspace key (tlsk_…). */
@@ -152,22 +163,31 @@ export function timelinerClient(key: string, base: string, fetchImpl: typeof fet
     if (!res.ok) throw new TimelinerError(explain(res.status, json), res.status);
     return json as T;
   };
+  // an answer that isn't a list is never taken for an empty one: a read would then remove every video it had
+  const notAList = (path: string) => new TimelinerError(`Timeliner’s answer for ${path} wasn’t a list, so the last copy is kept.`, 200);
   const page = async <T>(path: string, before: string | null): Promise<TimelinerPage<T>> => {
     const r = await call<Partial<TimelinerPage<T>>>('GET', `${path}?limit=100${before ? `&before=${encodeURIComponent(before)}` : ''}`);
-    return { data: Array.isArray(r?.data) ? r.data : [], nextBefore: typeof r?.nextBefore === 'string' ? r.nextBefore : null };
+    if (!Array.isArray(r?.data)) throw notAList(path);
+    return { data: r.data, nextBefore: typeof r.nextBefore === 'string' && r.nextBefore ? r.nextBefore : null };
   };
-  type Move = { createdAt?: string; movedTo?: string | null; actor?: { id?: string } | null };
+  type Move = { createdAt?: unknown; movedTo?: unknown; actor?: { id?: unknown } | null };
   return {
     project: (id) => call('GET', `/projects/${encodeURIComponent(id)}`),
     brand: (id) => call('GET', `/brands/${encodeURIComponent(id)}`),
     task: (id) => call('GET', `/tasks/${encodeURIComponent(id)}`),
     tasks: (before) => page('/tasks', before),
     brands: (before) => page('/brands', before),
-    members: async () => (await call<{ data: Awaited<ReturnType<TimelinerApi['members']>> }>('GET', '/members?includeDeactivated=true'))?.data ?? [],
+    members: async () => {
+      const r = await call<{ data?: unknown }>('GET', '/members?includeDeactivated=true');
+      if (!Array.isArray(r?.data)) throw notAList('/members');
+      return r.data as Awaited<ReturnType<TimelinerApi['members']>>;
+    },
     lastMove: async (id) => {
-      const r = await call<{ data?: Move[] }>('GET', `/tasks/${encodeURIComponent(id)}/activity?action=moved&limit=1`);
-      const last = Array.isArray(r?.data) ? r.data[r.data.length - 1] : undefined;
-      return last?.createdAt ? { at: last.createdAt, to: last.movedTo ?? null, byId: last.actor?.id ?? null } : null;
+      const r = await call<{ data?: unknown }>('GET', `/tasks/${encodeURIComponent(id)}/activity?action=moved&limit=1`);
+      const last = (Array.isArray(r?.data) ? r.data[r.data.length - 1] : undefined) as Move | null | undefined;
+      const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
+      const at = str(last?.createdAt);
+      return at ? { at, to: str(last?.movedTo), byId: str(last?.actor?.id) } : null;
     },
     webhooks: async () => (await call<{ data: Awaited<ReturnType<TimelinerApi['webhooks']>> }>('GET', '/webhooks'))?.data ?? [],
     createWebhook: async (url, events) => (await call<{ id: string; secret: string }>('POST', '/webhooks', { url, events }))!,
@@ -442,8 +462,10 @@ async function place(ctx: Ctx, api: TimelinerApi | null, m: UploadMessage, settl
   const project = m.projectId ? await look((a) => a.project(m.projectId!)) : null;
   const brand = m.brandId ? await look((a) => a.brand(m.brandId!)) : null;
   const members = m.uploadedBy ? (await look((a) => a.members())) ?? [] : [];
-  const member = members.find((x) => x.id === m.uploadedBy);
-  const uploader = member ? [member.firstName, member.lastName].filter(Boolean).join(' ') || member.email : null;
+  // read as leniently as the Editors tab reads them: an odd member is passed over
+  const found = members.find((x) => !!x && typeof x === 'object' && x.id === m.uploadedBy);
+  const member = found ? { email: typeof found.email === 'string' ? found.email : null, names: [found.firstName, found.lastName].filter((x) => typeof x === 'string' && x.trim()) } : null;
+  const uploader = member ? member.names.join(' ') || member.email : null;
   const subFolderId = strOf(task?.subFolderId);
   const subName = subFolderId
     ? (project?.subFolders?.find((f) => f?.id === subFolderId)?.name ?? (await db.one<{ name: string }>(`select name from timeliner_names where id = $1`, [subFolderId]))?.name ?? null)

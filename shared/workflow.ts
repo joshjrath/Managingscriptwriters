@@ -370,8 +370,14 @@ export const isOnPlate = (s: VideoState) => s === 'to_edit' || s === 'revisions'
 /** A video as the "Not matched" and "Check" rules see it (an EditingVideo). */
 interface MatchedVideo { state: VideoState; batch: unknown; match: { how: string | null; check: boolean } }
 
-/** Open and not matched to a shoot: the "Not matched" chip and count. Pinned to no batch is a manager's answer, not a gap. */
-export const isNotMatched = (v: MatchedVideo) => v.state !== 'approved' && !v.batch && v.match.how !== 'pinned';
+/**
+ * Open and not matched to a shoot: the "Not matched" chip and count. Pinned to no batch is a manager's answer, not a
+ * gap; nor is a video whose client has no scripts on the site (`no_scripts`) or isn't a site client (`no_client`).
+ */
+export const isNotMatched = (v: MatchedVideo) => v.state !== 'approved' && !v.batch && v.match.how !== 'pinned' && !hasNoScripts(v);
+
+/** Normal work whose client has no scripts on the site, or whose Timeliner brand is no site client: "No scripts on the site". */
+export const hasNoScripts = (v: { match: { how: string | null } }) => v.match.how === 'no_scripts' || v.match.how === 'no_client';
 
 /** Open, and another video in its folder has its title on the same shoot: the "Check" chip and count. */
 export const needsCheck = (v: MatchedVideo) => v.state !== 'approved' && v.match.check;

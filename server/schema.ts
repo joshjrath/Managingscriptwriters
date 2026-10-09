@@ -709,4 +709,9 @@ alter table timeliner_tasks add column has_video boolean;
 `,
   // 32 · scripts PDFs that delivered their batch before PDFs were linked: each keeps its batch (see backfill.ts)
   linkDeliveredPdfs,
+  // 33 · what the last complete read of Timeliner found (videos, people, clients) and how many tasks, members,
+  // brands or projects it skipped because they couldn't be read: the Editors tab says so beside when it read
+  `
+alter table settings add column timeliner_sync_counts jsonb;
+`,
 ];
