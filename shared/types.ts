@@ -1093,7 +1093,7 @@ export interface EditingSync {
   /**
    * what the last complete read found: the videos it kept, the people with videos, the Timeliner brands (clients)
    * with videos, and the tasks, members, brands or projects it skipped because they couldn't be read. null before
-   * the first read
+   * the first read, and always for an editor (it's the managers')
    */
   counts: { videos: number; people: number; clients: number; skipped: number } | null;
 }

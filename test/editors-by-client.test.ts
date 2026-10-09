@@ -8,7 +8,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { EditingBoard, EditingVideo, EditorRow } from '../shared/types';
 import { TimelinerError, timelinerClient, type TimelinerApi, type TimelinerBrandMember } from '../server/timeliner';
 import { syncTimeliner } from '../server/editing';
-import { makeWorld, video, type World } from './timeliner-world';
+import { makeWorld, pdfTask, versionUploaded, video, type World } from './timeliner-world';
 
 let w: World;
 let b: EditingBoard;
@@ -98,6 +98,9 @@ describe('a video nobody is on belongs to its client’s editor in Timeliner', (
   it('gives it to them on their Home, and lets them say they’re on it; nobody else can', async () => {
     const mine = await w.mine(w.leo);
     expect(mine.toEdit.map((v) => v.title).sort()).toEqual(['Bright 01', 'C0101', 'C0102', 'Organic 01']);
+    // what the read found across the workspace (its people, its clients) is the managers'
+    expect(mine.sync).toMatchObject({ error: null, counts: null });
+    expect(b.sync.counts).not.toBeNull();
     expect(find(mine.toEdit, 'Organic 01').assignedBy).toBe('client');
     expect((await w.send('POST', '/api/editing/focus', w.leo, { videoId: 't_o1', action: 'start' })).status).toBe(200);
     const other = await w.send('POST', '/api/editing/focus', sam, { videoId: 't_o1', action: 'start' });
@@ -197,6 +200,55 @@ describe('reading who is on each brand', () => {
     expect(b.clients.find((c) => c.name === 'Zen Yoga')).toMatchObject({ editor: { name: 'Sam Lee' }, editorFrom: 'client', notAssigned: 0, flags: [] });
   });
 
+  it('never takes anyone off a brand when an entry in its list can’t be read, and adds whoever it could read', async () => {
+    const [ada, , maya, sam] = members;
+    // Zen Yoga's editor is Sam in Timeliner now too
+    w.tl.onBrand.b_zen = [...w.tl.onBrand.b_zen, on(sam, 'editor')];
+    const real = w.api.brandMembers;
+    const unreadable = { role: 'editor', automatic: false, member: null } as TimelinerBrandMember;
+    w.api.brandMembers = async (id) => {
+      // Leo's entry comes back with no member: he is still Joshua Shalimar's editor
+      if (id === 'b_js') return [on(ada, 'admin', true), unreadable];
+      // Leo's entry again (a member without an id), next to Maya's
+      if (id === 'b_bright') return [on(maya, 'editor'), { role: 'editor', automatic: false, member: { firstName: 'Leo' } } as unknown as TimelinerBrandMember];
+      // nothing in it can be read but Sam, who is new there
+      if (id === 'b_glow') return [unreadable, on(sam, 'editor')];
+      return real(id);
+    };
+    try {
+      expect(await syncTimeliner(w.db, w.api, new Date(w.now()))).toMatchObject({ ok: true, error: null, skipped: 3 });
+    } finally {
+      w.api.brandMembers = real;
+    }
+    b = await w.board();
+    // Leo keeps his client's videos and the one he's on (with the time on it)
+    expect(card('Leo Martins').focus).toMatchObject({ state: 'on', video: { title: 'Organic 01' } });
+    expect(titles(card('Leo Martins'))).toEqual(['Bright 01', 'C0101', 'C0102', 'Organic 01', 'Organic 03']);
+    expect(b.unassigned).toEqual([]);
+    // Glow Skincare keeps Maya and gains Sam
+    expect(titles(card('Maya Reyes'))).toEqual(['Bright 01', 'Glow 01']);
+    expect(titles(card('Sam Lee'))).toEqual(['Glow 01', 'Glow 02', 'Glow 03', 'Organic 02', 'Zen 01']);
+    expect(b.clients.find((c) => c.name === 'Glow Skincare')).toMatchObject({ editors: [expect.objectContaining({ name: 'Sam Lee' }), expect.objectContaining({ name: 'Maya Reyes' })] });
+
+    // a list that reads cleanly replaces what was kept: Glow Skincare is Maya's alone again
+    b = await w.sync();
+    expect(card('Leo Martins').focus).toMatchObject({ state: 'on', video: { title: 'Organic 01' } });
+    expect(titles(card('Sam Lee'))).toEqual(['Glow 02', 'Glow 03', 'Organic 02', 'Zen 01']);
+    expect(b.sync.counts).toMatchObject({ skipped: 0 });
+  });
+
+  it('counts a brand Timeliner says it doesn’t have as skipped, and keeps who was on it', async () => {
+    const real = w.api.brandMembers;
+    w.api.brandMembers = async (id) => (id === 'b_bright' ? null : real(id));
+    try {
+      expect(await syncTimeliner(w.db, w.api, new Date(w.now()))).toMatchObject({ ok: true, skipped: 1 });
+    } finally {
+      w.api.brandMembers = real;
+    }
+    b = await w.board();
+    expect(b.clients.find((c) => c.name === 'Brightside')).toMatchObject({ editors: [expect.objectContaining({ name: 'Leo Martins' }), expect.objectContaining({ name: 'Maya Reyes' })] });
+  });
+
   it('asks Timeliner for each brand’s members', async () => {
     const asked: string[] = [];
     const answer = (status: number, body: unknown) => (async (url: string | URL | Request) => {
@@ -209,5 +261,101 @@ describe('reading who is on each brand', () => {
     // no such brand, and an answer that isn't a list (never taken for "nobody")
     expect(await tl(answer(404, {})).brandMembers('b1')).toBeNull();
     await expect(tl(answer(200, { data: {} })).brandMembers('b1')).rejects.toThrow('Timeliner’s answer for /brands/b1/members wasn’t a list, so the last copy is kept.');
+  });
+});
+
+describe('a Timeliner admin or supervisor on a video', () => {
+  it('is reviewing it: never one of its client’s editors, and never flagged to be added as an editor', async () => {
+    add(
+      // at Internal approval with only Sue on it (a supervisor in Timeliner, not on the site)
+      ['t_o4', 'Organic 04', 'supervisorApproval', { assigneeIds: ['m_sup'] }],
+      // Leo's, with Sue on it too to review it
+      ['t_o5', 'Organic 05', 'toDo', { assigneeIds: ['m_leo', 'm_sup'] }],
+    );
+    try {
+      b = await w.sync();
+      // not a split: Sue isn't one of Joshua Shalimar's editors
+      expect(b.clients.find((c) => c.name === 'Joshua Shalimar')).toMatchObject({
+        editor: { name: 'Leo Martins' }, split: [expect.objectContaining({ name: 'Leo Martins', count: 5 }), expect.objectContaining({ name: 'Sam Lee', count: 1 })],
+        flags: ['Joshua Shalimar: 5 with Leo, 1 with Sam — one editor per client'],
+      });
+      // her card holds only the video nobody else is on, and asks nobody to make her an editor
+      expect(card('Sue Supervisor')).toMatchObject({ site: false, flag: null });
+      expect(titles(card('Sue Supervisor'))).toEqual(['Organic 04']);
+      expect(b.editors.filter((e) => e.flag && e.flag.kind !== 'nothing_assigned')).toEqual([]);
+      expect(titles(card('Leo Martins'))).toContain('Organic 05');
+    } finally {
+      w.tl.tasks = w.tl.tasks.filter((t) => t.id !== 't_o4' && t.id !== 't_o5');
+    }
+  });
+});
+
+describe('a new version of a shoot’s scripts PDF', () => {
+  it('is told to the client’s editor in Timeliner, whose videos from that shoot nobody is on', async () => {
+    const told = async (cookie: string) => ((await w.send('GET', '/api/notifications', cookie)).body.notifications as { title: string; body: string }[])
+      .filter((n) => n.title.startsWith('New scripts PDF'));
+    // nobody is on any of the shoot's videos: Leo's are his through the client alone
+    b = await w.sync();
+    expect(b.editors.flatMap((e) => e.videos).filter((v) => v.batch?.id === ids.oct6 && v.assignedBy === 'video').map((v) => v.title)).toEqual(['Organic 02']);
+    w.tl.tasks.push(pdfTask('t_pdf6', '2026-10-05T15:00:00Z', { id: 'f_61', name: 'JS scripts Oct 6.pdf' }));
+    expect((await w.hook('version.uploaded', versionUploaded({ taskId: 't_pdf6', fileName: 'JS scripts Oct 6.pdf', version: 1, uploadedAt: '2026-10-05T15:00:00Z', fileId: 'f_61' }))).outcome).toBe('delivered');
+    const t = w.tl.tasks.find((x) => x.id === 't_pdf6')!;
+    t.media = { ...t.media!, fileId: 'f_62', downloadUrl: 'https://s3.example/f_62?sig' };
+    expect((await w.hook('version.uploaded', versionUploaded({ taskId: 't_pdf6', fileName: 'JS scripts Oct 6.pdf', version: 2, uploadedAt: '2026-10-08T12:00:00Z', fileId: 'f_62' }))).outcome).toBe('new_version');
+    // Leo's videos from the Oct 6 shoot are his through the client; Maya has none from it
+    expect(await told(w.leo)).toEqual([expect.objectContaining({ title: 'New scripts PDF · Joshua Shalimar', body: 'The scripts PDF for the Oct 6 shoot has a new version (v2).' })]);
+    expect(await told(w.maya)).toEqual([]);
+  });
+});
+
+describe('brands that aren’t clients on the site', () => {
+  const [, , maya] = members;
+  const place = (id: string, name: string) => {
+    w.tl.projects[`p_${id}`] = { id: `p_${id}`, name, nodeId: `b_${id}`, createdAt: '2026-01-05T15:00:00Z', subFolders: [] };
+    return { projectId: `p_${id}`, brandId: `b_${id}`, subFolderId: null };
+  };
+
+  it('keeps each brand’s videos nobody is on apart (their folders named alike), each with its own usual editor', async () => {
+    w.tl.brands.b_alpha = 'Alpha Gym';
+    w.tl.brands.b_beta = 'Beta Cafe';
+    const alpha = place('alpha', 'Content');
+    const beta = place('beta', 'Content');
+    add(
+      // Maya made Alpha Gym's last video
+      ['t_a0', 'Alpha 00', 'approved', { ...alpha, assigneeIds: ['m_maya'], createdAt: '2026-10-01T15:00:00Z', updatedAt: '2026-10-05T15:00:00Z', approvedAt: '2026-10-05T15:00:00Z' }],
+      ['t_a1', 'Alpha 01', 'toDo', alpha], ['t_be1', 'Beta 01', 'toDo', beta],
+    );
+    b = await w.sync();
+    expect([...b.unassigned].sort((x, y) => x.titles.localeCompare(y.titles))).toEqual([
+      expect.objectContaining({ folder: 'Content', titles: 'Alpha 01', count: 1, brand: 'Alpha Gym', suggested: expect.objectContaining({ name: 'Maya Reyes' }) }),
+      expect.objectContaining({ folder: 'Content', titles: 'Beta 01', count: 1, brand: 'Beta Cafe', suggested: null }),
+    ]);
+    expect(b.clients.find((c) => c.name === 'Beta Cafe')).toMatchObject({ editor: null, flags: ['Beta Cafe · 1 video not assigned'] });
+  });
+
+  it('lists the clients to look at first, however few their videos', async () => {
+    w.tl.brands.b_delta = 'Delta Dance';
+    w.tl.onBrand.b_delta = [on(maya, 'editor')];
+    const delta = place('delta', 'Delta Reels');
+    add(['t_dl1', 'Delta 01', 'toDo', delta], ['t_dl2', 'Delta 02', 'toDo', delta], ['t_dl3', 'Delta 03', 'toDo', delta]);
+    b = await w.sync();
+    expect(b.clients.find((c) => c.name === 'Delta Dance')).toMatchObject({ editor: { name: 'Maya Reyes' }, open: 3, flags: [] });
+    // flagged (most open videos first), then the rest
+    expect(b.clients.map((c) => c.name)).toEqual(['Joshua Shalimar', 'Glow Skincare', 'Alpha Gym', 'Beta Cafe', 'Brightside', 'Delta Dance', 'Zen Yoga']);
+  });
+
+  it('never names someone who has left Timeliner as a client’s editor', async () => {
+    w.api.members = async () => [...members, { id: 'm_olga', email: 'olga@freelance.test', firstName: 'Olga', lastName: 'Old', role: 'editor', deactivated: true }];
+    w.tl.brands.b_gamma = 'Gamma';
+    const gamma = place('gamma', 'Gamma Reels');
+    add(
+      // Olga, who has since left, made Gamma's last video (approved Oct 1); nobody is on its brand
+      ['t_gm0', 'Gamma 00', 'approved', { ...gamma, assigneeIds: ['m_olga'], createdAt: '2026-09-25T15:00:00Z', updatedAt: '2026-10-01T15:00:00Z', approvedAt: '2026-10-01T15:00:00Z' }],
+      ['t_gm1', 'Gamma 01', 'toDo', gamma],
+    );
+    b = await w.sync();
+    expect(b.editors.some((e) => e.memberId === 'm_olga')).toBe(false);
+    expect(b.clients.find((c) => c.name === 'Gamma')).toMatchObject({ editor: null, editorFrom: null, notAssigned: 1, flags: ['Gamma · 1 video not assigned'] });
+    expect(b.unassigned.find((g) => g.brand === 'Gamma')).toMatchObject({ titles: 'Gamma 01', suggested: null });
   });
 });

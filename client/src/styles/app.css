@@ -2163,6 +2163,20 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
 .ed-ct-flags { display: flex; flex-wrap: wrap; gap: 4px; }
 .ed-ct-flags .chip { white-space: normal; text-align: left; }
 .ed-ct-more { margin-top: 10px; }
+/* a phone: each client is one line (name → editor · open), its chips under it, and the rest fold away after a few */
+@media (min-width: 761px) { .ed-ct-more.phone { display: none; } }
+@media (max-width: 760px) {
+  .ed-ct-list { gap: 4px; }
+  .ed-ct-list > li.ed-ct-fold { display: none; }
+  .ed-ct { flex-direction: row; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; padding: 10px 12px; }
+  .ed-ct-top { display: contents; }
+  .ed-ct-name { flex: 0 1 auto; }
+  .ed-ct-ed { order: 1; flex: 0 1 auto; }
+  .ed-ct-ed .ed-via { display: none; }
+  .ed-ct-open { order: 2; }
+  .ed-ct-open::before { content: '·' / ''; margin-right: 8px; }
+  .ed-ct-flags { order: 3; flex-basis: 100%; }
+}
 
 /* the whole team, and what the colours mean */
 .ed-team { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; margin-top: 18px; padding: 16px 20px 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); }

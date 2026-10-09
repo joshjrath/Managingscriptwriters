@@ -251,14 +251,22 @@ async function readProjects(api: TimelinerApi, tasks: Task[], cached: Map<string
   return out;
 }
 
+/** What a brand's list said when an entry in it couldn't be read: who to add (or update), and who left Timeliner. */
+interface BrandMembersSome { add: BrandMember[]; left: string[] }
+
 /**
  * Who is on each brand these videos are under (open videos' brands first), one call per brand: a client's editor is
  * assigned on its brand in Timeliner, not on each video. A brand whose list can't be read keeps what was read last
- * (skipped and noted); one Timeliner no longer has does too. Someone on a brand whose member can't be read is
- * skipped alone. `members` are the people the lists name, for any the workspace's own list left out.
+ * (skipped and noted); one Timeliner no longer has does too (skipped). A list with an entry that can't be read
+ * (skipped alone) never takes anyone off the brand, since that entry may be its editor: whoever could be read is
+ * added (`some`), and the rest stay as read last. `members` are the people the lists name, for any the workspace's
+ * own list left out.
  */
-async function readBrandMembers(api: TimelinerApi, tasks: Task[], skips: Skip[], log?: (m: string) => void): Promise<{ read: Map<string, BrandMember[]>; members: Member[] }> {
+async function readBrandMembers(api: TimelinerApi, tasks: Task[], skips: Skip[], log?: (m: string) => void): Promise<{
+  read: Map<string, BrandMember[]>; some: Map<string, BrandMembersSome>; members: Member[];
+}> {
   const read = new Map<string, BrandMember[]>();
+  const some = new Map<string, BrandMembersSome>();
   const members = new Map<string, Member>();
   const ordered = [...tasks].sort((a, b) => Number(videoState(a.statusGroup) === 'approved') - Number(videoState(b.statusGroup) === 'approved'));
   const ids = [...new Set(ordered.map((t) => t.brandId).filter((x): x is string => !!x))];
@@ -274,27 +282,32 @@ async function readBrandMembers(api: TimelinerApi, tasks: Task[], skips: Skip[],
       if (log && !loggedSkips.has(`brand-members|${err.message}`)) { loggedSkips.add(`brand-members|${err.message}`); log(`timeliner: couldn't read who is on a brand: ${err.message}`); }
       continue;
     }
-    if (list == null) continue;
-    if (!Array.isArray(list)) { skips.push({ what: 'brand’s member list', id }); continue; }
+    // Timeliner has no such brand (though videos are under it), or the answer isn't a list: as read last
+    if (list == null || !Array.isArray(list)) { skips.push({ what: 'brand’s member list', id }); continue; }
     const kept = new Map<string, BrandMember>();
+    const left: string[] = [];
+    let unread = false;
     for (const raw of list) {
       const r = membershipSchema.safeParse(raw);
       const memberId = r.success ? (r.data.member?.id ?? r.data.memberId ?? null) : null;
       if (!r.success || !memberId) {
         skips.push({ what: 'brand member', id: rawId(raw && typeof raw === 'object' ? (raw as { member?: unknown }).member : null) ?? rawId(raw) });
+        unread = true;
         continue;
       }
       // someone who has left isn't anyone's editor
-      if (r.data.member?.deactivated) continue;
+      if (r.data.member?.deactivated) { left.push(memberId); continue; }
       if (r.data.member && r.data.member.id === memberId) members.set(memberId, r.data.member);
       const m: BrandMember = { memberId, role: r.data.role ?? null, automatic: r.data.automatic };
       // listed twice: an assignment as an editor is what counts
       const had = kept.get(memberId);
       if (!had || (had.automatic && !m.automatic) || (had.role !== 'editor' && m.role === 'editor' && !m.automatic)) kept.set(memberId, m);
     }
-    read.set(id, [...kept.values()]);
+    // an entry it couldn't read may be the brand's editor: a bad answer is never read as nobody
+    if (unread) some.set(id, { add: [...kept.values()], left: left.filter((x) => !kept.has(x)) });
+    else read.set(id, [...kept.values()]);
   }
-  return { read, members: [...members.values()] };
+  return { read, some, members: [...members.values()] };
 }
 
 interface Prev {
@@ -331,12 +344,18 @@ async function readMoves(api: TimelinerApi, tasks: Task[], prev: Map<string, Pre
 // scripts PDF link, the shoot an editor's raw clips are from and the new-version notice all read it from here.
 
 /**
+ * Timeliner's workspace roles that review rather than edit: `admin` and `supervisor` manage the work, `guest` is an
+ * outside reviewer. Only `editor` (or a role the site doesn't know) does the editing.
+ */
+const REVIEW_ROLES = ['admin', 'supervisor', 'guest'];
+
+/**
  * SQL: `bm` (a row of timeliner_brand_members, `m` its member, left joined) is one of that brand's editors: an
  * editor there, assigned rather than automatic (a workspace admin's access to every brand), still active, and not
  * a workspace admin, supervisor or guest (they review; they aren't anyone's editor).
  */
 const IS_BRAND_EDITOR = (bm: string, m: string) =>
-  `${bm}.role = 'editor' and not ${bm}.automatic and coalesce(${m}.active, true) and coalesce(${m}.role, 'editor') not in ('admin', 'supervisor', 'guest')`;
+  `${bm}.role = 'editor' and not ${bm}.automatic and coalesce(${m}.active, true) and coalesce(${m}.role, 'editor') not in (${REVIEW_ROLES.map((r) => `'${r}'`).join(', ')})`;
 
 /** SQL: the Timeliner member ids the task `tt` belongs to (rule A): its assignees, else its brand's editors. */
 export const OWNER_IDS = (tt: string) => `(case when cardinality(${tt}.assignee_ids) > 0 then ${tt}.assignee_ids
@@ -436,6 +455,8 @@ interface Found {
   brands?: { id: string; name: string }[];
   /** who is on each brand read this time (each replaces what was kept for that brand) */
   brandMembers?: Map<string, BrandMember[]>;
+  /** brands whose list had an entry that couldn't be read: whoever could be read is added, nobody is taken off but who left */
+  brandMembersSome?: Map<string, BrandMembersSome>;
   projects: Map<string, ProjectRead>;
   /** rows written by something newer than this (a webhook during a read) are left alone */
   readSince: string;
@@ -480,6 +501,15 @@ async function write(db: Db, f: Found): Promise<void> {
       await t.query(`delete from timeliner_brand_members where brand_id = any($1::text[])`, [[...f.brandMembers.keys()]]);
       const rows = [...f.brandMembers].flatMap(([brandId, list]) => list.map((m) => [brandId, m.memberId, m.role, m.automatic, at]));
       await insertRows(t, 'timeliner_brand_members', ['brand_id', 'member_id', 'role', 'automatic', 'synced_at'], rows);
+    }
+    if (f.brandMembersSome?.size) {
+      for (const [brandId, s] of f.brandMembersSome) {
+        if (s.left.length) await t.query(`delete from timeliner_brand_members where brand_id = $1 and member_id = any($2::text[])`, [brandId, s.left]);
+      }
+      const rows = [...f.brandMembersSome].flatMap(([brandId, s]) => s.add.map((m) => [brandId, m.memberId, m.role, m.automatic, at]));
+      await insertRows(t, 'timeliner_brand_members', ['brand_id', 'member_id', 'role', 'automatic', 'synced_at'], rows, {
+        tail: () => 'on conflict (brand_id, member_id) do update set role = excluded.role, automatic = excluded.automatic, synced_at = excluded.synced_at',
+      });
     }
     const names: unknown[][] = [];
     for (const b of f.brands ?? []) names.push([b.id, 'brand', b.name, null, at, null]);
@@ -758,7 +788,7 @@ export async function syncTimeliner(db: Db, api: TimelinerApi, now: Date, log?: 
     await write(db, {
       // a list of members none of which could be read keeps the last ones (else nobody would match by email)
       rows, drop, complete: listed.complete, listedFrom, members: members.length || !(listedMembers as unknown[]).length ? members : undefined, brands, projects,
-      extraMembers: onBrands.members.filter((x) => !known.has(x.id)), brandMembers: onBrands.read,
+      extraMembers: onBrands.members.filter((x) => !known.has(x.id)), brandMembers: onBrands.read, brandMembersSome: onBrands.some,
       readSince: now.toISOString(), at: now, fullRead: true, pdfs, counts,
     });
     logSkips(skips, log);
@@ -1150,27 +1180,39 @@ interface Person {
 /** A name as compared across Timeliner, the team and Settings → Editors: any case, any spacing, any accents. */
 const personKey = (name: string) => name.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, '');
 
+/** A Timeliner admin, supervisor or guest: on a video to review it, never anyone's editor. */
+const isReviewer = (L: Loaded, m: string) => REVIEW_ROLES.includes(L.members.get(m)?.role ?? '');
+
 /**
  * Who does the editing of a video, for its client's editor and split: whom it belongs to (rule A) who are editors
- * in Timeliner (a manager or supervisor also on it is reviewing), else everyone on it.
+ * in Timeliner. An admin, supervisor or guest on it is reviewing it, even alone on it.
  */
 function editorsOn(L: Loaded, t: TaskRow): string[] {
-  const all = [...new Set(t.owner_ids)];
-  const eds = all.filter((m) => { const r = L.members.get(m)?.role; return !r || r === 'editor'; });
-  return eds.length ? eds : all;
+  return [...new Set(t.owner_ids)].filter((m) => !isReviewer(L, m));
+}
+
+/**
+ * Whose card on the Editors tab a video is on: its editors (rule A). One only reviewers are on is theirs, so it
+ * isn't on nobody's card (it isn't "not assigned" either: someone is on it in Timeliner).
+ */
+function onCardOf(L: Loaded, t: TaskRow): string[] {
+  const eds = editorsOn(L, t);
+  return eds.length ? eds : [...new Set(t.owner_ids)];
 }
 
 /**
  * Everyone on the board: a site account matched by Timeliner email; else one with the same name (their emails
  * differ: flagged); else, from Timeliner alone, flagged as not on the site (with their place and hours from
- * Settings → Editors when their name is there). Editors on the site with nothing in Timeliner get a quiet note.
+ * Settings → Editors when their name is there). An admin, supervisor or guest in Timeliner has a card only for
+ * videos nobody else is on (onCardOf), and is never flagged to be added as an editor. Editors on the site with
+ * nothing in Timeliner get a quiet note.
  */
 function peopleOf(L: Loaded): Person[] {
-  // their videos: on the video, or through their client (rule A)
+  // their videos: on the video, or through their client (rule A); not one they're only reviewing
   const work = new Map<string, { all: number; open: number }>();
   for (const t of L.tasks) {
     const open = videoState(t.status_group) !== 'approved';
-    for (const m of new Set(t.owner_ids)) {
+    for (const m of onCardOf(L, t)) {
       const w = work.get(m) ?? { all: 0, open: 0 };
       w.all++;
       if (open) w.open++;
@@ -1234,9 +1276,11 @@ function peopleOf(L: Loaded): Person[] {
     others.push({
       key: `m${m}`, userId: null, linked: false, memberIds: [m], name,
       city: e?.city ?? null, timezone: e?.timezone ?? null, workHours: e?.workHours ?? null,
-      flag: e
-        ? { kind: 'no_site_access', timelinerEmail: email, siteEmail: null, text: `Not on the site — give them site access in Settings → Editors with ${tlEmail}` }
-        : { kind: 'not_on_site', timelinerEmail: email, siteEmail: null, text: `Not on the site — add them in Settings → Team as an Editor with ${tlEmail}` },
+      // an admin, supervisor or guest in Timeliner reviews: never flagged to be added as an editor
+      flag: isReviewer(L, m) ? null
+        : e
+          ? { kind: 'no_site_access', timelinerEmail: email, siteEmail: null, text: `Not on the site — give them site access in Settings → Editors with ${tlEmail}` }
+          : { kind: 'not_on_site', timelinerEmail: email, siteEmail: null, text: `Not on the site — add them in Settings → Team as an Editor with ${tlEmail}` },
       card: !gone,
     });
   }
@@ -1261,12 +1305,14 @@ function clientOfTask(L: Loaded, t: TaskRow): { key: string; name: string; clien
 /**
  * Everything about one person's videos: the Editors tab's card and their own Home are both made from it.
  * `clientKeys` names each of the card's clients (the same objects as `row.clients`), for the board's flags.
+ * `owners` is whom each video is counted for: whom it belongs to (rule A) on their Home; on the board, not someone
+ * only reviewing it (onCardOf).
  */
-function editorOf(L: Loaded, p: Person): { row: EditorRow; mine: MyEditing; clientKeys: Map<EditorClient, string> } {
+function editorOf(L: Loaded, p: Person, owners: (t: TaskRow) => string[] = (t) => t.owner_ids): { row: EditorRow; mine: MyEditing; clientKeys: Map<EditorClient, string> } {
   const weekAgo = L.now.getTime() - 7 * DAY_MS;
   const ids = new Set(p.memberIds);
   // theirs: assigned on the video, or nobody is and they're its client's editor in Timeliner (rule A)
-  const own = L.tasks.filter((t) => t.owner_ids.some((m) => ids.has(m)));
+  const own = L.tasks.filter((t) => owners(t).some((m) => ids.has(m)));
   // their taps and done marks: only from a site account with their Timeliner email
   const me = p.linked ? p.userId : null;
   const videos = own.map((t) => toVideo(L, t, me));
@@ -1362,7 +1408,8 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
   const people = peopleOf(L);
   const personOf = new Map<string, Person>();
   for (const p of people) for (const m of p.memberIds) personOf.set(m, p);
-  const built = people.filter((p) => p.card).map((p) => editorOf(L, p));
+  const cardOwners = new Map(L.tasks.map((t) => [t.id, onCardOf(L, t)]));
+  const built = people.filter((p) => p.card).map((p) => editorOf(L, p, (t) => cardOwners.get(t.id) ?? []));
   const editors = built.map((b) => b.row).sort((a, b) => rank(a, L.now) - rank(b, L.now) || a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
   const refOf = (p: Person, memberId: string): EditorRef => ({ name: p.name, userId: p.userId, memberId, key: p.key });
 
@@ -1386,8 +1433,9 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
     const batchId = t.batch_id != null ? Number(t.batch_id) : null;
     const b = batchId != null ? L.batches.get(batchId) : undefined;
     const byShoot = raw && b && batchId != null;
-    const key = byShoot ? `raw|b${batchId}` : `${raw ? 'raw' : 'titled'}|${t.folder ?? ''}|${t.client_id ?? ''}`;
     const c = clientOfTask(L, t);
+    // by client: the site's, else the Timeliner brand (two brands' folders can share a name)
+    const key = byShoot ? `raw|b${batchId}` : `${raw ? 'raw' : 'titled'}|${t.folder ?? ''}|${c?.key ?? ''}`;
     const g = groups.get(key) ?? {
       folder: t.folder ?? clientName ?? c?.name ?? 'Timeliner', clientName, raw,
       batch: byShoot ? { id: batchId, title: b.title, shootDate: b.shootDate } : null,
@@ -1422,16 +1470,23 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
     if (isOpen) a.open++;
     if (notAssigned(t)) { a.notAssigned++; if (isRawTitle(t.title)) a.rawNotAssigned++; }
     // each person once per video, whichever of their Timeliner accounts it's on
-    const byPerson = new Map<string, string>();
-    for (const m of editorsOn(L, t)) { const p = personOf.get(m); if (p && !byPerson.has(p.key)) byPerson.set(p.key, m); }
-    const made = time(t.created_at);
-    for (const [pk, m] of byPerson) {
-      if (isOpen) {
+    const byPerson = (list: string[]) => {
+      const out = new Map<string, string>();
+      for (const m of list) { const p = personOf.get(m); if (p && !out.has(p.key)) out.set(p.key, m); }
+      return out;
+    };
+    const eds = editorsOn(L, t);
+    if (isOpen) {
+      for (const [pk, m] of byPerson(eds)) {
         const o = a.openBy.get(pk) ?? { count: 0, members: new Map<string, number>() };
         o.count++; tally(o.members, m);
         a.openBy.set(pk, o);
       }
-      if (made >= since) {
+    }
+    const made = time(t.created_at);
+    // someone who has left Timeliner is never named a client's editor (nor suggested for its videos)
+    if (made >= since) {
+      for (const [pk, m] of byPerson(eds.filter((x) => L.members.get(x)?.active !== false))) {
         const r = a.made.get(pk) ?? { count: 0, last: 0, members: new Map<string, number>() };
         r.count++; r.last = Math.max(r.last, made); tally(r.members, m);
         a.made.set(pk, r);
@@ -1481,7 +1536,8 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
       };
     })
     .filter((c) => c.open > 0 || c.notAssigned > 0 || c.editor)
-    .sort((a, b) => b.open - a.open || a.name.localeCompare(b.name));
+    // the ones to look at first (however few their videos), then the most open videos
+    .sort((a, b) => Number(b.flags.length > 0) - Number(a.flags.length > 0) || b.open - a.open || a.name.localeCompare(b.name));
   const clientByKey = new Map(clients.map((c) => [c.key, c]));
 
   // on each card, a client with more than one editor (this one among them) carries its flag
@@ -1552,6 +1608,8 @@ export async function loadMine(ctx: Ctx, me: Me): Promise<MyEditing> {
   const own = (v: EditingVideo): EditingVideo => ({ ...v, match: { ...v.match, note: null } });
   return {
     ...mine,
+    // what the read found across the workspace (its people and clients) is the managers'
+    sync: { ...mine.sync, counts: null },
     focus: mine.focus && { ...mine.focus, video: own(mine.focus.video) },
     nextUp: mine.nextUp && own(mine.nextUp),
     revisions: mine.revisions.map(own), toEdit: mine.toEdit.map(own), waiting: mine.waiting.map(own), approvedWeek: mine.approvedWeek.map(own),

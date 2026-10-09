@@ -163,7 +163,7 @@ export function EditorsPage() {
         <Panel title="Timeliner hasn’t been read yet" className="ed-setup">
           <div className="stack s4">
             {b.sync.error
-              ? <div className="banner red" role="alert"><AlertTriangle aria-hidden /><div className="txt"><b>Couldn’t read Timeliner</b><span>Timeliner answered: {b.sync.error}</span></div></div>
+              ? <div className="banner red" role="alert"><AlertTriangle aria-hidden /><div className="txt"><b>Couldn’t read Timeliner</b><span>{b.sync.error}</span></div></div>
               : <p className="muted">The key is set. The site reads Timeliner a few seconds after it starts, then every few minutes, and each editor’s videos show up here.</p>}
             <FormError error={read.error} />
             <div className="row-flex">{readButton(true)}</div>
@@ -220,14 +220,17 @@ function SetupPanel({ b }: { b: EditingBoard }) {
   );
 }
 
-/** The last read failed: what Timeliner answered, and that what's below is the last good copy (so it never reads as "nothing to do"). */
+/**
+ * The last read failed: why, in the server's words (Timeliner's own answer, "Timeliner answered 500: …", or that it
+ * couldn't be reached), and that what's below is the last good copy (so it never reads as "nothing to do").
+ */
 function SyncBanner({ s, now }: { s: EditingSync; now: number }) {
   return (
     <div className="banner red ed-banner" role="alert">
       <AlertTriangle aria-hidden />
       <div className="txt">
         <b>Couldn’t read Timeliner just now</b>
-        <span>Timeliner answered: {s.error}{s.syncedAt ? ` Everything below is the copy read ${fmtAgo(s.syncedAt, now)}, so it may be out of date; the site tries again in a few minutes.` : ''}</span>
+        <span>{s.error}{s.syncedAt ? ` Everything below is the copy read ${fmtAgo(s.syncedAt, now)}, so it may be out of date; the site tries again in a few minutes.` : ''}</span>
       </div>
     </div>
   );
@@ -237,10 +240,13 @@ function SyncBanner({ s, now }: { s: EditingSync; now: number }) {
 
 function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: number; today: ISODate; workspaceTz: string }) {
   const t = b.totals;
-  // the last read failed: an all-clear can't be vouched for, so the cards say how old their copy is instead
-  const clear = (words: string) => (b.sync.error && b.sync.syncedAt
-    ? <span className="kpi-pill" title="Timeliner couldn’t be read just now">As of {fmtAgo(b.sync.syncedAt, now)}</span>
+  // the last read failed: an all-clear can't be vouched for, so the cards say how old their copy is instead, in the
+  // pill and in the line under the number (phones hide the pill)
+  const asOf = b.sync.error && b.sync.syncedAt ? `As of ${fmtAgo(b.sync.syncedAt, now)}` : null;
+  const clear = (words: string) => (asOf
+    ? <span className="kpi-pill" title="Timeliner couldn’t be read just now">{asOf}</span>
     : <span className="kpi-pill"><Check aria-hidden />{words}</span>);
+  const calm = (words: string) => asOf ?? words;
   const kinds = new Map(b.editors.map((e) => [e.key, nowKind(e, now)]));
   const live = b.editors.filter((e) => kinds.get(e.key) === 'live');
   const paused = b.editors.filter((e) => kinds.get(e.key) === 'paused');
@@ -264,7 +270,7 @@ function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: nu
             <span key={e.key} className="kpi-row"><span className="ellipsis"><Pause size={11} aria-hidden /> {first(e.name)} · <b>{videoName(e.focus!.video)}</b></span><span>{e.focus!.state === 'paused' ? 'paused' : 'still marked'}</span></span>
           ))}
           {!live.length && !held.length && (
-            <span className="kpi-row"><span>Next up</span><b className="ellipsis">{next ? `${first(next.name)} · ${videoName(next.nextUp!)}` : 'Nothing on anyone’s plate'}</b></span>
+            <span className="kpi-row"><span>Next up</span><b className="ellipsis">{next ? `${first(next.name)} · ${videoName(next.nextUp!)}` : calm('Nothing on anyone’s plate')}</b></span>
           )}
         </span>
       )} />
@@ -286,7 +292,7 @@ function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: nu
     <KpiCard tone="today" icon={<AlarmClock />} n={t.dueToday}
       pill={due.length ? <span className="kpi-pill">{plural(due.length, 'editor')}</span> : clear(todays.length ? 'Nothing left' : 'Nothing due')}
       cap="Due today"
-      sub={top ? `${first(top.name)} · ${videoTitles(top.videos.filter((v) => onPlate(v) && v.due && v.due <= today))} still to edit` : todays.length ? 'Nothing left to edit today' : 'No videos due today'}
+      sub={top ? `${first(top.name)} · ${videoTitles(top.videos.filter((v) => onPlate(v) && v.due && v.due <= today))} still to edit` : calm(todays.length ? 'Nothing left to edit today' : 'No videos due today')}
       label={`${plural(t.dueToday, 'video')} due today still to edit`}
       foot={todays.length ? (
         <span className="kpi-meter">
@@ -309,7 +315,7 @@ function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: nu
     <KpiCard tone="revs" icon={<RotateCcw />} n={t.revisions}
       pill={rev.length ? <span className="kpi-pill">{plural(rev.length, 'editor')}</span> : clear('None')}
       cap="Revisions"
-      sub={t.revisions ? 'sent back with changes' : 'Nothing sent back'}
+      sub={t.revisions ? 'sent back with changes' : calm('Nothing sent back')}
       label={`${plural(t.revisions, 'video')} in revisions`}
       foot={(
         <span className="kpi-list">
@@ -318,7 +324,7 @@ function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: nu
             const round = Math.max(0, ...vids.map((v) => v.revisionRound));
             return <span key={e.key} className="kpi-row"><span className="ellipsis">{first(e.name)} · <b>{videoTitles(vids)}</b></span><span>{round ? `Round ${round}` : ''}</span></span>;
           })}
-          {!rev.length && <span className="kpi-row"><span>Every video is moving forward</span></span>}
+          {!rev.length && <span className="kpi-row"><span>{calm('Every video is moving forward')}</span></span>}
         </span>
       )} />
   );
@@ -340,7 +346,7 @@ function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: nu
     <KpiCard tone="review" icon={<Eye />} n={t.waitingOnYou}
       pill={oldest ? <span className="kpi-pill">Oldest: {fmtAgo(oldest, now)}</span> : t.waitingOnYou ? undefined : clear('Queue clear')}
       cap="Waiting on you"
-      sub={steps.size ? [...steps].map(([k, n]) => `${k} ${n}`).join(' · ') : 'Nothing to review'}
+      sub={steps.size ? [...steps].map(([k, n]) => `${k} ${n}`).join(' · ') : calm('Nothing to review')}
       label={`${plural(t.waitingOnYou, 'video')} waiting on your review`}
       foot={(
         <span className="kpi-list">
@@ -348,7 +354,7 @@ function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: nu
             <span key={e.key} className="kpi-row"><span className="ellipsis">{first(e.name)} · {videoTitles(vids)}</span><b className="num">{vids.length}</b></span>
           ))}
           {others > 0 && <span className="kpi-row"><span className="ellipsis">Others in Timeliner</span><b className="num">{others}</b></span>}
-          {!byEditor.length && !others && <span className="kpi-row"><span>Nothing sent to review yet</span></span>}
+          {!byEditor.length && !others && <span className="kpi-row"><span>{calm('Nothing sent to review yet')}</span></span>}
         </span>
       )} />
   );
@@ -366,8 +372,10 @@ function nextDue(b: EditingBoard, today: ISODate): string {
 
 // ── editors by client ────────────────────────────────────────────────────
 
-/** Clients shown before "Show all". */
+/** Clients shown before "Show all" (flagged ones always show: the server lists them first). */
 const CLIENT_TILES = 12;
+/** On a phone, where each client is one line: the rest fold away so the roster stays near the top. */
+const PHONE_TILES = 4;
 
 /** A client's flag without its name, which its tile already shows ("18 with Maya, 3 with Sam — one editor per client"). */
 function flagWords(c: ClientEditing, text: string): string {
@@ -379,23 +387,32 @@ function flagWords(c: ClientEditing, text: string): string {
 /**
  * Each client and its editor (one editor per client, worked out from Timeliner): the one assigned to the client
  * there, else whoever has most of its recent videos. Its open videos, and a chip when they're split across
- * editors or some aren't assigned. A tile whose editor has a card goes to it.
+ * editors or some aren't assigned. A tile whose editor has a card goes to it. The clients to look at come first
+ * and always show; on a phone each client is one line, and the rest fold away after a few.
  */
 function ClientStrip({ b }: { b: EditingBoard }) {
   const [all, setAll] = useState(false);
   const listId = useId();
   if (!b.clients.length) return null;
   const cards = new Set(b.editors.map((e) => e.key));
-  const shown = all ? b.clients : b.clients.slice(0, CLIENT_TILES);
+  const folds = (cap: number) => (c: ClientEditing, i: number) => !c.flags.length && i >= cap;
+  const shown = all ? b.clients : b.clients.filter((c, i) => !folds(CLIENT_TILES)(c, i));
+  const foldedHere = b.clients.filter(folds(CLIENT_TILES)).length;
+  const foldedOnPhone = b.clients.filter(folds(PHONE_TILES)).length;
   const flagged = b.clients.filter((c) => c.flags.length > 0).length;
   return (
     <Panel title="Editors by client" count={b.clients.length} className="ed-clients"
       sub={flagged ? `one editor per client · ${plural(flagged, 'client')} to look at` : 'one editor per client, from Timeliner'}>
       <ul className="ed-ct-list" id={listId}>
-        {shown.map((c) => <li key={c.key}><ClientTile c={c} card={!!c.editor && cards.has(c.editor.key)} /></li>)}
+        {shown.map((c, i) => (
+          <li key={c.key} className={!all && folds(PHONE_TILES)(c, i) ? 'ed-ct-fold' : undefined}>
+            <ClientTile c={c} card={!!c.editor && cards.has(c.editor.key)} />
+          </li>
+        ))}
       </ul>
-      {b.clients.length > CLIENT_TILES && (
-        <button type="button" className="ed-vbtn ed-ct-more" aria-expanded={all} aria-controls={listId} onClick={() => setAll((x) => !x)}>
+      {foldedOnPhone > 0 && (
+        // only a phone folds any away when there are few clients
+        <button type="button" className={`ed-vbtn ed-ct-more${foldedHere ? '' : ' phone'}`} aria-expanded={all} aria-controls={listId} onClick={() => setAll((x) => !x)}>
           {all ? 'Show fewer' : `Show all ${b.clients.length} clients`}<ChevronDown className={`chev${all ? ' up' : ''}`} aria-hidden />
         </button>
       )}
@@ -785,7 +802,7 @@ function Drill({ id, e, today, tz, now }: { id: string; e: EditorRow; today: ISO
   const unmatched = all.filter((x) => notMatched(x.v)).length;
   const toCheck = all.filter((x) => needsCheck(x.v)).length;
   // a client without scripts on the site has no shoot to match its videos to
-  const noneToMatch = all.length > 0 && all.every((x) => noScripts(x.v));
+  const noneToMatch = all.length > 0 && all.every((x) => x.v.match.how === 'no_scripts');
   return (
     <div className="ed-drill" id={id}>
       <p className="ed-drill-hint">
@@ -833,6 +850,9 @@ function VideoDetail({ v, c, today, onClose }: { v: EditingVideo; c: string; tod
   const nm = notMatched(v);
   // its client has no scripts on the site (or isn't a site client): normal work, nothing to pin it to
   const ns = noScripts(v);
+  // its client has no batches at all: no pin. A brand no client is named like may still be one of theirs, so it
+  // can be pinned (quietly: no nag, not counted as not matched)
+  const canPin = !ns || v.match.how === 'no_client';
   const who = clientName(v);
   const unpin = useSave(() => api<EditingBoard>(`/api/editing/videos/${encodeURIComponent(v.id)}/pin`, { method: 'DELETE' }), {
     onSuccess: () => toast(`Took the pin off ${videoName(v)}. The site matches it by itself again.`),
@@ -869,9 +889,9 @@ function VideoDetail({ v, c, today, onClose }: { v: EditingVideo; c: string; tod
         </p>
       )}
       {v.batch && <div className="ed-vd-line"><ScriptLink v={v} who="manager" today={today} /></div>}
-      {!pinning && !ns && (
+      {!pinning && canPin && (
         <div className="ed-vd-acts">
-          <Button variant="tall" icon={<Pin aria-hidden />} onClick={() => setPinning(true)}>{pinned ? 'Change the pin' : v.batch ? 'Wrong shoot? Pin it' : 'Pin it to its shoot'}</Button>
+          <Button variant={ns ? 'ghost tall' : 'tall'} icon={<Pin aria-hidden />} onClick={() => setPinning(true)}>{pinned ? 'Change the pin' : v.batch ? 'Wrong shoot? Pin it' : 'Pin it to its shoot'}</Button>
           {pinned && <Button variant="ghost tall" icon={<PinOff aria-hidden />} busy={unpin.isPending} onClick={() => unpin.mutate(undefined)}>Unpin</Button>}
         </div>
       )}
@@ -1031,7 +1051,7 @@ function NotAssigned({ b, today }: { b: EditingBoard; today: ISODate }) {
           const d = dueWords(g.due, today);
           const hot = d?.tone === 'today' || d?.tone === 'late';
           return (
-            <div key={`${g.raw ? 'raw' : 'titled'}|${g.batch?.id ?? ''}|${g.folder}|${g.clientName ?? ''}`} className={`ed-na-row${g.raw ? ' raw' : ''}`}>
+            <div key={`${g.raw ? 'raw' : 'titled'}|${g.batch?.id ?? ''}|${g.folder}|${g.clientName ?? g.brand ?? ''}`} className={`ed-na-row${g.raw ? ' raw' : ''}`}>
               <span className="ed-na-t">
                 {naLabel(g, today)}
                 {/* whom to give them: their client's editor */}

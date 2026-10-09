@@ -188,12 +188,17 @@ describe('one editor per client', () => {
     })]);
   });
 
-  it('counts a reviewer on a video as its editor only when nobody else is on it', async () => {
-    // Ada (a Timeliner admin) is on one of Dana's videos to review it: still Dana's alone, not a split
+  it('never counts a reviewer on a video (a Timeliner admin) as its editor', async () => {
+    // Ada (a Timeliner admin, the site's Admin) is on one of Dana's videos to review it: still Dana's alone, not a
+    // split, and not on a card of Ada's
     w.tl.tasks.find((t) => t.id === 't_d1')!.assigneeIds = ['m_dana', 'm_ada'];
-    const after = await w.sync();
-    expect(after.clients.find((c) => c.name === 'Brightside')).toMatchObject({ editor: { name: 'Gus Ghost' }, split: [] });
-    w.tl.tasks.find((t) => t.id === 't_d1')!.assigneeIds = ['m_dana'];
+    try {
+      const after = await w.sync();
+      expect(after.clients.find((c) => c.name === 'Brightside')).toMatchObject({ editor: { name: 'Gus Ghost' }, split: [] });
+      expect(after.editors.filter((e) => e.memberId === 'm_ada')).toEqual([]);
+    } finally {
+      w.tl.tasks.find((t) => t.id === 't_d1')!.assigneeIds = ['m_dana'];
+    }
   });
 });
 
