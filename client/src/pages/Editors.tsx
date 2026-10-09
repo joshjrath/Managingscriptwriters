@@ -1,9 +1,9 @@
 // Editors (managers): what each editor is doing right now and what's on their plate, read from Timeliner.
 // Videos are given to editors in Timeliner (a video is its assignees' there, as Timeliner's assignee filter shows);
 // this page never assigns them. On top, what the last read found and Read Timeliner now; then the summary cards, the
-// one count of videos not matched to a shoot, and "Editors by client" (each client's editor since the one-editor
-// rule began, its open videos, and its warnings as chips: split across editors, two editors, some not assigned).
-// The roster has a card for everyone in Timeliner with videos and every editor on the site; people to fix (not on
+// one count of videos not matched to a shoot, and the roster. Below the roster, "Editors by client" (each client's
+// editor since the one-editor rule began, its open videos, and its warnings as chips: split across editors, two
+// editors, some not assigned). The roster has a card for everyone in Timeliner with videos and every editor on the site; people to fix (not on
 // the site, or another email here) are flagged on their card and listed in one line above the cards. Each card is
 // calm: their name and biggest client ("Dentist Mike + 2 more"), at most two pills, what they're on (the video they
 // tapped "I'm on this" for, or paused), else what's next by deadline, or that they're off hours, on one line with
@@ -184,12 +184,12 @@ export function EditorsPage() {
           {(b.editors.length > 0 || b.unassigned.length > 0) && <SummaryCards b={b} now={now} today={clock.today} workspaceTz={clock.timezone} />}
           {/* the one place the videos not matched to a shoot are counted: each card leaves them to its Videos */}
           <MatchStrip b={b} />
-          <ClientStrip b={b} today={clock.today} />
           <Panel title="Roster" count={b.editors.length} className="ed-roster"
             sub="Editing now first, then paused, due today, revisions, and who’s free"
             tools={<a className="ed-tl-link" href={TIMELINER_APP} target="_blank" rel="noopener noreferrer"><Layers aria-hidden />Open in Timeliner</a>}>
             <Roster b={b} now={now} tz={tz} today={clock.today} />
           </Panel>
+          <ClientStrip b={b} today={clock.today} />
         </>
       )}
     </>

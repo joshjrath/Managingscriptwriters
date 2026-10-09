@@ -38,6 +38,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-09-editors-by-client-below-roster',
+    date: '2026-10-09',
+    title: 'Editors by client moved below the roster',
+    summary: 'On the Editors tab, the roster now comes first and Editors by client sits under it.',
+    changes: [
+      { tag: 'improved', text: 'The Editors tab shows the roster of editors first. Editors by client, with each client’s editor and its warnings, is now below the roster.' },
+    ],
+  },
+  {
     id: '2026-10-09-editors-match-timeliner-assignees',
     date: '2026-10-09',
     title: 'The Editors tab matches Timeliner’s assignees exactly',
