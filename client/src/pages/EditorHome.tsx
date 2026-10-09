@@ -28,7 +28,7 @@ import { burst, centerOf } from '../fx';
 import { motionAllowed } from '../motion';
 import {
   AgainTag, AltLink, byTitle, clientName, docKind, docName, docSource, fmtWhen, likelyWords, midSentence, focusSeconds, noScripts, noScriptWords, openWords,
-  reviewWords, ScriptLink, scriptWhat, shootLabel, shootWords, squareOf, syncWords, TIMELINER_APP, useNow, VideoLine, videoName, videoTitles,
+  reviewWords, ScriptLink, scriptWhat, shootLabel, shootWords, squareOf, syncWords, TIMELINER_APP, timelinerVideoUrl, useNow, VideoLine, videoName, videoTitles,
 } from '../components/EditingBits';
 import { DeliverableRow } from './ScriptBank';
 
@@ -295,7 +295,7 @@ function FocusCard({ f, all, now, today, acting }: { f: EditorFocus; all: Editin
             <FileText aria-hidden />{openWords(v)}
           </a>
         )}
-        <a className="btn eh-btn quiet" href={TIMELINER_APP} target="_blank" rel="noopener noreferrer"><Layers aria-hidden />Open in Timeliner</a>
+        <a className="btn eh-btn quiet" href={timelinerVideoUrl(v.id)} target="_blank" rel="noopener noreferrer"><Layers aria-hidden />Open in Timeliner</a>
         <div className="eh-act-group" role="group" aria-label={videoName(v)}>
           {on
             ? <Button variant="eh-btn light" icon={<Pause className="ed-fill" aria-hidden />} busy={acting.busy(v.id, 'pause')} disabled={acting.pending} onClick={() => acting.run(v, 'pause')}>Pause</Button>
@@ -388,7 +388,7 @@ function DoneCard({ v, now, tz, today, acting }: { v: EditingVideo; now: number;
           <div className="eh-script-t">Send it to Needs review in Timeliner</div>
           <div className="eh-script-s">The managers can already see it’s done. It moves on here once it’s in Needs review.</div>
         </div>
-        <a className="btn eh-btn dark" href={TIMELINER_APP} target="_blank" rel="noopener noreferrer">Open in Timeliner<ExternalLink aria-hidden /></a>
+        <a className="btn eh-btn dark" href={timelinerVideoUrl(v.id)} target="_blank" rel="noopener noreferrer">Open in Timeliner<ExternalLink aria-hidden /></a>
       </div>
       <div className="eh-actions">
         <Button variant="eh-btn quiet" icon={<RotateCcw aria-hidden />} busy={acting.busy(v.id, 'start')} disabled={acting.pending} onClick={() => acting.run(v, 'start')}
@@ -425,7 +425,7 @@ function NextCard({ v, after, today, acting }: { v: EditingVideo; after: boolean
           </a>
         )}
         {v.script?.alt && <AltLink d={v.script.alt} what={scriptWhat(v, today).toLowerCase()} />}
-        <a className="btn eh-btn ghost" href={TIMELINER_APP} target="_blank" rel="noopener noreferrer">Open in Timeliner</a>
+        <a className="btn eh-btn ghost" href={timelinerVideoUrl(v.id)} target="_blank" rel="noopener noreferrer">Open in Timeliner</a>
       </div>
       {err && <div className="eh-err"><FormError error={err} /></div>}
       <p className="eh-note">Picked by deadline from Timeliner{v.state === 'revisions' ? ', revisions first' : ''}. Tapping it lets the managers see what you’re cutting.</p>

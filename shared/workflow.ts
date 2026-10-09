@@ -368,6 +368,11 @@ export const TIMELINER_STEP_LABEL: Record<TimelinerStatusGroup, string> = {
   posted: 'Posted',
 };
 
+/** Timeliner's web app, where the team is signed in (its home page, timeliner.io, is for visitors). */
+export const TIMELINER_APP = 'https://timeliner.io/app';
+/** One video in Timeliner's web app: it opens the task named by `?task=`, as the address bar shows with a video open. */
+export const timelinerVideoUrl = (taskId: string) => `${TIMELINER_APP}?task=${encodeURIComponent(taskId)}`;
+
 /** Videos an editor still has to work on (and so can say they're on). */
 export const isOnPlate = (s: VideoState) => s === 'to_edit' || s === 'revisions';
 

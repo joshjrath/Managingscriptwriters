@@ -31,7 +31,7 @@ import { KpiCard } from '../components/StatCards';
 import { motionAllowed } from '../motion';
 import {
   AgainTag, byTitle, clientName, clockTime, docKind, docName, docSource, midSentence, fmtWhen, focusSeconds, hoursText, localTime, noScripts, notMatched, numberedName,
-  readWords, reviewWords, ScriptLink, shootLabel, shootWords, squareOf, tileTime, TIMELINER_APP, useNow, VideoLine, VideoName, videoName, videoTitles,
+  readWords, reviewWords, ScriptLink, shootLabel, shootWords, squareOf, tileTime, TIMELINER_APP, timelinerVideoUrl, useNow, VideoLine, VideoName, videoName, videoTitles,
 } from '../components/EditingBits';
 
 const first = (name: string) => name.trim().split(/\s+/)[0] || name;
@@ -859,7 +859,9 @@ function VideoDetail({ v, c, today, onClose }: { v: EditingVideo; c: string; tod
         <span className={`ed-sq c-${c}`} aria-hidden>{squareOf(v)}</span>
         <div className="ed-vd-title">
           <b><VideoName v={v} /></b>
-          <span className="muted">Timeliner: {v.step}{v.folder ? ` · ${v.folder}` : ''}</span>
+          <span className="muted">
+            Timeliner: {v.step}{v.folder ? ` · ${v.folder}` : ''} · <a className="link" href={timelinerVideoUrl(v.id)} target="_blank" rel="noopener noreferrer">Open in Timeliner</a>
+          </span>
         </div>
         <button type="button" className="icon-btn ed-vd-x" aria-label={`Close ${videoName(v)}`} onClick={onClose}><X aria-hidden /></button>
       </div>

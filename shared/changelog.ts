@@ -38,6 +38,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-09-open-video-in-timeliner',
+    date: '2026-10-09',
+    title: 'Open in Timeliner opens the video itself',
+    summary: 'Open in Timeliner beside a video now opens that exact video in Timeliner, not Timeliner’s home page.',
+    changes: [
+      { tag: 'improved', text: 'On an editor’s Home, Open in Timeliner beside what they’re on, what’s next and a video marked done opens that video in Timeliner.' },
+      { tag: 'new', text: 'On the Editors tab, tapping a video in an editor’s Videos shows Open in Timeliner, which opens that video there.' },
+      { tag: 'improved', text: 'The other Timeliner links (Open in Timeliner above a list, Assign in Timeliner) open Timeliner’s app instead of its home page.' },
+    ],
+  },
+  {
     id: '2026-10-09-editors-by-client-below-roster',
     date: '2026-10-09',
     title: 'Editors by client moved below the roster',

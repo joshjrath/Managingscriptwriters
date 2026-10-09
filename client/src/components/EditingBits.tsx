@@ -10,10 +10,8 @@ import { FileText, Film } from 'lucide-react';
 import type { EditingSync, EditingVideo, EditorFocus, ScriptDoc } from '../../../shared/types';
 import { addDays, diffDays, nowInZone, type ISODate } from '../../../shared/dates';
 import { compressTitles, hasNoScripts, isNotMatched, titleNumber } from '../../../shared/workflow';
+export { TIMELINER_APP, timelinerVideoUrl } from '../../../shared/workflow';
 import { fmtAgo, fmtDate, fmtDow, fmtHour, plural } from '../../../shared/format';
-
-/** Timeliner's web app. Its API has no link to one video, so "Open in Timeliner" opens the app. */
-export const TIMELINER_APP = 'https://timeliner.io/';
 
 /** The current time, moved on every `ms`, so "40 min on it" and "3 min ago" stay true between reads. */
 export function useNow(ms = 30_000): number {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   allowedFrom, canSendDocument, checkAction, compressRanges, deriveStage, documentState, evenSplit, isAdmin, isManager, isNewWork, isNotMatched, milestone, newlyAdded, parseRanges, progressLabel,
-  splitAssignments, summarize, type ScriptStatus,
+  splitAssignments, summarize, TIMELINER_APP, timelinerVideoUrl, type ScriptStatus,
 } from '../shared/workflow';
 import { makeClock } from '../shared/dates';
 import { parseEntry } from '../shared/parse';
@@ -219,5 +219,17 @@ describe('a video not matched to a shoot', () => {
     expect(isNotMatched(v('no_client'))).toBe(false);
     expect(isNotMatched(v(null, { state: 'approved' }))).toBe(false);
     expect(isNotMatched(v('date', { batch: { id: 1 } }))).toBe(false);
+  });
+});
+
+describe('links into Timeliner', () => {
+  it('opens one video by its task id, as Timeliner’s address bar shows it', () => {
+    expect(timelinerVideoUrl('3e032f54-73bc-4ece-a4f4-01876d698050')).toBe('https://timeliner.io/app?task=3e032f54-73bc-4ece-a4f4-01876d698050');
+  });
+  it('keeps an odd id inside the task parameter', () => {
+    expect(timelinerVideoUrl('a&b=c')).toBe('https://timeliner.io/app?task=a%26b%3Dc');
+  });
+  it('opens the app, not the home page, when it isn’t about one video', () => {
+    expect(TIMELINER_APP).toBe('https://timeliner.io/app');
   });
 });
