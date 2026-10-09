@@ -728,4 +728,16 @@ create table timeliner_brand_members (
 );
 create index timeliner_brand_members_member_idx on timeliner_brand_members (member_id);
 `,
+  // 35 · each person's Timeliner email, beside the email they sign in with (which never changes for it): a Timeliner
+  // member is a team member when the member's email is either, and an editor in Settings → Editors when it's theirs.
+  // Two people on the team (or two in Settings → Editors) never share one. And the day the team began giving each
+  // client one editor: only videos made in Timeliner since then count for the Editors tab's one-editor checks
+  // (Oct 9, 2026, when the rule began)
+  `
+alter table users add column timeliner_email text;
+create unique index users_timeliner_email_key on users (lower(timeliner_email)) where timeliner_email is not null and removed_at is null;
+alter table editors add column timeliner_email text;
+create unique index editors_timeliner_email_key on editors (lower(timeliner_email)) where timeliner_email is not null and removed_at is null;
+alter table settings add column one_editor_since date not null default '2026-10-09';
+`,
 ];

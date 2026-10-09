@@ -35,7 +35,7 @@ import { isISODate, isValidTimeZone, makeClock, type ISODate } from '../shared/d
 import { cityLabel, onShift } from '../shared/cities';
 import {
   compressRanges, compressTitles, hasNoScripts, isApproved, isEditor, isFocusStale, isManager, isNotMatched, isOnPlate, isRawTitle, needsCheck, TIMELINER_STEP_LABEL, titleNumber,
-  videoState, type ScriptStatus, type TimelinerStatusGroup, type VideoState,
+  underOneEditorRule, videoState, type ScriptStatus, type TimelinerStatusGroup, type VideoState,
 } from '../shared/workflow';
 import { fmtWorked } from '../shared/format';
 import type {
@@ -357,6 +357,20 @@ const REVIEW_ROLES = ['admin', 'supervisor', 'guest'];
 const IS_BRAND_EDITOR = (bm: string, m: string) =>
   `${bm}.role = 'editor' and not ${bm}.automatic and coalesce(${m}.active, true) and coalesce(${m}.role, 'editor') not in (${REVIEW_ROLES.map((r) => `'${r}'`).join(', ')})`;
 
+/**
+ * SQL: the site user `u` has the email `e` (an SQL expression) as the one they sign in with, or as their Timeliner
+ * email (any case, spaces around it ignored). The one place someone in Timeliner is matched to a person by email:
+ * the board, an editor's Home, I'm on this, the scripts PDF link, the new-version notice and whom a delivery by
+ * upload is recorded under all go by it (`loadEditing` builds the same match in memory, sign-in email first).
+ */
+export const USER_HAS_EMAIL = (u: string, e: string) =>
+  `(lower(trim(${u}.email)) = lower(trim(${e})) or lower(trim(${u}.timeliner_email)) = lower(trim(${e})))`;
+/** SQL: the Timeliner member `m` is the site user `u` (USER_HAS_EMAIL). */
+export const MEMBER_IS_USER = (m: string, u: string) => USER_HAS_EMAIL(u, `${m}.email`);
+
+/** An email as compared across Timeliner and the site: any case, spaces around it ignored. */
+const emailKey = (v: string) => v.trim().toLowerCase();
+
 /** SQL: the Timeliner member ids the task `tt` belongs to (rule A): its assignees, else its brand's editors. */
 export const OWNER_IDS = (tt: string) => `(case when cardinality(${tt}.assignee_ids) > 0 then ${tt}.assignee_ids
   else array(select ob.member_id from timeliner_brand_members ob left join timeliner_members om on om.id = ob.member_id
@@ -591,7 +605,7 @@ async function write(db: Db, f: Found): Promise<void> {
 async function endLeftFocus(t: Db): Promise<void> {
   const rows = await t.query<{ user_id: number; task_id: string; status_group: string | null; theirs: boolean }>(
     `select f.user_id, f.task_id, tt.status_group,
-            exists (select 1 from timeliner_members m join users u on lower(u.email) = lower(m.email)
+            exists (select 1 from timeliner_members m join users u on ${MEMBER_IS_USER('m', 'u')}
                      where u.id = f.user_id and m.id = any(${OWNER_IDS('tt')})) as theirs
        from editor_focus f left join timeliner_tasks tt on tt.id = f.task_id`,
   );
@@ -1008,15 +1022,15 @@ interface Loaded {
   tasks: TaskRow[];
   byId: Map<string, TaskRow>;
   users: UserSummary[];
-  /** member id → the site user with that email */
+  /** member id → the site user with that email, as their sign-in email (first) or their Timeliner email */
   userOf: Map<string, number>;
   members: Map<string, { name: string | null; email: string | null; role: string | null; active: boolean }>;
   /** Timeliner brand id → its name */
   brands: Map<string, string>;
   /** Timeliner brand id → its editors there (the client's dedicated editors), as OWNER_IDS counts them */
   brandEditors: Map<string, string[]>;
-  /** Settings → Editors: editors who don't sign in, with where they are and their hours */
-  offSite: { name: string; city: string; timezone: string; workHours: [number, number] }[];
+  /** Settings → Editors: editors who don't sign in, with where they are, their hours and their Timeliner email */
+  offSite: { id: number; name: string; city: string; timezone: string; workHours: [number, number]; timelinerEmail: string | null }[];
   focus: Map<number, FocusRow>;
   done: DoneRow[];
   /** `${taskId}|${userId}` → when they marked it done here */
@@ -1034,6 +1048,9 @@ interface Loaded {
   scripts: Map<number, Map<number, { status: ScriptStatus; approvedAt: string | null }>>;
   today: ISODate;
   now: Date;
+  /** the workspace's time zone, and the day the one-editor-per-client rule began there (`settings.oneEditorSince`) */
+  tz: string;
+  oneEditorSince: ISODate;
 }
 
 /** The last complete read's counts as stored (anything odd reads as none). */
@@ -1059,9 +1076,14 @@ async function loadEditing(ctx: Ctx): Promise<Loaded> {
   )) brandEditors.set(r.brand_id, [...(brandEditors.get(r.brand_id) ?? []), r.member_id]);
   const members = await db.query<{ id: string; email: string | null; name: string | null; role: string | null; active: boolean }>(`select id, email, name, role, active from timeliner_members`);
   const users = (await loadUsers(db)).filter((u) => u.active);
-  const byEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.id]));
+  // as MEMBER_IS_USER: their sign-in email, else their Timeliner email (the sign-in email first, should both name someone)
+  const bySignIn = new Map(users.map((u) => [emailKey(u.email), u.id]));
+  const byTimeliner = new Map(users.flatMap((u) => (u.timelinerEmail ? [[emailKey(u.timelinerEmail), u.id] as const] : [])));
   const userOf = new Map<string, number>();
-  for (const m of members) { const u = m.email ? byEmail.get(m.email.toLowerCase()) : undefined; if (u) userOf.set(m.id, u); }
+  for (const m of members) {
+    const u = m.email ? bySignIn.get(emailKey(m.email)) ?? byTimeliner.get(emailKey(m.email)) : undefined;
+    if (u) userOf.set(m.id, u);
+  }
   const batchIds = [...new Set(tasks.map((t) => t.batch_id).filter((x): x is number => x != null).map(Number))];
   const batches = batchIds.length ? await db.query<{ id: number; title: string; shoot_date: string | null }>(
     `select b.id, b.title, sh.start_date::text as shoot_date from batches b left join shoots sh on sh.id = b.shoot_id where b.id = any($1::bigint[])`, [batchIds],
@@ -1096,7 +1118,8 @@ async function loadEditing(ctx: Ctx): Promise<Loaded> {
     brands: new Map((await db.query<{ id: string; name: string }>(`select id, name from timeliner_names where kind = 'brand'`)).map((b) => [b.id, b.name])),
     brandEditors,
     offSite: (await loadEditorRows(db)).map((r) => ({
-      name: r.name, city: cityLabel({ name: r.city, country: r.country }), timezone: r.timezone, workHours: [Number(r.work_start), Number(r.work_end)] as [number, number],
+      id: Number(r.id), name: r.name, city: cityLabel({ name: r.city, country: r.country }), timezone: r.timezone,
+      workHours: [Number(r.work_start), Number(r.work_end)] as [number, number], timelinerEmail: r.timeliner_email,
     })),
     focus: new Map((await db.query<FocusRow>(`select user_id, task_id, state, since, worked_seconds, paused_at from editor_focus`)).map((f) => [Number(f.user_id), f])),
     done, doneAt: new Map(done.map((d) => [`${d.task_id}|${d.user_id}`, d.done_at])),
@@ -1109,6 +1132,8 @@ async function loadEditing(ctx: Ctx): Promise<Loaded> {
     pdfs: pdfOf, scripts,
     today: makeClock(settings.timezone, settings.cutoff, now).today,
     now,
+    tz: settings.timezone,
+    oneEditorSince: settings.oneEditorSince,
   };
 }
 
@@ -1159,12 +1184,13 @@ function toVideo(L: Loaded, t: TaskRow, userId: number | null): EditingVideo {
 
 /**
  * Someone on the Editors tab: everyone in Timeliner with videos in the copy, and every editor on the site. A site
- * account matched by email (`linked`) brings their taps; one matched by name only says the emails differ.
+ * account matched by email (`linked`: their sign-in or Timeliner email) brings their taps; one matched by name only
+ * says Timeliner knows them by another email.
  */
 interface Person {
   key: string;
   userId: number | null;
-  /** their site account has their Timeliner email: their taps and done marks count */
+  /** their site account has their Timeliner email (as its sign-in or Timeliner email): their taps and done marks count */
   linked: boolean;
   /** their Timeliner member ids (one, nearly always); the first has the most videos */
   memberIds: string[];
@@ -1201,11 +1227,12 @@ function onCardOf(L: Loaded, t: TaskRow): string[] {
 }
 
 /**
- * Everyone on the board: a site account matched by Timeliner email; else one with the same name (their emails
- * differ: flagged); else, from Timeliner alone, flagged as not on the site (with their place and hours from
- * Settings → Editors when their name is there). An admin, supervisor or guest in Timeliner has a card only for
- * videos nobody else is on (onCardOf), and is never flagged to be added as an editor. Editors on the site with
- * nothing in Timeliner get a quiet note.
+ * Everyone on the board: a site account matched by email (their sign-in email, or their Timeliner email); else
+ * someone in Settings → Editors with that Timeliner email; else a site account with the same name (Timeliner knows
+ * them by another email: flagged, to link it); else someone in Settings → Editors with the same name; else, from
+ * Timeliner alone, flagged as not on the site. Settings → Editors gives the card their place and hours. An admin,
+ * supervisor or guest in Timeliner has a card only for videos nobody else is on (onCardOf), and is never flagged to
+ * be added as an editor. Editors on the site with nothing in Timeliner get a quiet note.
  */
 function peopleOf(L: Loaded): Person[] {
   // their videos: on the video, or through their client (rule A); not one they're only reviewing
@@ -1247,12 +1274,14 @@ function peopleOf(L: Loaded): Person[] {
     p.memberIds.push(m);
   }
 
-  // the rest of Timeliner's people with videos: by name to someone on the site with no Timeliner work under their
-  // email, or to Settings → Editors; else only in Timeliner. A name two people share here matches nobody
+  // the rest of Timeliner's people with videos: to Settings → Editors by their Timeliner email there; by name to
+  // someone on the site with no Timeliner work under their emails, or to Settings → Editors; else only in Timeliner.
+  // A name two people share here matches nobody
   const siteByName = new Map<string, UserSummary | null>();
   for (const u of L.users) { const k = personKey(u.name); siteByName.set(k, siteByName.has(k) ? null : u); }
   const offSite = new Map<string, Loaded['offSite'][number]>();
   for (const e of L.offSite) if (!offSite.has(personKey(e.name))) offSite.set(personKey(e.name), e);
+  const offSiteByEmail = new Map(L.offSite.flatMap((e) => (e.timelinerEmail ? [[emailKey(e.timelinerEmail), e] as const] : [])));
   const others: Person[] = [];
   for (const m of [...work.keys()].filter((x) => !L.userOf.has(x)).sort(mostWork)) {
     const who = L.members.get(m);
@@ -1261,34 +1290,40 @@ function peopleOf(L: Loaded): Person[] {
     const k = who?.name ? personKey(who.name) : null;
     // someone who left Timeliner with only finished videos there: nothing to fix, nothing to show
     const gone = who?.active === false && !(work.get(m)?.open ?? 0);
-    const u = k && !gone ? siteByName.get(k) : undefined;
+    const linkedOff = email ? offSiteByEmail.get(emailKey(email)) : undefined;
+    const u = k && !gone && !linkedOff ? siteByName.get(k) : undefined;
     if (u && !byUser.get(u.id)?.linked) {
       const p = siteOf(u);
       p.memberIds.push(m);
       p.flag ??= {
-        kind: 'email_differs', timelinerEmail: email, siteEmail: u.email,
-        text: `Their email here (${u.email}) differs from Timeliner (${email ?? 'none'}) — change one so they match`,
+        kind: 'email_differs', timelinerEmail: email, siteEmail: u.email, offSiteId: null,
+        text: email
+          ? `Timeliner knows ${u.name} as ${email}${u.timelinerEmail ? `, not ${u.timelinerEmail}` : ''}`
+          : `Timeliner has no email for ${u.name}, so it can’t be linked to them here`,
       };
       continue;
     }
-    const e = k ? offSite.get(k) : undefined;
-    const tlEmail = email ?? 'the email they use in Timeliner';
+    const e = linkedOff ?? (k ? offSite.get(k) : undefined);
+    const known = email ? ` — Timeliner knows them as ${email}` : ' — Timeliner has no email for them';
     others.push({
       key: `m${m}`, userId: null, linked: false, memberIds: [m], name,
       city: e?.city ?? null, timezone: e?.timezone ?? null, workHours: e?.workHours ?? null,
       // an admin, supervisor or guest in Timeliner reviews: never flagged to be added as an editor
       flag: isReviewer(L, m) ? null
         : e
-          ? { kind: 'no_site_access', timelinerEmail: email, siteEmail: null, text: `Not on the site — give them site access in Settings → Editors with ${tlEmail}` }
-          : { kind: 'not_on_site', timelinerEmail: email, siteEmail: null, text: `Not on the site — add them in Settings → Team as an Editor with ${tlEmail}` },
+          ? { kind: 'no_site_access', timelinerEmail: email, siteEmail: null, offSiteId: e.id, text: `In Settings → Editors without site access${known}` }
+          : { kind: 'not_on_site', timelinerEmail: email, siteEmail: null, offSiteId: null, text: `Not on the site${known}` },
       card: !gone,
     });
   }
 
-  // editors on the site with nothing in Timeliner (under their email, or their name)
+  // editors on the site with nothing in Timeliner (under their emails, or their name)
   for (const u of L.users) {
     if (!isEditor(u.role) || byUser.has(u.id)) continue;
-    siteOf(u).flag = { kind: 'nothing_assigned', timelinerEmail: null, siteEmail: u.email, text: `Nothing assigned in Timeliner (their Timeliner email must be ${u.email})` };
+    siteOf(u).flag = {
+      kind: 'nothing_assigned', timelinerEmail: u.timelinerEmail, siteEmail: u.email, offSiteId: null,
+      text: `Nothing assigned in Timeliner under ${u.email}${u.timelinerEmail ? ` or ${u.timelinerEmail}` : ''}`,
+    };
   }
   return [...byUser.values(), ...others];
 }
@@ -1457,9 +1492,13 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
   }
 
   // each client's editor (one editor per client): who is on its brand as an editor in Timeliner; else whoever has
-  // the most of its videos made in the last 60 days (a tie: whoever had one most recently). And who has its open videos
+  // the most of its videos made in the last 60 days (a tie: whoever had one most recently). And who has its open
+  // videos. Only videos made since the rule began (settings.oneEditorSince) say anything about the rule: before it, a
+  // client's videos went to whoever was free, so they never flag a client nor decide whom its videos usually go to
   type Acc = {
     key: string; name: string; clientId: number | null; brand: string | null; brandIds: Set<string>; open: number; notAssigned: number; rawNotAssigned: number;
+    /** its videos made since the one-editor rule began */
+    ruled: number;
     made: Map<string, { count: number; last: number; members: Map<string, number> }>; openBy: Map<string, { count: number; members: Map<string, number> }>;
   };
   const accs = new Map<string, Acc>();
@@ -1468,13 +1507,16 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
   for (const t of L.tasks) {
     const c = clientOfTask(L, t);
     if (!c) continue;
-    const a = accs.get(c.key) ?? { ...c, brandIds: new Set<string>(), open: 0, notAssigned: 0, rawNotAssigned: 0, made: new Map(), openBy: new Map() };
+    const a = accs.get(c.key) ?? { ...c, brandIds: new Set<string>(), open: 0, notAssigned: 0, rawNotAssigned: 0, ruled: 0, made: new Map(), openBy: new Map() };
     accs.set(c.key, a);
     a.brand ??= c.brand;
     if (t.brand_id) a.brandIds.add(t.brand_id);
     const isOpen = videoState(t.status_group) !== 'approved';
     if (isOpen) a.open++;
     if (notAssigned(t)) { a.notAssigned++; if (isRawTitle(t.title)) a.rawNotAssigned++; }
+    // made before the rule began: on its editor's card and in every count, but nothing more here
+    if (!underOneEditorRule(t.created_at, L.oneEditorSince, L.tz)) continue;
+    a.ruled++;
     // each person once per video, whichever of their Timeliner accounts it's on
     const byPerson = (list: string[]) => {
       const out = new Map<string, string>();
@@ -1519,14 +1561,18 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
       };
       const editors = [...onBrand.values()].sort((x, y) => most(x.key, y.key));
       const top = [...a.made.keys()].sort(most)[0];
-      const editor = editors[0] ?? (top ? refOf(byKey.get(top)!, topMember(a.made.get(top)!.members)) : null);
+      // nothing made since the rule began: only an editor assigned to it alone in Timeliner is named
+      const beforeRule = a.ruled === 0;
+      const editor = beforeRule ? (editors.length === 1 ? editors[0] : null)
+        : editors[0] ?? (top ? refOf(byKey.get(top)!, topMember(a.made.get(top)!.members)) : null);
       const split = a.openBy.size > 1
         ? [...a.openBy].map(([pk, o]) => ({ ...refOf(byKey.get(pk)!, topMember(o.members)), count: o.count })).sort((x, y) => y.count - x.count || x.name.localeCompare(y.name))
         : [];
       const short = shortNames([...split.map((x) => x.name), ...editors.map((x) => x.name), ...(editor ? [editor.name] : [])]);
       const flags: string[] = [];
       // more than one editor on the client in Timeliner says it all; else its open videos split across editors
-      const one = editors.length > 1 ? `${a.name} has ${editors.length} editors in Timeliner — one editor per client`
+      const one = beforeRule ? null
+        : editors.length > 1 ? `${a.name} has ${editors.length} editors in Timeliner — one editor per client`
         : split.length ? `${a.name}: ${split.map((x) => `${x.count} with ${short(x.name)}`).join(', ')} — one editor per client` : null;
       if (one) {
         flags.push(one);
@@ -1537,13 +1583,14 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
         flags.push(`${a.name} · ${plural(a.notAssigned, word)} not assigned${editor ? ` (usually ${short(editor.name)})` : ''}`);
       }
       return {
-        key: a.key, name: a.name, clientId: a.clientId, brand: a.brand, editor, editorFrom: editors.length ? 'client' : editor ? 'videos' : null, editors,
-        open: a.open, notAssigned: a.notAssigned, split, flags,
+        key: a.key, name: a.name, clientId: a.clientId, brand: a.brand, editor, editorFrom: !editor ? null : editors.length ? 'client' : 'videos', editors,
+        open: a.open, notAssigned: a.notAssigned, split, flags, beforeRule,
       };
     })
-    .filter((c) => c.open > 0 || c.notAssigned > 0 || c.editor)
-    // the ones to look at first (however few their videos), then the most open videos
-    .sort((a, b) => Number(b.flags.length > 0) - Number(a.flags.length > 0) || b.open - a.open || a.name.localeCompare(b.name));
+    .filter((c) => c.open > 0 || c.notAssigned > 0 || c.editor || c.editors.length > 0)
+    // clients on the rule (videos made since it began) first; within each, the ones to look at first (however few
+    // their videos), then the most open videos
+    .sort((a, b) => Number(a.beforeRule) - Number(b.beforeRule) || Number(b.flags.length > 0) - Number(a.flags.length > 0) || b.open - a.open || a.name.localeCompare(b.name));
   const clientByKey = new Map(clients.map((c) => [c.key, c]));
 
   // on each card, a client with more than one editor (this one among them) carries its flag
@@ -1584,6 +1631,7 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
   const plates = built.flatMap((b) => [...b.mine.revisions, ...b.mine.toEdit]);
   return {
     sync: L.sync,
+    oneEditorSince: L.oneEditorSince,
     totals: {
       editingNow: editors.filter((e) => editingNow(e, L.now)).length,
       paused: editors.filter((e) => e.focus?.state === 'paused').length,
@@ -1604,7 +1652,7 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
 export async function loadMine(ctx: Ctx, me: Me): Promise<MyEditing> {
   const L = await loadEditing(ctx);
   const u = L.users.find((x) => x.id === me.id);
-  // their videos: the ones given in Timeliner to their email here, as their taps check
+  // their videos: the ones given in Timeliner to their sign-in or Timeliner email here, as their taps check
   const person: Person = {
     key: `u${me.id}`, userId: me.id, linked: true, memberIds: [...L.userOf].filter(([, id]) => id === me.id).map(([m]) => m),
     name: me.name, city: u?.city ?? null, timezone: u?.timezone ?? null, workHours: u?.workHours ?? null, flag: null, card: true,
@@ -1638,8 +1686,12 @@ export async function applyFocus(ctx: Ctx, me: Me, videoId: string, action: Focu
     const focus = await t.one<FocusRow>(`select user_id, task_id, state, since, worked_seconds, paused_at from editor_focus where user_id = $1 for update`, [me.id]);
     const task = await t.one<TaskRow>(`select tt.*, ${OWNER_IDS('tt')} as owner_ids from timeliner_tasks tt where tt.id = $1`, [videoId]);
     if (!task) throw notFound('Video');
-    // theirs: assigned to them on the video, or nobody is and they're its client's editor in Timeliner (rule A)
-    const theirs = await t.one(`select 1 from timeliner_members where lower(email) = lower($1) and id = any($2::text[])`, [me.email, task.owner_ids ?? []]);
+    // theirs: assigned to them on the video, or nobody is and they're its client's editor in Timeliner (rule A), under
+    // their sign-in email or their Timeliner email
+    const theirs = await t.one(
+      `select 1 from timeliner_members m join users u on u.id = $1 and ${MEMBER_IS_USER('m', 'u')} where m.id = any($2::text[]) limit 1`,
+      [me.id, task.owner_ids ?? []],
+    );
     if (!theirs) throw forbidden('That video isn’t assigned to you in Timeliner.');
     const state = videoState(task.status_group);
     const onIt = focus?.task_id === videoId ? focus : null;
@@ -1809,7 +1861,7 @@ export function registerEditingRoutes(app: FastifyInstance, ctx: Ctx) {
     return loadBoard(ctx);
   });
 
-  // an editor's own videos, matched by their email in Timeliner
+  // an editor's own videos, matched by their sign-in email or their Timeliner email
   app.get('/api/editing/me', async (req): Promise<MyEditing> => {
     const me = requireUser(req);
     return loadMine(ctx, me);
@@ -1832,10 +1884,11 @@ export function registerEditingRoutes(app: FastifyInstance, ctx: Ctx) {
       const me = requireUser(req);
       const { batchId } = parse(z.object({ batchId: zs.id }), req.params);
       if (!isManager(me.role)) {
-        // a video of theirs from that batch: assigned to them, or to them as its client's editor (rule A)
+        // a video of theirs from that batch: assigned to them, or to them as its client's editor (rule A), under their
+        // sign-in email or their Timeliner email
         const theirs = await ctx.db.one(
-          `select 1 from timeliner_tasks tt join timeliner_members m on m.id = any(${OWNER_IDS('tt')})
-            where tt.batch_id = $1 and lower(m.email) = lower($2) limit 1`, [batchId, me.email],
+          `select 1 from timeliner_tasks tt join timeliner_members m on m.id = any(${OWNER_IDS('tt')}) join users u on u.id = $2 and ${MEMBER_IS_USER('m', 'u')}
+            where tt.batch_id = $1 limit 1`, [batchId, me.id],
         );
         if (!theirs) throw forbidden('That scripts PDF is for videos that aren’t assigned to you in Timeliner.');
       }

@@ -34,6 +34,11 @@ export interface UserSummary extends Me {
   timezone: string | null;
   /** local working hours; the end may pass midnight (e.g. [20, 28]) */
   workHours: [number, number] | null;
+  /**
+   * the email Timeliner knows them by, when it isn't their sign-in email (null when it's the same, or not set). A
+   * Timeliner member is this person when the member's email is their sign-in email or this one. Never used to sign in
+   */
+  timelinerEmail: string | null;
 }
 
 /** An editor kept in Settings → Editors (city, local time, hours) who doesn't use the platform. */
@@ -45,6 +50,8 @@ export interface Editor {
   /** IANA time zone: the city's, unless one was chosen */
   timezone: string;
   workHours: [number, number];
+  /** the email Timeliner knows them by: a Timeliner member with it is this editor (else one with the same name is) */
+  timelinerEmail: string | null;
 }
 
 export interface Settings {
@@ -64,6 +71,11 @@ export interface Settings {
   remindersEnabled: boolean;
   /** the colour palette the admin picked for the whole site (null = the original) */
   theme: WorkspaceTheme | null;
+  /**
+   * the day the team began giving each client one editor: only videos made in Timeliner on or after it (in the
+   * workspace's time zone) count for the Editors tab's one-editor-per-client checks (`underOneEditorRule`)
+   */
+  oneEditorSince: ISODate;
 }
 
 export interface ClientLite {
@@ -999,25 +1011,28 @@ export interface EditorPlate {
 }
 
 /**
- * Why an editor's card needs fixing, one line each, ready to show:
- * - `not_on_site`: in Timeliner with videos, no site account with their Timeliner email ("Not on the site — add them
- *   in Settings → Team as an Editor with gus@…")
- * - `no_site_access`: the same, but their name is in Settings → Editors (the list of editors who don't sign in), whose
- *   city, time zone and hours the card uses ("Not on the site — give them site access in Settings → Editors with gus@…")
- * - `email_differs`: on the site under the same name with another email ("Their email here (a@…) differs from
- *   Timeliner (b@…) — change one so they match"); their Timeliner work is on the card, but their taps (I'm on this)
- *   can't reach it until the emails match
+ * Why an editor's card needs fixing, one line each, ready to show. Each comes with what fixes it on the Editors tab:
+ * - `not_on_site`: in Timeliner with videos, nobody on the site with that email as their sign-in or Timeliner email
+ *   ("Not on the site — add them to the team, or link them to someone on the site"): Add to the team (their
+ *   Timeliner email filled in as their Timeliner email), or link them to someone already there
+ * - `no_site_access`: the same, but they're in Settings → Editors (the list of editors who don't sign in), by their
+ *   Timeliner email there or by name, whose city, time zone and hours the card uses: Give site access, or link them
+ * - `email_differs`: on the site under the same name with another email ("Timeliner knows Sam Lee as
+ *   sam.lee@…"); their Timeliner work is on the card, but their taps (I'm on this) can't reach it until it's linked:
+ *   Link adds that email as their Timeliner email
  * - `nothing_assigned`: an editor on the site with nothing in Timeliner, a quiet note ("Nothing assigned in Timeliner
- *   (their Timeliner email must be a@…)")
+ *   under a@…"), with a field to add their Timeliner email
  */
 export type EditorFlagKind = 'not_on_site' | 'no_site_access' | 'email_differs' | 'nothing_assigned';
 export interface EditorFlag {
   kind: EditorFlagKind;
   text: string;
-  /** their email in Timeliner (null when Timeliner has none, and for `nothing_assigned`) */
+  /** their email in Timeliner (null when Timeliner has none, and for `nothing_assigned` when they have no Timeliner email here) */
   timelinerEmail: string | null;
-  /** their email on the site (`email_differs`, `nothing_assigned`) */
+  /** their sign-in email on the site (`email_differs`, `nothing_assigned`) */
   siteEmail: string | null;
+  /** `no_site_access`: their entry in Settings → Editors (to give them site access from the card) */
+  offSiteId: number | null;
 }
 
 /** Someone who cuts a client's videos, as the Editors tab names them. */
@@ -1112,8 +1127,9 @@ export interface ClientEditing {
   brand: string | null;
   /**
    * its editor: the one assigned to the client (its brand) in Timeliner; else whoever has the most of its videos made
-   * in the last 60 days (a tie: whoever had one most recently). With several on the brand, the one of them with the
-   * most of its videos. null when there's nobody
+   * in the last 60 days and since the one-editor rule began (a tie: whoever had one most recently). With several on
+   * the brand, the one of them with the most of those videos. null when there's nobody, and for a client whose videos
+   * are all from before the rule (`beforeRule`) unless exactly one editor is on it in Timeliner
    */
   editor: EditorRef | null;
   /** where `editor` comes from: assigned on the client in Timeliner, worked out from who has its videos, or nobody */
@@ -1128,21 +1144,30 @@ export interface ClientEditing {
    */
   notAssigned: number;
   /**
-   * who has its open videos, most first, when more than one editor does (empty otherwise). A video two people have
-   * (both on the client in Timeliner, say) counts for each
+   * who has its open videos made since the one-editor rule began, most first, when more than one editor does (empty
+   * otherwise). A video two people have (both on the client in Timeliner, say) counts for each
    */
   split: (EditorRef & { count: number })[];
   /**
    * one line each, calm, ready to show: "Brightside has 2 editors in Timeliner — one editor per client" when more
    * than one is on the client, else "Brightside: 18 with Maya, 3 with Sam — one editor per client" when split;
-   * "Joshua Shalimar · 9 clips not assigned (usually Leo)" when some aren't assigned
+   * "Joshua Shalimar · 9 clips not assigned (usually Leo)" when some aren't assigned. Only videos made since the
+   * one-editor rule began (`EditingBoard.oneEditorSince`) can raise the one-editor flags
    */
   flags: string[];
+  /**
+   * none of its videos were made since the one-editor rule began: nothing is worked out from its videos and it's
+   * never flagged as split or as having two editors. Its tile says "Before the one-editor rule", unless exactly one
+   * editor is on it in Timeliner (then `editor` is them, `editorFrom` is `client`)
+   */
+  beforeRule: boolean;
 }
 
 /** The managers' Editors tab. */
 export interface EditingBoard {
   sync: EditingSync;
+  /** the day the one-editor-per-client rule began (`Settings.oneEditorSince`): older videos never raise its flags */
+  oneEditorSince: ISODate;
   /** over all the work in Timeliner, whoever has it (each video once), not only people on the site */
   totals: {
     /** on a video right now (site taps only); one left running (isFocusStale in shared/workflow.ts) isn't counted */

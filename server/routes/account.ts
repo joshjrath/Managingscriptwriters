@@ -6,7 +6,7 @@ import {
   checkThrottle, clearFailures, createSession, destroySession, hashPassword, recordFailure, requireAdmin, requireManager, requireUser,
   SESSION_COOKIE, setSessionCookie, sha, validatePassword, verifyPassword,
 } from '../auth';
-import { assigneesOf, batchLink, loadSettings, loadUsers, logActivity, notify, rulesOf, settingsFor, type Ctx } from '../core';
+import { assigneesOf, batchLink, emailHolder, emailTakenWords, loadSettings, loadUsers, logActivity, notify, rulesOf, settingsFor, type Ctx } from '../core';
 import { compressRanges, isAdmin, isEditor, isManager, ROLE_LABEL, type Role } from '../../shared/workflow';
 import { auditEvent } from '../audit';
 import { LOCKS, type Db } from '../db';
@@ -14,12 +14,12 @@ import type { Me, Settings, UserSummary } from '../../shared/types';
 import { conflict, forbidden, HttpError, notFound, parse, zs } from '../http';
 import { computeDeadlines, isValidTimeZone } from '../../shared/dates';
 import { findCity, shiftOf, zoneFor } from '../../shared/cities';
-import { fmtDate } from '../../shared/format';
+import { fmtDate, fmtDateYear } from '../../shared/format';
 import type { Notification } from '../../shared/types';
 import { ACCENTS, darkTextContrast, HEX, MIN_ACCENT_CONTRAST, PALETTES, resolveTheme, SURFACES, type Accent, type WorkspaceTheme } from '../../shared/palettes';
 
 const PLACE_KEYS = new Set(['city', 'city_code', 'country', 'lat', 'lon', 'timezone']);
-const email = z.string().trim().toLowerCase().email('Enter a valid email').max(200);
+const email = zs.email;
 const password = z.string().min(1, 'Enter a password').max(200);
 
 export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
@@ -203,6 +203,17 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     return { users: await teamFor(requireUser(req)) };
   });
 
+  /**
+   * One email names one person: a Timeliner email nobody else signs in with or has as theirs, and a sign-in email
+   * nobody else has as their Timeliner email (409, naming who has it). Someone in Settings → Editors doesn't count:
+   * a site account always wins, and giving them site access moves their Timeliner email to the team.
+   */
+  async function emailFree(value: string, field: 'email' | 'timelinerEmail', exceptUserId?: number) {
+    const who = await emailHolder(db, value, { exceptUserId, signIn: field === 'timelinerEmail' });
+    if (!who) return;
+    throw new HttpError(409, emailTakenWords(who), { [field]: who.how === 'sign-in' ? `${who.name} signs in with it` : `${who.name}’s Timeliner email` }, 'duplicate');
+  }
+
   const capacity = z.coerce.number().positive('Use a positive number').max(50).nullable().optional();
   const city = z.string().trim().max(120).nullable().optional();
   const timezone = z.string().trim().refine(isValidTimeZone, 'Pick a time zone from the list').optional();
@@ -240,6 +251,8 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const input = parse(z.object({
       name: zs.name('Name', 120), email, role: z.enum(ROLES), password, capacityPerDay: capacity,
       city, timezone, workStart: hour.optional(), workEnd: hour.optional(),
+      /** the email Timeliner knows them by, when it isn't the one they sign in with */
+      timelinerEmail: zs.emailOrNone.optional(),
     }), req.body);
     guardAdmin(me, null, input.role);
     const place = placeColumns(input);
@@ -247,25 +260,29 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     if (err) throw new HttpError(400, err, { password: err });
     const existing = await db.one<{ id: number; removed_at: string | null }>(`select id, removed_at from users where lower(email) = $1`, [input.email]);
     if (existing && !existing.removed_at) throw new HttpError(409, 'Someone with that email is already on the team', { email: 'Already on the team' });
+    await emailFree(input.email, 'email', existing?.id);
+    // the same as the email they sign in with: nothing to add
+    const tl = input.timelinerEmail && input.timelinerEmail !== input.email ? input.timelinerEmail : null;
+    if (tl) await emailFree(tl, 'timelinerEmail', existing?.id);
     const hash = await hashPassword(input.password);
     let id: number;
     if (existing) {
       // someone who was removed earlier comes back with their history intact
       await db.query(
-        `update users set name = $2, role = $3, password_hash = $4, temp_password = $5, capacity_per_day = $6, active = true, removed_at = null, updated_at = now() where id = $1`,
-        [existing.id, input.name, input.role, hash, input.password, input.capacityPerDay ?? null],
+        `update users set name = $2, role = $3, password_hash = $4, temp_password = $5, capacity_per_day = $6, timeliner_email = $7, active = true, removed_at = null, updated_at = now() where id = $1`,
+        [existing.id, input.name, input.role, hash, input.password, input.capacityPerDay ?? null, tl],
       );
       id = existing.id;
     } else {
       const row = await db.one<{ id: number }>(
-        `insert into users (email, name, role, password_hash, temp_password, capacity_per_day) values ($1,$2,$3,$4,$5,$6) returning id`,
-        [input.email, input.name, input.role, hash, input.password, input.capacityPerDay ?? null],
+        `insert into users (email, name, role, password_hash, temp_password, capacity_per_day, timeliner_email) values ($1,$2,$3,$4,$5,$6,$7) returning id`,
+        [input.email, input.name, input.role, hash, input.password, input.capacityPerDay ?? null, tl],
       );
       id = row!.id;
     }
     const placeKeys = Object.keys(place);
     if (placeKeys.length) await db.query(`update users set ${placeKeys.map((k, i) => `${k} = $${i + 2}`).join(', ')} where id = $1`, [id, ...placeKeys.map((k) => place[k])]);
-    await logActivity(db, { actor: me, action: 'user.created', entityType: 'user', entityId: id, summary: `${existing ? 'Re-added' : 'Added'} ${input.name} as ${ROLE_LABEL[input.role]}` });
+    await logActivity(db, { actor: me, action: 'user.created', entityType: 'user', entityId: id, summary: `${existing ? 'Re-added' : 'Added'} ${input.name} as ${ROLE_LABEL[input.role]}${tl ? ` (Timeliner email ${tl})` : ''}` });
     return { users: await teamFor(me) };
   });
 
@@ -278,9 +295,14 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       city, timezone, workStart: hour.optional(), workEnd: hour.optional(),
       /** when deactivating: who takes over their unfinished scripts (null leaves them unassigned) */
       reassignTo: zs.id.nullable().optional(),
+      /** the email Timeliner knows them by, when it isn't their sign-in email (null or empty clears it) */
+      timelinerEmail: zs.emailOrNone.optional(),
     }), req.body);
-    const u = await db.one<{ role: Role; active: boolean; name: string; email: string; removed_at: string | null; city: string | null; country: string | null; timezone: string | null; capacity_per_day: number | null; work_start: number | null; work_end: number | null }>(
-      `select role, active, name, email, removed_at, city, country, timezone, capacity_per_day, work_start, work_end from users where id = $1`, [id],
+    const u = await db.one<{
+      role: Role; active: boolean; name: string; email: string; removed_at: string | null; city: string | null; country: string | null; timezone: string | null;
+      capacity_per_day: number | null; work_start: number | null; work_end: number | null; timeliner_email: string | null;
+    }>(
+      `select role, active, name, email, removed_at, city, country, timezone, capacity_per_day, work_start, work_end, timeliner_email from users where id = $1`, [id],
     );
     if (!u || u.removed_at) throw notFound('Team member');
     guardAdmin(me, u, input.role);
@@ -301,7 +323,16 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     if (input.email !== undefined && input.email !== u.email) {
       const taken = await db.one<{ id: number }>(`select id from users where lower(email) = $1 and id <> $2 and removed_at is null`, [input.email, id]);
       if (taken) throw new HttpError(409, 'Someone else on the team already uses that email', { email: 'Already used by someone else' });
+      await emailFree(input.email, 'email', id);
       set.email = input.email;
+    }
+    // their Timeliner email: never their sign-in email (that one already matches), never someone else's
+    const signIn = String(set.email ?? u.email).toLowerCase();
+    let timeliner = input.timelinerEmail !== undefined ? input.timelinerEmail : u.timeliner_email;
+    if (timeliner && timeliner.toLowerCase() === signIn) timeliner = null;
+    if ((timeliner ?? null) !== (u.timeliner_email ?? null)) {
+      if (timeliner && timeliner.toLowerCase() !== u.timeliner_email?.toLowerCase()) await emailFree(timeliner, 'timelinerEmail', id);
+      set.timeliner_email = timeliner;
     }
     if (input.role !== undefined && input.role !== u.role) set.role = input.role;
     if (input.active !== undefined && input.active !== u.active) set.active = input.active;
@@ -328,6 +359,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
         const what: string[] = [];
         if (set.name !== undefined) what.push(`name ${u.name} → ${input.name}`);
         if (set.email !== undefined) what.push(`email → ${input.email}`);
+        if (set.timeliner_email !== undefined) what.push(set.timeliner_email ? `Timeliner email → ${String(set.timeliner_email)}` : 'Timeliner email cleared');
         if (set.role !== undefined) what.push(`role ${ROLE_LABEL[u.role]} → ${ROLE_LABEL[input.role!]}`);
         if (set.active === false) what.push(`deactivated${moved ? ` (${moved} unfinished scripts ${target ? `moved to ${target.name}` : 'unassigned'})` : ''}`);
         if (set.active === true) what.push('reactivated');
@@ -451,6 +483,8 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       ...rulesInput,
       reminderLeadDays: z.coerce.number({ message: 'Enter a number of days' }).int().min(0, 'Use 0 or more days').max(14, 'Use 14 days or fewer').optional(),
       planReminderDays: z.coerce.number({ message: 'Enter a number of days' }).int().min(3, 'Use at least 3 days').max(60, 'Use 60 days or fewer').optional(),
+      /** the day the team began giving each client one editor (the Editors tab's one-editor checks count videos made since) */
+      oneEditorSince: zs.date.optional(),
       recalculate: z.boolean().default(false),
     }), req.body);
     const before = await loadSettings(db);
@@ -460,12 +494,15 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const map: Record<string, string> = {
       orgName: 'org_name', timezone: 'timezone', cutoff: 'cutoff', draftOffsetDays: 'draft_offset_days', finalOffsetDays: 'final_offset_days',
       dayMode: 'day_mode', workingDays: 'working_days', reminderLeadDays: 'reminder_lead_days', planReminderDays: 'plan_reminder_days',
+      oneEditorSince: 'one_editor_since',
     };
     const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const shown = (k: string, v: unknown) => (k === 'workingDays' ? (v as number[]).map((d) => DAY[d]).join(' ') : k === 'dayMode' ? (v === 'business' ? 'working days' : 'calendar days') : String(v));
+    const shown = (k: string, v: unknown) => (k === 'workingDays' ? (v as number[]).map((d) => DAY[d]).join(' ') : k === 'dayMode' ? (v === 'business' ? 'working days' : 'calendar days')
+      : k === 'oneEditorSince' ? fmtDateYear(String(v)) : String(v));
     const label: Record<string, string> = {
       orgName: 'Organisation name', timezone: 'HQ time zone', cutoff: 'Daily cutoff', draftOffsetDays: 'Drafts due (days before)', finalOffsetDays: 'Final delivery (days before)',
       dayMode: 'Count days as', workingDays: 'Working week', reminderLeadDays: 'Remind writers (days before)', planReminderDays: 'Remind managers to plan (days before)',
+      oneEditorSince: 'One editor per client since',
     };
     // only what actually changed
     const keys = Object.keys(map).filter((k) => {
