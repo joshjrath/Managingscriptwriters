@@ -181,6 +181,8 @@ beforeAll(async () => {
   writer = await login('wes@scale.test');
   leo = await login('leo@scale.test');
   maya = await login('maya@scale.test');
+  // the one-editor rule was on long before these videos were made (test/one-editor-rule.test.ts covers its start)
+  expect((await send('PATCH', '/api/settings', admin, { oneEditorSince: '2026-01-01' })).status).toBe(200);
   ids.shalimar = JSON.parse((await json('/api/clients', { name: 'Joshua Shalimar' }, admin)).body).clientId;
   ids.brightside = JSON.parse((await json('/api/clients', { name: 'Brightside' }, admin)).body).clientId;
 

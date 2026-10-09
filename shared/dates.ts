@@ -205,6 +205,20 @@ export function nowInZone(tz: string, now: Date = new Date()): { date: ISODate; 
   };
 }
 
+/**
+ * Whether the moment `at` (an ISO timestamp) falls on `day` or later in the time zone `tz`. Only a moment within a
+ * day of midnight UTC asks the time zone (no zone is more than 14 hours from UTC), so it's cheap over many moments.
+ * An unreadable moment is never on or after anything.
+ */
+export function onOrAfterDay(at: string | null | undefined, day: ISODate, tz: string): boolean {
+  const t = at ? Date.parse(at) : NaN;
+  if (Number.isNaN(t)) return false;
+  const midnight = Date.parse(`${day}T00:00:00Z`);
+  if (t < midnight - 14 * 3600_000) return false;
+  if (t >= midnight + 12 * 3600_000) return true;
+  return nowInZone(tz, new Date(t)).date >= day;
+}
+
 export function parseCutoff(cutoff: string): number {
   const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(cutoff);
   if (!m) throw new Error(`Invalid cutoff: ${cutoff}`);

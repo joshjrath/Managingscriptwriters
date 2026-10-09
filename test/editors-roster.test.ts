@@ -32,6 +32,8 @@ const members: Members = [
 
 beforeAll(async () => {
   w = await makeWorld();
+  // the one-editor rule was on long before these videos were made (test/one-editor-rule.test.ts covers its start)
+  await w.oneEditorSince('2026-01-01');
   w.api.members = async () => members;
   for (const [name, email] of [['Sam Lee', 'sam@scale.test'], ['Nia North', 'nia@scale.test']]) {
     const r = await w.send('POST', '/api/users', w.admin, { name, email, role: 'editor', password: 'team-password-1' });

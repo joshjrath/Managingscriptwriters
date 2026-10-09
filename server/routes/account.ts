@@ -14,7 +14,7 @@ import type { Me, Settings, UserSummary } from '../../shared/types';
 import { conflict, forbidden, HttpError, notFound, parse, zs } from '../http';
 import { computeDeadlines, isValidTimeZone } from '../../shared/dates';
 import { findCity, shiftOf, zoneFor } from '../../shared/cities';
-import { fmtDate } from '../../shared/format';
+import { fmtDate, fmtDateYear } from '../../shared/format';
 import type { Notification } from '../../shared/types';
 import { ACCENTS, darkTextContrast, HEX, MIN_ACCENT_CONTRAST, PALETTES, resolveTheme, SURFACES, type Accent, type WorkspaceTheme } from '../../shared/palettes';
 
@@ -451,6 +451,8 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       ...rulesInput,
       reminderLeadDays: z.coerce.number({ message: 'Enter a number of days' }).int().min(0, 'Use 0 or more days').max(14, 'Use 14 days or fewer').optional(),
       planReminderDays: z.coerce.number({ message: 'Enter a number of days' }).int().min(3, 'Use at least 3 days').max(60, 'Use 60 days or fewer').optional(),
+      /** the day the team began giving each client one editor: the Editors tab's one-editor checks count videos made since */
+      oneEditorSince: zs.date.optional(),
       recalculate: z.boolean().default(false),
     }), req.body);
     const before = await loadSettings(db);
@@ -460,12 +462,15 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const map: Record<string, string> = {
       orgName: 'org_name', timezone: 'timezone', cutoff: 'cutoff', draftOffsetDays: 'draft_offset_days', finalOffsetDays: 'final_offset_days',
       dayMode: 'day_mode', workingDays: 'working_days', reminderLeadDays: 'reminder_lead_days', planReminderDays: 'plan_reminder_days',
+      oneEditorSince: 'one_editor_since',
     };
     const DAY = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const shown = (k: string, v: unknown) => (k === 'workingDays' ? (v as number[]).map((d) => DAY[d]).join(' ') : k === 'dayMode' ? (v === 'business' ? 'working days' : 'calendar days') : String(v));
+    const shown = (k: string, v: unknown) => (k === 'workingDays' ? (v as number[]).map((d) => DAY[d]).join(' ') : k === 'dayMode' ? (v === 'business' ? 'working days' : 'calendar days')
+      : k === 'oneEditorSince' ? fmtDateYear(String(v)) : String(v));
     const label: Record<string, string> = {
       orgName: 'Organisation name', timezone: 'HQ time zone', cutoff: 'Daily cutoff', draftOffsetDays: 'Drafts due (days before)', finalOffsetDays: 'Final delivery (days before)',
       dayMode: 'Count days as', workingDays: 'Working week', reminderLeadDays: 'Remind writers (days before)', planReminderDays: 'Remind managers to plan (days before)',
+      oneEditorSince: 'One editor per client since',
     };
     // only what actually changed
     const keys = Object.keys(map).filter((k) => {

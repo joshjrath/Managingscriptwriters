@@ -182,7 +182,7 @@ export function EditorsPage() {
           {read.error && <div className="ed-banner"><FormError error={read.error} /></div>}
           {/* nobody and nothing on the board: zeros and all-clears would only look like nothing to do */}
           {(b.editors.length > 0 || b.unassigned.length > 0) && <SummaryCards b={b} now={now} today={clock.today} workspaceTz={clock.timezone} />}
-          <ClientStrip b={b} />
+          <ClientStrip b={b} today={clock.today} />
           <Panel title="Roster" count={b.editors.length} className="ed-roster"
             sub="Editing now first, then paused, due today, revisions, and who’s free"
             tools={<a className="ed-tl-link" href={TIMELINER_APP} target="_blank" rel="noopener noreferrer"><Layers aria-hidden />Open in Timeliner</a>}>
@@ -385,12 +385,14 @@ function flagWords(c: ClientEditing, text: string): string {
 }
 
 /**
- * Each client and its editor (one editor per client, worked out from Timeliner): the one assigned to the client
- * there, else whoever has most of its recent videos. Its open videos, and a chip when they're split across
- * editors or some aren't assigned. A tile whose editor has a card goes to it. The clients to look at come first
- * and always show; on a phone each client is one line, and the rest fold away after a few.
+ * Each client and its editor (one editor per client since the day the rule began, worked out from Timeliner): the
+ * one assigned to the client there, else whoever has most of its recent videos. Its open videos, and a chip when
+ * they're split across editors or some aren't assigned. A client with no videos since the rule began reads "Before
+ * the one-editor rule" (unless one editor is on it in Timeliner). A tile whose editor has a card goes to it. Clients
+ * on the rule come first, the ones to look at first among them, and those always show; on a phone each client is
+ * one line, and the rest fold away after a few.
  */
-function ClientStrip({ b }: { b: EditingBoard }) {
+function ClientStrip({ b, today }: { b: EditingBoard; today: ISODate }) {
   const [all, setAll] = useState(false);
   const listId = useId();
   if (!b.clients.length) return null;
@@ -400,9 +402,10 @@ function ClientStrip({ b }: { b: EditingBoard }) {
   const foldedHere = b.clients.filter(folds(CLIENT_TILES)).length;
   const foldedOnPhone = b.clients.filter(folds(PHONE_TILES)).length;
   const flagged = b.clients.filter((c) => c.flags.length > 0).length;
+  const rule = `one editor per client since ${fmtDate(b.oneEditorSince, today)}`;
   return (
     <Panel title="Editors by client" count={b.clients.length} className="ed-clients"
-      sub={flagged ? `one editor per client · ${plural(flagged, 'client')} to look at` : 'one editor per client, from Timeliner'}>
+      sub={flagged ? `${rule} · ${plural(flagged, 'client')} to look at` : `${rule}, from Timeliner`}>
       <ul className="ed-ct-list" id={listId}>
         {shown.map((c, i) => (
           <li key={c.key} className={!all && folds(PHONE_TILES)(c, i) ? 'ed-ct-fold' : undefined}>
@@ -430,7 +433,9 @@ function ClientTile({ c, card }: { c: ClientEditing; card: boolean }) {
       </span>
       <span className="ed-ct-ed">
         <ArrowRight aria-hidden />
-        {ed ? <b className="ellipsis">{ed.name}</b> : <span className="muted">No editor yet</span>}
+        {ed ? <b className="ellipsis">{ed.name}</b>
+          : c.beforeRule ? <span className="muted" title="None of its videos were made since the one-editor rule began">Before the one-editor rule</span>
+          : <span className="muted">No editor yet</span>}
         {ed && c.editors.length > 1 && <span className="muted">+{c.editors.length - 1}</span>}
         {ed && (c.editorFrom === 'client'
           ? <span className="ed-via" title="Assigned to this client in Timeliner">assigned in Timeliner</span>
@@ -1129,7 +1134,7 @@ function Legend() {
         <span className="ed-lg"><span className="ed-src tl">in Timeliner</span>sent to review in Timeliner</span>
       </div>
       <p>“Editing now” is the video an editor tapped “I’m on this” for. They can pause it, then mark it done. It clears itself when Timeliner moves that video to Needs review. Left running for {FOCUS_STALE_HOURS} hours, or outside the editor’s working hours, it shows as still marked as editing instead.</p>
-      <p>A video is the editor’s it’s assigned to in Timeliner; one nobody is on is its client’s editor’s there (“via client”). Each client has one editor: a client whose videos are with more than one is flagged.</p>
+      <p>A video is the editor’s it’s assigned to in Timeliner; one nobody is on is its client’s editor’s there (“via client”). Each client has one editor: a client whose videos are with more than one is flagged. Only videos made since the rule began (Settings → Timeliner) count for that.</p>
       <p>Each video goes with the shoot that had just happened when it was made in Timeliner; a titled video with the shoot whose raw clips its editor has been cutting. Once it has been in review it keeps that shoot. A pin always wins.</p>
     </div>
   );

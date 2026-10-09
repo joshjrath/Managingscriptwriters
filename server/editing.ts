@@ -31,7 +31,7 @@ import { EDITOR_SHOOT_KEEP_DAYS, isSureMatch, matchVideos, type VideoIn, type Wo
 import { loadDeliverables, loadScriptEdits, type ScriptEdit } from './records';
 import { EDITOR_FILES } from './files';
 import { loadEditorRows } from './control/editors';
-import { isISODate, isValidTimeZone, makeClock, type ISODate } from '../shared/dates';
+import { isISODate, isValidTimeZone, makeClock, onOrAfterDay, type ISODate } from '../shared/dates';
 import { cityLabel, onShift } from '../shared/cities';
 import {
   compressRanges, compressTitles, hasNoScripts, isApproved, isEditor, isFocusStale, isManager, isNotMatched, isOnPlate, isRawTitle, needsCheck, TIMELINER_STEP_LABEL, titleNumber,
@@ -1034,6 +1034,9 @@ interface Loaded {
   scripts: Map<number, Map<number, { status: ScriptStatus; approvedAt: string | null }>>;
   today: ISODate;
   now: Date;
+  /** the workspace's time zone, and the day the one-editor-per-client rule began there (`settings.oneEditorSince`) */
+  tz: string;
+  oneEditorSince: ISODate;
 }
 
 /** The last complete read's counts as stored (anything odd reads as none). */
@@ -1109,8 +1112,18 @@ async function loadEditing(ctx: Ctx): Promise<Loaded> {
     pdfs: pdfOf, scripts,
     today: makeClock(settings.timezone, settings.cutoff, now).today,
     now,
+    tz: settings.timezone,
+    oneEditorSince: settings.oneEditorSince,
   };
 }
+
+/**
+ * A video counts for the one-editor-per-client rule when it was made in Timeliner on or after the day the rule
+ * began (`settings.oneEditorSince`, HQ time). Before it, a client's videos went to whoever was free: an older video
+ * still shows on its editor's card and in every count, but never flags a client (split, or two editors), never
+ * decides whom a client's videos usually go to, and alone never puts a client on the rule. One with no date never counts.
+ */
+const underRule = (L: Loaded, t: Pick<Row, 'created_at'>) => onOrAfterDay(t.created_at, L.oneEditorSince, L.tz);
 
 /** A done mark counts until Timeliner moves the video on (or back, after it was marked). */
 const markHolds = (doneAt: string, t: Pick<Row, 'left_plate_at' | 'moved_at'>) => time(doneAt) > Math.max(time(t.left_plate_at) || 0, time(t.moved_at) || 0);
@@ -1457,9 +1470,12 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
   }
 
   // each client's editor (one editor per client): who is on its brand as an editor in Timeliner; else whoever has
-  // the most of its videos made in the last 60 days (a tie: whoever had one most recently). And who has its open videos
+  // the most of its videos made in the last 60 days (a tie: whoever had one most recently). And who has its open
+  // videos. Only videos made since the rule began (underRule) say who that is or whether it's split
   type Acc = {
     key: string; name: string; clientId: number | null; brand: string | null; brandIds: Set<string>; open: number; notAssigned: number; rawNotAssigned: number;
+    /** its videos made since the one-editor rule began */
+    ruled: number;
     made: Map<string, { count: number; last: number; members: Map<string, number> }>; openBy: Map<string, { count: number; members: Map<string, number> }>;
   };
   const accs = new Map<string, Acc>();
@@ -1468,13 +1484,16 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
   for (const t of L.tasks) {
     const c = clientOfTask(L, t);
     if (!c) continue;
-    const a = accs.get(c.key) ?? { ...c, brandIds: new Set<string>(), open: 0, notAssigned: 0, rawNotAssigned: 0, made: new Map(), openBy: new Map() };
+    const a = accs.get(c.key) ?? { ...c, brandIds: new Set<string>(), open: 0, notAssigned: 0, rawNotAssigned: 0, ruled: 0, made: new Map(), openBy: new Map() };
     accs.set(c.key, a);
     a.brand ??= c.brand;
     if (t.brand_id) a.brandIds.add(t.brand_id);
     const isOpen = videoState(t.status_group) !== 'approved';
     if (isOpen) a.open++;
     if (notAssigned(t)) { a.notAssigned++; if (isRawTitle(t.title)) a.rawNotAssigned++; }
+    // made before the rule began: on its editor's card and in the counts above, nothing more
+    if (!underRule(L, t)) continue;
+    a.ruled++;
     // each person once per video, whichever of their Timeliner accounts it's on
     const byPerson = (list: string[]) => {
       const out = new Map<string, string>();
@@ -1519,14 +1538,18 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
       };
       const editors = [...onBrand.values()].sort((x, y) => most(x.key, y.key));
       const top = [...a.made.keys()].sort(most)[0];
-      const editor = editors[0] ?? (top ? refOf(byKey.get(top)!, topMember(a.made.get(top)!.members)) : null);
+      // nothing made since the rule began: only the one editor on it in Timeliner is named, and nothing is flagged
+      const beforeRule = a.ruled === 0;
+      const editor = beforeRule ? (editors.length === 1 ? editors[0] : null)
+        : editors[0] ?? (top ? refOf(byKey.get(top)!, topMember(a.made.get(top)!.members)) : null);
       const split = a.openBy.size > 1
         ? [...a.openBy].map(([pk, o]) => ({ ...refOf(byKey.get(pk)!, topMember(o.members)), count: o.count })).sort((x, y) => y.count - x.count || x.name.localeCompare(y.name))
         : [];
       const short = shortNames([...split.map((x) => x.name), ...editors.map((x) => x.name), ...(editor ? [editor.name] : [])]);
       const flags: string[] = [];
       // more than one editor on the client in Timeliner says it all; else its open videos split across editors
-      const one = editors.length > 1 ? `${a.name} has ${editors.length} editors in Timeliner — one editor per client`
+      const one = beforeRule ? null
+        : editors.length > 1 ? `${a.name} has ${editors.length} editors in Timeliner — one editor per client`
         : split.length ? `${a.name}: ${split.map((x) => `${x.count} with ${short(x.name)}`).join(', ')} — one editor per client` : null;
       if (one) {
         flags.push(one);
@@ -1537,13 +1560,14 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
         flags.push(`${a.name} · ${plural(a.notAssigned, word)} not assigned${editor ? ` (usually ${short(editor.name)})` : ''}`);
       }
       return {
-        key: a.key, name: a.name, clientId: a.clientId, brand: a.brand, editor, editorFrom: editors.length ? 'client' : editor ? 'videos' : null, editors,
-        open: a.open, notAssigned: a.notAssigned, split, flags,
+        key: a.key, name: a.name, clientId: a.clientId, brand: a.brand, editor, editorFrom: !editor ? null : editors.length ? 'client' : 'videos', editors,
+        open: a.open, notAssigned: a.notAssigned, split, flags, beforeRule,
       };
     })
-    .filter((c) => c.open > 0 || c.notAssigned > 0 || c.editor)
-    // the ones to look at first (however few their videos), then the most open videos
-    .sort((a, b) => Number(b.flags.length > 0) - Number(a.flags.length > 0) || b.open - a.open || a.name.localeCompare(b.name));
+    .filter((c) => c.open > 0 || c.notAssigned > 0 || c.editor || c.editors.length > 0)
+    // clients on the rule (videos made since it began) first; within each, the ones to look at first (however few
+    // their videos), then the most open videos
+    .sort((a, b) => Number(a.beforeRule) - Number(b.beforeRule) || Number(b.flags.length > 0) - Number(a.flags.length > 0) || b.open - a.open || a.name.localeCompare(b.name));
   const clientByKey = new Map(clients.map((c) => [c.key, c]));
 
   // on each card, a client with more than one editor (this one among them) carries its flag
@@ -1584,6 +1608,7 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
   const plates = built.flatMap((b) => [...b.mine.revisions, ...b.mine.toEdit]);
   return {
     sync: L.sync,
+    oneEditorSince: L.oneEditorSince,
     totals: {
       editingNow: editors.filter((e) => editingNow(e, L.now)).length,
       paused: editors.filter((e) => e.focus?.state === 'paused').length,

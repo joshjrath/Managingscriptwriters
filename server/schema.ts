@@ -728,4 +728,9 @@ create table timeliner_brand_members (
 );
 create index timeliner_brand_members_member_idx on timeliner_brand_members (member_id);
 `,
+  // 35 · the day the team began giving each client one editor (Oct 9, 2026, with its first two editors): only
+  // videos made in Timeliner since then count for the Editors tab's one-editor checks. Settings → Timeliner changes it
+  `
+alter table settings add column one_editor_since date not null default '2026-10-09';
+`,
 ];

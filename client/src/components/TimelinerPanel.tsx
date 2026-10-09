@@ -4,19 +4,19 @@
 // can reach the site, picks the batch for any upload that couldn't be matched (the likely one comes preselected),
 // moves a PDF linked to the wrong shoot (once its delivery there is undone), and sees which PDF is linked to which
 // shoot. It also says when the editors' videos were last read from Timeliner (for the Editors tab), and reads them
-// again on request.
+// again on request, and sets the day the one-editor-per-client rule began (only videos made since are checked).
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { CheckCheck, CircleHelp, Clapperboard, FileText, Plug, RefreshCw, Send } from 'lucide-react';
 import { api, useSave } from '../api';
 import {
-  TIMELINER_KEY_PERMISSIONS, type EditingBoard, type TimelinerEvent, type TimelinerOutcome, type TimelinerPdfHow, type TimelinerPdfLink, type TimelinerStatus,
+  TIMELINER_KEY_PERMISSIONS, type EditingBoard, type Settings, type TimelinerEvent, type TimelinerOutcome, type TimelinerPdfHow, type TimelinerPdfLink, type TimelinerStatus,
 } from '../../../shared/types';
-import { fmtAgo, fmtStamp } from '../../../shared/format';
-import { useDisplayTz } from './Shell';
-import { Button, Chip, FormError, Panel, useToast } from './ui';
+import { fmtAgo, fmtDateYear, fmtStamp } from '../../../shared/format';
+import { useBoot, useDisplayTz } from './Shell';
+import { Button, Chip, Field, FormError, inputProps, Panel, useFieldId, useToast } from './ui';
 
 const OUTCOME: Record<TimelinerOutcome, { label: string; color: string }> = {
   delivered: { label: 'Delivered', color: 'mint' },
@@ -78,6 +78,7 @@ export function TimelinerPanel() {
             <p className="muted" style={{ fontSize: 13.5, margin: 0 }}>The key is set. Connect to have Timeliner tell this site about uploads, and each shoot’s scripts PDF delivers its batch. The key needs <b>{TIMELINER_KEY_PERMISSIONS}</b> in Timeliner (a read-only key can’t connect, but it’s enough to read the editors’ videos).</p>
           )}
           {s.keySet && <VideosRead />}
+          {s.keySet && <OneEditorSince />}
           {s.events.length > 0 && (
             <>
               <div className="section-title" style={{ margin: '4px 0 0' }}>Recent uploads</div>
@@ -116,6 +117,39 @@ function VideosRead() {
       {board.isError && <p className="tl-videos-err" role="status">Couldn’t load when they were last read: {board.error.message}</p>}
       <FormError error={read.error} />
     </div>
+  );
+}
+
+/**
+ * The day the team began giving each client one editor: the Editors tab checks only videos made in Timeliner since
+ * then (a client split across editors, two editors on a client, whom its videos usually go to). Sends only this field.
+ */
+function OneEditorSince() {
+  const { settings } = useBoot();
+  const toast = useToast();
+  const id = useFieldId('one-editor');
+  const [day, setDay] = useState(settings.oneEditorSince);
+  // take the saved day when it changes, but never over one being typed here
+  const synced = useRef(settings.oneEditorSince);
+  useEffect(() => {
+    setDay((cur) => (cur === synced.current ? settings.oneEditorSince : cur));
+    synced.current = settings.oneEditorSince;
+  }, [settings.oneEditorSince]);
+  const save = useSave((oneEditorSince: string) => api<{ settings: Settings }>('/api/settings', { method: 'PATCH', body: { oneEditorSince } }), {
+    onSuccess: (out) => { synced.current = out.settings.oneEditorSince; setDay(out.settings.oneEditorSince); toast(`One editor per client since ${fmtDateYear(out.settings.oneEditorSince)}`); },
+  });
+  const err = !day ? 'Pick a day' : save.error?.fields.oneEditorSince;
+  const dirty = day !== settings.oneEditorSince;
+  return (
+    <form className="form" onSubmit={(e) => { e.preventDefault(); if (day && dirty) save.mutate(day); }} noValidate>
+      <Field label="One editor per client since" htmlFor={id} error={err} help="Only work made in Timeliner since this day is checked against the one-editor rule">
+        <div className="row-flex s2">
+          <input className="input" type="date" style={{ maxWidth: 200 }} value={day} onChange={(e) => setDay(e.target.value)} {...inputProps(id, err)} />
+          {dirty && <Button type="submit" variant="sm primary" disabled={!day} busy={save.isPending}>Save</Button>}
+        </div>
+      </Field>
+      <FormError error={save.error && !save.error.fields.oneEditorSince ? save.error : null} />
+    </form>
   );
 }
 

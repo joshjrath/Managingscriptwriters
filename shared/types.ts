@@ -64,6 +64,11 @@ export interface Settings {
   remindersEnabled: boolean;
   /** the colour palette the admin picked for the whole site (null = the original) */
   theme: WorkspaceTheme | null;
+  /**
+   * the day the team began giving each client one editor (Settings → Timeliner): only videos made in Timeliner on
+   * or after it (HQ time) count for the Editors tab's one-editor checks
+   */
+  oneEditorSince: ISODate;
 }
 
 export interface ClientLite {
@@ -1113,7 +1118,8 @@ export interface ClientEditing {
   /**
    * its editor: the one assigned to the client (its brand) in Timeliner; else whoever has the most of its videos made
    * in the last 60 days (a tie: whoever had one most recently). With several on the brand, the one of them with the
-   * most of its videos. null when there's nobody
+   * most of its videos. Only videos made since the one-editor rule began (`EditingBoard.oneEditorSince`) count; a
+   * client with none (`beforeRule`) has an editor only when exactly one is on its brand. null when there's nobody
    */
   editor: EditorRef | null;
   /** where `editor` comes from: assigned on the client in Timeliner, worked out from who has its videos, or nobody */
@@ -1128,21 +1134,29 @@ export interface ClientEditing {
    */
   notAssigned: number;
   /**
-   * who has its open videos, most first, when more than one editor does (empty otherwise). A video two people have
-   * (both on the client in Timeliner, say) counts for each
+   * who has its open videos made since the one-editor rule began, most first, when more than one editor does (empty
+   * otherwise). A video two people have (both on the client in Timeliner, say) counts for each
    */
   split: (EditorRef & { count: number })[];
   /**
    * one line each, calm, ready to show: "Brightside has 2 editors in Timeliner — one editor per client" when more
    * than one is on the client, else "Brightside: 18 with Maya, 3 with Sam — one editor per client" when split;
-   * "Joshua Shalimar · 9 clips not assigned (usually Leo)" when some aren't assigned
+   * "Joshua Shalimar · 9 clips not assigned (usually Leo)" when some aren't assigned. Only videos made since the
+   * one-editor rule began count as split or for two editors
    */
   flags: string[];
+  /**
+   * none of its videos were made since the one-editor rule began ("Before the one-editor rule"): never flagged as
+   * split or for two editors, and listed after the clients on the rule
+   */
+  beforeRule: boolean;
 }
 
 /** The managers' Editors tab. */
 export interface EditingBoard {
   sync: EditingSync;
+  /** the day the team began giving each client one editor (`Settings.oneEditorSince`): "one editor per client since Oct 9" */
+  oneEditorSince: ISODate;
   /** over all the work in Timeliner, whoever has it (each video once), not only people on the site */
   totals: {
     /** on a video right now (site taps only); one left running (isFocusStale in shared/workflow.ts) isn't counted */

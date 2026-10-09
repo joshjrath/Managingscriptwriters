@@ -50,6 +50,8 @@ export interface World {
   /** the batch's approvals and deliveries took place at `at` (the database stamps its own clock otherwise) */
   stamp(batchId: number, o: { approvedAt?: string; deliveredAt?: string }): Promise<void>;
   detail(batchId: number): Promise<BatchDetail>;
+  /** the day the one-editor-per-client rule began (Settings → Timeliner), set by a manager */
+  oneEditorSince(day: string): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -177,6 +179,10 @@ export async function makeWorld(): Promise<World> {
         await db.query(`update scripts set delivered_at = $2 where batch_id = $1 and delivered_at is not null`, [batchId, o.deliveredAt]);
         await db.query(`update deliveries set confirmed_at = $2 where batch_id = $1`, [batchId, o.deliveredAt]);
       }
+    },
+    oneEditorSince: async (day) => {
+      const r = await send('PATCH', '/api/settings', admin, { oneEditorSince: day });
+      expect([r.status, r.body?.settings?.oneEditorSince]).toEqual([200, day]);
     },
     close: async () => { await app.close(); await db.close(); },
   };
