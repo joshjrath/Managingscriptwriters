@@ -510,7 +510,7 @@ function EditorsPanel() {
   const [inviting, setInviting] = useState<Editor | null>(null);
   const editors = q.data?.editors ?? [];
   return (
-    <Panel title="Editors" sub="no sign-in" count={editors.length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setEditing('new')}>Add editor</Button>}>
+    <Panel id="editors" title="Editors" sub="no sign-in" count={editors.length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setEditing('new')}>Add editor</Button>}>
       {q.isLoading && <Loading height={80} />}
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
       <div className="rows">

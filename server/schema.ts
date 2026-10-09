@@ -714,4 +714,18 @@ alter table timeliner_tasks add column has_video boolean;
   `
 alter table settings add column timeliner_sync_counts jsonb;
 `,
+  // 34 · who is on each Timeliner brand (client), with their brand-level role and whether the access is automatic (a
+  // workspace admin's): a client's dedicated editor is assigned on the brand, so a video nobody is assigned to on
+  // the video belongs to its brand's editors. Replaced brand by brand on every read of Timeliner
+  `
+create table timeliner_brand_members (
+  brand_id text not null,
+  member_id text not null,
+  role text,
+  automatic boolean not null default false,
+  synced_at timestamptz not null,
+  primary key (brand_id, member_id)
+);
+create index timeliner_brand_members_member_idx on timeliner_brand_members (member_id);
+`,
 ];

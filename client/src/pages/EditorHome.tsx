@@ -2,10 +2,12 @@
 // ("I'm on this", then Pause or Done), else what's next by deadline, and every video still to edit or fix
 // with the script it's cut from: the shoot's scripts PDF from Timeliner, else the manager's edited version, with
 // the other as a quieter second link. Raw camera clips ("Raw clip C0045") are folded by shoot under To edit and
-// open the shoot's whole scripts PDF; a video the site couldn't match says a manager has been asked. Done tells the managers and
-// never changes Timeliner; the video moves on here once Timeliner has it in review, and tapping I'm on this on
-// a video marked done takes the mark back. Below: each shoot coming up with how many of its scripts are final
-// (Ready, On track or Late, opening just that shoot's scripts), the newest finished scripts, and their to-dos.
+// open the shoot's whole scripts PDF; a video the site couldn't match says a manager has been asked, and one for a
+// client without scripts on the site says so. A video nobody is on in Timeliner is theirs as its client's editor
+// there ("via client"). Done tells the managers and never changes Timeliner; the video moves on here once Timeliner
+// has it in review, and tapping I'm on this on a video marked done takes the mark back. Below: each shoot coming up
+// with how many of its scripts are final (Ready, On track or Late, opening just that shoot's scripts), the newest
+// finished scripts, and their to-dos.
 
 import { useId, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
@@ -25,8 +27,8 @@ import { TodoPanel } from '../components/Todos';
 import { burst, centerOf } from '../fx';
 import { motionAllowed } from '../motion';
 import {
-  AgainTag, AltLink, byTitle, docKind, docName, docSource, fmtWhen, likelyWords, midSentence, focusSeconds, noScriptWords, openWords, reviewWords, ScriptLink,
-  scriptWhat, shootLabel, shootWords, squareOf, syncWords, TIMELINER_APP, useNow, VideoName, videoName, videoTitles,
+  AgainTag, AltLink, byTitle, clientName, docKind, docName, docSource, fmtWhen, likelyWords, midSentence, focusSeconds, noScripts, noScriptWords, openWords,
+  reviewWords, ScriptLink, scriptWhat, shootLabel, shootWords, squareOf, syncWords, TIMELINER_APP, useNow, VideoName, videoName, videoTitles,
 } from '../components/EditingBits';
 import { DeliverableRow } from './ScriptBank';
 
@@ -329,7 +331,8 @@ function ScriptBox({ v, today }: { v: EditingVideo; today: ISODate }) {
               ? `${docSource(s)}${reviewWords(s) ? ` · ${reviewWords(s)}` : ''}${v.scriptNumber == null ? ' · every script from the shoot' : ''}`
               : `${docKind(s)} · ${s.edited ? 'approved with edits, so this is the edited version to use' : `approved · scripts ${s.ranges}`}`)
             : !v.batch
-              ? (v.match.how === 'pinned' ? 'A manager says this video isn’t cut from a shoot’s scripts.' : 'The site couldn’t tell which shoot this video is from yet.')
+              ? (noScripts(v) ? `${clientName(v) ?? 'This client'} has no scripts on the site, so there’s nothing to open here.`
+                : v.match.how === 'pinned' ? 'A manager says this video isn’t cut from a shoot’s scripts.' : 'The site couldn’t tell which shoot this video is from yet.')
               : v.scriptIssue === 'not_approved' ? `It shows up here once it’s approved in ${v.batch.title}.`
               : v.scriptNumber != null ? `${v.batch.title} has no finished document for it yet.`
               : `It shows up here once the ${shootWords(v.batch, today)}’s scripts PDF is in Timeliner.`}
@@ -447,7 +450,7 @@ interface ClipGroup { key: string; batch: EditingVideo['batch']; folder: string 
 function clipGroups(list: EditingVideo[]): ClipGroup[] {
   const groups = new Map<string, ClipGroup>();
   for (const v of list) {
-    const key = v.batch ? `b${v.batch.id}` : `f${v.folder ?? ''}|${v.client?.id ?? ''}`;
+    const key = v.batch ? `b${v.batch.id}` : `f${v.folder ?? ''}|${v.client?.id ?? v.brand ?? ''}`;
     const g = groups.get(key) ?? { key, batch: v.batch, folder: v.folder, clips: [] };
     g.clips.push(v);
     groups.set(key, g);
@@ -531,10 +534,12 @@ function RawClips({ g, now, tz, today, acting }: { g: ClipGroup; now: number; tz
   const [open, setOpen] = useState(g.clips.length <= 2);
   const listId = useId();
   const n = g.clips.length;
-  const label = `${g.batch ? shootWords(g.batch, today) : g.folder ?? 'Not matched to a shoot'} · ${plural(n, 'raw clip')}`;
+  const label = `${g.batch ? shootWords(g.batch, today) : g.folder ?? (noScripts(g.clips[0]) ? clientName(g.clips[0]) ?? 'No scripts on the site' : 'Not matched to a shoot')} · ${plural(n, 'raw clip')}`;
   const soonest = g.clips.map((v) => v.due).filter((x): x is string => !!x).sort()[0];
   const due = soonest ? dueWords(soonest, today) : null;
   const likely = likelyWords(g.clips[0]);
+  // nobody is on these clips in Timeliner: they're yours as their client's editor there
+  const via = g.clips.every((v) => v.assignedBy === 'client');
   // every clip of a shoot opens the same scripts: shown once, beside the group
   const lead = g.clips.find((v) => v.script) ?? g.clips[0];
   return (
@@ -544,7 +549,7 @@ function RawClips({ g, now, tz, today, acting }: { g: ClipGroup; now: number; tz
           <span className="eh-vq ed raw" aria-hidden><Film className="sq-raw" /></span>
           <span className="eh-wtxt">
             <b>{label}</b>
-            <span>{[due ? <span key="d" className={`eh-due ${due.tone}`}>{due.text}</span> : 'No deadline in Timeliner', likely].filter(Boolean).map((x, i) => <span key={i}>{i > 0 && ' · '}{x}</span>)}</span>
+            <span>{[due ? <span key="d" className={`eh-due ${due.tone}`}>{due.text}</span> : 'No deadline in Timeliner', likely, via ? 'via client' : null].filter(Boolean).map((x, i) => <span key={i}>{i > 0 && ' · '}{x}</span>)}</span>
           </span>
           <span className="eh-wmore">{open ? 'Hide' : 'Show'}<ChevronDown className={`chev${open ? ' up' : ''}`} aria-hidden /></span>
         </button>
@@ -552,7 +557,7 @@ function RawClips({ g, now, tz, today, acting }: { g: ClipGroup; now: number; tz
       </div>
       {open && (
         <div id={listId} className="eh-rows eh-clip-rows">
-          {g.clips.map((v) => <VideoRow key={v.id} v={v} kind="ed" multi={false} inGroup={{ due: soonest ?? null }} now={now} tz={tz} today={today} acting={acting} />)}
+          {g.clips.map((v) => <VideoRow key={v.id} v={v} kind="ed" multi={false} inGroup={{ due: soonest ?? null, via }} now={now} tz={tz} today={today} acting={acting} />)}
         </div>
       )}
     </div>
@@ -561,9 +566,9 @@ function RawClips({ g, now, tz, today, acting }: { g: ClipGroup; now: number; tz
 
 type RowKind = 'rv' | 'ed' | 'dn' | 'ir' | 'cl';
 
-/** `inGroup`: a raw clip in its shoot's folded list, which already says the shoot, its scripts and the soonest deadline. */
+/** `inGroup`: a raw clip in its shoot's folded list, which already says the shoot, its scripts, the soonest deadline and (`via`) that they all came through their client. */
 function VideoRow({ v, kind, multi, inGroup, now, tz, today, acting }: {
-  v: EditingVideo; kind: RowKind; multi: boolean; inGroup?: { due: ISODate | null }; now: number; tz: string; today: ISODate; acting: Acting;
+  v: EditingVideo; kind: RowKind; multi: boolean; inGroup?: { due: ISODate | null; via: boolean }; now: number; tz: string; today: ISODate; acting: Acting;
 }) {
   const due = dueWords(v.due, today);
   const likely = inGroup ? null : likelyWords(v);
@@ -581,6 +586,8 @@ function VideoRow({ v, kind, multi, inGroup, now, tz, today, acting }: {
     if (kind === 'rv' && v.movedAt) meta.push(`sent back ${fmtWhen(v.movedAt, tz, now)}`);
   }
   if (!inGroup || v.state !== 'to_edit' || v.step !== 'To be edited') meta.push(<span className="nowrap">Timeliner: {v.step}</span>);
+  // nobody is on it in Timeliner: it's theirs as its client's editor there (a shoot's list of clips that all are says so once, above)
+  if (v.assignedBy === 'client' && !inGroup?.via) meta.push(<span className="ed-via" title="Assigned to you through its client in Timeliner">via client</span>);
   const canStart = kind === 'rv' || kind === 'ed' || kind === 'dn';
   const err = acting.error(v.id);
   return (
@@ -615,10 +622,13 @@ function ScriptDocs({ d, now, tz, today }: { d: MyEditing; now: number; tz: stri
   const docs = [...d.scripts].sort((a, b) => Number(b.href === lead?.script?.href) - Number(a.href === lead?.script?.href));
   const example = plate.find((v) => v.script && v.scriptNumber != null);
   const anyPdf = docs.some((s) => s.source === 'timeliner');
+  // every video to cut is for a client without scripts on the site: nothing to match, so nothing to wait for
+  const noneHere = plate.length > 0 && plate.every(noScripts);
   return (
     <Panel title="Script documents" className="eh-docs">
       <p className="eh-docs-sub">{docs.length
         ? <>Approved scripts for your videos.{example && <> {example.title} is Script {example.scriptNumber}, and so on.</>}{anyPdf && <> The scripts PDF is always its newest version in Timeliner.</>}</>
+        : noneHere ? 'Your videos are for clients without scripts on the site, so there are no script documents to open.'
         : 'No script documents matched yet. They show up here once your videos are matched to a shoot’s approved scripts.'}</p>
       {docs.length > 0 && (
         <div className="stack">

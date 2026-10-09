@@ -118,11 +118,12 @@ describe('everyone in Timeliner has a card', () => {
     // due today first (Gus's and Dana's are Timeliner-only), off hours last
     expect(b.editors.map((e) => e.name)).toEqual(['Gus Ghost', 'Leo Martins', 'Maya Reyes', 'Nia North', 'Sam Lee', 'Dana Diaz']);
     const split = 'Joshua Shalimar: 5 with Maya, 4 with Leo, 1 with Sam — one editor per client';
-    expect(card('Leo Martins').clients).toEqual([{ name: 'Joshua Shalimar', clientId: ids.js, count: 4, split }]);
-    expect(card('Maya Reyes').clients).toEqual([{ name: 'Joshua Shalimar', clientId: ids.js, count: 5, split }]);
-    expect(card('Dana Diaz').clients).toEqual([{ name: 'Brightside', clientId: ids.bright, count: 2, split: null }]);
+    // nobody is on these clients' brands in Timeliner here: every video was given on the video
+    expect(card('Leo Martins').clients).toEqual([{ name: 'Joshua Shalimar', clientId: ids.js, count: 4, split, viaClient: false }]);
+    expect(card('Maya Reyes').clients).toEqual([{ name: 'Joshua Shalimar', clientId: ids.js, count: 5, split, viaClient: false }]);
+    expect(card('Dana Diaz').clients).toEqual([{ name: 'Brightside', clientId: ids.bright, count: 2, split: null, viaClient: false }]);
     // a Timeliner brand that's no site client, by its name there
-    expect(card('Gus Ghost').clients).toEqual([{ name: 'Zen Yoga', clientId: null, count: 1, split: null }]);
+    expect(card('Gus Ghost').clients).toEqual([{ name: 'Zen Yoga', clientId: null, count: 1, split: null, viaClient: false }]);
   });
 });
 
@@ -164,7 +165,7 @@ describe('one editor per client', () => {
     // Maya has more of its open videos, but most are from July: Leo has had the most since
     expect(js).toEqual({
       key: `c${ids.js}`, name: 'Joshua Shalimar', clientId: ids.js, brand: 'Joshua Shalimar',
-      editor: { name: 'Leo Martins', userId: ids.leo, memberId: 'm_leo', key: `u${ids.leo}` },
+      editor: { name: 'Leo Martins', userId: ids.leo, memberId: 'm_leo', key: `u${ids.leo}` }, editorFrom: 'videos', editors: [],
       open: 12, notAssigned: 2,
       split: [
         expect.objectContaining({ name: 'Maya Reyes', memberId: 'm_maya', count: 5 }),

@@ -1,12 +1,14 @@
 // Editing: the videos editors cut, read from Timeliner.
 //
 // Videos are given to editors in Timeliner; this site never assigns them and editors never claim them here.
-// Every TIMELINER_SYNC_MINUTES (and on "Read Timeliner now") the server reads Timeliner's members, brands and
-// tasks and keeps a copy. After every write to the copy (a read, a video message, a manager's pin) every video is
-// matched again to a client, a batch and a script by the rules in server/matching.ts: by date, from when the
-// video was made (raw camera clips belong to the shoot that had just happened; a titled video to the shoot whose
-// raw clips its editor has been cutting), a manager's pin first, and a video that has been in review keeps its
-// batch. Its editor then gets the script to cut from: the shoot's scripts PDF from Timeliner (opened through
+// Each client has its dedicated editor, assigned on the client's brand in Timeliner, so a video nobody is on
+// belongs to its brand's editors (OWNER_IDS); one given to someone on the video is theirs.
+// Every TIMELINER_SYNC_MINUTES (and on "Read Timeliner now") the server reads Timeliner's members, brands (and who
+// is on each) and tasks and keeps a copy. After every write to the copy (a read, a video message, a manager's
+// pin) every video is matched again to a client, a batch and a script by the rules in server/matching.ts: by
+// date, from when the video was made (raw camera clips belong to the shoot that had just happened; a titled video
+// to the shoot whose raw clips its editor has been cutting), a manager's pin first, and a video that has been in
+// review keeps its batch. Its editor then gets the script to cut from: the shoot's scripts PDF from Timeliner (opened through
 // GET /api/editing/script-pdf/:batchId, which fetches a fresh link each time), else the site's document. A
 // read-only key is enough. When the webhook is connected, task messages update one video straight away; a
 // message that changes or removes a video after a read began isn't undone by that read. When Timeliner can't be
@@ -44,6 +46,8 @@ import type {
 /** pages of 100 tasks read each time, newest first (a read that stops here removes only what vanished from the stretch it read) */
 const TASK_PAGES = 30;
 const BRAND_PAGES = 10;
+/** brands whose members are read each time (the ones with open videos first); the rest keep what was read last */
+const BRAND_MEMBERS_PER_READ = 60;
 /** approved or posted and untouched this long: not kept */
 const KEEP_FINISHED_DAYS = 30;
 /** a project's name and sub-folders are read again at most this often */
@@ -137,6 +141,20 @@ type Member = z.infer<typeof memberSchema>;
 
 /** A brand (a client in Timeliner): an id and a name, or it's no use. */
 const brandSchema = z.object({ id: idOf(200), name: z.string().transform((v) => clean(v, 300)).pipe(z.string().min(1)) });
+
+/**
+ * Someone on a brand (GET /brands/{id}/members), as leniently: their brand-level role, whether the access is
+ * automatic (a workspace admin's, on every brand), and who they are (the member, else a bare member id). Only who
+ * they are is required.
+ */
+const membershipSchema = z.object({
+  role: text(40).transform((v) => v?.toLowerCase() ?? null),
+  automatic: z.preprocess((v) => (v === 'true' ? true : v === 'false' ? false : v), z.boolean()).catch(false),
+  member: memberSchema.nullish().catch(null),
+  memberId: optId(200),
+});
+/** Who is on a brand, as kept: `timeliner_brand_members`. */
+interface BrandMember { memberId: string; role: string | null; automatic: boolean }
 
 /** Something a read couldn't use: a task, member, brand, project or sub-folder, and its id when it had one. */
 interface Skip { what: string; id: string | null }
@@ -233,6 +251,52 @@ async function readProjects(api: TimelinerApi, tasks: Task[], cached: Map<string
   return out;
 }
 
+/**
+ * Who is on each brand these videos are under (open videos' brands first), one call per brand: a client's editor is
+ * assigned on its brand in Timeliner, not on each video. A brand whose list can't be read keeps what was read last
+ * (skipped and noted); one Timeliner no longer has does too. Someone on a brand whose member can't be read is
+ * skipped alone. `members` are the people the lists name, for any the workspace's own list left out.
+ */
+async function readBrandMembers(api: TimelinerApi, tasks: Task[], skips: Skip[], log?: (m: string) => void): Promise<{ read: Map<string, BrandMember[]>; members: Member[] }> {
+  const read = new Map<string, BrandMember[]>();
+  const members = new Map<string, Member>();
+  const ordered = [...tasks].sort((a, b) => Number(videoState(a.statusGroup) === 'approved') - Number(videoState(b.statusGroup) === 'approved'));
+  const ids = [...new Set(ordered.map((t) => t.brandId).filter((x): x is string => !!x))];
+  for (const id of ids.slice(0, BRAND_MEMBERS_PER_READ)) {
+    let list: unknown;
+    try {
+      list = await api.brandMembers(id);
+    } catch (err) {
+      if (stopLooking(err)) break;
+      if (!(err instanceof TimelinerError)) throw err;
+      // this brand's editors stay as last read; the rest of the read goes on
+      skips.push({ what: 'brand’s member list', id });
+      if (log && !loggedSkips.has(`brand-members|${err.message}`)) { loggedSkips.add(`brand-members|${err.message}`); log(`timeliner: couldn't read who is on a brand: ${err.message}`); }
+      continue;
+    }
+    if (list == null) continue;
+    if (!Array.isArray(list)) { skips.push({ what: 'brand’s member list', id }); continue; }
+    const kept = new Map<string, BrandMember>();
+    for (const raw of list) {
+      const r = membershipSchema.safeParse(raw);
+      const memberId = r.success ? (r.data.member?.id ?? r.data.memberId ?? null) : null;
+      if (!r.success || !memberId) {
+        skips.push({ what: 'brand member', id: rawId(raw && typeof raw === 'object' ? (raw as { member?: unknown }).member : null) ?? rawId(raw) });
+        continue;
+      }
+      // someone who has left isn't anyone's editor
+      if (r.data.member?.deactivated) continue;
+      if (r.data.member && r.data.member.id === memberId) members.set(memberId, r.data.member);
+      const m: BrandMember = { memberId, role: r.data.role ?? null, automatic: r.data.automatic };
+      // listed twice: an assignment as an editor is what counts
+      const had = kept.get(memberId);
+      if (!had || (had.automatic && !m.automatic) || (had.role !== 'editor' && m.role === 'editor' && !m.automatic)) kept.set(memberId, m);
+    }
+    read.set(id, [...kept.values()]);
+  }
+  return { read, members: [...members.values()] };
+}
+
 interface Prev {
   id: string; status_group: string; step_label: string | null; history_group: string | null; updated_at: string | null;
   moved_at: string | null; moved_by: string | null; left_plate_at: string | null;
@@ -258,6 +322,26 @@ async function readMoves(api: TimelinerApi, tasks: Task[], prev: Map<string, Pre
   }
   return out;
 }
+
+// ── whom a video belongs to ──────────────────────────────────────────────
+//
+// Each client has its dedicated editor, and in Timeliner that's who is on the client's brand: most videos are
+// assigned on the brand, not one by one. So a video belongs to its assignees when it has any, otherwise to its
+// brand's editors (rule A). This is the one place that rule lives: the board, an editor's Home, I'm on this, the
+// scripts PDF link, the shoot an editor's raw clips are from and the new-version notice all read it from here.
+
+/**
+ * SQL: `bm` (a row of timeliner_brand_members, `m` its member, left joined) is one of that brand's editors: an
+ * editor there, assigned rather than automatic (a workspace admin's access to every brand), still active, and not
+ * a workspace admin, supervisor or guest (they review; they aren't anyone's editor).
+ */
+const IS_BRAND_EDITOR = (bm: string, m: string) =>
+  `${bm}.role = 'editor' and not ${bm}.automatic and coalesce(${m}.active, true) and coalesce(${m}.role, 'editor') not in ('admin', 'supervisor', 'guest')`;
+
+/** SQL: the Timeliner member ids the task `tt` belongs to (rule A): its assignees, else its brand's editors. */
+export const OWNER_IDS = (tt: string) => `(case when cardinality(${tt}.assignee_ids) > 0 then ${tt}.assignee_ids
+  else array(select ob.member_id from timeliner_brand_members ob left join timeliner_members om on om.id = ob.member_id
+              where ob.brand_id = ${tt}.brand_id and ${IS_BRAND_EDITOR('ob', 'om')} order by ob.member_id)::text[] end)`;
 
 // ── keeping the copy ─────────────────────────────────────────────────────
 
@@ -347,7 +431,11 @@ interface Found {
   /** a read that stopped early reached back to videos created then: newer tasks not in `rows` are gone */
   listedFrom?: string | null;
   members?: Member[];
+  /** people named on a brand that the workspace's list left out (added, never replacing anyone) */
+  extraMembers?: Member[];
   brands?: { id: string; name: string }[];
+  /** who is on each brand read this time (each replaces what was kept for that brand) */
+  brandMembers?: Map<string, BrandMember[]>;
   projects: Map<string, ProjectRead>;
   /** rows written by something newer than this (a webhook during a read) are left alone */
   readSince: string;
@@ -383,6 +471,15 @@ async function write(db: Db, f: Found): Promise<void> {
       const byId = new Map(f.members.map((x) => [x.id, x]));
       const rows = [...byId.values()].map((x) => [x.id, x.email ?? null, memberName(x)?.slice(0, 200) ?? null, x.role ?? null, !x.deactivated, at]);
       await insertRows(t, 'timeliner_members', ['id', 'email', 'name', 'role', 'active', 'synced_at'], rows);
+    }
+    if (f.extraMembers?.length) {
+      const rows = [...new Map(f.extraMembers.map((x) => [x.id, x])).values()].map((x) => [x.id, x.email ?? null, memberName(x)?.slice(0, 200) ?? null, x.role ?? null, !x.deactivated, at]);
+      await insertRows(t, 'timeliner_members', ['id', 'email', 'name', 'role', 'active', 'synced_at'], rows, { tail: () => 'on conflict (id) do nothing' });
+    }
+    if (f.brandMembers?.size) {
+      await t.query(`delete from timeliner_brand_members where brand_id = any($1::text[])`, [[...f.brandMembers.keys()]]);
+      const rows = [...f.brandMembers].flatMap(([brandId, list]) => list.map((m) => [brandId, m.memberId, m.role, m.automatic, at]));
+      await insertRows(t, 'timeliner_brand_members', ['brand_id', 'member_id', 'role', 'automatic', 'synced_at'], rows);
     }
     const names: unknown[][] = [];
     for (const b of f.brands ?? []) names.push([b.id, 'brand', b.name, null, at, null]);
@@ -450,7 +547,12 @@ async function write(db: Db, f: Found): Promise<void> {
     await rematch(t, f.at);
     await endLeftFocus(t);
     if (f.fullRead) {
-      await t.query(`update settings set timeliner_synced_at = $1, timeliner_sync_error = null, timeliner_sync_counts = $2::jsonb where id = 1`, [at, f.counts ? JSON.stringify(f.counts) : null]);
+      // the people with videos in this read: whom each belongs to (its assignees, else its client's editors)
+      const people = f.counts ? (await t.one<{ n: number }>(
+        `select count(distinct o)::int as n from (select unnest(${OWNER_IDS('tt')}) as o from timeliner_tasks tt where tt.id = any($1::text[])) x`, [listed],
+      ))?.n ?? 0 : 0;
+      const counts = f.counts ? { ...f.counts, people: Number(people) } : null;
+      await t.query(`update settings set timeliner_synced_at = $1, timeliner_sync_error = null, timeliner_sync_counts = $2::jsonb where id = 1`, [at, counts ? JSON.stringify(counts) : null]);
     }
   });
 }
@@ -460,7 +562,7 @@ async function endLeftFocus(t: Db): Promise<void> {
   const rows = await t.query<{ user_id: number; task_id: string; status_group: string | null; theirs: boolean }>(
     `select f.user_id, f.task_id, tt.status_group,
             exists (select 1 from timeliner_members m join users u on lower(u.email) = lower(m.email)
-                     where u.id = f.user_id and m.id = any(tt.assignee_ids)) as theirs
+                     where u.id = f.user_id and m.id = any(${OWNER_IDS('tt')})) as theirs
        from editor_focus f left join timeliner_tasks tt on tt.id = f.task_id`,
   );
   for (const r of rows) {
@@ -522,7 +624,7 @@ async function loadWorld(t: Db, now: Date): Promise<World> {
 
 interface MatchRow {
   id: string; title: string; status_group: string; created_at: string | null; project_id: string | null; sub_folder_id: string | null; brand_id: string | null;
-  internal_deadline: string | null; external_deadline: string | null; assignee_ids: string[]; parent_task_id: string | null; left_plate_at: string | null;
+  internal_deadline: string | null; external_deadline: string | null; owner_ids: string[]; parent_task_id: string | null; left_plate_at: string | null;
   client_id: number | null; batch_id: number | null; script_number: number | null; match_how: string | null; match_note: string | null; match_check: boolean; match_kept: boolean;
 }
 
@@ -534,16 +636,18 @@ interface MatchRow {
 export async function rematch(t: Db, now: Date): Promise<void> {
   const w = await loadWorld(t, now);
   const rows = await t.query<MatchRow>(
-    `select id, title, status_group, created_at, project_id, sub_folder_id, brand_id, internal_deadline, external_deadline, assignee_ids, parent_task_id,
-            left_plate_at, client_id, batch_id, script_number, match_how, match_note, match_check, match_kept
-       from timeliner_tasks`,
+    `select tt.id, tt.title, tt.status_group, tt.created_at, tt.project_id, tt.sub_folder_id, tt.brand_id, tt.internal_deadline, tt.external_deadline,
+            ${OWNER_IDS('tt')} as owner_ids, tt.parent_task_id, tt.left_plate_at, tt.client_id, tt.batch_id, tt.script_number, tt.match_how, tt.match_note,
+            tt.match_check, tt.match_kept
+       from timeliner_tasks tt`,
   );
   const videos: VideoIn[] = rows.map((r) => {
     const dues = [DAY(r.internal_deadline), DAY(r.external_deadline)].filter((x): x is string => !!x).sort();
     return {
       id: r.id, title: r.title, state: videoState(r.status_group), toDo: r.status_group === 'toDo', createdAt: iso(r.created_at),
       projectId: r.project_id, subFolderId: r.sub_folder_id, brandId: r.brand_id, deadline: dues[0] ?? null,
-      assignees: r.assignee_ids ?? [], parentId: r.parent_task_id, leftPlate: !!r.left_plate_at,
+      // whom it belongs to (rule A): an editor's raw clips are theirs whether given on the clip or on the client
+      assignees: r.owner_ids ?? [], parentId: r.parent_task_id, leftPlate: !!r.left_plate_at,
       prev: { how: (r.match_how as VideoMatchHow | null) ?? null, batchId: r.batch_id != null ? Number(r.batch_id) : null, note: r.match_note },
     };
   });
@@ -640,21 +744,21 @@ export async function syncTimeliner(db: Db, api: TimelinerApi, now: Date, log?: 
     const tasks = [...keep.values()];
     const prev = await loadPrev(db);
     const cached = await loadNames(db);
+    // who is on each brand first: a client's editor is assigned there, and every video without assignees is theirs
+    const onBrands = await readBrandMembers(api, tasks, skips, log);
     const projects = await readProjects(api, tasks, cached, now, PROJECTS_PER_READ, skips);
     const moves = await readMoves(api, tasks, prev, MOVES_PER_READ);
     const names = new Map<string, { name: string }>(cached);
     for (const b of brands) names.set(b.id, { name: b.name });
     for (const [id, p] of projects) if (p) { names.set(id, p); for (const s of p.subFolders) names.set(s.id, s); }
     const rows = tasks.map((t) => buildRow(t, prev.get(t.id), moves.get(t.id), names, now));
-    const counts = {
-      videos: rows.length,
-      people: new Set(rows.flatMap((r) => r.assignee_ids)).size,
-      clients: new Set(rows.map((r) => r.brand_id).filter(Boolean)).size,
-      skipped: skips.length,
-    };
+    // the people are counted as written, by whom each video belongs to (its brand's editors when nobody is on it)
+    const counts = { videos: rows.length, people: 0, clients: new Set(rows.map((r) => r.brand_id).filter(Boolean)).size, skipped: skips.length };
+    const known = new Set(members.map((x) => x.id));
     await write(db, {
       // a list of members none of which could be read keeps the last ones (else nobody would match by email)
       rows, drop, complete: listed.complete, listedFrom, members: members.length || !(listedMembers as unknown[]).length ? members : undefined, brands, projects,
+      extraMembers: onBrands.members.filter((x) => !known.has(x.id)), brandMembers: onBrands.read,
       readSince: now.toISOString(), at: now, fullRead: true, pdfs, counts,
     });
     logSkips(skips, log);
@@ -765,6 +869,8 @@ export function startTimelinerSync(ctx: Ctx, minutes: number, log: (m: string) =
 
 interface TaskRow extends Row {
   synced_at: string;
+  /** whom it belongs to (rule A, OWNER_IDS): its assignees, else its brand's editors in Timeliner */
+  owner_ids: string[];
   client_id: number | null; batch_id: number | null; script_number: number | null;
   match_how: string | null; match_note: string | null; match_check: boolean; match_kept: boolean;
 }
@@ -877,6 +983,8 @@ interface Loaded {
   members: Map<string, { name: string | null; email: string | null; role: string | null; active: boolean }>;
   /** Timeliner brand id → its name */
   brands: Map<string, string>;
+  /** Timeliner brand id → its editors there (the client's dedicated editors), as OWNER_IDS counts them */
+  brandEditors: Map<string, string[]>;
   /** Settings → Editors: editors who don't sign in, with where they are and their hours */
   offSite: { name: string; city: string; timezone: string; workHours: [number, number] }[];
   focus: Map<number, FocusRow>;
@@ -912,7 +1020,13 @@ async function loadEditing(ctx: Ctx): Promise<Loaded> {
   const s = await db.one<{ synced_at: string | null; error: string | null; counts: unknown }>(
     `select timeliner_synced_at as synced_at, timeliner_sync_error as error, timeliner_sync_counts as counts from settings where id = 1`,
   );
-  const tasks = await db.query<TaskRow>(`select * from timeliner_tasks order by id`);
+  const tasks = (await db.query<TaskRow>(`select tt.*, ${OWNER_IDS('tt')} as owner_ids from timeliner_tasks tt order by tt.id`))
+    .map((t) => ({ ...t, assignee_ids: t.assignee_ids ?? [], owner_ids: t.owner_ids ?? [] }));
+  const brandEditors = new Map<string, string[]>();
+  for (const r of await db.query<{ brand_id: string; member_id: string }>(
+    `select bm.brand_id, bm.member_id from timeliner_brand_members bm left join timeliner_members m on m.id = bm.member_id
+      where ${IS_BRAND_EDITOR('bm', 'm')} order by bm.brand_id, bm.member_id`,
+  )) brandEditors.set(r.brand_id, [...(brandEditors.get(r.brand_id) ?? []), r.member_id]);
   const members = await db.query<{ id: string; email: string | null; name: string | null; role: string | null; active: boolean }>(`select id, email, name, role, active from timeliner_members`);
   const users = (await loadUsers(db)).filter((u) => u.active);
   const byEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.id]));
@@ -950,6 +1064,7 @@ async function loadEditing(ctx: Ctx): Promise<Loaded> {
     tasks, byId: new Map(tasks.map((t) => [t.id, t])), users, userOf,
     members: new Map(members.map((m) => [m.id, { name: m.name, email: m.email, role: m.role, active: m.active !== false }])),
     brands: new Map((await db.query<{ id: string; name: string }>(`select id, name from timeliner_names where kind = 'brand'`)).map((b) => [b.id, b.name])),
+    brandEditors,
     offSite: (await loadEditorRows(db)).map((r) => ({
       name: r.name, city: cityLabel({ name: r.city, country: r.country }), timezone: r.timezone, workHours: [Number(r.work_start), Number(r.work_end)] as [number, number],
     })),
@@ -994,6 +1109,8 @@ function toVideo(L: Loaded, t: TaskRow, userId: number | null): EditingVideo {
     folder: t.folder,
     client: t.client_id != null && L.clients.has(Number(t.client_id)) ? { id: Number(t.client_id), name: L.clients.get(Number(t.client_id))! } : null,
     brand: t.brand_id ? L.brands.get(t.brand_id) ?? null : null,
+    // nobody on the video: it's its client's, whose editor is assigned on the brand (rule A)
+    assignedBy: t.assignee_ids.length ? 'video' : 'client',
     batch: batch && batchId != null ? { id: batchId, title: batch.title, shootDate: batch.shootDate } : null,
     scriptNumber: t.script_number,
     script: doc.script,
@@ -1034,11 +1151,11 @@ interface Person {
 const personKey = (name: string) => name.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, '');
 
 /**
- * Who does the editing of a video, for its client's editor and split: its assignees who are editors in Timeliner
- * (a manager or supervisor also on it is reviewing), else everyone on it.
+ * Who does the editing of a video, for its client's editor and split: whom it belongs to (rule A) who are editors
+ * in Timeliner (a manager or supervisor also on it is reviewing), else everyone on it.
  */
 function editorsOn(L: Loaded, t: TaskRow): string[] {
-  const all = [...new Set(t.assignee_ids)];
+  const all = [...new Set(t.owner_ids)];
   const eds = all.filter((m) => { const r = L.members.get(m)?.role; return !r || r === 'editor'; });
   return eds.length ? eds : all;
 }
@@ -1049,15 +1166,23 @@ function editorsOn(L: Loaded, t: TaskRow): string[] {
  * Settings → Editors when their name is there). Editors on the site with nothing in Timeliner get a quiet note.
  */
 function peopleOf(L: Loaded): Person[] {
+  // their videos: on the video, or through their client (rule A)
   const work = new Map<string, { all: number; open: number }>();
   for (const t of L.tasks) {
     const open = videoState(t.status_group) !== 'approved';
-    for (const m of new Set(t.assignee_ids)) {
+    for (const m of new Set(t.owner_ids)) {
       const w = work.get(m) ?? { all: 0, open: 0 };
       w.all++;
       if (open) w.open++;
       work.set(m, w);
     }
+  }
+  // a client's editor in Timeliner is on the board even while every video of it is someone else's: the client strip
+  // names them
+  const brandsWithVideos = new Set(L.tasks.map((t) => t.brand_id).filter((x): x is string => !!x));
+  for (const [brand, list] of L.brandEditors) {
+    if (!brandsWithVideos.has(brand)) continue;
+    for (const m of list) if (!work.has(m)) work.set(m, { all: 0, open: 0 });
   }
   const users = new Map(L.users.map((u) => [u.id, u]));
   const byUser = new Map<number, Person>();
@@ -1140,7 +1265,8 @@ function clientOfTask(L: Loaded, t: TaskRow): { key: string; name: string; clien
 function editorOf(L: Loaded, p: Person): { row: EditorRow; mine: MyEditing; clientKeys: Map<EditorClient, string> } {
   const weekAgo = L.now.getTime() - 7 * DAY_MS;
   const ids = new Set(p.memberIds);
-  const own = L.tasks.filter((t) => t.assignee_ids.some((m) => ids.has(m)));
+  // theirs: assigned on the video, or nobody is and they're its client's editor in Timeliner (rule A)
+  const own = L.tasks.filter((t) => t.owner_ids.some((m) => ids.has(m)));
   // their taps and done marks: only from a site account with their Timeliner email
   const me = p.linked ? p.userId : null;
   const videos = own.map((t) => toVideo(L, t, me));
@@ -1193,8 +1319,10 @@ function editorOf(L: Loaded, p: Person): { row: EditorRow; mine: MyEditing; clie
   for (const t of own) {
     const c = shown.has(t.id) ? clientOfTask(L, t) : null;
     if (!c) continue;
-    const e = clients.get(c.key) ?? { name: c.name, clientId: c.clientId, count: 0, split: null };
+    const e = clients.get(c.key) ?? { name: c.name, clientId: c.clientId, count: 0, split: null, viaClient: false };
     e.count++;
+    // they're on its brand in Timeliner: the client's editor there
+    if (t.brand_id && L.brandEditors.get(t.brand_id)?.some((m) => ids.has(m))) e.viaClient = true;
     clients.set(c.key, e);
   }
   const row: EditorRow = {
@@ -1244,7 +1372,8 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
 
   // nobody given them yet: titled videos by folder, raw clips by the shoot they matched (else by folder)
   const recent = L.now.getTime() - NOT_ASSIGNED_DAYS * DAY_MS;
-  const notAssigned = (t: TaskRow) => videoState(t.status_group) === 'to_edit' && !t.assignee_ids.length && !(t.created_at && time(t.created_at) < recent);
+  // nobody on the video and nobody on its client (rule C)
+  const notAssigned = (t: TaskRow) => videoState(t.status_group) === 'to_edit' && !t.owner_ids.length && !(t.created_at && time(t.created_at) < recent);
   type Group = {
     folder: string; clientName: string | null; raw: boolean; batch: EditingBoard['unassigned'][number]['batch']; titles: string[]; due: ISODate | null;
     docs: Map<string, ScriptDoc>; brand: string | null; clientKey: string | null;
@@ -1273,10 +1402,10 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
     groups.set(key, g);
   }
 
-  // each client's editor (one editor per client): whoever has the most of its videos made in the last 60 days
-  // (a tie: whoever had one most recently), and who has its open videos
+  // each client's editor (one editor per client): who is on its brand as an editor in Timeliner; else whoever has
+  // the most of its videos made in the last 60 days (a tie: whoever had one most recently). And who has its open videos
   type Acc = {
-    key: string; name: string; clientId: number | null; brand: string | null; open: number; notAssigned: number; rawNotAssigned: number;
+    key: string; name: string; clientId: number | null; brand: string | null; brandIds: Set<string>; open: number; notAssigned: number; rawNotAssigned: number;
     made: Map<string, { count: number; last: number; members: Map<string, number> }>; openBy: Map<string, { count: number; members: Map<string, number> }>;
   };
   const accs = new Map<string, Acc>();
@@ -1285,9 +1414,10 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
   for (const t of L.tasks) {
     const c = clientOfTask(L, t);
     if (!c) continue;
-    const a = accs.get(c.key) ?? { ...c, open: 0, notAssigned: 0, rawNotAssigned: 0, made: new Map(), openBy: new Map() };
+    const a = accs.get(c.key) ?? { ...c, brandIds: new Set<string>(), open: 0, notAssigned: 0, rawNotAssigned: 0, made: new Map(), openBy: new Map() };
     accs.set(c.key, a);
     a.brand ??= c.brand;
+    if (t.brand_id) a.brandIds.add(t.brand_id);
     const isOpen = videoState(t.status_group) !== 'approved';
     if (isOpen) a.open++;
     if (notAssigned(t)) { a.notAssigned++; if (isRawTitle(t.title)) a.rawNotAssigned++; }
@@ -1310,31 +1440,55 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
   }
   const byKey = new Map(people.map((p) => [p.key, p]));
   const topMember = (m: Map<string, number>) => [...m].sort((x, y) => y[1] - x[1] || x[0].localeCompare(y[0]))[0][0];
+  /** the one-line "one editor per client" flag of each client that has more than one editor, and who they are */
+  const oneEditor = new Map<string, { text: string; keys: Set<string> }>();
   const clients: ClientEditing[] = [...accs.values()]
     .map((a): ClientEditing => {
-      const top = [...a.made].sort(([ka, x], [kb, y]) => y.count - x.count || y.last - x.last || byKey.get(ka)!.name.localeCompare(byKey.get(kb)!.name))[0];
-      const editor = top ? refOf(byKey.get(top[0])!, topMember(top[1].members)) : null;
+      // assigned to the client in Timeliner: each person once (their first account on its brand)
+      const onBrand = new Map<string, EditorRef>();
+      for (const id of [...a.brandIds].sort()) {
+        for (const m of L.brandEditors.get(id) ?? []) {
+          const p = personOf.get(m);
+          if (p && !onBrand.has(p.key)) onBrand.set(p.key, refOf(p, m));
+        }
+      }
+      const most = (ka: string, kb: string) => {
+        const x = a.made.get(ka); const y = a.made.get(kb);
+        return (y?.count ?? 0) - (x?.count ?? 0) || (y?.last ?? 0) - (x?.last ?? 0) || byKey.get(ka)!.name.localeCompare(byKey.get(kb)!.name) || ka.localeCompare(kb);
+      };
+      const editors = [...onBrand.values()].sort((x, y) => most(x.key, y.key));
+      const top = [...a.made.keys()].sort(most)[0];
+      const editor = editors[0] ?? (top ? refOf(byKey.get(top)!, topMember(a.made.get(top)!.members)) : null);
       const split = a.openBy.size > 1
         ? [...a.openBy].map(([pk, o]) => ({ ...refOf(byKey.get(pk)!, topMember(o.members)), count: o.count })).sort((x, y) => y.count - x.count || x.name.localeCompare(y.name))
         : [];
-      const short = shortNames([...split.map((x) => x.name), ...(editor ? [editor.name] : [])]);
+      const short = shortNames([...split.map((x) => x.name), ...editors.map((x) => x.name), ...(editor ? [editor.name] : [])]);
       const flags: string[] = [];
-      if (split.length) flags.push(`${a.name}: ${split.map((x) => `${x.count} with ${short(x.name)}`).join(', ')} — one editor per client`);
+      // more than one editor on the client in Timeliner says it all; else its open videos split across editors
+      const one = editors.length > 1 ? `${a.name} has ${editors.length} editors in Timeliner — one editor per client`
+        : split.length ? `${a.name}: ${split.map((x) => `${x.count} with ${short(x.name)}`).join(', ')} — one editor per client` : null;
+      if (one) {
+        flags.push(one);
+        oneEditor.set(a.key, { text: one, keys: new Set([...editors, ...split].map((x) => x.key)) });
+      }
       if (a.notAssigned) {
         const word = a.rawNotAssigned === a.notAssigned ? 'clip' : 'video';
         flags.push(`${a.name} · ${plural(a.notAssigned, word)} not assigned${editor ? ` (usually ${short(editor.name)})` : ''}`);
       }
-      return { key: a.key, name: a.name, clientId: a.clientId, brand: a.brand, editor, open: a.open, notAssigned: a.notAssigned, split, flags };
+      return {
+        key: a.key, name: a.name, clientId: a.clientId, brand: a.brand, editor, editorFrom: editors.length ? 'client' : editor ? 'videos' : null, editors,
+        open: a.open, notAssigned: a.notAssigned, split, flags,
+      };
     })
     .filter((c) => c.open > 0 || c.notAssigned > 0 || c.editor)
     .sort((a, b) => b.open - a.open || a.name.localeCompare(b.name));
   const clientByKey = new Map(clients.map((c) => [c.key, c]));
 
-  // on each card, a client whose open videos are split across editors (this one among them) carries its flag
+  // on each card, a client with more than one editor (this one among them) carries its flag
   for (const b of built) {
     for (const [c, k] of b.clientKeys) {
-      const whole = clientByKey.get(k);
-      if (whole?.split.some((x) => x.key === b.row.key)) c.split = whole.flags[0];
+      const one = oneEditor.get(k);
+      if (one?.keys.has(b.row.key)) c.split = one.text;
     }
   }
 
@@ -1353,7 +1507,7 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
   const unknown = new Map<string, { name: string; email: string | null; count: number }>();
   for (const t of L.tasks) {
     if (videoState(t.status_group) === 'approved') continue;
-    for (const m of t.assignee_ids) {
+    for (const m of new Set(t.owner_ids)) {
       if (L.userOf.has(m)) continue;
       const who = L.members.get(m);
       const u = unknown.get(m) ?? { name: who?.name ?? who?.email ?? 'Someone in Timeliner', email: who?.email ?? null, count: 0 };
@@ -1418,9 +1572,10 @@ export async function applyFocus(ctx: Ctx, me: Me, videoId: string, action: Focu
     // focus row to lock, and two Dones can't both pass the check below
     await t.query(`select 1 from users where id = $1 for no key update`, [me.id]);
     const focus = await t.one<FocusRow>(`select user_id, task_id, state, since, worked_seconds, paused_at from editor_focus where user_id = $1 for update`, [me.id]);
-    const task = await t.one<TaskRow>(`select * from timeliner_tasks where id = $1`, [videoId]);
+    const task = await t.one<TaskRow>(`select tt.*, ${OWNER_IDS('tt')} as owner_ids from timeliner_tasks tt where tt.id = $1`, [videoId]);
     if (!task) throw notFound('Video');
-    const theirs = await t.one(`select 1 from timeliner_members where lower(email) = lower($1) and id = any($2::text[])`, [me.email, task.assignee_ids]);
+    // theirs: assigned to them on the video, or nobody is and they're its client's editor in Timeliner (rule A)
+    const theirs = await t.one(`select 1 from timeliner_members where lower(email) = lower($1) and id = any($2::text[])`, [me.email, task.owner_ids ?? []]);
     if (!theirs) throw forbidden('That video isn’t assigned to you in Timeliner.');
     const state = videoState(task.status_group);
     const onIt = focus?.task_id === videoId ? focus : null;
@@ -1613,8 +1768,9 @@ export function registerEditingRoutes(app: FastifyInstance, ctx: Ctx) {
       const me = requireUser(req);
       const { batchId } = parse(z.object({ batchId: zs.id }), req.params);
       if (!isManager(me.role)) {
+        // a video of theirs from that batch: assigned to them, or to them as its client's editor (rule A)
         const theirs = await ctx.db.one(
-          `select 1 from timeliner_tasks tt join timeliner_members m on m.id = any(tt.assignee_ids)
+          `select 1 from timeliner_tasks tt join timeliner_members m on m.id = any(${OWNER_IDS('tt')})
             where tt.batch_id = $1 and lower(m.email) = lower($2) limit 1`, [batchId, me.email],
         );
         if (!theirs) throw forbidden('That scripts PDF is for videos that aren’t assigned to you in Timeliner.');

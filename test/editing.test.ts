@@ -88,6 +88,7 @@ const fake: TimelinerApi = {
     { id: 'm_priya', email: 'priya@scale.test', firstName: 'Priya', lastName: 'Nair', role: 'editor' },
     { id: 'm_ghost', email: 'ghost@freelance.test', firstName: 'Gus', lastName: 'Ghost', role: 'editor' },
   ],
+  brandMembers: async () => [],
   lastMove: async (id) => moves[id] ?? null,
   webhooks: async () => hooks,
   createWebhook: async (url, events) => { calls.push(`create ${events.join(',')}`); hooks = [{ id: 'wh_1', url, events, active: true }]; return { id: 'wh_1', secret: SECRET }; },

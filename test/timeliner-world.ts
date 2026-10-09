@@ -8,7 +8,7 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../server/app';
 import type { Db } from '../server/db';
 import type { Ctx } from '../server/core';
-import { TimelinerError, type TimelinerApi, type TimelinerTask } from '../server/timeliner';
+import { TimelinerError, type TimelinerApi, type TimelinerBrandMember, type TimelinerTask } from '../server/timeliner';
 import type { BatchDetail, EditingBoard, MyEditing } from '../shared/types';
 import { freshDb } from './db';
 
@@ -30,6 +30,8 @@ export interface World {
     tasks: TimelinerTask[];
     projects: Record<string, Project>;
     brands: Record<string, string>;
+    /** who is on each brand (GET /brands/{id}/members): a client's editors are assigned there */
+    onBrand: Record<string, TimelinerBrandMember[]>;
     /** GET /tasks/{id} fails */
     taskFails: boolean;
     /** GET /tasks/{id} calls, to see what was cached */
@@ -76,6 +78,7 @@ export async function makeWorld(): Promise<World> {
       p_mine: { id: 'p_mine', name: 'My Videos', nodeId: 'b_js', createdAt: '2025-01-10T15:00:00Z', subFolders: [{ id: 'sf_org', name: 'Organic', createdAt: '2025-01-10T15:00:00Z' }, { id: 'sf_ads', name: 'Ads', createdAt: '2025-01-10T15:00:00Z' }] },
     },
     brands: { b_js: 'Joshua Shalimar' },
+    onBrand: {},
     taskFails: false,
     taskCalls: [],
   };
@@ -94,6 +97,7 @@ export async function makeWorld(): Promise<World> {
       { id: 'm_leo', email: 'leo@scale.test', firstName: 'Leo', lastName: 'Martins', role: 'editor' },
       { id: 'm_maya', email: 'maya@scale.test', firstName: 'Maya', lastName: 'Reyes', role: 'editor' },
     ],
+    brandMembers: async (id) => tl.onBrand[id] ?? [],
     lastMove: async () => null,
     webhooks: async () => [],
     createWebhook: async () => ({ id: 'wh_1', secret: SECRET }),

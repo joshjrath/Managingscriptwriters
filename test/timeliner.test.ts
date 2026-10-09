@@ -28,6 +28,7 @@ const fake: TimelinerApi = {
   task: async () => null,
   tasks: async () => ({ data: [], nextBefore: null }),
   brands: async () => ({ data: [], nextBefore: null }),
+  brandMembers: async () => [],
   lastMove: async () => null,
   members: async () => [{ id: 'm_wes', email: 'wes@scale.test', firstName: 'Wes', lastName: 'Writer' }, { id: 'm_ed', email: 'editor@agency.test', firstName: 'Ed', lastName: null }],
   webhooks: async () => [],

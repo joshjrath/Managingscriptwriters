@@ -1962,7 +1962,10 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
 
 /* roster */
 .ed-roster .panel-head .tools { gap: 4px 10px; }
-.ed-sync { font-size: 12.5px; color: var(--text-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ed-sync { min-width: 0; font-size: 12.5px; color: var(--text-2); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+/* the top of the tab: what the last read of Timeliner found, and Read Timeliner now */
+.ed-read { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px 12px; min-width: 0; max-width: 100%; }
+@media (max-width: 760px) { .ed-read { justify-content: flex-start; } }
 .ed-tl-link { display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 6px; border-radius: 10px; color: var(--text-2); font-size: 13px; font-weight: 600; white-space: nowrap; }
 .ed-tl-link:hover { color: var(--text); }
 .ed-tl-link svg { width: 15px; height: 15px; }
@@ -1980,6 +1983,10 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
   transition: box-shadow 200ms var(--ease);
 }
 .ed-card:hover { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12); }
+/* landed on from "Fix these people" or Editors by client: clear of the phone's top bar, with a short ring */
+.ed-card { scroll-margin-top: 84px; }
+.ed-card:focus { outline: none; }
+.ed-card.ed-hl { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--salmon) 60%, transparent); }
 .ed-card.live { background: radial-gradient(60% 140% at 0% 0%, color-mix(in srgb, var(--cyan) 11%, transparent), transparent 62%), var(--panel-2); }
 .ed-card.paused { background: radial-gradient(60% 140% at 0% 0%, color-mix(in srgb, var(--yellow) 8%, transparent), transparent 62%), var(--panel-2); }
 .ed-card.off { background: color-mix(in srgb, var(--panel-2) 45%, var(--panel)); }
@@ -1998,6 +2005,25 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
 .ed-name { font: 650 15.5px/1.25 var(--font-ui); letter-spacing: -0.01em; }
 .ed-place { font-size: 12.5px; color: var(--text-2); }
 .ed-pills { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+/* the clients a card leads with: "Joshua Shalimar · 32 videos" */
+.ed-clients-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; font-size: 13px; color: var(--text-2); }
+.ed-cli { min-width: 0; overflow-wrap: anywhere; }
+.ed-cli b { color: var(--text); font-weight: 650; }
+.ed-cli .ed-via { margin-left: 6px; }
+/* a quiet tag: "via client", "assigned in Timeliner", "Timeliner brand" */
+.ed-via { display: inline-block; padding: 0 7px; border-radius: var(--r-pill); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--neutral) 30%, transparent); color: var(--text-2); font-size: 11px; font-weight: 650; line-height: 18px; white-space: nowrap; }
+/* what to fix about who they are, and a client split across editors: one calm line each, on top of the card */
+.ed-flags { flex: 1 1 100%; min-width: 0; display: flex; flex-direction: column; gap: 6px; margin-bottom: -4px; }
+.ed-flag { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-width: 0; padding: 8px 12px; border-radius: var(--r-row); font-size: 13px; line-height: 1.4; }
+.ed-flag > svg { width: 15px; height: 15px; flex: none; }
+.ed-flag-t { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.ed-flag-t b { color: var(--text); font-weight: 650; }
+.ed-flag.fix { padding: 4px 4px 4px 12px; background: color-mix(in srgb, var(--yellow) 7%, transparent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--yellow) 20%, transparent); color: color-mix(in srgb, var(--yellow) 25%, var(--text)); }
+.ed-flag.fix > svg { color: var(--yellow); }
+.ed-flag.split { background: var(--row); color: var(--text-2); }
+.ed-flag-go { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: var(--r-pill); background: var(--btn); color: var(--text); font-weight: 650; white-space: nowrap; transition: background var(--t); }
+.ed-flag-go:hover { background: var(--btn-hover); }
+.ed-flag-who { padding: 0 8px; font-size: 12.5px; color: var(--text-2); }
 
 /* right now: a glowing tile, then what they're on */
 .ed-now { flex: 2 1 280px; min-width: 0; display: flex; align-items: center; gap: 16px; }
@@ -2100,7 +2126,7 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
 @keyframes ed-sqglow { 50% { box-shadow: 0 0 0 2px color-mix(in srgb, var(--cyan) 35%, transparent), 0 0 14px color-mix(in srgb, var(--cyan) 90%, transparent); } }
 .ed-sq.more { background: var(--row); color: var(--text-2); padding: 0 8px; }
 
-/* not assigned yet, and people Timeliner names who aren't on the site */
+/* not assigned yet */
 .ed-na-rows { gap: 12px; }
 .ed-na-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .ed-na-t { min-width: 92px; font-size: 13px; font-weight: 650; overflow-wrap: anywhere; }
@@ -2111,13 +2137,32 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
 .ed-abtn { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 18px; border-radius: var(--r-pill); background: var(--btn); color: var(--text); font: 650 13.5px/1 var(--font-ui); white-space: nowrap; }
 .ed-abtn:hover { background: var(--btn-hover); color: #fff; }
 .ed-abtn svg { width: 15px; height: 15px; }
-.ed-unknown { margin-top: 12px; padding: 16px 18px; border-radius: var(--r-card); background: color-mix(in srgb, var(--yellow) 5%, var(--panel-2)); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); }
-.ed-unknown-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; font-size: 13.5px; }
-.ed-unknown-h > svg { width: 17px; height: 17px; color: var(--yellow); }
-.ed-unknown-h .btn { margin-left: auto; min-height: 44px; }
-.ed-unknown ul { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
-.ed-unknown li { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; padding: 8px 12px; border-radius: 14px; background: var(--row); font-size: 13px; }
-.ed-unknown li .muted { font-size: 12.5px; }
+.ed-na-sug { color: var(--text-2); font-weight: 500; }
+/* one line above the cards: the people to fix, each a link to their card */
+.ed-fix { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin-bottom: 14px; padding: 6px 8px 6px 16px; border-radius: var(--r-row); background: color-mix(in srgb, var(--yellow) 6%, var(--panel-2)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--yellow) 18%, transparent); font-size: 13.5px; }
+.ed-fix > svg { width: 17px; height: 17px; flex: none; color: var(--yellow); }
+.ed-fix-h { font-weight: 650; }
+.ed-fix-list { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.ed-fix-who { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: var(--r-pill); background: var(--row); color: var(--text); font-weight: 600; overflow-wrap: anywhere; transition: background var(--t); }
+.ed-fix-who:hover { background: var(--btn); }
+.ed-fix-how { font-size: 12.5px; }
+
+/* editors by client: each client → its editor, its open videos, and a chip when it's split or some aren't assigned */
+.ed-clients { margin-bottom: var(--gap); }
+.ed-ct-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 8px; }
+.ed-ct-list > li { min-width: 0; }
+.ed-ct { display: flex; flex-direction: column; gap: 6px; min-width: 0; min-height: 44px; height: 100%; padding: 12px 14px; border-radius: var(--r-row); background: var(--panel-2); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06); color: var(--text); }
+.ed-ct.go { transition: box-shadow 200ms var(--ease); }
+.ed-ct.go:hover { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16); }
+.ed-ct-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.ed-ct-name { flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 650; overflow-wrap: anywhere; }
+.ed-ct-open { flex: none; font-size: 12.5px; color: var(--text-2); }
+.ed-ct-ed { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; min-width: 0; font-size: 13px; }
+.ed-ct-ed > svg { width: 13px; height: 13px; flex: none; color: var(--text-3); }
+.ed-ct-ed b { min-width: 0; max-width: 100%; font-weight: 600; }
+.ed-ct-flags { display: flex; flex-wrap: wrap; gap: 4px; }
+.ed-ct-flags .chip { white-space: normal; text-align: left; }
+.ed-ct-more { margin-top: 10px; }
 
 /* the whole team, and what the colours mean */
 .ed-team { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 28px; margin-top: 18px; padding: 16px 20px 6px; border-top: 1px solid rgba(255, 255, 255, 0.08); }

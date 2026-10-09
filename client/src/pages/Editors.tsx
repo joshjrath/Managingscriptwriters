@@ -1,39 +1,66 @@
 // Editors (managers): what each editor is doing right now and what's on their plate, read from Timeliner.
-// Videos are given to editors in Timeliner; this page never assigns them. Each editor's card says what they're
-// on (the video they tapped "I'm on this" for, or paused), else what's next by deadline, or that they're off
-// hours; their videos by state; what's due today; the last one they finished; and the script documents they
-// cut from (the shoot's scripts PDF from Timeliner, "Scripts PDF · v3 · from Timeliner"). Raw camera clips count as
-// clips ("24 clips to edit"). Videos the site couldn't match to a shoot, or whose match is worth a look, carry
-// "Not matched" and "Check" chips; in an editor's Videos, tapping a video shows how it was matched, and "Wrong
-// shoot? Pin it" pins it to a batch (and maybe a script), or to none. Then the videos nobody has in Timeliner yet
-// (raw clips by shoot), and people Timeliner names who aren't on the site.
+// Videos are given to editors in Timeliner (on the video, or to the client's dedicated editor on its brand); this
+// page never assigns them. On top, what the last read found and Read Timeliner now; then the summary cards and
+// "Editors by client" (each client's editor, its open videos, and a chip when its videos are split across editors
+// or some aren't assigned). The roster has a card for everyone in Timeliner with videos and every editor on the
+// site; people to fix (not on the site, or another email here) are flagged on their card and listed in one line
+// above the cards. Each card leads with its clients ("Joshua Shalimar · 32 videos") and says what they're on (the
+// video they tapped "I'm on this" for, or paused), else what's next by deadline, or that they're off hours; their
+// videos by state; what's due today; the last one they finished; and the script documents they cut from ("Scripts
+// PDF · v3 · from Timeliner"). Raw camera clips count as clips ("24 clips to edit"). Videos the site couldn't match
+// to a shoot, or whose match is worth a look, carry "Not matched" and "Check" chips; a client without scripts on
+// the site is "No scripts on the site", never "Not matched". In an editor's Videos, tapping a video shows how it was
+// matched, and "Wrong shoot? Pin it" pins it to a batch (and maybe a script), or to none. Then the videos nobody has
+// in Timeliner yet (raw clips by shoot), with whom to give them ("usually Leo").
 
-import { useId, useState, type FormEvent, type ReactNode } from 'react';
+import { useId, useState, type FormEvent, type MouseEvent, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  AlarmClock, AlertTriangle, Check, ChevronDown, CircleCheck, CircleHelp, Clapperboard, Eye, ExternalLink, FileText, Film, History, Layers, Moon,
-  Pause, Pin, PinOff, RefreshCw, RotateCcw, Scissors, Sunrise, TimerOff, UserPlus, Users, X,
+  AlarmClock, AlertTriangle, ArrowRight, Check, ChevronDown, CircleCheck, CircleHelp, Clapperboard, Eye, ExternalLink, FileText, FileX, Film, History, Layers,
+  Moon, Pause, Pin, PinOff, RefreshCw, RotateCcw, Scissors, Sunrise, TimerOff, UserPlus, Users, X,
 } from 'lucide-react';
 import { api, qs, useSave } from '../api';
-import type { BatchSummary, EditingBoard, EditingSync, EditingVideo, EditorRow, ScriptDoc } from '../../../shared/types';
-import { FOCUS_STALE_HOURS, isFocusStale, isOnPlate, needsCheck } from '../../../shared/workflow';
+import type { BatchSummary, EditingBoard, EditingSync, EditingVideo, EditorFlag, EditorRow, ClientEditing, ScriptDoc } from '../../../shared/types';
+import { FOCUS_STALE_HOURS, isAdmin, isFocusStale, isOnPlate, needsCheck } from '../../../shared/workflow';
 import { dueWords, fmtAgo, fmtDate, fmtHour, fmtStamp, fmtWorked, plural } from '../../../shared/format';
 import { nowInZone, type ISODate } from '../../../shared/dates';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import { Avatar, Button, Chip, Empty, ErrorState, Field, FormError, inputProps, Loading, Panel, useFieldId, useToast } from '../components/ui';
 import { KpiCard } from '../components/StatCards';
+import { motionAllowed } from '../motion';
 import {
-  AgainTag, byTitle, clockTime, docKind, docName, docSource, midSentence, fmtWhen, focusSeconds, hoursText, localTime, notMatched, reviewWords, ScriptLink,
-  shootLabel, shootWords, squareOf, syncWords, tileTime, TIMELINER_APP, useNow, VideoName, videoName, videoTitles,
+  AgainTag, byTitle, clientName, clockTime, docKind, docName, docSource, midSentence, fmtWhen, focusSeconds, hoursText, localTime, noScripts, notMatched, readWords,
+  reviewWords, ScriptLink, shootLabel, shootWords, squareOf, tileTime, TIMELINER_APP, useNow, VideoName, videoName, videoTitles,
 } from '../components/EditingBits';
 
-const first = (name: string) => name.split(/\s+/)[0] ?? name;
+const first = (name: string) => name.trim().split(/\s+/)[0] || name;
 const names = (list: string[]) => (list.length <= 1 ? list.join('') : `${list.slice(0, -1).join(', ')} and ${list[list.length - 1]}`);
 const sum = (list: number[]) => list.reduce((n, x) => n + x, 0);
 const plateTotal = (e: EditorRow) => e.plate.toEdit + e.plate.revisions + e.plate.inReview + e.plate.withClient + e.plate.approvedWeek;
 /** still to edit or fix, and not marked done here */
 const onPlate = (v: EditingVideo) => isOnPlate(v.state) && !v.doneAt;
+
+/** An editor's card on the page, for the links that scroll to it ("Fix these people", Editors by client). */
+const cardId = (key: string) => `ed-card-${key}`;
+/** Scroll to an editor's card and put focus on it (smoothly only when motion is on). */
+const goToCard = (key: string) => (ev: MouseEvent) => {
+  const el = document.getElementById(cardId(key));
+  if (!el) return;
+  ev.preventDefault();
+  el.scrollIntoView({ behavior: motionAllowed() ? 'smooth' : 'auto', block: 'start' });
+  el.focus({ preventScroll: true });
+  // a short ring, so the eye finds the card it landed on
+  el.classList.add('ed-hl');
+  window.setTimeout(() => el.classList.remove('ed-hl'), 1800);
+};
+
+/** Someone to fix about who they are (not `nothing_assigned`, which is a quiet note on their card). */
+const needsFix = (f: EditorFlag | null): f is EditorFlag => !!f && f.kind !== 'nothing_assigned';
+/** The flag in two or three words, for the "Fix these people" line. */
+const FIX_WORDS: Record<EditorFlag['kind'], string> = {
+  not_on_site: 'not on the site', no_site_access: 'no site access', email_differs: 'emails differ', nothing_assigned: 'nothing in Timeliner',
+};
 
 /** What a card shows under Right now: one of these for each editor. `stale` is an I'm on this left running (isFocusStale). */
 type NowKind = 'live' | 'stale' | 'paused' | 'next' | 'off' | 'clear';
@@ -49,18 +76,21 @@ const uniqueVideos = (list: EditingVideo[]) => {
   return [...out.values()];
 };
 
-/** Videos counted by state, split as the bars are: marked done here is its own count, as on an editor's Home. */
-function stateCounts(list: EditorRow[]): { label: string; n: number; c: string }[] {
-  const p = (fn: (e: EditorRow) => number) => sum(list.map(fn));
-  const marked = p((e) => e.videos.filter((v) => v.doneAt).length);
-  const toEdit = p((e) => e.plate.toEdit);
+/**
+ * Videos counted by state, split as the bars are: marked done here is its own count, as on an editor's Home. From
+ * the videos themselves, so a video two editors share (both on its client in Timeliner) counts once for the team.
+ */
+function stateCounts(videos: EditingVideo[]): { label: string; n: number; c: string }[] {
+  const n = (fn: (v: EditingVideo) => boolean) => videos.filter(fn).length;
+  const marked = n((v) => !!v.doneAt);
+  const toEdit = n((v) => v.state === 'to_edit' && !v.doneAt);
   // raw camera clips to cut read as clips, when that's all there is to edit
-  const clips = toEdit > 0 && p((e) => e.plate.rawToEdit) === toEdit;
+  const clips = toEdit > 0 && n((v) => v.state === 'to_edit' && !v.doneAt && v.raw) === toEdit;
   return [
-    { label: clips ? 'Clips to edit' : 'To edit', n: toEdit, c: 'ed' }, { label: 'Revisions', n: p((e) => e.plate.revisions), c: 'rv' },
+    { label: clips ? 'Clips to edit' : 'To edit', n: toEdit, c: 'ed' }, { label: 'Revisions', n: n((v) => v.state === 'revisions' && !v.doneAt), c: 'rv' },
     ...(marked ? [{ label: 'Marked done', n: marked, c: 'dn' }] : []),
-    { label: 'In review', n: p((e) => e.videos.filter((v) => v.state === 'in_review').length), c: 'ir' },
-    { label: 'With client', n: p((e) => e.plate.withClient), c: 'cl' }, { label: 'Approved', n: p((e) => e.plate.approvedWeek), c: 'ap' },
+    { label: 'In review', n: n((v) => v.state === 'in_review'), c: 'ir' },
+    { label: 'With client', n: n((v) => v.state === 'with_client'), c: 'cl' }, { label: 'Approved', n: n((v) => v.state === 'approved'), c: 'ap' },
   ];
 }
 
@@ -108,16 +138,24 @@ export function EditorsPage() {
   const read = useSave(() => api<EditingBoard>('/api/editing/sync', { body: {} }), {
     onSuccess: (b) => {
       if (b.sync.error) toast(`Couldn’t read Timeliner: ${b.sync.error}`, 'error');
-      else toast('Read Timeliner just now');
+      else toast(readWords(b.sync, Date.now()));
     },
   });
   const readButton = (primary?: boolean) => (
-    <Button variant={primary ? 'primary pill' : 'sm ghost'} icon={<RefreshCw aria-hidden />} busy={read.isPending} onClick={() => read.mutate(undefined)}>Read Timeliner now</Button>
+    <Button variant={primary ? 'primary pill' : 'pill tall'} icon={<RefreshCw aria-hidden />} busy={read.isPending} onClick={() => read.mutate(undefined)}>Read Timeliner now</Button>
   );
   const b = q.data;
   return (
     <>
-      <PageHeader title="Editors" sub="Who’s on what right now. Videos, steps and deadlines come from Timeliner." hideNewWork />
+      <PageHeader title="Editors" sub="Who’s on what right now. Videos, steps and deadlines come from Timeliner." hideNewWork>
+        {/* what the last read found, and a new read, always at the top once Timeliner has been read */}
+        {b?.sync.syncedAt && (
+          <div className="ed-read">
+            <span className="ed-sync" title={fmtStamp(b.sync.syncedAt, tz)}>{readWords(b.sync, now)}</span>
+            {b.sync.keySet && readButton()}
+          </div>
+        )}
+      </PageHeader>
       {q.isLoading && <Loading height={420} />}
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
       {b && !b.sync.keySet && !b.sync.syncedAt && <SetupPanel b={b} />}
@@ -125,7 +163,7 @@ export function EditorsPage() {
         <Panel title="Timeliner hasn’t been read yet" className="ed-setup">
           <div className="stack s4">
             {b.sync.error
-              ? <div className="banner red" role="alert"><AlertTriangle aria-hidden /><div className="txt"><b>Couldn’t read Timeliner</b><span>{b.sync.error}</span></div></div>
+              ? <div className="banner red" role="alert"><AlertTriangle aria-hidden /><div className="txt"><b>Couldn’t read Timeliner</b><span>Timeliner answered: {b.sync.error}</span></div></div>
               : <p className="muted">The key is set. The site reads Timeliner a few seconds after it starts, then every few minutes, and each editor’s videos show up here.</p>}
             <FormError error={read.error} />
             <div className="row-flex">{readButton(true)}</div>
@@ -141,17 +179,13 @@ export function EditorsPage() {
               <div className="txt"><b>Timeliner isn’t connected any more</b><span>TIMELINER_API_KEY isn’t set on the server, so this is the last copy, read {fmtAgo(b.sync.syncedAt, now)}.</span></div>
             </div>
           )}
-          <SummaryCards b={b} now={now} today={clock.today} workspaceTz={clock.timezone} />
+          {read.error && <div className="ed-banner"><FormError error={read.error} /></div>}
+          {/* nobody and nothing on the board: zeros and all-clears would only look like nothing to do */}
+          {(b.editors.length > 0 || b.unassigned.length > 0) && <SummaryCards b={b} now={now} today={clock.today} workspaceTz={clock.timezone} />}
+          <ClientStrip b={b} />
           <Panel title="Roster" count={b.editors.length} className="ed-roster"
             sub="Editing now first, then paused, due today, revisions, and who’s free"
-            tools={(
-              <>
-                <span className="ed-sync" title={fmtStamp(b.sync.syncedAt, tz)}>{syncWords(b.sync, now)}</span>
-                {b.sync.keySet && readButton()}
-                <a className="ed-tl-link" href={TIMELINER_APP} target="_blank" rel="noopener noreferrer"><Layers aria-hidden />Open in Timeliner</a>
-              </>
-            )}>
-            <FormError error={read.error} />
+            tools={<a className="ed-tl-link" href={TIMELINER_APP} target="_blank" rel="noopener noreferrer"><Layers aria-hidden />Open in Timeliner</a>}>
             <Roster b={b} now={now} tz={tz} today={clock.today} />
           </Panel>
         </>
@@ -186,13 +220,14 @@ function SetupPanel({ b }: { b: EditingBoard }) {
   );
 }
 
+/** The last read failed: what Timeliner answered, and that what's below is the last good copy (so it never reads as "nothing to do"). */
 function SyncBanner({ s, now }: { s: EditingSync; now: number }) {
   return (
-    <div className="banner red ed-banner" role="status">
+    <div className="banner red ed-banner" role="alert">
       <AlertTriangle aria-hidden />
       <div className="txt">
         <b>Couldn’t read Timeliner just now</b>
-        <span>{s.error}{s.syncedAt ? ` This is the copy read ${fmtAgo(s.syncedAt, now)}; it tries again in a few minutes.` : ''}</span>
+        <span>Timeliner answered: {s.error}{s.syncedAt ? ` Everything below is the copy read ${fmtAgo(s.syncedAt, now)}, so it may be out of date; the site tries again in a few minutes.` : ''}</span>
       </div>
     </div>
   );
@@ -202,6 +237,10 @@ function SyncBanner({ s, now }: { s: EditingSync; now: number }) {
 
 function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: number; today: ISODate; workspaceTz: string }) {
   const t = b.totals;
+  // the last read failed: an all-clear can't be vouched for, so the cards say how old their copy is instead
+  const clear = (words: string) => (b.sync.error && b.sync.syncedAt
+    ? <span className="kpi-pill" title="Timeliner couldn’t be read just now">As of {fmtAgo(b.sync.syncedAt, now)}</span>
+    : <span className="kpi-pill"><Check aria-hidden />{words}</span>);
   const kinds = new Map(b.editors.map((e) => [e.key, nowKind(e, now)]));
   const live = b.editors.filter((e) => kinds.get(e.key) === 'live');
   const paused = b.editors.filter((e) => kinds.get(e.key) === 'paused');
@@ -219,10 +258,10 @@ function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: nu
       foot={(
         <span className="kpi-list">
           {live.slice(0, 3).map((e) => (
-            <span key={e.userId} className="kpi-row"><span className="ellipsis">{first(e.name)} · <b>{videoName(e.focus!.video)}</b></span><span className="num">{fmtWorked(focusSeconds(e.focus!, now))}</span></span>
+            <span key={e.key} className="kpi-row"><span className="ellipsis">{first(e.name)} · <b>{videoName(e.focus!.video)}</b></span><span className="num">{fmtWorked(focusSeconds(e.focus!, now))}</span></span>
           ))}
           {held.slice(0, live.length >= 3 ? 1 : 3 - live.length).map((e) => (
-            <span key={e.userId} className="kpi-row"><span className="ellipsis"><Pause size={11} aria-hidden /> {first(e.name)} · <b>{videoName(e.focus!.video)}</b></span><span>{e.focus!.state === 'paused' ? 'paused' : 'still marked'}</span></span>
+            <span key={e.key} className="kpi-row"><span className="ellipsis"><Pause size={11} aria-hidden /> {first(e.name)} · <b>{videoName(e.focus!.video)}</b></span><span>{e.focus!.state === 'paused' ? 'paused' : 'still marked'}</span></span>
           ))}
           {!live.length && !held.length && (
             <span className="kpi-row"><span>Next up</span><b className="ellipsis">{next ? `${first(next.name)} · ${videoName(next.nextUp!)}` : 'Nothing on anyone’s plate'}</b></span>
@@ -245,7 +284,7 @@ function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: nu
   // today's videos all sent to review or marked done: there were some, there's just nothing left to edit
   const dueCard = (
     <KpiCard tone="today" icon={<AlarmClock />} n={t.dueToday}
-      pill={due.length ? <span className="kpi-pill">{plural(due.length, 'editor')}</span> : <span className="kpi-pill"><Check aria-hidden />{todays.length ? 'Nothing left' : 'Nothing due'}</span>}
+      pill={due.length ? <span className="kpi-pill">{plural(due.length, 'editor')}</span> : clear(todays.length ? 'Nothing left' : 'Nothing due')}
       cap="Due today"
       sub={top ? `${first(top.name)} · ${videoTitles(top.videos.filter((v) => onPlate(v) && v.due && v.due <= today))} still to edit` : todays.length ? 'Nothing left to edit today' : 'No videos due today'}
       label={`${plural(t.dueToday, 'video')} due today still to edit`}
@@ -268,7 +307,7 @@ function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: nu
   const rev = b.editors.filter((e) => e.plate.revisions > 0).sort((a, c) => c.plate.revisions - a.plate.revisions);
   const revCard = (
     <KpiCard tone="revs" icon={<RotateCcw />} n={t.revisions}
-      pill={rev.length ? <span className="kpi-pill">{plural(rev.length, 'editor')}</span> : <span className="kpi-pill"><Check aria-hidden />None</span>}
+      pill={rev.length ? <span className="kpi-pill">{plural(rev.length, 'editor')}</span> : clear('None')}
       cap="Revisions"
       sub={t.revisions ? 'sent back with changes' : 'Nothing sent back'}
       label={`${plural(t.revisions, 'video')} in revisions`}
@@ -299,7 +338,7 @@ function SummaryCards({ b, now, today, workspaceTz }: { b: EditingBoard; now: nu
     .map((e) => ({ e, vids: waiting.filter((w) => w.e === e).map((w) => w.v) })).sort((a, c) => c.vids.length - a.vids.length);
   const waitCard = (
     <KpiCard tone="review" icon={<Eye />} n={t.waitingOnYou}
-      pill={oldest ? <span className="kpi-pill">Oldest: {fmtAgo(oldest, now)}</span> : t.waitingOnYou ? undefined : <span className="kpi-pill"><Check aria-hidden />Queue clear</span>}
+      pill={oldest ? <span className="kpi-pill">Oldest: {fmtAgo(oldest, now)}</span> : t.waitingOnYou ? undefined : clear('Queue clear')}
       cap="Waiting on you"
       sub={steps.size ? [...steps].map(([k, n]) => `${k} ${n}`).join(' · ') : 'Nothing to review'}
       label={`${plural(t.waitingOnYou, 'video')} waiting on your review`}
@@ -325,6 +364,71 @@ function nextDue(b: EditingBoard, today: ISODate): string {
   return n ? `${dueWords(n.v.due, today)!.text.replace(/^Due /, '')} · ${first(n.e.name)}` : 'Nothing scheduled';
 }
 
+// ── editors by client ────────────────────────────────────────────────────
+
+/** Clients shown before "Show all". */
+const CLIENT_TILES = 12;
+
+/** A client's flag without its name, which its tile already shows ("18 with Maya, 3 with Sam — one editor per client"). */
+function flagWords(c: ClientEditing, text: string): string {
+  if (!c.name || !text.startsWith(c.name)) return text;
+  const rest = text.slice(c.name.length).replace(/^\s*[:·]\s*/, '').trim();
+  return rest ? rest.charAt(0).toUpperCase() + rest.slice(1) : text;
+}
+
+/**
+ * Each client and its editor (one editor per client, worked out from Timeliner): the one assigned to the client
+ * there, else whoever has most of its recent videos. Its open videos, and a chip when they're split across
+ * editors or some aren't assigned. A tile whose editor has a card goes to it.
+ */
+function ClientStrip({ b }: { b: EditingBoard }) {
+  const [all, setAll] = useState(false);
+  const listId = useId();
+  if (!b.clients.length) return null;
+  const cards = new Set(b.editors.map((e) => e.key));
+  const shown = all ? b.clients : b.clients.slice(0, CLIENT_TILES);
+  const flagged = b.clients.filter((c) => c.flags.length > 0).length;
+  return (
+    <Panel title="Editors by client" count={b.clients.length} className="ed-clients"
+      sub={flagged ? `one editor per client · ${plural(flagged, 'client')} to look at` : 'one editor per client, from Timeliner'}>
+      <ul className="ed-ct-list" id={listId}>
+        {shown.map((c) => <li key={c.key}><ClientTile c={c} card={!!c.editor && cards.has(c.editor.key)} /></li>)}
+      </ul>
+      {b.clients.length > CLIENT_TILES && (
+        <button type="button" className="ed-vbtn ed-ct-more" aria-expanded={all} aria-controls={listId} onClick={() => setAll((x) => !x)}>
+          {all ? 'Show fewer' : `Show all ${b.clients.length} clients`}<ChevronDown className={`chev${all ? ' up' : ''}`} aria-hidden />
+        </button>
+      )}
+    </Panel>
+  );
+}
+
+function ClientTile({ c, card }: { c: ClientEditing; card: boolean }) {
+  const ed = c.editor;
+  const body = (
+    <>
+      <span className="ed-ct-top">
+        <b className="ed-ct-name">{c.name}</b>
+        <span className="ed-ct-open num">{c.open ? `${c.open} open` : 'nothing open'}</span>
+      </span>
+      <span className="ed-ct-ed">
+        <ArrowRight aria-hidden />
+        {ed ? <b className="ellipsis">{ed.name}</b> : <span className="muted">No editor yet</span>}
+        {ed && c.editors.length > 1 && <span className="muted">+{c.editors.length - 1}</span>}
+        {ed && (c.editorFrom === 'client'
+          ? <span className="ed-via" title="Assigned to this client in Timeliner">assigned in Timeliner</span>
+          : <span className="ed-via" title="Nobody is assigned to this client in Timeliner: they have the most of its videos made in the last 60 days">most of its videos</span>)}
+      </span>
+      {c.flags.length > 0 && (
+        <span className="ed-ct-flags">{c.flags.map((f) => <Chip key={f} color="yellow" dot title={f}>{flagWords(c, f)}</Chip>)}</span>
+      )}
+    </>
+  );
+  return card && ed
+    ? <a className="ed-ct go" href={`#${cardId(ed.key)}`} onClick={goToCard(ed.key)}>{body}</a>
+    : <div className="ed-ct">{body}</div>;
+}
+
 // ── roster ───────────────────────────────────────────────────────────────
 
 function Roster({ b, now, tz, today }: { b: EditingBoard; now: number; tz: string; today: ISODate }) {
@@ -334,34 +438,124 @@ function Roster({ b, now, tz, today }: { b: EditingBoard; now: number; tz: strin
   const scale = Math.max(1, ...b.editors.map(plateTotal));
   return (
     <>
-      {!b.editors.length && (
-        <Empty boxed icon={<Users />} title="No editors yet">
-          Give someone the Editor role in <Link className="link" to="/settings#team">Settings → Team</Link>, with the email they use in Timeliner. Anyone else on the team with videos in Timeliner shows up here too.
-        </Empty>
-      )}
+      {!b.editors.length && <NoEditors b={b} now={now} />}
+      <FixPeople list={b.editors} />
       <MatchStrip b={b} />
       {b.editors.length > 0 && (
         <div className="ed-colhead" aria-hidden><span>Editor</span><span>Right now</span><span>On their plate this week</span></div>
       )}
       <div className="ed-list">
-        {b.editors.map((e) => <EditorCard key={e.key} e={e} scale={scale} now={now} tz={tz} today={today} open={open.has(e.key)} onToggle={() => toggle(e.key)} />)}
+        {b.editors.map((e) => (
+          <EditorCard key={e.key} e={e} b={b} scale={scale} now={now} tz={tz} today={today} open={open.has(e.key)} onToggle={() => toggle(e.key)} />
+        ))}
         {b.unassigned.length > 0 && <NotAssigned b={b} today={today} />}
       </div>
-      {b.unknownAssignees.length > 0 && <Unknown list={b.unknownAssignees} />}
       {b.editors.length > 0 && <WholeTeam b={b} now={now} />}
       <Legend />
     </>
   );
 }
 
-function EditorCard({ e, scale, now, tz, today, open, onToggle }: {
-  e: EditorRow; scale: number; now: number; tz: string; today: ISODate; open: boolean; onToggle: () => void;
+/**
+ * Nobody on the roster: Timeliner's last read found no videos assigned to anyone and nobody on the site is an
+ * editor. Never an all-clear when the last read failed: then it says the copy may be out of date.
+ */
+function NoEditors({ b, now }: { b: EditingBoard; now: number }) {
+  const c = b.sync.counts;
+  if (b.sync.error) {
+    return (
+      <Empty boxed icon={<AlertTriangle />} title="Nothing to show until Timeliner can be read">
+        The last read failed (see above), and the copy read {b.sync.syncedAt ? fmtAgo(b.sync.syncedAt, now) : 'before'} had no videos assigned to anyone. Read Timeliner now, or wait for the next read in a few minutes.
+      </Empty>
+    );
+  }
+  return (
+    <Empty boxed icon={<Users />} title="No editors yet">
+      {c && (c.videos === 0
+        ? <>The last read found no videos in Timeliner. If there should be some, check that the API key can read Tasks and Projects. </>
+        : <>The last read found {plural(c.videos, 'video')} in Timeliner, none of them assigned to anyone or to their client. </>)}
+      Give someone the Editor role in <Link className="link" to="/settings#team">Settings → Team</Link>, with the email they use in Timeliner. Everyone with videos in Timeliner shows up here too.
+    </Empty>
+  );
+}
+
+/** One line above the cards: the people whose cards are flagged (not on the site, or another email here), each a link to their card. */
+function FixPeople({ list }: { list: EditorRow[] }) {
+  const fix = list.filter((e) => needsFix(e.flag));
+  if (!fix.length) return null;
+  return (
+    <div className="ed-fix" role="group" aria-label={fix.length === 1 ? 'Fix this person' : 'Fix these people'}>
+      <UserPlus aria-hidden />
+      <b className="ed-fix-h">{fix.length === 1 ? 'Fix this person' : 'Fix these people'}</b>
+      <span className="ed-fix-list">
+        {fix.map((e) => (
+          <a key={e.key} className="ed-fix-who" href={`#${cardId(e.key)}`} onClick={goToCard(e.key)}>
+            {e.name}<span className="muted"> · {FIX_WORDS[e.flag!.kind]}</span>
+          </a>
+        ))}
+      </span>
+      <span className="muted ed-fix-how">Each card says which email to use.</span>
+    </div>
+  );
+}
+
+/** One client on a card ("Joshua Shalimar · 32 videos"), with whether they're its editor in Timeliner and whether it has scripts here. */
+interface CardClient { key: string; name: string; count: number; via: boolean; noScripts: boolean }
+
+/** Their clients, most first: the card's, then any client they're the editor of in Timeliner with none of its videos theirs. */
+function cardClients(e: EditorRow, b: EditingBoard): CardClient[] {
+  const same = (name: string, a: string) => name.trim().toLowerCase() === a.trim().toLowerCase();
+  const out: CardClient[] = e.clients.map((c, i) => {
+    const vids = e.videos.filter((v) => (c.clientId != null ? v.client?.id === c.clientId : !v.client && same(clientName(v) ?? '', c.name)));
+    return { key: `${c.clientId ?? 'b'}|${c.name}|${i}`, name: c.name, count: c.count, via: c.viaClient, noScripts: vids.length > 0 && vids.every(noScripts) };
+  });
+  for (const c of b.clients) {
+    if (!c.editors.some((x) => x.key === e.key)) continue;
+    if (e.clients.some((k) => (k.clientId != null ? k.clientId === c.clientId : c.clientId == null && same(k.name, c.name)))) continue;
+    out.push({ key: c.key, name: c.name, count: 0, via: true, noScripts: false });
+  }
+  return out;
+}
+
+const escapeRe = (w: string) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** A line of text with the emails in it in bold: the email to use is what the person acts on. */
+function Emphasize({ text, words }: { text: string; words: (string | null)[] }) {
+  const list = [...new Set(words.filter((w): w is string => !!w && text.includes(w)))];
+  if (!list.length) return <>{text}</>;
+  const re = new RegExp(`(${list.map(escapeRe).join('|')})`);
+  return <>{text.split(re).map((part, i) => (list.includes(part) ? <b key={i}>{part}</b> : part))}</>;
+}
+
+/** Why a card needs fixing, with the email to use and where to fix it (Settings → Team, or Settings → Editors for an Admin). */
+function FlagLine({ f }: { f: EditorFlag }) {
+  const { me } = useBoot();
+  const go = f.kind === 'no_site_access'
+    ? (isAdmin(me.role) ? <Link className="ed-flag-go" to="/settings#editors">Settings → Editors</Link> : <span className="ed-flag-who">an Admin can do this in Settings → Editors</span>)
+    : <Link className="ed-flag-go" to="/settings#team">Settings → Team</Link>;
+  return (
+    <span className="ed-flag fix">
+      <UserPlus aria-hidden />
+      <span className="ed-flag-t"><Emphasize text={f.text} words={[f.timelinerEmail, f.siteEmail]} /></span>
+      {go}
+    </span>
+  );
+}
+
+function EditorCard({ e, b, scale, now, tz, today, open, onToggle }: {
+  e: EditorRow; b: EditingBoard; scale: number; now: number; tz: string; today: ISODate; open: boolean; onToggle: () => void;
 }) {
   const drillId = useId();
   const kind = nowKind(e, now);
   const f = e.focus;
   const city = e.city?.split(',')[0] ?? null;
   const local = localTime(e.timezone, now);
+  // the clients they edit for lead the card ("Joshua Shalimar · 32 videos"); a client split across editors is flagged
+  const clients = cardClients(e, b);
+  const splits = [...new Set(e.clients.map((c) => c.split).filter((x): x is string => !!x))];
+  const fix = needsFix(e.flag) ? e.flag : null;
+  // a site editor with nothing in Timeliner: a quiet note where Right now would say what they're on
+  const nothing = e.flag?.kind === 'nothing_assigned' ? e.flag.text : null;
+  const brandOnly = clients.filter((c) => !c.count);
   const plate = e.videos.filter(onPlate);
   const overdue = plate.filter((v) => v.due && v.due < today).length;
   const soonest = plate.map((v) => v.due).filter((d): d is string => !!d).sort()[0] ?? null;
@@ -421,7 +615,7 @@ function EditorCard({ e, scale, now, tz, today, open, onToggle }: {
     tile = <span className="ed-tile off" aria-hidden><Moon /><span className="ed-tu">Off</span></span>;
     eyebrow = <span className="ed-eyebrow off">{[city, local].filter(Boolean).join(' ') || 'Off hours'}</span>;
     big = { text: 'Off hours', cls: 'quiet' };
-    note = { text: `Nothing to edit${hours ? ` · works ${hours} their time` : ''}` };
+    note = { text: nothing ?? `Nothing to edit${hours ? ` · works ${hours} their time` : ''}` };
   } else {
     // nothing to edit: what they do have, if anything, is with you, with the client or approved
     tile = <span className="ed-tile clear" aria-hidden><CircleCheck /><span className="ed-tu">Clear</span></span>;
@@ -432,7 +626,12 @@ function EditorCard({ e, scale, now, tz, today, open, onToggle }: {
       e.plate.withClient && `${e.plate.withClient} with the client`,
       e.plate.approvedWeek && `${e.plate.approvedWeek} approved this week`,
     ].filter(Boolean);
-    note = { text: has.length ? has.join(' · ') : 'Nothing assigned to them in Timeliner' };
+    note = {
+      text: has.length ? has.join(' · ')
+        : nothing ?? (brandOnly.length
+          ? `Editor of ${names(brandOnly.map((c) => c.name))} in Timeliner; ${brandOnly.length === 1 ? 'its' : 'their'} videos are assigned to others`
+          : 'Nothing assigned to them in Timeliner'),
+    };
   }
 
   // their plate: raw camera clips to cut read as clips ("24 clips to edit")
@@ -451,12 +650,30 @@ function EditorCard({ e, scale, now, tz, today, open, onToggle }: {
   const theirs = lastLocal ? ` (${lastLocal} ${city ? `in ${city}` : 'their time'})` : '';
 
   return (
-    <article className={`ed-card ${kind}`} aria-label={e.name}>
+    <article id={cardId(e.key)} tabIndex={-1} className={`ed-card ${kind}`} aria-label={e.name}>
+      {(fix || splits.length > 0) && (
+        <div className="ed-flags">
+          {fix && <FlagLine f={fix} />}
+          {splits.map((t) => <span key={t} className="ed-flag split"><Users aria-hidden /><span className="ed-flag-t">{t}</span></span>)}
+        </div>
+      )}
       <div className="ed-who">
         <span className="ed-av"><Avatar name={e.name} id={e.userId} /></span>
         <div className="ed-who-txt">
           <h3 className="ed-name ellipsis">{e.name}</h3>
-          <div className="ed-place num">{[city, local].filter(Boolean).join(' · ') || 'Time zone not set'}</div>
+          {clients.length > 0 && (
+            <div className="ed-clients-line">
+              {clients.slice(0, 2).map((c) => (
+                <span key={c.key} className="ed-cli">
+                  <b>{c.name}</b> · {c.count ? plural(c.count, 'video') : 'its editor in Timeliner'}
+                  {c.via && c.count > 0 && <span className="ed-via" title="Assigned to this client in Timeliner, so its videos nobody else is on are theirs">via client</span>}
+                  {c.noScripts && <span className="ed-via" title="This client has no scripts on the site">no scripts on the site</span>}
+                </span>
+              ))}
+              {clients.length > 2 && <span className="muted" title={clients.slice(2).map((c) => `${c.name} · ${c.count ? plural(c.count, 'video') : 'its editor in Timeliner'}`).join(', ')}>+{clients.length - 2} more</span>}
+            </div>
+          )}
+          <div className="ed-place num">{[city, local].filter(Boolean).join(' · ') || (e.site ? 'Time zone not set' : 'Only in Timeliner')}</div>
           {pills.length > 0 && <div className="ed-pills">{pills}</div>}
         </div>
       </div>
@@ -479,7 +696,7 @@ function EditorCard({ e, scale, now, tz, today, open, onToggle }: {
         <div className="ed-bar" role="img" aria-label={segs.length ? segs.map((s) => s.label).join(', ') : 'No videos'}>
           {segs.map((s) => <span key={s.c} className={`c-${s.c}`} style={{ width: `calc(${(s.n / scale) * 100}% - 2px)` }} title={s.label} />)}
         </div>
-        <Counts list={stateCounts([e])} />
+        <Counts list={stateCounts(e.videos)} />
       </div>
 
       <div className="ed-foot">
@@ -567,10 +784,12 @@ function Drill({ id, e, today, tz, now }: { id: string; e: EditorRow; today: ISO
   const sel = all.find((x) => x.v.id === picked) ?? null;
   const unmatched = all.filter((x) => notMatched(x.v)).length;
   const toCheck = all.filter((x) => needsCheck(x.v)).length;
+  // a client without scripts on the site has no shoot to match its videos to
+  const noneToMatch = all.length > 0 && all.every((x) => noScripts(x.v));
   return (
     <div className="ed-drill" id={id}>
       <p className="ed-drill-hint">
-        Tap a video to see which shoot it was matched to, and pin it if that’s wrong.
+        {noneToMatch ? 'No scripts on the site for these videos, so there’s no shoot to match them to. Tap one to see it.' : 'Tap a video to see which shoot it was matched to, and pin it if that’s wrong.'}
         {unmatched > 0 && <span className="ed-drill-key"><i className="ed-sq c-ed lg nm" aria-hidden /><b>{unmatched} not matched</b></span>}
         {toCheck > 0 && <span className="ed-drill-key"><i className="ed-sq c-ed lg ck" aria-hidden /><b>{toCheck} to check</b></span>}
       </p>
@@ -612,6 +831,9 @@ function VideoDetail({ v, c, today, onClose }: { v: EditingVideo; c: string; tod
   const [pinning, setPinning] = useState(false);
   const pinned = v.match.how === 'pinned';
   const nm = notMatched(v);
+  // its client has no scripts on the site (or isn't a site client): normal work, nothing to pin it to
+  const ns = noScripts(v);
+  const who = clientName(v);
   const unpin = useSave(() => api<EditingBoard>(`/api/editing/videos/${encodeURIComponent(v.id)}/pin`, { method: 'DELETE' }), {
     onSuccess: () => toast(`Took the pin off ${videoName(v)}. The site matches it by itself again.`),
   });
@@ -629,8 +851,11 @@ function VideoDetail({ v, c, today, onClose }: { v: EditingVideo; c: string; tod
         <span className="ed-vd-shoot">
           {v.batch
             ? <>{v.client && `${v.client.name} · `}<Link className="link" to={`/batches/${v.batch.id}`}>{v.batch.title}</Link>{v.batch.shootDate && ` · shoot ${fmtDate(v.batch.shootDate, today)}`}</>
-            : pinned ? 'Not from any batch' : v.client ? `${v.client.name} · no shoot yet` : 'No client or shoot yet'}
+            : pinned ? 'Not from any batch' : ns ? who ?? 'In Timeliner' : who ? `${who} · no shoot yet` : 'No client or shoot yet'}
         </span>
+        {!v.client && v.brand && <span className="ed-via" title="Its brand (client) in Timeliner, which isn’t a client on the site">Timeliner brand</span>}
+        {ns && <Chip color="plain" icon={<FileX aria-hidden />}>No scripts on the site</Chip>}
+        {v.assignedBy === 'client' && <span className="ed-via" title="Nobody is assigned on this video in Timeliner: it’s its client’s, and the client’s editor there has it">via client</span>}
         {nm && <Chip color="yellow" icon={<CircleHelp aria-hidden />}>Not matched</Chip>}
         {v.match.check && <Chip color="yellow" icon={<AlertTriangle aria-hidden />}>Check</Chip>}
         {pinned && <Chip color="plain" icon={<Pin aria-hidden />}>Pinned</Chip>}
@@ -644,7 +869,7 @@ function VideoDetail({ v, c, today, onClose }: { v: EditingVideo; c: string; tod
         </p>
       )}
       {v.batch && <div className="ed-vd-line"><ScriptLink v={v} who="manager" today={today} /></div>}
-      {!pinning && (
+      {!pinning && !ns && (
         <div className="ed-vd-acts">
           <Button variant="tall" icon={<Pin aria-hidden />} onClick={() => setPinning(true)}>{pinned ? 'Change the pin' : v.batch ? 'Wrong shoot? Pin it' : 'Pin it to its shoot'}</Button>
           {pinned && <Button variant="ghost tall" icon={<PinOff aria-hidden />} busy={unpin.isPending} onClick={() => unpin.mutate(undefined)}>Unpin</Button>}
@@ -780,7 +1005,7 @@ function NotAssigned({ b, today }: { b: EditingBoard; today: ISODate }) {
   const allClips = groups.every((g) => g.raw);
   const dueNow = sum(groups.filter((g) => g.due && g.due <= today).map((g) => g.count));
   const soonest = groups.map((g) => g.due).filter((d): d is string => !!d).sort()[0] ?? null;
-  const clients = [...new Set(groups.map((g) => g.clientName).filter((c): c is string => !!c))];
+  const clients = [...new Set(groups.map((g) => g.clientName ?? g.brand).filter((c): c is string => !!c))];
   // the documents these videos are cut from, so whoever assigns them can check which shoot's scripts they are
   const docs = [...new Map(groups.flatMap((g) => g.scripts).map((d) => [d.href, d])).values()];
   return (
@@ -789,7 +1014,7 @@ function NotAssigned({ b, today }: { b: EditingBoard; today: ISODate }) {
         <span className="ed-av na" aria-hidden><UserPlus /></span>
         <div className="ed-who-txt">
           <h3 className="ed-name">Not assigned yet</h3>
-          <div className="ed-place">No editor in Timeliner yet</div>
+          <div className="ed-place">Nobody on them or on their client in Timeliner</div>
           {clients.length > 0 && <div className="ed-pills">{clients.map((c) => <Chip key={c} color="plain">{c}</Chip>)}</div>}
         </div>
       </div>
@@ -807,7 +1032,11 @@ function NotAssigned({ b, today }: { b: EditingBoard; today: ISODate }) {
           const hot = d?.tone === 'today' || d?.tone === 'late';
           return (
             <div key={`${g.raw ? 'raw' : 'titled'}|${g.batch?.id ?? ''}|${g.folder}|${g.clientName ?? ''}`} className={`ed-na-row${g.raw ? ' raw' : ''}`}>
-              <span className="ed-na-t">{naLabel(g, today)}</span>
+              <span className="ed-na-t">
+                {naLabel(g, today)}
+                {/* whom to give them: their client's editor */}
+                {g.suggested && <span className="ed-na-sug"> (usually {first(g.suggested.name)})</span>}
+              </span>
               {/* the titles beside them say the same, so the squares are for the eye; raw clips are counted, not drawn */}
               {!g.raw && (
                 <span className="ed-na-sqs" aria-hidden>
@@ -824,7 +1053,7 @@ function NotAssigned({ b, today }: { b: EditingBoard; today: ISODate }) {
       <div className="ed-foot">
         {docs.length
           ? docs.slice(0, 3).map((d) => <DocLink key={d.href} d={d} />)
-          : <span className="muted">Videos are given to editors in Timeliner; they show up on that editor’s card here.</span>}
+          : <span className="muted">Give them to an editor in Timeliner, on the video or on its client; they show up on that editor’s card here.</span>}
         {docs.length > 3 && <span className="muted">+{docs.length - 3} more</span>}
         <a className="ed-abtn" href={TIMELINER_APP} target="_blank" rel="noopener noreferrer">Assign in Timeliner<ExternalLink aria-hidden /></a>
       </div>
@@ -832,34 +1061,17 @@ function NotAssigned({ b, today }: { b: EditingBoard; today: ISODate }) {
   );
 }
 
-/** People Timeliner gives videos to whose email matches nobody here. */
-function Unknown({ list }: { list: EditingBoard['unknownAssignees'] }) {
-  return (
-    <div className="ed-unknown" role="group" aria-label="In Timeliner, not on the site">
-      <div className="ed-unknown-h">
-        <UserPlus aria-hidden />
-        <b>In Timeliner, not on the site</b>
-        <span className="muted">Their videos show up here once someone on the site has the same email.</span>
-        <Link className="btn sm" to="/settings#team">Settings → Team</Link>
-      </div>
-      <ul>
-        {list.map((u) => (
-          <li key={`${u.name}|${u.email ?? ''}`}><b>{u.name}</b>{u.email && <span className="muted">{u.email}</span>}<span className="num">{plural(u.count, 'open video')}</span></li>
-        ))}
-      </ul>
-    </div>
-  );
-}
-
 function WholeTeam({ b, now }: { b: EditingBoard; now: number }) {
   // each editor once, under what their card shows
   const kinds = b.editors.map((e) => nowKind(e, now));
   const n = (k: NowKind) => kinds.filter((x) => x === k).length;
+  // each video once, however many editors have it (two on its client in Timeliner)
+  const videos = uniqueVideos(b.editors.flatMap((e) => e.videos));
   return (
     <div className="ed-team" role="group" aria-label="Whole team">
       <div className="ed-team-who">
         <b>Whole team</b>
-        <span className="muted">{plural(sum(b.editors.map(plateTotal)), 'video')} assigned · {b.totals.notAssigned} not yet{b.totals.notMatched ? ` · ${b.totals.notMatched} not matched` : ''}{b.totals.toCheck ? ` · ${b.totals.toCheck} to check` : ''}</span>
+        <span className="muted">{plural(videos.length, 'video')} assigned · {b.totals.notAssigned} not yet{b.totals.notMatched ? ` · ${b.totals.notMatched} not matched` : ''}{b.totals.toCheck ? ` · ${b.totals.toCheck} to check` : ''}</span>
       </div>
       <div className="ed-team-now">
         <Chip color="cyan" icon={<i className="ed-live-dot" aria-hidden />}>{n('live')} editing now</Chip>
@@ -868,7 +1080,7 @@ function WholeTeam({ b, now }: { b: EditingBoard; now: number }) {
         <Chip color="plain">{n('next')} next up</Chip>
         <Chip color="plain">{n('off')} off hours</Chip>
       </div>
-      <Counts list={stateCounts(b.editors)} />
+      <Counts list={stateCounts(videos)} />
     </div>
   );
 }
@@ -890,12 +1102,14 @@ function Legend() {
         <span className="ed-lg"><i className="ed-sq c-ed lg" aria-hidden><Film className="sq-raw" /></i>Raw clip (camera footage, no script number)</span>
         <span className="ed-lg"><i className="ed-sq c-ed lg nm" aria-hidden />Not matched to a shoot</span>
         <span className="ed-lg"><i className="ed-sq c-ed lg ck" aria-hidden />Check: two videos with one title on a shoot</span>
+        <span className="ed-lg wrap"><Chip color="plain" icon={<FileX aria-hidden />}>No scripts on the site</Chip>a client we don’t write scripts for: its videos are normal work</span>
       </div>
       <div><span className="ed-legend-h">Last finished</span>
         <span className="ed-lg wrap"><span className="ed-src site"><Check aria-hidden />on the site</span>marked done here, until Timeliner moves it to Needs review</span>
         <span className="ed-lg"><span className="ed-src tl">in Timeliner</span>sent to review in Timeliner</span>
       </div>
       <p>“Editing now” is the video an editor tapped “I’m on this” for. They can pause it, then mark it done. It clears itself when Timeliner moves that video to Needs review. Left running for {FOCUS_STALE_HOURS} hours, or outside the editor’s working hours, it shows as still marked as editing instead.</p>
+      <p>A video is the editor’s it’s assigned to in Timeliner; one nobody is on is its client’s editor’s there (“via client”). Each client has one editor: a client whose videos are with more than one is flagged.</p>
       <p>Each video goes with the shoot that had just happened when it was made in Timeliner; a titled video with the shoot whose raw clips its editor has been cutting. Once it has been in review it keeps that shoot. A pin always wins.</p>
     </div>
   );

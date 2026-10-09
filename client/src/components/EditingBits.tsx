@@ -8,7 +8,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { FileText, Film } from 'lucide-react';
 import type { EditingSync, EditingVideo, EditorFocus, ScriptDoc } from '../../../shared/types';
 import { addDays, diffDays, nowInZone, type ISODate } from '../../../shared/dates';
-import { compressTitles, isNotMatched, titleNumber } from '../../../shared/workflow';
+import { compressTitles, hasNoScripts, isNotMatched, titleNumber } from '../../../shared/workflow';
 import { fmtAgo, fmtDate, fmtDow, fmtHour, plural } from '../../../shared/format';
 
 /** Timeliner's web app. Its API has no link to one video, so "Open in Timeliner" opens the app. */
@@ -69,6 +69,17 @@ export function syncWords(s: EditingSync, now: number): string {
   return `Read from Timeliner ${fmtAgo(s.syncedAt, now)}`;
 }
 
+/**
+ * What the last complete read found, for the managers: "Read 214 videos · 6 people · 9 clients from Timeliner 2 min
+ * ago", with "· 3 skipped" when it skipped any. Without counts (a copy read before they were kept), as syncWords.
+ */
+export function readWords(s: EditingSync, now: number): string {
+  const c = s.counts;
+  if (!s.syncedAt || !c) return syncWords(s, now);
+  const found = `${plural(c.videos, 'video')} · ${plural(c.people, 'person', 'people')} · ${plural(c.clients, 'client')}`;
+  return `Read ${found} from Timeliner ${fmtAgo(s.syncedAt, now)}${c.skipped > 0 ? ` · ${c.skipped} skipped` : ''}`;
+}
+
 // ── videos ───────────────────────────────────────────────────────────────
 
 /** What a video's square shows: its number as written ("05"), else its first letters. */
@@ -100,10 +111,14 @@ export function videoTitles(list: Pick<EditingVideo, 'title' | 'raw'>[]): string
 /** "Oct 14 shoot", or the batch's title when it has no shoot date. */
 export const shootWords = (b: { title: string; shootDate: ISODate | null }, today?: ISODate) => (b.shootDate ? `${fmtDate(b.shootDate, today)} shoot` : b.title);
 
-/** "Joshua Shalimar · Oct 6": whose shoot a video is from, as far as it was matched. */
+/** The client a video is for: the site's client, else its Timeliner brand (a client without scripts here, or not a site client). */
+export const clientName = (v: Pick<EditingVideo, 'client' | 'brand'>): string | null => v.client?.name ?? (v.brand?.trim() || null);
+
+/** "Joshua Shalimar · Oct 6": whose shoot a video is from, as far as it was matched (the Timeliner brand when it has no site client). */
 export function shootLabel(v: EditingVideo, today?: ISODate): string {
   const where = v.batch?.shootDate ? fmtDate(v.batch.shootDate, today) : v.batch?.title ?? null;
-  return [v.client?.name, where ?? (v.client ? null : v.folder)].filter(Boolean).join(' · ');
+  const who = clientName(v);
+  return [who, where ?? (who ? null : v.folder)].filter(Boolean).join(' · ');
 }
 
 /**
@@ -114,6 +129,9 @@ export const likelyWords = (v: EditingVideo): string | null => (!v.batch || v.ma
 
 /** Open and not matched to a shoot: the "Not matched" chip (the rule, shared with the server's count, is in shared/workflow.ts). */
 export const notMatched = isNotMatched;
+
+/** Normal work whose client has no scripts on the site (or isn't a site client): a neutral "No scripts on the site", never "Not matched". */
+export const noScripts = hasNoScripts;
 
 // ── script documents ─────────────────────────────────────────────────────
 
@@ -152,6 +170,7 @@ export const openWords = (v: EditingVideo) => (v.scriptNumber != null ? `Open sc
 /** Why a video has no script link. Editors are told a manager has been asked; managers what it is. */
 export function noScriptWords(v: EditingVideo, who: 'editor' | 'manager', today?: ISODate): string {
   if (!v.batch) {
+    if (hasNoScripts(v)) return 'No scripts on the site';
     if (v.match.how === 'pinned') return who === 'editor' ? 'No script for this video' : 'Pinned as not from any batch';
     return who === 'editor' ? 'Not matched yet — a manager has been asked' : 'Not matched to a shoot';
   }

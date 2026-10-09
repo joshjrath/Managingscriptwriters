@@ -27,7 +27,7 @@ import { batchLink, loadSettings, logActivity, managerIds, notify, type Ctx } fr
 import { requireManager } from './auth';
 import { HttpError, conflict, notFound, parse, zs } from './http';
 import { applyScriptAction } from './routes/batches';
-import { applyTaskMessage, dropDocumentTask } from './editing';
+import { applyTaskMessage, dropDocumentTask, OWNER_IDS } from './editing';
 import { batchDay, clientFit, dayOf, nameKey, PDF_AHEAD, PDF_LATE, PDF_LATE_FALLBACK, placePdf, type PdfBatch } from './matching';
 import {
   TIMELINER_KEY_PERMISSIONS, type Me, type TimelinerEvent, type TimelinerOutcome, type TimelinerPdfHow, type TimelinerPdfLink, type TimelinerStatus,
@@ -90,6 +90,18 @@ export interface TimelinerMedia {
 /** One page of a list, newest first; `nextBefore` is the cursor for the next (null at the end). */
 export interface TimelinerPage<T> { data: T[]; nextBefore: string | null }
 
+/**
+ * Someone with access to a brand (a client in Timeliner), as GET /brands/{id}/members sends it: their brand-level
+ * `role`, whether the access is `automatic` (a workspace admin's, on every brand: not an assignment), and the
+ * member (the same shape as GET /members). Read leniently in server/editing.ts: any field may be odd.
+ */
+export interface TimelinerBrandMember {
+  brandId?: string;
+  role?: string | null;
+  automatic?: boolean;
+  member?: { id: string; email?: string | null; firstName?: string | null; lastName?: string | null; role?: string | null; deactivated?: boolean } | null;
+}
+
 /** The parts of Timeliner's REST API this server uses (tests pass a stand-in). */
 export interface TimelinerApi {
   /** a project with its sub-folders (the level between a project and its tasks), and when each was made */
@@ -102,6 +114,11 @@ export interface TimelinerApi {
   brands(before: string | null): Promise<TimelinerPage<{ id: string; name: string }>>;
   /** the team, including people who have left (tasks can still name them) */
   members(): Promise<{ id: string; email: string; firstName: string | null; lastName: string | null; role?: string | null; deactivated?: boolean }[]>;
+  /**
+   * who is on a brand (its active team members; a client's editors are assigned here rather than on each video).
+   * null when Timeliner has no such brand
+   */
+  brandMembers(brandId: string): Promise<TimelinerBrandMember[] | null>;
   /** a task's latest step move: its exact step name, when, and who moved it (null when it never moved) */
   lastMove(taskId: string): Promise<{ at: string; to: string | null; byId: string | null } | null>;
   webhooks(): Promise<{ id: string; url: string; events: string[]; active: boolean }[]>;
@@ -181,6 +198,13 @@ export function timelinerClient(key: string, base: string, fetchImpl: typeof fet
       const r = await call<{ data?: unknown }>('GET', '/members?includeDeactivated=true');
       if (!Array.isArray(r?.data)) throw notAList('/members');
       return r.data as Awaited<ReturnType<TimelinerApi['members']>>;
+    },
+    brandMembers: async (id) => {
+      const path = `/brands/${encodeURIComponent(id)}/members`;
+      const r = await call<{ data?: unknown }>('GET', path);
+      if (r === null) return null;
+      if (!Array.isArray(r?.data)) throw notAList(path);
+      return r.data as TimelinerBrandMember[];
     },
     lastMove: async (id) => {
       const r = await call<{ data?: unknown }>('GET', `/tasks/${encodeURIComponent(id)}/activity?action=moved&limit=1`);
@@ -648,11 +672,11 @@ async function deliverFromTimeliner(
       });
     }
     // a new version (its message may come after a read already saw its file): the editors cutting this shoot's
-    // videos hear once per version
+    // videos (assigned to them, or to them as their client's editor) hear once per version
     if (info.key && known && !picked && newest && version > 1) {
       const editors = await t.query<{ id: number }>(
         `select distinct u.id from timeliner_tasks tt
-           join timeliner_members m on m.id = any(tt.assignee_ids)
+           join timeliner_members m on m.id = any(${OWNER_IDS('tt')})
            join users u on lower(u.email) = lower(m.email) and u.active and u.removed_at is null
           where tt.batch_id = $1 and tt.status_group not in ('supervisorApproval', 'clientApproval', 'endClientApproval', 'approved', 'posted')`, [target],
       );
