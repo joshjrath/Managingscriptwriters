@@ -15,7 +15,8 @@ import { applyTheme, restoreTheme } from '../theme';
 import { CalendarFeedsPanel } from '../components/CalendarFeeds';
 import { TimelinerPanel } from '../components/TimelinerPanel';
 import { PageHeader, useBoot } from '../components/Shell';
-import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, Term, useFieldId, useToast } from '../components/ui';
+import { Avatar, Button, Chip, copyText, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, Term, useFieldId, useToast } from '../components/ui';
+import { BackupsPanel } from '../components/BackupsPanel';
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -45,6 +46,7 @@ export function SettingsPage() {
           <TimelinerPanel />
           <CalendarFeedsPanel />
           {isAdmin(me.role) && <EditorsPanel />}
+          {isAdmin(me.role) && <BackupsPanel />}
         </div>
       </div>
     </>
@@ -386,24 +388,6 @@ export function signInMessage(p: { name: string; email: string; password: string
       ? 'Your password was reset, so you’ve been signed out. When you sign in with this one, the site asks you to choose your own.'
       : `When you sign in, the site asks you to choose your own password (you can also change it any time from the menu under your name). ${p.role === 'writer' ? 'Your scripts, deadlines and briefs are under “My work”.' : p.role === 'editor' ? 'Your home page shows upcoming shoots and the newest finished scripts; the Calendar, Script bank and client material are in the menu.' : ''}`.trim(),
   ].join('\n');
-}
-
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    // fallback for browsers that block the clipboard API
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    ta.remove();
-    return ok;
-  }
 }
 
 function ShareDetails({ message, name, onClose }: { message: string; name: string; onClose: () => void }) {

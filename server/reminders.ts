@@ -2,6 +2,7 @@
 // reminders for managers: a shoot coming up with no scripts planned yet, or
 // a batch with scripts nobody is assigned to, starting planReminderDays
 // before the shoot (or drafts, with no shoot) and again at 7, 3 and 1 days.
+// And for Admins, once a day, when the Google Sheets backup stopped arriving.
 //
 // Runs inside the web process every REMINDER_INTERVAL_MINUTES (default 10),
 // and can also be run once from a cron job with `npm run reminders`.
@@ -10,7 +11,8 @@
 // A moved deadline gets a new key, so it is reminded about again.
 
 import { LOCKS } from './db';
-import { batchLink, clockFor, loadBatches, loadSettings, managerIds, notify, rulesOf, type Ctx, type ScriptLiteRow } from './core';
+import { adminIds, batchLink, clockFor, loadBatches, loadSettings, managerIds, notify, rulesOf, type Ctx, type ScriptLiteRow } from './core';
+import { backupLateNotice } from './backup';
 import { addDays, computeDeadlines, diffDays, type ISODate } from '../shared/dates';
 import { isDraftReady } from '../shared/workflow';
 import { fmtDate, fmtRange, plural } from '../shared/format';
@@ -92,6 +94,12 @@ export async function runReminders(ctx: Ctx): Promise<{ created: number; skipped
         body: `${b.title}: ${b.shootStart ? `shoot ${inDays(days)}` : `drafts due ${inDays(days)}`}${b.draftDue && b.shootStart ? `, drafts due ${fmtDate(b.draftDue)}` : ''}. Assign ${b.progress.unassigned === 1 ? 'it' : 'them'} to a writer.`,
         link: `${batchLink(b.id)}#scripts`, dedupeKey: `plan:batch:${b.id}:${ref}:${stage}`,
       });
+    }
+
+    // the daily Google Sheets backup stopped arriving: tell the Admins, once a day until it's back
+    const late = await backupLateNotice(t, ctx.now());
+    if (late) {
+      created += await notify(t, await adminIds(t), { type: 'backup', ...late, link: '/settings#backups', dedupeKey: `backup-late:${clock.today}` });
     }
 
     await t.query(`update settings set reminders_last_run_at = now() where id = 1`);

@@ -312,6 +312,25 @@ export function Loading({ label = 'Loading…', height = 320 }: { label?: string
   return <div className="skel" style={{ height }} role="status" aria-label={label} />;
 }
 
+/** Copies text to the clipboard; false when the browser refused (the person can still select and copy it). */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // fallback for browsers that block the clipboard API
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  }
+}
+
 export function FormError({ error }: { error: ApiError | null | undefined }) {
   if (!error) return null;
   return (

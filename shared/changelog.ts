@@ -24,6 +24,7 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-10-08-editors-tab-timeliner': ['managers', 'editors'], '2026-10-08-timeliner-matching': ['managers', 'editors'],
   '2026-10-09-editors-everyone-in-timeliner': ['managers', 'editors'], '2026-10-09-one-editor-since': ['managers', 'editors'],
   '2026-10-09-editors-match-timeliner-assignees': ['managers', 'editors'],
+  '2026-10-16-google-sheets-backup': ['managers'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -37,6 +38,18 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-16-google-sheets-backup',
+    date: '2026-10-16',
+    title: 'A nightly backup of everything to Google Sheets',
+    summary: 'Admins can have a Google Sheet copy the whole site every night, with every uploaded file saved to Google Drive and a dated copy kept for a year, so the work is safe even beyond the database host’s few days of backups.',
+    changes: [
+      { tag: 'new', text: 'Settings → Backups (Admins): Set up the Google Sheets backup gives you the sheet’s script with the steps. Every night it copies every table into its own tab, saves every uploaded file into Google Drive, and keeps a dated copy for a year (the copy from the 1st of each month is kept for good). Passwords, sign-ins and keys are never copied.' },
+      { tag: 'new', text: 'Settings → Backups shows when the last backup arrived and what it held, and how big the database is. If none arrives for a day and a half, every Admin gets a notification once a day until it does.' },
+      { tag: 'improved', text: 'Editing a client’s brand voice or guidance, a briefing, a batch or a script now keeps what it replaced in the history, so an overwritten note can be found again.' },
+      { tag: 'improved', text: 'Recording mode refuses to start rather than risk its practice changes reaching the real workspace, if the database connection ever ignores the setting that keeps them apart.' },
+    ],
+  },
   {
     id: '2026-10-09-open-video-in-timeliner',
     date: '2026-10-09',

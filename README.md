@@ -193,7 +193,7 @@ Every meaningful change (creation, assignments, status changes, reviews, deliver
 
 ## Screens
 
-Overview · My work · Script bank · Production (board + table, filters, search) · Calendar (month + list; writing periods, drafts due, final delivery, shoots) · Clients and client detail · Batch detail (drafts & documents, script checklist with range selection and bulk actions, brief, deadlines, review notes, delivery records, history) · Review queue (one card per document) · Resources · Settings (deadline rules, timezone & cutoff, reminders, team, editors) · Master log (admins) · What's new · Editors (managers: each editor's videos from Timeliner) · Editor home (editors). Dashboard cards link to the matching filtered records; chart bars reveal the underlying batches. Admins and managers see the whole team on the Overview; a writer's Overview counts only the scripts assigned to them.
+Overview · My work · Script bank · Production (board + table, filters, search) · Calendar (month + list; writing periods, drafts due, final delivery, shoots) · Clients and client detail · Batch detail (drafts & documents, script checklist with range selection and bulk actions, brief, deadlines, review notes, delivery records, history) · Review queue (one card per document) · Resources · Settings (deadline rules, timezone & cutoff, reminders, team, editors, backups) · Master log (admins) · What's new · Editors (managers: each editor's videos from Timeliner) · Editor home (editors). Dashboard cards link to the matching filtered records; chart bars reveal the underlying batches. Admins and managers see the whole team on the Overview; a writer's Overview counts only the scripts assigned to them.
 
 Responsive: full sidebar on wide screens, collapsible icon rail on smaller desktops/tablets, navigation drawer and card layouts on phones (My work, deadlines, briefs and delivery confirmation are prioritised).
 
@@ -211,7 +211,7 @@ Responsive: full sidebar on wide screens, collapsible icon rail on smaller deskt
 
 **Keep the web service on a paid instance (the blueprint uses Starter).** Render's free web services sleep when nobody is using them, and the deadline reminders run inside the server, so they would stop. If you want the free plan anyway, set `REMINDERS=off` and add a Render **Cron Job** on the same repo that runs `npm run reminders` every 15 minutes, with build command `npm ci && npm run build`, `NODE_VERSION=22` and the same `DATABASE_URL` (it refuses to run without one).
 
-The server creates its tables on first start and refuses to start without `DATABASE_URL`, so nothing is ever written to Render's temporary disk. Uploaded files are stored in Postgres, so no Render disk is needed. Pick a database plan with backups; check Render's current terms, because free databases are time-limited.
+The server creates its tables on first start and refuses to start without `DATABASE_URL`, so nothing is ever written to Render's temporary disk. Uploaded files are stored in Postgres, so no Render disk is needed. Pick a paid database plan: free ones have no backups and are time-limited. Then set up the Google Sheets backup (see [Backups and restoring](#backups-and-restoring)).
 
 To set it up by hand instead of using the blueprint: create a PostgreSQL database, then a Node web service with build command `npm ci && npm run build`, start command `node --max-old-space-size=200 --max-semi-space-size=2 dist/server/index.mjs`, health check path `/healthz`, and environment variables `NODE_VERSION=22`, `DATABASE_URL` (the database's internal connection string), the three `MANAGER_*` values and, recommended, `TRUST_PROXY` (see Security).
 
@@ -223,6 +223,31 @@ To set it up by hand instead of using the blueprint: create a PostgreSQL databas
 - The embedded database (PGlite) is only for local use and the demo; it needs about 500 MB by itself, so production always uses PostgreSQL.
 
 Any other Node 22 host with PostgreSQL works the same way (`railway.json` is kept for Railway).
+
+## Backups and restoring
+
+Besides the live database there are two copies:
+
+1. **Render's own backups** (paid database plans only): point-in-time restore for the last 3 days (Hobby workspace) or 7 days (Professional and up), and exports you can download from the database's Recovery page.
+2. **The Google Sheets backup** (Settings → Backups, Admins). Every night a Google Sheet copies every table (a tab each), saves every uploaded file into Google Drive (checked byte for byte), and keeps a dated copy of itself in Drive for a year (the copy from the 1st of each month is kept for good). Passwords, sign-ins, keys and secret calendar links are left out. **Set up the Google Sheets backup** makes a backup key and hands out the sheet's script with the site's address and the key filled in, with the steps; it takes a few minutes, once. Settings → Backups then shows the last backup, and every Admin gets a notification once a day when none has arrived for 36 hours. **New key** stops the old one (paste the new script into the sheet); **Turn off** stops backups. The script is `scripts/google-sheets-backup.gs`: it keeps inside Google's limits (a big backup carries on in the next run after 6 minutes, the logs are left out first if everything wouldn't fit in one sheet, and big files come in pieces). Anyone who can open the sheet can read everything in it, so share it only with Admins.
+
+**Before deploying a change that adds a migration** (`server/schema.ts`), take an export in Render (database → Recovery → Export), so there's a copy from just before.
+
+Script documents themselves live in Google Docs; only their links are here. Keep them in a Shared drive the company owns, so a writer leaving doesn't take them along.
+
+**Getting one thing back.** Find it in the backup sheet, or in a dated copy in its Daily copies folder, and type it back in on the site. Edits to a client (brand voice, guidance, description), a briefing, a batch or a script also keep what they overwrote, in the history entry's `detail.changes` (the `activity` tab of the sheet).
+
+**Restoring the whole database** (Render):
+
+1. Render → the database → **Recovery** → restore to a time before the problem. It makes a **new** database; the old one is untouched.
+2. Point the web service at it: set `DATABASE_URL` to the new database's internal connection string. With the Blueprint, also change `fromDatabase.name` in `render.yaml` to the new database's name, or the next Blueprint sync points the service back at the old one.
+3. Deploy. Migrations bring an older copy up to date by themselves.
+4. Sign-ins come back with the copy, so sign everyone out: in the new database's shell (`psql`), run `delete from sessions;`. Anyone removed from the team after the restore point is back: remove them again in Settings → Team.
+5. Timeliner: deliveries from scripts PDFs uploaded after the restore point aren't in the copy, and Timeliner won't send them again. Click **Reconnect** in Settings → Timeliner, then deliver those batches by hand.
+6. Settings → Backups: if the backup key was changed after the restore point, click **New key** and paste the new script into the sheet.
+7. When everything checks out, delete the old database (Render bills both).
+
+If the database and Render's backups were both lost, the sheet still has every record: the ids in its tabs link them (`scripts.batch_id` is the `id` in `batches`), and its Uploaded files folder has every file. Practise a restore on a throwaway database now and then, so the steps are known before they're needed.
 
 ## Security
 
@@ -237,7 +262,7 @@ Any other Node 22 host with PostgreSQL works the same way (`railway.json` is kep
 
 ```sh
 npm test                                              # embedded Postgres (PGlite)
-TEST_DATABASE_URL=postgres://user@host/db npm test    # a real PostgreSQL (the schema is wiped first)
+TEST_DATABASE_URL=postgres://user@localhost/db npm test  # a real PostgreSQL (the schema is wiped first: only on this machine or a database named *test*)
 npm run typecheck
 npm run lint                                          # ESLint, zero warnings allowed
 npm run verify                                        # typecheck, lint, tests and build: what CI runs on every push
@@ -255,7 +280,7 @@ shared/         date & deadline maths, workflow rules, quick-entry parser, API t
 server/         Fastify API: auth, routes/ and the feature modules beside it (submissions, script bank, today…), reminders, migrations, demo seed
                 control/: the editors list
 client/         React app (Vite): styles/tokens.css holds every colour, radius, spacing and type token
-scripts/        dev runner
+scripts/        dev runner, and the Google Sheet's backup script (google-sheets-backup.gs)
 test/           vitest suites
 ```
 

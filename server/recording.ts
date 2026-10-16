@@ -83,6 +83,10 @@ export async function cloneDb(src: Db): Promise<Db> {
   let dst: Db | null = null;
   try {
     dst = await src.withSchema(schema);
+    // A connection pooler that drops the schema setting would leave the copy pointing at the real workspace,
+    // so practice changes would be real ones: refuse instead.
+    const at = await dst.one<{ s: string }>(`select current_schema() as s`);
+    if (at?.s !== schema) throw new Error(`Recording mode’s practice copy would use the "${at?.s ?? 'default'}" schema instead of its own (is a connection pooler dropping the search_path setting?), so it wasn’t started`);
     await migrate(dst);
     const d = dst;
     const tables = (await d.query<{ name: string }>(

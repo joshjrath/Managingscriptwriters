@@ -98,6 +98,10 @@ export async function managerIds(db: Db): Promise<number[]> {
   return (await db.query<{ id: number }>(`select id from users where role in ('owner', 'manager') and active and removed_at is null`)).map((r) => r.id);
 }
 
+export async function adminIds(db: Db): Promise<number[]> {
+  return (await db.query<{ id: number }>(`select id from users where role = 'owner' and active and removed_at is null`)).map((r) => r.id);
+}
+
 // ── activity ─────────────────────────────────────────────────────────────
 
 export async function logActivity(
@@ -109,6 +113,19 @@ export async function logActivity(
      values ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)`,
     [a.clientId ?? null, a.batchId ?? null, a.entityType, a.entityId ?? null, a.actor?.id ?? null, a.action, a.summary, a.detail ? JSON.stringify(a.detail) : null],
   );
+}
+
+/**
+ * For an edit's activity entry (`detail.changes`): each field the edit changed, with what it was before. Edits
+ * overwrite in place, so this is where an overwritten value can be found again (and in the backup's activity tab).
+ */
+export function fieldChanges(before: Record<string, unknown>, set: Record<string, unknown>): Record<string, { from: unknown; to: unknown }> {
+  const out: Record<string, { from: unknown; to: unknown }> = {};
+  for (const [k, to] of Object.entries(set)) {
+    const from = before[k] ?? null;
+    if (from !== (to ?? null)) out[k] = { from, to: to ?? null };
+  }
+  return out;
 }
 
 // ── notifications ────────────────────────────────────────────────────────

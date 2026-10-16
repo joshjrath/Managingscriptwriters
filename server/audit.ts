@@ -73,6 +73,7 @@ const MUTATIONS: Record<string, string> = {
   '/api/me/timezone': 'set their time zone',
   '/api/editors': 'add an editor',
   '/api/editors/:id': 'change an editor',
+  '/api/admin/backup/key': 'change the backup key',
 };
 
 async function describeView(db: Db, route: string, params: Record<string, string>, query: Record<string, string>, me: Me): Promise<{ key: string; summary: string; link: string | null } | null> {

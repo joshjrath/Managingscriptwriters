@@ -12,6 +12,6 @@ export default defineConfig({
   server: {
     port: Number(process.env.PORT ?? 5173),
     // keep the browser's Host header: the API refuses POSTs whose Origin doesn't match it (CSRF guard)
-    proxy: { '/api': { target: `http://127.0.0.1:${apiPort}`, changeOrigin: false }, '/healthz': `http://127.0.0.1:${apiPort}` },
+    proxy: { '/api': { target: `http://127.0.0.1:${apiPort}`, changeOrigin: false }, '/healthz': `http://127.0.0.1:${apiPort}`, '/hooks': `http://127.0.0.1:${apiPort}` },
   },
 });

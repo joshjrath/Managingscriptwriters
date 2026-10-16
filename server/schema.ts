@@ -736,4 +736,14 @@ alter table settings add column one_editor_since date not null default '2026-10-
   // 36 · the team's Needs review is Timeliner's inProgress step group, whose exact step name and the time a video
   // moved there weren't read before (it counted as still to edit): videos there read them on the next reads
   rereadNeedsReview,
+  // 37 · the daily backup to Google Sheets (server/backup.ts): the SHA-256 of the key the sheet uses, who made it
+  // and when, and what the sheet said when it last finished (and where it is)
+  `
+alter table settings add column backup_key_hash text;
+alter table settings add column backup_key_created_at timestamptz;
+alter table settings add column backup_key_created_by bigint references users(id);
+alter table settings add column backup_last_at timestamptz;
+alter table settings add column backup_last jsonb;
+alter table settings add column backup_sheet_url text;
+`,
 ];

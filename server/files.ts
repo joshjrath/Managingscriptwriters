@@ -112,13 +112,13 @@ export async function storeFile(t: Db, me: Me, file: UploadedFile): Promise<numb
 }
 
 
-/** A stored file's contents as a stream, read from the database in small pieces. */
-export function fileStream(db: Db, id: number, size: number): Readable {
-  let pos = 0;
+/** A stored file's contents as a stream, read from the database in small pieces: up to `end` (its size, for all of it), from byte `from`. */
+export function fileStream(db: Db, id: number, end: number, from = 0): Readable {
+  let pos = from;
   /** the next piece, or null at the end */
   const next = async (): Promise<Buffer | null> => {
-    if (pos >= size) return null;
-    const row = await db.one<{ c: Uint8Array | null }>(`select substring(data from $2 for $3) as c from files where id = $1`, [id, pos + 1, READ_PIECE]);
+    if (pos >= end) return null;
+    const row = await db.one<{ c: Uint8Array | null }>(`select substring(data from $2 for $3) as c from files where id = $1`, [id, pos + 1, Math.min(READ_PIECE, end - pos)]);
     const c = row?.c;
     if (!c || !c.length) return null;
     pos += c.length;

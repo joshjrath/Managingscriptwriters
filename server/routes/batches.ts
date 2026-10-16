@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { Db } from '../db';
 import {
   assigneesOf, batchLink, buildSummary, clockFor, isAssignedTo, lastDeliveredAt, loadBatch, loadBatches,
-  editorIds, loadSettings, loadUsers, loadWritten, logActivity, managerIds, markSeen, notify, rulesOf, type BatchRow, type Ctx, BATCH_SELECT, loadScriptsFor,
+  editorIds, fieldChanges, loadSettings, loadUsers, loadWritten, logActivity, managerIds, markSeen, notify, rulesOf, type BatchRow, type Ctx, BATCH_SELECT, loadScriptsFor,
 } from '../core';
 import { requireManager, requireUser } from '../auth';
 import { buildGroups, publicSubmission } from '../submissions';
@@ -408,11 +408,15 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
           [id, ...keys.map((k) => set[k])],
         );
       }
+      // what each changed field was before, the dates with the deadline entry and the rest with the other
+      const before = b as unknown as Record<string, unknown>;
+      const dateKeys = new Set(['draft_due', 'draft_due_mode', 'final_due', 'final_due_mode', 'needs_date_review', 'date_review_note']);
+      const pick = (dates: boolean) => fieldChanges(before, Object.fromEntries(keys.filter((k) => dateKeys.has(k) === dates).map((k) => [k, set[k]])));
       if (changes.length) {
-        await logActivity(t, { actor: me, action: 'batch.updated', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id, summary: `Updated ${changes.join(', ')}` });
+        await logActivity(t, { actor: me, action: 'batch.updated', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id, summary: `Updated ${changes.join(', ')}`, detail: { changes: pick(false) } });
       }
       if (dateMsgs.length) {
-        await logActivity(t, { actor: me, action: 'batch.deadlines', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id, summary: dateMsgs.join(' · ') });
+        await logActivity(t, { actor: me, action: 'batch.deadlines', entityType: 'batch', entityId: id, batchId: id, clientId: b.client_id, summary: dateMsgs.join(' · '), detail: { changes: pick(true) } });
         await notify(t, await assigneesOf(t, id, { undeliveredOnly: true }), {
           type: 'deadline_change', title: `Deadline changed · ${(set.title as string) ?? b.title}`, body: dateMsgs.join('. '), link: batchLink(id),
         }, me.id);
@@ -639,8 +643,8 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       notes: zs.text(4000),
     }), req.body);
     const batchId = await db.tx(async (t) => {
-      const s = await t.one<{ batch_id: number; number: number; assignee_id: number | null; version: number; client_id: number }>(
-        `select s.batch_id, s.number, s.assignee_id, s.version, b.client_id from scripts s join batches b on b.id = s.batch_id where s.id = $1 and s.removed_at is null for update of s`, [id],
+      const s = await t.one<{ batch_id: number; number: number; assignee_id: number | null; version: number; client_id: number; doc_url: string | null; timeliner_url: string | null; notes: string | null }>(
+        `select s.batch_id, s.number, s.assignee_id, s.version, b.client_id, s.doc_url, s.timeliner_url, s.notes from scripts s join batches b on b.id = s.batch_id where s.id = $1 and s.removed_at is null for update of s`, [id],
       );
       if (!s) throw notFound('Script');
       if (!isManager(me.role) && s.assignee_id !== me.id) throw forbidden('You can only edit scripts assigned to you');
@@ -652,7 +656,7 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
       const keys = Object.keys(set);
       if (keys.length) {
         await t.query(`update scripts set ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, version = version + 1, updated_at = now() where id = $1`, [id, ...keys.map((k) => set[k])]);
-        await logActivity(t, { actor: me, action: 'script.edited', entityType: 'script', entityId: id, batchId: s.batch_id, clientId: s.client_id, summary: `Edited script ${s.number} (${keys.map((k) => k.replace('_url', ' link').replace('_', ' ')).join(', ')})` });
+        await logActivity(t, { actor: me, action: 'script.edited', entityType: 'script', entityId: id, batchId: s.batch_id, clientId: s.client_id, summary: `Edited script ${s.number} (${keys.map((k) => k.replace('_url', ' link').replace('_', ' ')).join(', ')})`, detail: { changes: fieldChanges(s, set) } });
       }
       return s.batch_id;
     });

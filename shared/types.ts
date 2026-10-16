@@ -864,6 +864,20 @@ export interface TimelinerStatus {
   pdfs: TimelinerPdfLink[];
 }
 
+/** Settings → Backups (Admins): the daily copy to Google Sheets, and how big the database is. */
+export interface BackupStatus {
+  /** a backup key exists (the sheet needs it) */
+  keySet: boolean;
+  keyCreated: { at: string; byName: string | null } | null;
+  /** what the sheet said when it last finished */
+  last: { at: string; tables: number; rows: number; files: number; filesSaved: number; filesWaiting: number; problems: string[] } | null;
+  sheetUrl: string | null;
+  /** a key is set and no backup has arrived for a day and a half */
+  late: boolean;
+  /** the database's size on disk (null where the engine can't say), and the uploaded files in it */
+  database: { bytes: number | null; files: number; fileBytes: number; largest: { name: string; bytes: number }[] };
+}
+
 // ── Editing: the videos editors cut, read from Timeliner ─────────────────
 
 /** A script document an editor cuts from. */

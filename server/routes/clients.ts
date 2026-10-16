@@ -4,7 +4,7 @@ import { EDITOR_FILES, fileStream, isBlockedFile, spool, storedFileName, storeFi
 import type { FastifyInstance } from 'fastify';
 import { isEditor, isManager, type Role } from '../../shared/workflow';
 import { z } from 'zod';
-import { clockFor, isAssignedTo, loadBatches, loadSettings, logActivity, type Ctx } from '../core';
+import { clockFor, fieldChanges, isAssignedTo, loadBatches, loadSettings, logActivity, type Ctx } from '../core';
 import { requireManager, requireUser } from '../auth';
 import { forbidden, HttpError, notFound, optionalDate, parse, zs } from '../http';
 import { loadActivity, loadBriefings, loadResources, loadShoots } from '../records';
@@ -215,9 +215,15 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     if (input.guidance !== undefined) set.guidance = input.guidance;
     const keys = Object.keys(set);
     if (!keys.length) return { ok: true };
-    const r = await db.one(`update clients set ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() where id = $1 returning id`, [id, ...keys.map((k) => set[k])]);
-    if (!r) throw notFound('Client');
-    await logActivity(db, { actor: me, action: 'client.updated', entityType: 'client', entityId: id, clientId: id, summary: `Updated client ${keys.map((k) => k.replace('_', ' ').replace(' id', '')).join(', ')}` });
+    await db.tx(async (t) => {
+      const before = await t.one<Record<string, unknown>>(`select name, owner_id, description, brand_voice, guidance from clients where id = $1 for update`, [id]);
+      if (!before) throw notFound('Client');
+      await t.query(`update clients set ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() where id = $1`, [id, ...keys.map((k) => set[k])]);
+      await logActivity(t, {
+        actor: me, action: 'client.updated', entityType: 'client', entityId: id, clientId: id,
+        summary: `Updated client ${keys.map((k) => k.replace('_', ' ').replace(' id', '')).join(', ')}`, detail: { changes: fieldChanges(before, set) },
+      });
+    });
     return { ok: true };
   });
 
@@ -276,10 +282,13 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const input = parse(briefingSchema.partial(), req.body);
     await db.tx(async (t) => {
-      const b = await t.one<{ client_id: number; title: string }>(`select client_id, title from briefings where id = $1`, [id]);
+      const b = await t.one<{ client_id: number; title: string } & Record<string, unknown>>(
+        `select client_id, title, call_date, recording_url, document_url, summary, instructions from briefings where id = $1 for update`, [id],
+      );
       if (!b) throw notFound('Briefing');
       const map: Record<string, string> = { title: 'title', callDate: 'call_date', recordingUrl: 'recording_url', documentUrl: 'document_url', summary: 'summary', instructions: 'instructions' };
       const keys = Object.keys(map).filter((k) => (input as Record<string, unknown>)[k] !== undefined);
+      const set = Object.fromEntries(keys.map((k) => [map[k], (input as Record<string, unknown>)[k]]));
       if (keys.length) {
         await t.query(`update briefings set ${keys.map((k, i) => `${map[k]} = $${i + 2}`).join(', ')}, updated_at = now() where id = $1`, [id, ...keys.map((k) => (input as Record<string, unknown>)[k])]);
       }
@@ -291,7 +300,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
           await t.query(`insert into batch_briefings (batch_id, briefing_id) values ($1, $2)`, [bid, id]);
         }
       }
-      await logActivity(t, { actor: me, action: 'briefing.updated', entityType: 'briefing', entityId: id, clientId: b.client_id, summary: `Updated briefing “${input.title ?? b.title}”` });
+      await logActivity(t, { actor: me, action: 'briefing.updated', entityType: 'briefing', entityId: id, clientId: b.client_id, summary: `Updated briefing “${input.title ?? b.title}”`, detail: { changes: fieldChanges(b, set) } });
     });
     return { briefing: (await loadBriefings(db, { ids: [id] }))[0] };
   });

@@ -129,6 +129,15 @@ const ACCESS: Record<string, Access> = {
   'DELETE /api/editing/videos/:id/pin': 'manager',
   // Timeliner calls it; the signature is the protection (test/timeliner.test.ts)
   'POST /hooks/timeliner': 'public',
+
+  // Settings → Backups, and the backup sheet's calls: the backup key is their protection (test/backup.test.ts)
+  'GET /api/admin/backup': 'admin',
+  'POST /api/admin/backup/key': 'admin',
+  'DELETE /api/admin/backup/key': 'admin',
+  'GET /hooks/backup': 'public',
+  'GET /hooks/backup/tables/:name': 'public',
+  'GET /hooks/backup/files/:id': 'public',
+  'POST /hooks/backup/done': 'public',
 };
 
 /** Every route the server registers, read from its source (`app.get('/api/…'` and friends). */
