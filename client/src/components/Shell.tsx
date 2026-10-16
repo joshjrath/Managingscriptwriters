@@ -3,16 +3,16 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { isAdmin, isManager, ROLE_LABEL } from '../../../shared/workflow';
+import { homePath, isAdmin, isEditor, isManager, isThumbnailDesigner, isVideoEditor, personLabel } from '../../../shared/workflow';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bell, Building2, CalendarDays, Clapperboard, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
-  Circle, Eye, Globe2, Home, Library, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
+  Circle, Eye, Globe2, Home, Images, Library, Palette, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
 } from 'lucide-react';
 import { LayoutGroup, m } from 'framer-motion';
 import { api, queryClient, useSave } from '../api';
-import type { Bootstrap, Notification, SearchResults } from '../../../shared/types';
+import type { Bootstrap, Notification, SearchResults, ThumbnailNotification } from '../../../shared/types';
 import { fmtDate, fmtStamp, fmtTimeZoneAbbr } from '../../../shared/format';
 import { nowInZone } from '../../../shared/dates';
 import { Avatar, Button, Dialog, Field, FormError, inputProps, setToastTag, useFieldId, useToast } from './ui';
@@ -102,9 +102,9 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
             {(() => {
               // the menu says when something inside it wants you: new work, reviews, attention
               const c = boot.counts;
-              const n = isManager(boot.me.role) ? c.reviewQueue + c.attention : 0;
+              const n = isManager(boot.me.role) ? c.reviewQueue + c.attention + c.thumbnailsToReview : 0;
               const fresh = c.myNewWork > 0;
-              const what = [fresh && 'new work', isManager(boot.me.role) && c.reviewQueue && `${c.reviewQueue} in review`, isManager(boot.me.role) && c.attention && `${c.attention} need attention`].filter(Boolean).join(', ');
+              const what = [fresh && 'new work', isManager(boot.me.role) && c.reviewQueue && `${c.reviewQueue} in review`, isManager(boot.me.role) && c.attention && `${c.attention} need attention`, isManager(boot.me.role) && c.thumbnailsToReview && `${c.thumbnailsToReview} thumbnail ${c.thumbnailsToReview === 1 ? 'round' : 'rounds'} to review`].filter(Boolean).join(', ');
               return (
                 <button className="icon-btn menu-btn" onClick={() => setDrawer(true)} aria-label={`Open navigation${what ? ` (${what})` : ''}`}>
                   <Menu />{(fresh || n > 0) && <span className={`badge${fresh ? ' fresh' : ''}`} aria-hidden>{fresh ? 'New' : n > 99 ? '99+' : n}</span>}
@@ -144,7 +144,7 @@ function MobileNav({ onClose }: { onClose: () => void }) {
 
 function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapsed?: boolean; mobile?: boolean }) {
   const boot = useBoot();
-  const { me, counts, settings, mode } = boot;
+  const { me, counts, settings, mode, users } = boot;
   const manager = isManager(me.role);
   // editors get a focused site: what's coming up, finished scripts, and the client material they cut from
   const editorItems = [
@@ -154,6 +154,17 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
   ];
+  // thumbnail designers: their Studio (briefs, rounds and wins), then what video editors have too
+  const designerItems = [
+    { to: '/studio', label: 'Studio', icon: <Palette />, count: counts.myThumbnails || undefined },
+    { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
+    { to: '/scripts', label: 'Script bank', icon: <Library /> },
+    { to: '/clients', label: 'Clients', icon: <Building2 /> },
+    { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
+  ];
+  // managers see Thumbnails once the team has (or had) a thumbnail designer, or there's a brief open or a round waiting for them
+  // (briefs can be written before anyone is a designer, and wait under Needs a designer)
+  const thumbnails = users.some((u) => isThumbnailDesigner(u)) || counts.thumbnailsToReview > 0 || counts.thumbnailsOpen > 0;
   // writers: their own work first, then their Overview and the Production board, then where to find things
   const writerItems = [
     { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 },
@@ -164,7 +175,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
   ];
-  const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; fresh?: boolean; show?: boolean }[] = me.role === 'editor' ? editorItems : !manager ? writerItems : [
+  const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; fresh?: boolean; show?: boolean }[] = isThumbnailDesigner(me) ? designerItems : isEditor(me.role) ? editorItems : !manager ? writerItems : [
     { to: '/overview', label: 'Overview', icon: <LayoutDashboard />, count: counts.attention || undefined, hot: counts.attention > 0 },
     { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 },
     { to: '/production', label: 'Production', icon: <Columns3 /> },
@@ -173,12 +184,13 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/review', label: 'Review queue', icon: <ClipboardCheck />, count: counts.reviewQueue || undefined },
     { to: '/writers', label: 'Team', icon: <Users /> },
     { to: '/editors', label: 'Editors', icon: <Clapperboard /> },
+    ...(thumbnails ? [{ to: '/thumbnails', label: 'Thumbnails', icon: <Images />, count: counts.thumbnailsToReview || undefined }] : []),
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
   ];
   return (
     <div className="rail">
-      <NavLink to={manager ? '/overview' : me.role === 'editor' ? '/editor' : '/my-work'} className="wordmark" aria-label="SCALE Media home">
+      <NavLink to={homePath(me)} className="wordmark" aria-label="SCALE Media home">
         <span className="full">SCALE</span>
         <span className="full">&nbsp;</span>
         <span>{collapsed && !mobile ? 'S' : 'Media'}</span>
@@ -197,7 +209,9 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
               {it.fresh && <span className="new-pill" aria-label="Has new work">New</span>}
               {it.count != null && !it.fresh && (() => {
                 // say what the number counts, the way the page it opens counts it
-                const what = it.to === '/review' ? `${it.count === 1 ? 'script' : 'scripts'} in review` : it.to === '/overview' ? `${it.count === 1 ? 'batch needs' : 'batches need'} attention` : `${it.count === 1 ? 'script' : 'scripts'} still to write, send or deliver`;
+                const what = it.to === '/review' ? `${it.count === 1 ? 'script' : 'scripts'} in review` : it.to === '/overview' ? `${it.count === 1 ? 'batch needs' : 'batches need'} attention`
+                  : it.to === '/thumbnails' ? `thumbnail ${it.count === 1 ? 'round' : 'rounds'} to review` : it.to === '/studio' ? `${it.count === 1 ? 'thumbnail' : 'thumbnails'} to design or change`
+                    : `${it.count === 1 ? 'script' : 'scripts'} still to write, send or deliver`;
                 return <span className={`count${it.hot ? ' hot' : ''}`} title={`${it.count} ${what}`} aria-label={`${it.count} ${what}`}>{it.count}</span>;
               })()}
               {(it.hot || it.fresh) && <span className="dot-badge" aria-hidden />}
@@ -274,7 +288,7 @@ function UserMenu() {
         <Avatar name={me.name} id={me.id} />
         <span className="who">
           <b className="ellipsis">{me.name}</b>
-          <span>{ROLE_LABEL[me.role]}</span>
+          <span>{personLabel(me)}</span>
         </span>
       </button>
       {open && (
@@ -349,9 +363,10 @@ function useOutside(ref: React.RefObject<HTMLElement | null>, fn: () => void, ac
 type Hit = { key: string; group: string; t: string; s?: string; to: string };
 
 function SearchBox() {
-  const { me } = useBoot();
+  const { me, users } = useBoot();
   const manager = isManager(me.role);
-  const editor = me.role === 'editor';
+  const editor = isEditor(me.role);
+  const designer = isThumbnailDesigner(me);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
   const [debounced, setDebounced] = useState('');
@@ -370,7 +385,11 @@ function SearchBox() {
     ...r.scripts.map((x) => ({ key: `s${x.batchId}-${x.number}`, group: 'Scripts', t: `Script #${x.number}`, s: `${x.clientName} · ${x.batchTitle}`, to: `/batches/${x.batchId}#scripts` })),
     ...r.batches.map((b) => ({ key: `b${b.id}`, group: 'Batches', t: b.title, s: b.clientName, to: `/batches/${b.id}` })),
     ...r.shoots.map((x) => ({ key: `h${x.id}`, group: 'Shoots', t: `${x.title} · ${fmtDate(x.startDate)}`, s: x.clientName, to: x.batchId ? `/batches/${x.batchId}` : editor ? `/scripts?clientId=${x.clientId}` : `/calendar?m=${x.startDate.slice(0, 7)}` })),
-    ...(manager ? r.people : []).map((p) => ({ key: `p${p.id}`, group: 'People', t: p.name, s: ROLE_LABEL[p.role], to: p.role === 'editor' ? '/writers' : `/my-work?userId=${p.id}` })),
+    ...(manager ? r.people : []).map((p) => {
+      // search names only the role; the team list knows an editor's kind
+      const who = users.find((u) => u.id === p.id) ?? p;
+      return { key: `p${p.id}`, group: 'People', t: p.name, s: personLabel(who), to: isThumbnailDesigner(who) ? `/studio?userId=${p.id}` : isEditor(p.role) ? '/writers' : `/my-work?userId=${p.id}` };
+    }),
     ...r.briefings.map((x) => ({ key: `r${x.id}`, group: 'Briefing calls', t: x.title, s: `${x.clientName}${x.callDate ? ` · ${fmtDate(x.callDate)}` : ''}`, to: `/clients/${x.clientId}` })),
     ...r.resources.map((x) => ({ key: `f${x.id}`, group: 'Resources', t: x.title, s: x.clientName, to: `/resources?q=${encodeURIComponent(x.title)}` })),
   ];
@@ -390,7 +409,7 @@ function SearchBox() {
         <div ref={pop} className="search-pop floating" aria-live="polite" style={{ left: at.left, top: at.top, width: at.width }}>
           {res.isLoading && <div className="empty">Searching…</div>}
           {res.isError && <div className="empty">Search failed. Try again.</div>}
-          {r && !hits.length && <div className="empty">Nothing matches “{debounced}”. Try a client, a person, or a script number like #12.</div>}
+          {r && !hits.length && <div className="empty">Nothing matches “{debounced}”. {designer ? 'Try a client, a shoot or a script number like #12.' : 'Try a client, a person, or a script number like #12.'}</div>}
           {groups.map((g) => (
             <div key={g}>
               <h4>{g}</h4>
@@ -408,14 +427,21 @@ function SearchBox() {
 
 // ── notifications ────────────────────────────────────────────────────────
 
+// thumbnails keep the same meanings: a new brief like an assignment, a round sent like a review request, picked like an approval, changes like revisions
+const THUMB_NOTE_COLOR: Record<ThumbnailNotification, string> = {
+  thumbnail_new: 'var(--cyan)', thumbnail_sent: 'var(--lavender)', thumbnail_picked: 'var(--mint)', thumbnail_changes: 'var(--pink)',
+};
 const NOTE_COLOR: Record<string, string> = {
   overdue: 'var(--red)', blocker: 'var(--red)', deadline: 'var(--yellow)', deadline_change: 'var(--yellow)', review_request: 'var(--lavender)',
   revision_request: 'var(--pink)', planning: 'var(--salmon)', approval: 'var(--mint)', delivery: 'var(--mint)', assignment: 'var(--cyan)', todo: 'var(--salmon)', todo_done: 'var(--mint)',
+  ...THUMB_NOTE_COLOR,
 };
 
 export function NotificationsButton({ className = '' }: { className?: string }) {
   const displayTz = useDisplayTz();
-  const editorBell = useBoot().me.role === 'editor';
+  const bellFor = useBoot().me;
+  const editorBell = isVideoEditor(bellFor);
+  const designerBell = isThumbnailDesigner(bellFor);
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const nav = useNavigate();
@@ -438,7 +464,7 @@ export function NotificationsButton({ className = '' }: { className?: string }) 
           </div>
           {q.isLoading && <div className="empty">Loading…</div>}
           {q.isError && <div className="empty">Couldn’t load notifications.</div>}
-          {q.data && !q.data.notifications.length && <div className="empty"><b>You’re all caught up</b><span>{editorBell ? 'You’ll hear here when a shoot’s scripts are all final, or a shoot moves.' : 'Assignments, reviews, deadline changes and deliveries show up here.'}</span></div>}
+          {q.data && !q.data.notifications.length && <div className="empty"><b>You’re all caught up</b><span>{designerBell ? 'You’ll hear here when you’re given a thumbnail brief, and when a manager picks an option or asks for changes.' : editorBell ? 'You’ll hear here when a shoot’s scripts are all final, or a shoot moves.' : 'Assignments, reviews, deadline changes and deliveries show up here.'}</span></div>}
           {q.data?.notifications.map((n) => (
             <button key={n.id} className={`notif${n.readAt ? ' read' : ''}`} style={{ ['--c' as string]: NOTE_COLOR[n.type] ?? 'var(--cyan)' }}
               onClick={() => { if (!n.readAt) read.mutate({ ids: [n.id] }); setOpen(false); if (n.link) nav(n.link); }}>

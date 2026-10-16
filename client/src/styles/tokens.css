@@ -95,6 +95,33 @@
   --shadow-pop: 0 28px 70px -18px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.06);
   --glow: 0 0 10px;
 
+  /* Thumbnail Studio (.studio): a darker, picture-first room made from the surfaces and accents above (so it
+     follows the workspace palette), the frame behind a picture, and the plain light and dark feeds Preview in
+     the wild shows options on. The feeds are generic: no platform's colours, chrome or logos. */
+  --studio-bg: color-mix(in srgb, var(--bg) 58%, #000);
+  --studio-panel: color-mix(in srgb, var(--panel) 70%, #000);
+  --studio-row: color-mix(in srgb, var(--row) 62%, #000);
+  --studio-row-hover: color-mix(in srgb, var(--row-hover) 62%, #000);
+  --studio-glow-1: color-mix(in srgb, var(--lavender) 15%, transparent);
+  --studio-glow-2: color-mix(in srgb, var(--cyan) 10%, transparent);
+  --studio-line: rgba(255, 255, 255, 0.07);
+  --frame: #050506;
+  --thumb-scrim: rgba(8, 8, 10, 0.78);
+  --sheen: rgba(255, 255, 255, 0.22);
+  --shadow-thumb: 0 26px 60px -30px rgba(0, 0, 0, 0.9);
+  --feed-light: #F4F4F6;
+  --feed-light-text: #16161A;
+  --feed-light-text-2: #5C5C66;
+  --feed-light-chip: #E2E2E8;
+  --feed-dark: #111113;
+  --feed-dark-text: #F2F2F4;
+  --feed-dark-text-2: #A2A2AD;
+  --feed-dark-chip: #2A2A30;
+  --feed-badge: rgba(8, 8, 10, 0.84);
+  --feed-badge-text: #FFFFFF;
+  --safe-line: rgba(255, 255, 255, 0.92);
+  --safe-shade: color-mix(in srgb, var(--red) 38%, transparent);
+
   /* motion */
   --t: 150ms;
   --ease: cubic-bezier(0.2, 0.8, 0.2, 1);

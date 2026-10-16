@@ -7,31 +7,37 @@ import { useEffect, useState } from 'react';
 import { AnimatePresence, m } from 'framer-motion';
 import { Eye, Minimize2, Undo2, Users } from 'lucide-react';
 import { api, ApiError, queryClient } from '../api';
-import { isAdmin, isManager, ROLE_LABEL } from '../../../shared/workflow';
-import type { SessionMode } from '../../../shared/types';
-import type { Role } from '../../../shared/workflow';
+import { homePath, isAdmin, isManager, personLabel, type KindOf } from '../../../shared/workflow';
+import type { SessionMode, UserSummary } from '../../../shared/types';
 import { Avatar, Button, Dialog, FormError } from './ui';
 import { SPRING } from '../motion';
 import { useBoot } from './Shell';
 
-/** Reload into the new view, staying on this page when the new person can open it. */
-function reloadAs(role: Role) {
+/** Reload into the new view, staying on this page when the new person can open it, else on their home page. */
+function reloadAs(person: KindOf) {
   queryClient.clear();
   const path = window.location.pathname;
-  const blocked = (path.startsWith('/log') && !isAdmin(role)) || (path.startsWith('/settings') && !isManager(role));
-  if (blocked) window.location.assign(isManager(role) ? '/overview' : '/my-work');
+  const blocked = (path.startsWith('/log') && !isAdmin(person.role)) || (path.startsWith('/settings') && !isManager(person.role));
+  if (blocked) window.location.assign(homePath(person));
   else window.location.reload();
 }
 
+/** Who the site shows after a mode change: the viewed person (the team list knows an editor's kind), else the Admin. */
+function viewedPerson(s: SessionMode, users: UserSummary[]): KindOf {
+  const v = s.viewingAs;
+  return v ? users.find((u) => u.id === v.id) ?? { role: v.role } : { role: 'owner' };
+}
+
 export function useModeActions() {
+  const { users } = useBoot();
   const [busy, setBusy] = useState<null | 'recording' | 'view'>(null);
   const [error, setError] = useState<ApiError | null>(null);
-  const run = async (kind: 'recording' | 'view', path: string, body: Record<string, unknown> = {}, role?: (s: SessionMode) => Role) => {
+  const run = async (kind: 'recording' | 'view', path: string, body: Record<string, unknown> = {}) => {
     setBusy(kind);
     setError(null);
     try {
       const s = await api<SessionMode>(path, { body });
-      reloadAs(role ? role(s) : s.viewingAs?.role ?? 'owner');
+      reloadAs(viewedPerson(s, users));
     } catch (err) {
       setError(err as ApiError);
       setBusy(null);
@@ -129,7 +135,7 @@ export function ViewAsDialog({ open, onClose }: { open: boolean; onClose: () => 
           <button key={u.id} className={`viewas-row${u.id === current ? ' on' : ''}`} disabled={!!act.busy} aria-current={u.id === current || undefined}
             onClick={() => (u.id === current ? onClose() : u.id === mode.realId ? act.stopViewing() : act.viewAs(u.id))}>
             <Avatar name={u.name} id={u.id} />
-            <span className="who"><b>{u.id === mode.realId ? `${u.name} (you)` : u.name}</b><span>{ROLE_LABEL[u.role]}</span></span>
+            <span className="who"><b>{u.id === mode.realId ? `${u.name} (you)` : u.name}</b><span>{personLabel(u)}</span></span>
             {u.id === current && <span className="chip">Now</span>}
           </button>
         ))}

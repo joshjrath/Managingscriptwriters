@@ -11,6 +11,8 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../server/app';
 import type { Db } from '../server/db';
 import type { Ctx } from '../server/core';
+import { editorRoutesFor } from '../server/editor-access';
+import { EDITOR_KINDS, type EditorKind } from '../shared/workflow';
 import { freshDb } from './db';
 
 /**
@@ -79,6 +81,13 @@ const ACCESS: Record<string, Access> = {
   'POST /api/editing/focus': 'user',
   // the scripts PDF of a batch they have a video from (only theirs: test/editing.test.ts)
   'GET /api/editing/script-pdf/:batchId': 'user',
+  // Thumbnail Studio: thumbnail designers (their own briefs only) and, for the two reads, managers; writers and video
+  // editors are refused (test/thumbnails.test.ts covers whose brief and file is whose)
+  'GET /api/studio': 'user',
+  'GET /api/thumbnails/:id': 'user',
+  'POST /api/thumbnails/:id/options': 'user',
+  'DELETE /api/thumbnail-options/:id': 'user',
+  'POST /api/thumbnails/:id/send': 'user',
 
   'POST /api/users': 'manager',
   'PATCH /api/users/:id': 'manager',
@@ -107,6 +116,10 @@ const ACCESS: Record<string, Access> = {
   'DELETE /api/script-bank/past/:id': 'manager',
   'POST /api/import/read': 'manager',
   'POST /api/import/apply': 'manager',
+  'GET /api/thumbnails': 'manager',
+  'POST /api/thumbnails': 'manager',
+  'PATCH /api/thumbnails/:id': 'manager',
+  'POST /api/thumbnails/:id/decision': 'manager',
 
   'GET /api/audit': 'admin',
   'PUT /api/settings/theme': 'admin',
@@ -154,6 +167,8 @@ let app: FastifyInstance;
 let admin = '';
 let manager = '';
 let writer = '';
+/** a signed-in editor of each kind: a video editor and a thumbnail designer */
+const editors: Record<EditorKind, string> = { short_form: '', thumbnail: '' };
 
 const call = async (method: string, url: string, cookie?: string) => {
   const headers: Record<string, string> = { 'x-scale-media': '1' };
@@ -177,6 +192,11 @@ beforeAll(async () => {
   }
   manager = cookieOf(await json('POST', '/api/auth/login', { email: 'max@scale.test', password: 'team-password-1' }));
   writer = cookieOf(await json('POST', '/api/auth/login', { email: 'wes@scale.test', password: 'team-password-1' }));
+  for (const kind of EDITOR_KINDS) {
+    const email = `${kind}@scale.test`;
+    expect((await json('POST', '/api/users', { name: `Ed ${kind}`, email, role: 'editor', editorKind: kind, password: 'team-password-1' }, admin)).statusCode).toBe(200);
+    editors[kind] = cookieOf(await json('POST', '/api/auth/login', { email, password: 'team-password-1' }));
+  }
 });
 
 afterAll(async () => {
@@ -227,6 +247,74 @@ describe('route access', () => {
     expect(let_in).toEqual([]);
     // and the admin gets past the role check on them
     expect(await call('GET', '/api/audit', admin)).toBe(200);
+  });
+});
+
+describe('editors, by kind', () => {
+  const allowed = (kind: EditorKind) => Object.entries(editorRoutesFor(kind)).flatMap(([method, set]) => [...set].map((r) => `${method} ${r}`)).sort();
+
+  it('gives video editors exactly what editors had before kinds', () => {
+    expect(allowed('short_form')).toEqual([
+      'GET /api/auth/status', 'GET /api/bootstrap', 'GET /api/counts', 'GET /api/moments', 'GET /api/notifications',
+      'GET /api/calendar', 'GET /api/script-bank', 'GET /api/files/:id', 'GET /api/shoot-readiness', 'GET /api/search',
+      'GET /api/clients', 'GET /api/clients/:id', 'GET /api/resources',
+      'GET /api/todos', 'GET /api/editing/me', 'GET /api/editing/script-pdf/:batchId',
+      'POST /api/auth/login', 'POST /api/auth/logout', 'POST /api/me/password', 'POST /api/me/timezone', 'POST /api/me/whats-new',
+      'POST /api/moments/seen', 'POST /api/notifications/read',
+      'POST /api/todos', 'POST /api/editing/focus',
+      'PATCH /api/todos/:id',
+      'DELETE /api/todos/:id',
+    ].sort());
+  });
+
+  it('allows each kind only routes that exist and that anyone signed in may call', () => {
+    for (const kind of EDITOR_KINDS) {
+      const odd = allowed(kind).filter((r) => ACCESS[r] !== 'user' && ACCESS[r] !== 'public');
+      expect([kind, odd]).toEqual([kind, []]);
+    }
+  });
+
+  it('gives thumbnail designers their Studio, and nobody else but managers (who only read it)', async () => {
+    const studio = allowed('thumbnail').filter((r) => !allowed('short_form').includes(r));
+    expect(studio).toEqual([
+      'DELETE /api/thumbnail-options/:id', 'GET /api/studio', 'GET /api/thumbnails/:id', 'POST /api/thumbnails/:id/options', 'POST /api/thumbnails/:id/send',
+    ]);
+    const let_in: string[] = [];
+    for (const route of studio) {
+      const [method, url] = route.split(' ');
+      // writers have no Studio; video editors are refused before the route runs (code 'editor', above)
+      for (const [who, cookie] of [['writer', writer], ['video editor', editors.short_form]] as const) {
+        const status = await call(method, concrete(url), cookie);
+        if (status !== 403) let_in.push(`${who}: ${route} → ${status}`);
+      }
+      // managers read a Studio and a brief, but never add, remove or send a designer's options
+      if (method !== 'GET' && (await call(method, concrete(url), manager)) !== 403) let_in.push(`manager: ${route}`);
+    }
+    expect(let_in).toEqual([]);
+    // a designer reaches them (brief 1 doesn't exist, so it's not found rather than refused)
+    expect(await call('GET', '/api/studio', editors.thumbnail)).toBe(200);
+    expect(await call('GET', '/api/thumbnails/1', editors.thumbnail)).toBe(404);
+  });
+
+  it('refuses each kind every other route, in words for their kind', async () => {
+    for (const kind of EDITOR_KINDS) {
+      const mine = new Set(allowed(kind));
+      const let_in: string[] = [];
+      for (const [route, access] of Object.entries(ACCESS)) {
+        if (access === 'public' || mine.has(route)) continue;
+        const [method, url] = route.split(' ');
+        const headers: Record<string, string> = { 'x-scale-media': '1', cookie: editors[kind] };
+        if (method !== 'GET') headers['content-type'] = 'application/json';
+        const r = await app.inject({ method: method as 'GET', url: concrete(url), headers, payload: method === 'GET' ? undefined : '{}' });
+        const code = r.statusCode === 403 ? (JSON.parse(r.body) as { error: { code?: string } }).error.code : undefined;
+        if (r.statusCode !== 403 || code !== 'editor') let_in.push(`${kind}: ${route} → ${r.statusCode} ${code ?? ''}`);
+      }
+      expect(let_in).toEqual([]);
+    }
+    // a video editor's Home isn't a designer's, and the refusal says what a designer can do
+    const r = await app.inject({ method: 'GET', url: '/api/editing/me', headers: { cookie: editors.thumbnail } });
+    expect(r.statusCode).toBe(403);
+    expect((JSON.parse(r.body) as { error: { message: string } }).error.message).toMatch(/Thumbnail designers can use their Studio/);
   });
 });
 

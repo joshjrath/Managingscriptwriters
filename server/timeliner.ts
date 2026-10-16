@@ -297,12 +297,12 @@ export function readMessage(raw: unknown): UploadMessage {
   };
 }
 
-interface UserRow { id: number; name: string; email: string; role: Me['role']; capacity_per_day: number | null }
-const asMe = (u: UserRow): Me => ({ id: u.id, name: u.name, email: u.email, role: u.role, capacityPerDay: u.capacity_per_day });
+interface UserRow { id: number; name: string; email: string; role: Me['role']; editor_kind: Me['editorKind']; capacity_per_day: number | null }
+const asMe = (u: UserRow): Me => ({ id: u.id, name: u.name, email: u.email, role: u.role, capacityPerDay: u.capacity_per_day, editorKind: u.editor_kind ?? null });
 
 /** Whom a Timeliner delivery is recorded under: the uploader when they're on the team, else whoever connected Timeliner, else an Admin. */
 async function actorFor(db: Db, uploaderEmail: string | null): Promise<Me | null> {
-  const cols = `id, name, email, role, capacity_per_day`;
+  const cols = `id, name, email, role, editor_kind, capacity_per_day`;
   const live = `active and removed_at is null and role <> 'editor'`;
   if (uploaderEmail) {
     const u = await db.one<UserRow>(`select ${cols} from users where lower(email) = lower($1) and ${live}`, [uploaderEmail]);

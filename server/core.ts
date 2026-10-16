@@ -4,8 +4,8 @@
 import type { Db } from './db';
 import { makeClock, type Clock, type DeadlineRules, type ISODate } from '../shared/dates';
 import {
-  compressRanges, deriveStage, milestone, nextMilestone, summarize,
-  type ScriptLite, type ScriptStatus, type Role,
+  compressRanges, deriveStage, kindsSql, milestone, nextMilestone, summarize, VIDEO_EDITOR_KINDS,
+  type EditorKind, type ScriptLite, type ScriptStatus, type Role,
 } from '../shared/workflow';
 import type { WorkspaceTheme } from '../shared/palettes';
 import type { BatchSummary, Me, Priority, Settings, UserSummary, WriterShare, DateMode } from '../shared/types';
@@ -74,24 +74,26 @@ export async function clockFor(ctx: Ctx, settings?: Settings): Promise<Clock> {
 // ── users ────────────────────────────────────────────────────────────────
 
 interface UserRow {
-  id: number; name: string; email: string; role: Role; active: boolean; capacity_per_day: number | null;
+  id: number; name: string; email: string; role: Role; editor_kind: EditorKind | null; active: boolean; capacity_per_day: number | null;
   removed_at: string | null; temp_password: string | null; city: string | null; country: string | null; timezone: string | null; work_start: number | null; work_end: number | null;
 }
 
 export async function loadUsers(db: Db): Promise<UserSummary[]> {
-  const rows = await db.query<UserRow>(`select id, name, email, role, active, capacity_per_day, removed_at, temp_password, city, country, timezone, work_start, work_end from users order by active desc, name`);
+  const rows = await db.query<UserRow>(`select id, name, email, role, editor_kind, active, capacity_per_day, removed_at, temp_password, city, country, timezone, work_start, work_end from users order by active desc, name`);
   // temp passwords are stripped here; only the team endpoint adds them back for owners and managers
   return rows.map((r) => ({
-    id: r.id, name: r.name, email: r.email, role: r.role, active: r.active && !r.removed_at, removed: !!r.removed_at, capacityPerDay: r.capacity_per_day, tempPassword: null,
+    id: r.id, name: r.name, email: r.email, role: r.role, editorKind: r.editor_kind ?? null, active: r.active && !r.removed_at, removed: !!r.removed_at, capacityPerDay: r.capacity_per_day, tempPassword: null,
     city: r.city ? `${r.city}${r.country ? `, ${r.country}` : ''}` : null,
     timezone: r.timezone,
     workHours: r.work_start != null && r.work_end != null ? [r.work_start, r.work_end] : null,
   }));
 }
 
-/** Editors who can sign in: they hear when a shoot's scripts are final, or the shoot moves. */
+/** Video editors who can sign in (isVideoEditor; never thumbnail designers): they hear when a shoot's scripts are final, or the shoot moves. */
 export async function editorIds(db: Db): Promise<number[]> {
-  return (await db.query<{ id: number }>(`select id from users where role = 'editor' and active and removed_at is null`)).map((r) => r.id);
+  return (await db.query<{ id: number }>(
+    `select id from users where role = 'editor' and (editor_kind is null or editor_kind in (${kindsSql(VIDEO_EDITOR_KINDS)})) and active and removed_at is null`,
+  )).map((r) => r.id);
 }
 
 export async function managerIds(db: Db): Promise<number[]> {
@@ -122,6 +124,8 @@ export interface NotifyInput {
   dedupeKey?: string | null;
   /** With a dedupe key: refresh the existing notification instead of skipping it. */
   refresh?: boolean;
+  /** The thumbnail decision it tells of, so a later decision on the same round can take it back while it's unread. */
+  thumbnailDecisionId?: number | null;
 }
 
 export async function notify(db: Db, userIds: Iterable<number>, n: NotifyInput, exceptUserId?: number): Promise<number> {
@@ -130,16 +134,17 @@ export async function notify(db: Db, userIds: Iterable<number>, n: NotifyInput, 
     if (uid === exceptUserId) continue;
     if (n.dedupeKey && n.refresh) {
       await db.query(
-        `insert into notifications (user_id, type, title, body, link, dedupe_key) values ($1,$2,$3,$4,$5,$6)
-         on conflict (user_id, dedupe_key) do update set title = excluded.title, body = excluded.body, link = excluded.link, created_at = now(), read_at = null`,
-        [uid, n.type, n.title, n.body ?? null, n.link ?? null, n.dedupeKey],
+        `insert into notifications (user_id, type, title, body, link, dedupe_key, thumbnail_decision_id) values ($1,$2,$3,$4,$5,$6,$7)
+         on conflict (user_id, dedupe_key) do update set title = excluded.title, body = excluded.body, link = excluded.link, created_at = now(), read_at = null,
+           thumbnail_decision_id = excluded.thumbnail_decision_id`,
+        [uid, n.type, n.title, n.body ?? null, n.link ?? null, n.dedupeKey, n.thumbnailDecisionId ?? null],
       );
       created++;
     } else {
       const rows = await db.query(
-        `insert into notifications (user_id, type, title, body, link, dedupe_key) values ($1,$2,$3,$4,$5,$6)
+        `insert into notifications (user_id, type, title, body, link, dedupe_key, thumbnail_decision_id) values ($1,$2,$3,$4,$5,$6,$7)
          on conflict (user_id, dedupe_key) do nothing returning id`,
-        [uid, n.type, n.title, n.body ?? null, n.link ?? null, n.dedupeKey ?? null],
+        [uid, n.type, n.title, n.body ?? null, n.link ?? null, n.dedupeKey ?? null, n.thumbnailDecisionId ?? null],
       );
       created += rows.length;
     }

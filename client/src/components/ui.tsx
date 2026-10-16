@@ -254,10 +254,10 @@ export function Avatar({ name, id, small }: { name: string; id?: number | null; 
 
 // ── panels & states ──────────────────────────────────────────────────────
 
-export function Panel({ title, sub, tools, count, children, className = '', id, as: As = 'section' }: { title?: ReactNode; sub?: ReactNode; tools?: ReactNode; count?: number; children: ReactNode; className?: string; id?: string; as?: 'section' | 'div' }) {
+export function Panel({ title, sub, tools, count, children, className = '', id, as: As = 'section', tabIndex }: { title?: ReactNode; sub?: ReactNode; tools?: ReactNode; count?: number; children: ReactNode; className?: string; id?: string; as?: 'section' | 'div'; /** -1: a jump to it (an in-page link) can move focus there */ tabIndex?: number }) {
   const hid = useId();
   return (
-    <As className={`panel ${className}`} aria-labelledby={title ? hid : undefined} id={id}>
+    <As className={`panel ${className}`} aria-labelledby={title ? hid : undefined} id={id} tabIndex={tabIndex}>
       {(title || tools) && (
         <div className="panel-head">
           {title && <h2 id={hid}>{title}</h2>}
@@ -435,6 +435,44 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 }
 
 export const useToast = () => useContext(ToastCtx);
+
+// ── pictures ─────────────────────────────────────────────────────────────
+
+/**
+ * A widescreen (16:9) picture: loaded lazily, shimmering until it arrives, with alt text. With no picture (or
+ * one that can't be opened) it's a title card instead: `title` in big display type on a glowing card in `tone`
+ * (a colour token), so work with nothing made yet still reads as a thumbnail. `children` sit on top of it
+ * (letters, chips). `fit="contain"` shows the whole image, letterboxed, rather than filling the frame.
+ */
+export function Thumb({ src, alt, title, sub, tone, fit = 'cover', eager, className = '', children }: {
+  src?: string | null; alt: string; title?: string; sub?: string; tone?: string; fit?: 'cover' | 'contain'; eager?: boolean; className?: string; children?: ReactNode;
+}) {
+  const [state, setState] = useState<{ src: string | null; loaded: boolean; failed: boolean }>({ src: src ?? null, loaded: false, failed: false });
+  // a new picture starts over (shimmer, then the image)
+  if ((src ?? null) !== state.src) setState({ src: src ?? null, loaded: false, failed: false });
+  const show = !!src && !state.failed;
+  // a picture already in the browser's cache can finish before React listens for it
+  const seen = useCallback((img: HTMLImageElement | null) => {
+    if (img?.complete && img.naturalWidth > 0) setState((s) => (s.loaded ? s : { ...s, loaded: true }));
+  }, []);
+  return (
+    <div className={`thumb${fit === 'contain' ? ' contain' : ''}${show && state.loaded ? ' loaded' : ''}${show ? '' : ' card'} ${className}`} style={tone ? { ['--tone' as string]: tone } : undefined}>
+      {show ? (
+        <>
+          <span className="thumb-skel" aria-hidden />
+          <img ref={seen} src={src} alt={alt} loading={eager ? 'eager' : 'lazy'} decoding="async" draggable={false}
+            onLoad={() => setState((s) => ({ ...s, loaded: true }))} onError={() => setState((s) => ({ ...s, failed: true }))} />
+        </>
+      ) : (
+        <div className="thumb-card" role="img" aria-label={alt}>
+          {sub && <span className="thumb-card-s" aria-hidden>{sub}</span>}
+          <b className="thumb-card-t" aria-hidden>{title ?? ''}</b>
+        </div>
+      )}
+      {children}
+    </div>
+  );
+}
 
 // ── misc ─────────────────────────────────────────────────────────────────
 

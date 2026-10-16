@@ -6,11 +6,13 @@ import { m } from 'framer-motion';
 import { Sparkles } from 'lucide-react';
 import { api, queryClient } from '../api';
 import type { Bootstrap } from '../../../shared/types';
-import { CHANGELOG, LATEST_CHANGE, ONLY_FOR, TECHNICAL, type Audience, type ChangeTag } from '../../../shared/changelog';
-import { isManager } from '../../../shared/workflow';
+import { audienceOf, CHANGELOG, LATEST_CHANGE, ONLY_FOR, TECHNICAL, type Audience, type ChangeTag } from '../../../shared/changelog';
 import { fmtDateYear } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
 import { Chip, Panel, Seg } from '../components/ui';
+
+/** Who "For you" is, in the subtitle. */
+const AUDIENCE_WORDS: Record<Audience, string> = { managers: 'managers', writers: 'writers', editors: 'editors', designers: 'thumbnail designers' };
 
 const TAG: Record<ChangeTag, { label: string; color: string }> = {
   new: { label: 'New', color: 'mint' },
@@ -22,7 +24,7 @@ export function WhatsNewPage() {
   const { whatsNewSeen, me } = useBoot();
   // what was new before this visit, kept for the whole visit so the highlight survives the dot clearing
   const [firstUnseen] = useState(() => (whatsNewSeen ? Math.max(0, CHANGELOG.findIndex((e) => e.id === whatsNewSeen)) : Math.min(CHANGELOG.length, 5)));
-  const mine: Audience = isManager(me.role) ? 'managers' : me.role === 'editor' ? 'editors' : 'writers';
+  const mine = audienceOf(me);
   const [all, setAll] = useState(false);
   const forMe = (id: string) => !TECHNICAL.has(id) && (!ONLY_FOR[id] || ONLY_FOR[id].includes(mine));
   const shown = CHANGELOG.map((e, i) => ({ e, i })).filter(({ e }) => all || forMe(e.id));
@@ -34,7 +36,7 @@ export function WhatsNewPage() {
   }, [whatsNewSeen]);
   return (
     <>
-      <PageHeader title="What’s new" sub={all ? `Every change to SCALE Media since day one · ${CHANGELOG.length} updates` : `What changed for ${mine === 'managers' ? 'managers' : mine === 'editors' ? 'editors' : 'writers'} · ${shown.length} updates`} hideNewWork>
+      <PageHeader title="What’s new" sub={all ? `Every change to SCALE Media since day one · ${CHANGELOG.length} updates` : `What changed for ${AUDIENCE_WORDS[mine]} · ${shown.length} updates`} hideNewWork>
         <Seg role="group" aria-label="Which updates">
           <button aria-pressed={!all} onClick={() => setAll(false)}>For you</button>
           <button aria-pressed={all} onClick={() => setAll(true)}>Everything</button>

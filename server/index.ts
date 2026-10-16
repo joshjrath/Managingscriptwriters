@@ -102,7 +102,7 @@ async function bootstrapManager(db: Awaited<ReturnType<typeof openDb>>, { email,
   const hash = await hashPassword(password);
   const existing = await db.one<{ id: number }>(`select id from users where lower(email) = $1`, [email]);
   if (existing) {
-    await db.query(`update users set password_hash = $2, role = 'owner', active = true, removed_at = null, temp_password = null, updated_at = now() where id = $1`, [existing.id, hash]);
+    await db.query(`update users set password_hash = $2, role = 'owner', editor_kind = null, active = true, removed_at = null, temp_password = null, updated_at = now() where id = $1`, [existing.id, hash]);
     await db.query(`delete from sessions where user_id = $1`, [existing.id]);
     console.log(`reset password for manager ${email} — remove MANAGER_RESET_PASSWORD now so later restarts don't reset it again`);
   } else {

@@ -13,6 +13,7 @@ import { addDays, diffDays, nowInZone, startOfWeek, workingDaysBetween, type Clo
 import { bothLate, isDraftReady, isNewWork, milestone, nextMilestone, summarize, type Milestone, type ScriptStatus } from '../../shared/workflow';
 import { plural } from '../../shared/format';
 import { sessionMode } from '../recording';
+import { thumbnailCounts } from '../thumbnails';
 import type {
   AttentionItem, AttentionKind, BatchSummary, Bootstrap, CalendarEvent, Counts, Dashboard, DueCategory, DueDay, Me,
   MyWork, ReviewQueue, ShootReadiness, WriterLoad,
@@ -159,6 +160,8 @@ export async function computeCounts(ctx: Ctx, me: Me, batches?: BatchSummary[], 
     reviewQueue: isManager(me.role) ? data.summaries.reduce((n, b) => n + b.progress.inReview, 0) : 0,
     unreadNotifications: unread?.n ?? 0,
     attention: isManager(me.role) ? attentionFor(data.summaries, await inactivePeople(ctx.db)).length : attentionFor(data.summaries).length,
+    // Thumbnail Studio: managers' rounds waiting for a decision, a designer's briefs on their plate (from rows)
+    ...(await thumbnailCounts(ctx.db, me)),
   };
 }
 

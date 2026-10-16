@@ -4,14 +4,23 @@
 // someone has already seen.
 
 import type { ISODate } from './dates';
+import { isManager, isThumbnailDesigner, isEditor, type KindOf } from './workflow';
 
 export type ChangeTag = 'new' | 'improved' | 'fixed';
 
-/** Who an update matters to. Entries not listed in ONLY_FOR are for everyone. */
-export type Audience = 'managers' | 'writers' | 'editors';
+/** Who an update matters to. Entries not listed in ONLY_FOR are for everyone. `editors` are the video editors. */
+export type Audience = 'managers' | 'writers' | 'editors' | 'designers';
+
+/** Whose updates someone sees on What's new: Admins count as managers, thumbnail designers are `designers`. */
+export function audienceOf(p: KindOf): Audience {
+  if (isManager(p.role)) return 'managers';
+  if (isThumbnailDesigner(p)) return 'designers';
+  return isEditor(p.role) ? 'editors' : 'writers';
+}
 
 /** Updates that only matter to some people (Admins count as managers). */
 export const ONLY_FOR: Record<string, Audience[]> = {
+  '2026-10-16-thumbnail-studio': ['managers', 'designers'],
   '2026-10-07-calendar-shoots-match': ['managers'], '2026-10-07-editors': ['managers', 'editors'], '2026-10-07-calendar-shoots': ['managers'],
   '2026-10-07-calendar-embed': ['managers'], '2026-10-02-fill-missing-deadlines': ['managers'], '2026-10-02-drafts-from-final': ['managers'],
   '2026-10-01-palettes': ['managers'], '2026-09-30-control-center-people': ['managers'], '2026-09-30-control-center-admin-editors': ['managers'],
@@ -37,6 +46,24 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-16-thumbnail-studio',
+    date: '2026-10-16',
+    title: 'Thumbnail Studio: thumbnail designers get their own home',
+    summary: 'Thumbnail designers now sign in to their own Studio to make the thumbnails managers hand out on the new Thumbnails page. Managers pick an option or ask for changes.',
+    changes: [
+      { tag: 'new', text: 'In Settings → Team, an Editor now has a Kind: Video editor or Thumbnail designer. A thumbnail designer lands on their own Studio. Like video editors, they keep the calendar, finished scripts, clients and resources, and are never given scripts.' },
+      { tag: 'new', text: 'Managers have a new Thumbnails page. New thumbnail asks for the client, the shoot if there is one, the video’s title, what the thumbnail should show, any words for the image, how many options you want (3 by default), a due date and a designer. The designer is told straight away. The Thumbnails item appears in the menu once someone on the team is a thumbnail designer or a brief is open, with how many rounds are waiting for you.' },
+      { tag: 'new', text: 'The Studio shows the next thumbnail to make large on screen, with its brief and the client’s look: brand voice, guidance, and their logos and reference images shown as pictures. Before an image exists, the video’s title shows on a card, so the board still looks like a wall of thumbnails.' },
+      { tag: 'new', text: 'Designers drop an image anywhere on the brief, paste it straight from Photoshop or Figma, or choose it, and line up options A to F, each with a one-line note. Quick checks against YouTube’s guidance (1280×720, widescreen, under YouTube’s 2 MB limit, JPG or PNG) only warn and never stop a hand-in. Only PNG, JPG and WebP images can be options.' },
+      { tag: 'new', text: 'Options stay private in the designer’s tray until they press Send round. Preview in the wild shows every option at the sizes viewers see in a feed, on a light or dark feed, with Squint, Greyscale and Safe zone switches, beside the client’s recent picks.' },
+      { tag: 'new', text: 'Reviewing: a round reaches managers only when it’s sent. See its options side by side, then Pick one (with an optional reason) or Ask for changes (a note is required). Until the designer sends another round you can decide again, and their unread message about your first decision is taken back. If they sent a newer round while you were looking, the page says so and refreshes. Download the picked option at full quality.' },
+      { tag: 'new', text: 'Every picked thumbnail goes on the Wall of wins of the designer who made it, and a pick from the last 12 hours shows at the top of their Studio, above what’s next. Each brief has a round strip that reads like its story: Round 1, changes asked, Round 2, B picked.' },
+      { tag: 'new', text: 'The Thumbnails page lists rounds to review first, then each designer’s briefs with what’s due this week, a Needs a designer group, and what was picked lately. Edit or reassign any brief, and cancel one that’s still open. Managers can open any designer’s Studio read-only; their unsent options stay private, and a designer only sees the options other designers made once one is picked.' },
+      { tag: 'improved', text: 'Video editors are now labelled Video editor on the Team page, in the account menu, View as and search, so they’re told apart from thumbnail designers. Thumbnail designers aren’t on the Editors tab and don’t get Scripts final or Shoot moved notices.' },
+      { tag: 'improved', text: 'A thumbnail designer can’t be switched to another kind or role while they still have open briefs. Reassign them on the Thumbnails page first.' },
+    ],
+  },
   {
     id: '2026-10-09-open-video-in-timeliner',
     date: '2026-10-09',

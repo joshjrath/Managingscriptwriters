@@ -1,8 +1,8 @@
 // Clients, briefing/ideation-call records, resources and secure file access.
 
-import { EDITOR_FILES, fileStream, isBlockedFile, spool, storedFileName, storeFile, type UploadedFile } from '../files';
+import { DESIGNER_FILES, EDITOR_FILES, fileStream, isBlockedFile, SENT_OPTION_FILES, spool, storedFileName, storeFile, type UploadedFile } from '../files';
 import type { FastifyInstance } from 'fastify';
-import { isEditor, isManager, type Role } from '../../shared/workflow';
+import { isEditor, isManager, isThumbnailDesigner, type Role } from '../../shared/workflow';
 import { z } from 'zod';
 import { clockFor, isAssignedTo, loadBatches, loadSettings, logActivity, type Ctx } from '../core';
 import { requireManager, requireUser } from '../auth';
@@ -375,10 +375,16 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
   app.get('/api/files/:id', async (req, reply) => {
     const me = requireUser(req);
     const { id } = parse(z.object({ id: zs.id }), req.params);
-    // editors: only EDITOR_FILES (finished work); everyone else: any file something live still refers to
+    // one rule per person. Writers: any file something live still refers to. Video editors: only EDITOR_FILES
+    // (finished work). Thumbnail designers: that, plus their own options and clients' winners (DESIGNER_FILES, for
+    // the session person). Managers: anyLive plus options in sent rounds, never a designer's unsent tray.
     const anyLive = `(exists (select 1 from resources r where r.file_id = f.id and r.removed_at is null) or exists (select 1 from submissions s where s.file_id = f.id) or exists (select 1 from reviews v where v.file_id = f.id) or exists (select 1 from past_documents p where p.file_id = f.id and p.removed_at is null))`;
+    const rule = isManager(me.role) ? { sql: `(${anyLive} or ${SENT_OPTION_FILES})`, params: [] }
+      : isThumbnailDesigner(me) ? { sql: `(${EDITOR_FILES} or ${DESIGNER_FILES('$2')})`, params: [me.id] }
+        : isEditor(me.role) ? { sql: EDITOR_FILES, params: [] }
+          : { sql: anyLive, params: [] };
     const f = await db.one<{ filename: string; mime: string; size: number; stored: number }>(
-      `select f.filename, f.mime, f.size, octet_length(f.data) as stored from files f where f.id = $1 and ${isEditor(me.role) ? EDITOR_FILES : anyLive}`, [id],
+      `select f.filename, f.mime, f.size, octet_length(f.data) as stored from files f where f.id = $1 and ${rule.sql}`, [id, ...rule.params],
     );
     if (!f) throw notFound('File');
     const inline = SAFE_INLINE.has(f.mime) && (req.query as Record<string, string>).download !== '1';

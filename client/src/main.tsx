@@ -1,5 +1,5 @@
 import { StrictMode, useEffect, type ReactElement } from 'react';
-import { isManager } from '../../shared/workflow';
+import { homePath, isEditor, isManager, isThumbnailDesigner, isVideoEditor } from '../../shared/workflow';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { QueryClientProvider, useQuery } from '@tanstack/react-query';
@@ -24,6 +24,9 @@ import { ScriptBankPage } from './pages/ScriptBank';
 import { WritersPage } from './pages/Writers';
 import { EditorsPage } from './pages/Editors';
 import { EditorHome } from './pages/EditorHome';
+import { StudioPage } from './pages/Studio';
+import { ThumbBriefPage } from './pages/ThumbBrief';
+import { ThumbnailsPage } from './pages/Thumbnails';
 import { SettingsPage } from './pages/Settings';
 import { MasterLogPage } from './pages/MasterLog';
 import { WhatsNewPage } from './pages/WhatsNew';
@@ -65,17 +68,24 @@ function Gate() {
   } catch { /* ignore */ }
   if (!status.data!.signedIn) return <Login status={status.data!} signedOut={signedOut} onDone={() => { setRecordingMode(null); queryClient.clear(); void status.refetch(); }} />;
   if (boot.isError || !boot.data) return <main className="login"><ErrorState error={boot.error} retry={() => boot.refetch()} /></main>;
-  const role = boot.data.me.role;
-  const home = isManager(role) ? '/overview' : role === 'editor' ? '/editor' : '/my-work';
-  // editors only have their own pages; anything else takes them home
-  const only = (el: ReactElement) => (role === 'editor' ? <Navigate to="/editor" replace /> : el);
-  // the review queue (other writers' feedback) and the team page are for managers
+  const me = boot.data.me;
+  const role = me.role;
+  const home = homePath(me);
+  // editors (video editors and thumbnail designers) only have their own pages; anything else takes them home
+  const only = (el: ReactElement) => (isEditor(role) ? <Navigate to={home} replace /> : el);
+  // the review queue (other writers' feedback), the team page and the thumbnail board are for managers
   const managers = (el: ReactElement) => (isManager(role) ? el : <Navigate to={home} replace />);
+  // a thumbnail designer's Studio and briefs; managers open any designer's, read-only
+  const studio = (el: ReactElement) => (isThumbnailDesigner(me) || isManager(role) ? el : <Navigate to={home} replace />);
   return (
     <Routes>
       <Route element={<AppShell boot={boot.data} />}>
         <Route index element={<Navigate to={home} replace />} />
-        <Route path="/editor" element={role === 'editor' || isManager(role) ? <EditorHome /> : <Navigate to={home} replace />} />
+        <Route path="/editor" element={isVideoEditor(me) || isManager(role) ? <EditorHome /> : <Navigate to={home} replace />} />
+        <Route path="/studio" element={studio(<StudioPage />)} />
+        <Route path="/studio/briefs/:id" element={studio(<ThumbBriefPage />)} />
+        <Route path="/thumbnails" element={managers(<ThumbnailsPage />)} />
+        <Route path="/thumbnails/:id" element={managers(<ThumbBriefPage />)} />
         <Route path="/overview" element={only(<Overview />)} />
         <Route path="/my-work" element={only(<MyWorkPage />)} />
         <Route path="/production" element={only(<Production />)} />

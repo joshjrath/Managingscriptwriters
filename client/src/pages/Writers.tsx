@@ -1,15 +1,16 @@
 // Team (managers): everyone on the team in one place, with each person's
 // workload, open to-dos and local time, and shortcuts to their work and to
 // give them a to-do. Anyone writing scripts is listed (an Admin who writes
-// too, themselves included); editors have their own section.
+// too, themselves included); video editors and thumbnail designers each have
+// their own section.
 
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, ListTodo, PenLine, Search, Users } from 'lucide-react';
+import { AlertTriangle, ListTodo, Palette, PenLine, Search, Users } from 'lucide-react';
 import { api } from '../api';
 import type { Dashboard, UserSummary } from '../../../shared/types';
-import { isManager, ROLE_LABEL } from '../../../shared/workflow';
+import { isEditor, isManager, isThumbnailDesigner, isVideoEditor, personLabel } from '../../../shared/workflow';
 import { fmtDate, plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
 import { Avatar, Button, Chip, Empty, Panel } from '../components/ui';
@@ -34,8 +35,9 @@ export function WritersPage() {
     // writers first, then by name
     return list.sort((a, b) => Number(a.role !== 'writer') - Number(b.role !== 'writer') || a.name.localeCompare(b.name));
   }, [users, me.id, q, manager, dash.data]);
-  const writers = manager ? people.filter((u) => u.role !== 'editor') : people;
-  const editors = manager ? people.filter((u) => u.role === 'editor') : [];
+  const writers = manager ? people.filter((u) => !isEditor(u.role)) : people;
+  const editors = manager ? people.filter((u) => isVideoEditor(u)) : [];
+  const designers = manager ? people.filter((u) => isThumbnailDesigner(u)) : [];
   const card = (u: UserSummary) => (
     <WriterCard key={u.id} u={u} manager={manager} self={u.id === me.id}
       load={dash.data?.workload.find((w) => w.userId === u.id)}
@@ -59,6 +61,12 @@ export function WritersPage() {
               <div className="writer-grid">{editors.map(card)}</div>
             </>
           )}
+          {designers.length > 0 && (
+            <>
+              <h2 className="team-sub">Thumbnail designers <span className="muted">make the videos’ thumbnails; their briefs and picks are in their Studio</span></h2>
+              <div className="writer-grid">{designers.map(card)}</div>
+            </>
+          )}
         </>
       )}
       {todoFor != null && <TodoDialog userId={todoFor} onClose={() => setTodoFor(null)} />}
@@ -77,7 +85,7 @@ function WriterCard({ u, manager, self, load, openTodos, today, onTodo }: {
         <Avatar name={u.name} id={u.id} />
         <div style={{ minWidth: 0, flex: 1 }}>
           <div className="writer-name ellipsis">{u.name}{self && <span className="muted" style={{ fontWeight: 500 }}> (you)</span>}</div>
-          <div className="muted" style={{ fontSize: 12.5 }}>{ROLE_LABEL[u.role]}{u.city ? ` · ${u.city.split(',')[0]}` : ''}{time ? ` · ${time} there` : ''}</div>
+          <div className="muted" style={{ fontSize: 12.5 }}>{personLabel(u)}{u.city ? ` · ${u.city.split(',')[0]}` : ''}{time ? ` · ${time} there` : ''}</div>
         </div>
       </div>
 
@@ -99,7 +107,8 @@ function WriterCard({ u, manager, self, load, openTodos, today, onTodo }: {
 
 
       <div className="row-flex s2 writer-actions">
-        {manager && u.role !== 'editor' && <Link to={self ? '/my-work' : `/my-work?userId=${u.id}`} className="btn sm"><PenLine aria-hidden />{self ? 'My work' : 'Their work'}</Link>}
+        {manager && !isEditor(u.role) && <Link to={self ? '/my-work' : `/my-work?userId=${u.id}`} className="btn sm"><PenLine aria-hidden />{self ? 'My work' : 'Their work'}</Link>}
+        {manager && isThumbnailDesigner(u) && <Link to={`/studio?userId=${u.id}`} className="btn sm"><Palette aria-hidden />Open their Studio</Link>}
         {manager && <Button variant="sm ghost" icon={<ListTodo aria-hidden />} onClick={onTodo}>Add to-do</Button>}
       </div>
     </section>

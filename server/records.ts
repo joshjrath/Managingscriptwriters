@@ -127,7 +127,7 @@ export async function loadDeliveries(db: Db, where: { batchIds?: number[]; confi
 interface ResourceRow {
   id: number; client_id: number; client_name: string; briefing_id: number | null; briefing_title: string | null;
   batch_id: number | null; batch_title: string | null; kind: 'link' | 'file'; category: Resource['category']; title: string;
-  url: string | null; file_id: number | null; file_name: string | null; file_size: number | null; notes: string | null;
+  url: string | null; file_id: number | null; file_name: string | null; file_size: number | null; file_mime: string | null; notes: string | null;
   created_by: number; created_by_name: string; created_at: string; attached: boolean;
 }
 
@@ -155,7 +155,7 @@ export async function loadResources(db: Db, where: { clientId?: number; batchId?
   if (!where.includeArchivedClients && !where.clientId && !where.id) cond.push(`c.status <> 'archived'`);
   const rows = await db.query<ResourceRow>(
     `select r.id, r.client_id, c.name as client_name, r.briefing_id, bf.title as briefing_title, r.batch_id, b.title as batch_title,
-            r.kind, r.category, r.title, r.url, r.file_id, f.filename as file_name, f.size as file_size, r.notes,
+            r.kind, r.category, r.title, r.url, r.file_id, f.filename as file_name, f.size as file_size, f.mime as file_mime, r.notes,
             r.created_by, u.name as created_by_name, r.created_at, ${attached} as attached
        from resources r
        join clients c on c.id = r.client_id
@@ -170,7 +170,7 @@ export async function loadResources(db: Db, where: { clientId?: number; batchId?
   return rows.map((r) => ({
     id: r.id, clientId: r.client_id, clientName: r.client_name, briefingId: r.briefing_id, briefingTitle: r.briefing_title,
     batchId: r.batch_id, batchTitle: r.batch_title, kind: r.kind, category: r.category, title: r.title, url: r.url,
-    fileId: r.file_id, fileName: r.file_name, fileSize: r.file_size, notes: r.notes,
+    fileId: r.file_id, fileName: r.file_name, fileSize: r.file_size, fileMime: r.file_mime ?? null, notes: r.notes,
     createdById: r.created_by, createdByName: r.created_by_name, createdAt: r.created_at,
     ...(r.attached ? { attached: true } : {}),
   }));

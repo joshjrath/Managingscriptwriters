@@ -37,8 +37,8 @@ import { loadEditorRows } from './control/editors';
 import { isISODate, isValidTimeZone, makeClock, onOrAfterDay, type ISODate } from '../shared/dates';
 import { cityLabel, onShift } from '../shared/cities';
 import {
-  compressRanges, compressTitles, hasNoScripts, isApproved, isEditor, isFocusStale, isManager, isNotMatched, isOnPlate, isRawTitle, needsCheck, ROLE_LABEL, TIMELINER_STEP_LABEL,
-  titleNumber, videoState, type Role, type ScriptStatus, type TimelinerStatusGroup, type VideoState,
+  compressRanges, compressTitles, hasNoScripts, isApproved, isEditor, isFocusStale, isManager, isNotMatched, isOnPlate, isRawTitle, isVideoEditor, kindsSql, needsCheck,
+  NON_VIDEO_EDITOR_KINDS, ROLE_LABEL, TIMELINER_STEP_LABEL, titleNumber, videoState, type Role, type ScriptStatus, type TimelinerStatusGroup, type VideoState,
 } from '../shared/workflow';
 import { fmtWorked } from '../shared/format';
 import type {
@@ -357,12 +357,14 @@ const REVIEW_ROLES = ['admin', 'supervisor', 'guest'];
 const NOT_EDITOR_ROLES = (Object.keys(ROLE_LABEL) as Role[]).filter((r) => !isEditor(r));
 
 /**
- * SQL: the Timeliner member id `id` is someone on the site who isn't an editor (a writer, manager or the Admin, matched
- * by email). Only editors are editors: they're never anyone's editor, on a video or as its client's editor on a brand
- * (a writer is often on a brand to upload its scripts PDFs). Someone in Timeliner the site doesn't know still counts.
+ * SQL: the Timeliner member id `id` is someone on the site who isn't a video editor (a writer, manager or the Admin,
+ * or an editor of another kind, such as a thumbnail designer: NON_VIDEO_EDITOR_KINDS; matched by email). Only video
+ * editors are editors: the rest are never anyone's editor, on a video or as its client's editor on a brand (a writer
+ * is often on a brand to upload its scripts PDFs). Someone in Timeliner the site doesn't know still counts.
  */
 const SITE_NON_EDITOR = (id: string) => `exists (select 1 from timeliner_members sm join users su on lower(su.email) = lower(sm.email)
-  where sm.id = ${id} and su.removed_at is null and su.role in (${NOT_EDITOR_ROLES.map((r) => `'${r}'`).join(', ')}))`;
+  where sm.id = ${id} and su.removed_at is null and (su.role in (${NOT_EDITOR_ROLES.map((r) => `'${r}'`).join(', ')})
+    or su.editor_kind in (${kindsSql(NON_VIDEO_EDITOR_KINDS)})))`;
 
 /**
  * SQL: `bm` (a row of timeliner_brand_members, `m` its member, left joined) is one of that brand's editors: an
@@ -1282,7 +1284,12 @@ function peopleOf(L: Loaded): Person[] {
   // the rest of Timeliner's people with videos: by name to someone on the site with no Timeliner work under their
   // email, or to Settings → Editors; else only in Timeliner. A name two people share here matches nobody
   const siteByName = new Map<string, UserSummary | null>();
-  for (const u of L.users) { const k = personKey(u.name); siteByName.set(k, siteByName.has(k) ? null : u); }
+  // (never a thumbnail designer: they cut no videos, so none in Timeliner are theirs)
+  for (const u of L.users) {
+    if (isEditor(u.role) && !isVideoEditor(u)) continue;
+    const k = personKey(u.name);
+    siteByName.set(k, siteByName.has(k) ? null : u);
+  }
   const offSite = new Map<string, Loaded['offSite'][number]>();
   for (const e of L.offSite) if (!offSite.has(personKey(e.name))) offSite.set(personKey(e.name), e);
   const others: Person[] = [];
@@ -1319,9 +1326,10 @@ function peopleOf(L: Loaded): Person[] {
     });
   }
 
-  // editors on the site with nothing in Timeliner (under their email, or their name)
+  // video editors on the site with nothing in Timeliner (under their email, or their name); thumbnail designers
+  // have nothing there to assign
   for (const u of L.users) {
-    if (!isEditor(u.role) || byUser.has(u.id)) continue;
+    if (!isVideoEditor(u) || byUser.has(u.id)) continue;
     siteOf(u).flag = { kind: 'nothing_assigned', timelinerEmail: null, siteEmail: u.email, text: `Nothing assigned in Timeliner (their Timeliner email must be ${u.email})` };
   }
   return [...byUser.values(), ...others];
