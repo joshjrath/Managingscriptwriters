@@ -42,7 +42,7 @@ import {
 } from '../shared/workflow';
 import { fmtWorked } from '../shared/format';
 import type {
-  ClientEditing, Deliverable, EditingBoard, EditingSync, EditingVideo, EditorClient, EditorFlag, EditorFocus, EditorPlate, EditorRef, EditorRow, FocusAction, Me,
+  ClientEditing, Deliverable, EditingBoard, EditingSync, EditingVideo, EditorClient, EditorFlag, EditorFocus, EditorPlate, EditorRef, EditorRow, EditorToAdd, FocusAction, Me,
   MyEditing, ScriptDoc, UserSummary, VideoMatch, VideoMatchHow,
 } from '../shared/types';
 
@@ -1032,13 +1032,15 @@ interface Loaded {
   users: UserSummary[];
   /** member id → the site user with that email */
   userOf: Map<string, number>;
+  /** lower-cased emails of site accounts that are deactivated (not removed): someone with one is on the site, turned off */
+  deactivated: Set<string>;
   members: Map<string, { name: string | null; email: string | null; role: string | null; active: boolean }>;
   /** Timeliner brand id → its name */
   brands: Map<string, string>;
   /** Timeliner brand id → its editors there (IS_BRAND_EDITOR): only to name the client's editor, never whose a video is */
   brandEditors: Map<string, string[]>;
   /** Settings → Editors: editors who don't sign in, with where they are and their hours */
-  offSite: { name: string; city: string; timezone: string; workHours: [number, number] }[];
+  offSite: { id: number; name: string; city: string; timezone: string; workHours: [number, number] }[];
   focus: Map<number, FocusRow>;
   done: DoneRow[];
   /** `${taskId}|${userId}` → when they marked it done here */
@@ -1083,7 +1085,8 @@ async function loadEditing(ctx: Ctx): Promise<Loaded> {
       where ${IS_BRAND_EDITOR('bm', 'm')} order by bm.brand_id, bm.member_id`,
   )) brandEditors.set(r.brand_id, [...(brandEditors.get(r.brand_id) ?? []), r.member_id]);
   const members = await db.query<{ id: string; email: string | null; name: string | null; role: string | null; active: boolean }>(`select id, email, name, role, active from timeliner_members`);
-  const users = (await loadUsers(db)).filter((u) => u.active);
+  const everyone = await loadUsers(db);
+  const users = everyone.filter((u) => u.active);
   const byEmail = new Map(users.map((u) => [u.email.toLowerCase(), u.id]));
   const userOf = new Map<string, number>();
   for (const m of members) { const u = m.email ? byEmail.get(m.email.toLowerCase()) : undefined; if (u) userOf.set(m.id, u); }
@@ -1117,11 +1120,12 @@ async function loadEditing(ctx: Ctx): Promise<Loaded> {
   return {
     sync: { keySet: !!ctx.timeliner, syncedAt: iso(s?.synced_at), error: s?.error ?? null, counts: syncCounts(s?.counts) },
     tasks, byId: new Map(tasks.map((t) => [t.id, t])), users, userOf,
+    deactivated: new Set(everyone.filter((u) => !u.active && !u.removed).map((u) => u.email.toLowerCase())),
     members: new Map(members.map((m) => [m.id, { name: m.name, email: m.email, role: m.role, active: m.active !== false }])),
     brands: new Map((await db.query<{ id: string; name: string }>(`select id, name from timeliner_names where kind = 'brand'`)).map((b) => [b.id, b.name])),
     brandEditors,
     offSite: (await loadEditorRows(db)).map((r) => ({
-      name: r.name, city: cityLabel({ name: r.city, country: r.country }), timezone: r.timezone, workHours: [Number(r.work_start), Number(r.work_end)] as [number, number],
+      id: Number(r.id), name: r.name, city: cityLabel({ name: r.city, country: r.country }), timezone: r.timezone, workHours: [Number(r.work_start), Number(r.work_end)] as [number, number],
     })),
     focus: new Map((await db.query<FocusRow>(`select user_id, task_id, state, since, worked_seconds, paused_at from editor_focus`)).map((f) => [Number(f.user_id), f])),
     done, doneAt: new Map(done.map((d) => [`${d.task_id}|${d.user_id}`, d.done_at])),
@@ -1206,8 +1210,12 @@ interface Person {
   timezone: string | null;
   workHours: [number, number] | null;
   flag: EditorFlag | null;
-  /** given a card: not someone who left Timeliner with nothing open */
+  /** given a card: not someone who left Timeliner with nothing open, nor a client's editor there with nothing assigned */
   card: boolean;
+  /** only in Timeliner as a client's editor there, with no video assigned to them (no card: offered in `toAdd`) */
+  brandOnly: boolean;
+  /** their Settings → Editors entry, when they're flagged `no_site_access` (Give site access takes it off that list) */
+  editorId: number | null;
 }
 
 /** A name as compared across Timeliner, the team and Settings → Editors: any case, any spacing, any accents. */
@@ -1236,9 +1244,11 @@ function onCardOf(L: Loaded, t: TaskRow): string[] {
 /**
  * Everyone on the board: a site account matched by Timeliner email; else one with the same name (their emails
  * differ: flagged); else, from Timeliner alone, flagged as not on the site (with their place and hours from
- * Settings → Editors when their name is there). An admin, supervisor or guest in Timeliner has a card only for
+ * Settings → Editors when their name is there), or as deactivated here when their Timeliner email is a deactivated
+ * account on the site (reactivated, never added again). An admin, supervisor or guest in Timeliner has a card only for
  * videos nobody else is on (onCardOf), and is never flagged to be added as an editor. Editors on the site with
- * nothing in Timeliner get a quiet note.
+ * nothing in Timeliner get a quiet note. A client's editor in Timeliner with nothing assigned has no card, and is
+ * offered to add when they aren't on the site (`brandOnly`, peopleToAdd).
  */
 function peopleOf(L: Loaded): Person[] {
   // their videos: assigned to them in Timeliner; not one they're only reviewing
@@ -1254,7 +1264,7 @@ function peopleOf(L: Loaded): Person[] {
   }
   // a client's editor in Timeliner is someone on the board even with no video of their own, so the client strip can
   // name them; being on a brand alone never gives them a video, nor a card unless they're on the site (peopleOf's
-  // `card` below)
+  // `card` below). One not on the site is offered to add instead (`brandOnly`: the board's `toAdd`)
   const brandsWithVideos = new Set(L.tasks.map((t) => t.brand_id).filter((x): x is string => !!x));
   for (const [brand, list] of L.brandEditors) {
     if (!brandsWithVideos.has(brand)) continue;
@@ -1265,7 +1275,7 @@ function peopleOf(L: Loaded): Person[] {
   const siteOf = (u: UserSummary): Person => {
     let p = byUser.get(u.id);
     if (!p) {
-      p = { key: `u${u.id}`, userId: u.id, linked: false, memberIds: [], name: u.name, city: u.city, timezone: u.timezone, workHours: u.workHours, flag: null, card: true };
+      p = { key: `u${u.id}`, userId: u.id, linked: false, memberIds: [], name: u.name, city: u.city, timezone: u.timezone, workHours: u.workHours, flag: null, card: true, brandOnly: false, editorId: null };
       byUser.set(u.id, p);
     }
     return p;
@@ -1300,7 +1310,8 @@ function peopleOf(L: Loaded): Person[] {
     const k = who?.name ? personKey(who.name) : null;
     // someone who left Timeliner with only finished videos there: nothing to fix, nothing to show
     const gone = who?.active === false && !(work.get(m)?.open ?? 0);
-    // on a client's brand with no video assigned to them: named in the client strip, no card (nothing of theirs to show)
+    // on a client's brand with no video assigned to them: named in the client strip, no card (nothing of theirs to
+    // show); flagged all the same, for the board's `toAdd`
     const brandOnly = !(work.get(m)?.all ?? 0);
     const u = k && !gone ? siteByName.get(k) : undefined;
     if (u && !byUser.get(u.id)?.linked) {
@@ -1314,15 +1325,21 @@ function peopleOf(L: Loaded): Person[] {
     }
     const e = k ? offSite.get(k) : undefined;
     const tlEmail = email ?? 'the email they use in Timeliner';
+    // an admin, supervisor or guest in Timeliner reviews: never flagged to be added as an editor. Someone whose
+    // Timeliner email is a deactivated account here is on the site, turned off: adding them again would clash
+    const flag: EditorFlag | null = isReviewer(L, m) ? null
+      : email && L.deactivated.has(email.toLowerCase())
+        ? { kind: 'deactivated', timelinerEmail: email, siteEmail: email, text: `Deactivated on the site as ${email} — reactivate them in Settings → Team` }
+        : e
+          ? { kind: 'no_site_access', timelinerEmail: email, siteEmail: null, text: `Not on the site (they’re in Settings → Editors) — give them site access with ${tlEmail}` }
+          : { kind: 'not_on_site', timelinerEmail: email, siteEmail: null, text: `Not on the site — add them as an Editor with ${tlEmail}` };
     others.push({
       key: `m${m}`, userId: null, linked: false, memberIds: [m], name,
       city: e?.city ?? null, timezone: e?.timezone ?? null, workHours: e?.workHours ?? null,
-      // an admin, supervisor or guest in Timeliner reviews: never flagged to be added as an editor
-      flag: isReviewer(L, m) ? null
-        : e
-          ? { kind: 'no_site_access', timelinerEmail: email, siteEmail: null, text: `Not on the site — give them site access in Settings → Editors with ${tlEmail}` }
-          : { kind: 'not_on_site', timelinerEmail: email, siteEmail: null, text: `Not on the site — add them in Settings → Team as an Editor with ${tlEmail}` },
+      flag,
       card: !gone && !brandOnly,
+      brandOnly,
+      editorId: flag?.kind === 'no_site_access' && e ? e.id : null,
     });
   }
 
@@ -1416,6 +1433,7 @@ function editorOf(L: Loaded, p: Person, owners: (t: TaskRow) => string[] = (t) =
     clients: [...clients.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
     name: p.name, city: p.city, timezone: p.timezone, workHours: p.workHours,
     offHours: !!(p.workHours && p.timezone && isValidTimeZone(p.timezone)) && !onShift(p.workHours!, p.timezone!, L.now),
+    ...(p.editorId != null ? { editorId: p.editorId } : {}),
     focus, nextUp, plate: plateCounts,
     dueToday: plate.filter((v) => v.due && v.due <= L.today).length,
     lastFinished: last,
@@ -1616,6 +1634,8 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
     }))
     .sort((a, b) => (a.due ?? '9999').localeCompare(b.due ?? '9999') || a.folder.localeCompare(b.folder) || Number(a.raw) - Number(b.raw));
 
+  const toAdd = peopleToAdd(L, people, editors, clients);
+
   // kept for older screens: Timeliner's people with open videos and no site account with their email
   const unknown = new Map<string, { name: string; email: string | null; count: number }>();
   for (const t of L.tasks) {
@@ -1650,7 +1670,38 @@ export async function loadBoard(ctx: Ctx): Promise<EditingBoard> {
     unassigned,
     clients,
     unknownAssignees: [...unknown.values()].sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+    toAdd,
   };
+}
+
+/**
+ * A client's editors in Timeliner with nothing assigned to them yet who aren't on the site (peopleOf's brand-only
+ * people flagged `not_on_site` or `no_site_access`: never a reviewer, someone deactivated there, someone the site knows
+ * by email or name, or someone whose Timeliner email is a deactivated account here, who can't be added again). They
+ * have no card, so "Fix these people" offers them, prefilled. Each name once, and never one that already has a card
+ * (a second Timeliner account of someone on the board), nor a member Timeliner gave neither a name nor an email.
+ * By name.
+ */
+function peopleToAdd(L: Loaded, people: Person[], cards: EditorRow[], clients: ClientEditing[]): EditorToAdd[] {
+  const carded = new Set(cards.map((e) => personKey(e.name)));
+  const out = new Map<string, EditorToAdd>();
+  for (const p of people) {
+    const memberId = p.memberIds[0];
+    const flag = p.flag;
+    if (p.card || !p.brandOnly || !memberId || !flag || (flag.kind !== 'not_on_site' && flag.kind !== 'no_site_access')) continue;
+    const who = L.members.get(memberId);
+    if (!who?.name && !who?.email) continue;
+    const k = personKey(p.name);
+    if (carded.has(k)) continue;
+    const of = clients.filter((c) => c.editors.some((x) => x.key === p.key)).map((c) => c.name);
+    const was = out.get(k);
+    if (was) { was.clients = [...new Set([...was.clients, ...of])]; continue; }
+    out.set(k, {
+      key: p.key, memberId, name: p.name, email: flag.timelinerEmail, clients: of, flag,
+      city: p.city, timezone: p.timezone, workHours: p.workHours, editorId: p.editorId,
+    });
+  }
+  return [...out.values()].sort((a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
 }
 
 export async function loadMine(ctx: Ctx, me: Me): Promise<MyEditing> {
@@ -1660,6 +1711,7 @@ export async function loadMine(ctx: Ctx, me: Me): Promise<MyEditing> {
   const person: Person = {
     key: `u${me.id}`, userId: me.id, linked: true, memberIds: [...L.userOf].filter(([, id]) => id === me.id).map(([m]) => m),
     name: me.name, city: u?.city ?? null, timezone: u?.timezone ?? null, workHours: u?.workHours ?? null, flag: null, card: true,
+    brandOnly: false, editorId: null,
   };
   const mine = editorOf(L, person).mine;
   // the match note is the managers' (it can name a manager, another editor or another client): never sent here

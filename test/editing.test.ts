@@ -297,7 +297,7 @@ describe('reading Timeliner', () => {
     expect(b.editors.map((e) => [e.name, e.offHours])).toEqual([['Maya Reyes', false], ['Leo Martins', false], ['Gus Ghost', false], ['Priya Nair', true]]);
     expect(editor(b, 'Gus Ghost')).toMatchObject({
       key: 'mm_ghost', userId: null, memberId: 'm_ghost', site: false, focus: null, videos: [expect.objectContaining({ title: 'Organic 09' })],
-      flag: { kind: 'not_on_site', text: 'Not on the site — add them in Settings → Team as an Editor with ghost@freelance.test' },
+      flag: { kind: 'not_on_site', text: 'Not on the site — add them as an Editor with ghost@freelance.test' },
     });
     const leoRow = editor(b, 'Leo Martins');
     expect(leoRow.plate).toEqual({ toEdit: 2, rawToEdit: 0, revisions: 1, inReview: 1, withClient: 0, approvedWeek: 1 });

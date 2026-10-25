@@ -20,7 +20,7 @@ export function audienceOf(p: KindOf): Audience {
 
 /** Updates that only matter to some people (Admins count as managers). */
 export const ONLY_FOR: Record<string, Audience[]> = {
-  '2026-10-25-thumbnails-always-in-menu': ['managers'], '2026-10-25-thumbnail-studio': ['managers', 'designers'],
+  '2026-10-25-editors-add-from-timeliner': ['managers'], '2026-10-25-thumbnails-always-in-menu': ['managers'], '2026-10-25-thumbnail-studio': ['managers', 'designers'],
   '2026-10-07-calendar-shoots-match': ['managers'], '2026-10-07-editors': ['managers', 'editors'], '2026-10-07-calendar-shoots': ['managers'],
   '2026-10-07-calendar-embed': ['managers'], '2026-10-02-fill-missing-deadlines': ['managers'], '2026-10-02-drafts-from-final': ['managers'],
   '2026-10-01-palettes': ['managers'], '2026-09-30-control-center-people': ['managers'], '2026-09-30-control-center-admin-editors': ['managers'],
@@ -46,6 +46,18 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-25-editors-add-from-timeliner',
+    date: '2026-10-25',
+    title: 'Add editors from Timeliner in one click',
+    summary: 'People in Timeliner who aren’t on the site show up on the Editors tab ready to add, with their name and Timeliner email filled in, even before they’re given a video.',
+    changes: [
+      { tag: 'fixed', text: 'An editor on a client in Timeliner with no video assigned to them yet didn’t show up anywhere on the Editors tab, so there was nothing to tell you to add them. They’re now listed in “Fix these people” (“On a client in Timeliner, nothing assigned yet: Ana Lopez (Acme) · Add”).' },
+      { tag: 'new', text: 'Add (and Add to the site on a flagged card) opens the Add person form already filled in: their name, the email they use in Timeliner, Editor as a Video editor, and their city, time zone and hours when they’re in Settings → Editors. Change anything before saving; you then get their sign-in details to send, and they leave the list.' },
+      { tag: 'improved', text: 'For someone kept in Settings → Editors, Admins get Give site access right there on the Editors tab, which does what the button in Settings → Editors does and takes them off that list.' },
+      { tag: 'improved', text: 'Someone whose Timeliner email belongs to a person you deactivated here is no longer offered to add again (the form would only say that email is already on the team): their card says “Deactivated on the site” and links to Settings → Team, where you can turn them back on.' },
+    ],
+  },
   {
     id: '2026-10-25-thumbnails-always-in-menu',
     date: '2026-10-25',
