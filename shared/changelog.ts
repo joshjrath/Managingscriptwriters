@@ -20,7 +20,7 @@ export function audienceOf(p: KindOf): Audience {
 
 /** Updates that only matter to some people (Admins count as managers). */
 export const ONLY_FOR: Record<string, Audience[]> = {
-  '2026-10-25-thumbnail-studio': ['managers', 'designers'],
+  '2026-10-25-thumbnails-always-in-menu': ['managers'], '2026-10-25-thumbnail-studio': ['managers', 'designers'],
   '2026-10-07-calendar-shoots-match': ['managers'], '2026-10-07-editors': ['managers', 'editors'], '2026-10-07-calendar-shoots': ['managers'],
   '2026-10-07-calendar-embed': ['managers'], '2026-10-02-fill-missing-deadlines': ['managers'], '2026-10-02-drafts-from-final': ['managers'],
   '2026-10-01-palettes': ['managers'], '2026-09-30-control-center-people': ['managers'], '2026-09-30-control-center-admin-editors': ['managers'],
@@ -46,6 +46,15 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-25-thumbnails-always-in-menu',
+    date: '2026-10-25',
+    title: 'Thumbnails is always in the menu',
+    summary: 'Admins and managers now always see Thumbnails in the menu, so the first brief can be written before anyone is a thumbnail designer.',
+    changes: [
+      { tag: 'fixed', text: 'Thumbnails only showed in the menu once someone was a thumbnail designer, so it couldn’t be found on a new team. It’s now always there for admins and managers, and the page says how to make someone a thumbnail designer (Settings → Team, set an Editor’s Kind).' },
+    ],
+  },
   {
     id: '2026-10-25-thumbnail-studio',
     date: '2026-10-25',
