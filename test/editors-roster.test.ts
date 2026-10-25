@@ -80,7 +80,7 @@ describe('everyone in Timeliner has a card', () => {
   it('gives someone who isn’t on the site a card with their videos, flagged to add them', () => {
     expect(card('Gus Ghost')).toMatchObject({
       key: 'mm_gus', userId: null, memberId: 'm_gus', site: false, focus: null,
-      flag: { kind: 'not_on_site', text: 'Not on the site — add them in Settings → Team as an Editor with gus@freelance.test', timelinerEmail: 'gus@freelance.test', siteEmail: null },
+      flag: { kind: 'not_on_site', text: 'Not on the site — add them as an Editor with gus@freelance.test', timelinerEmail: 'gus@freelance.test', siteEmail: null },
       plate: { revisions: 1 }, dueToday: 1,
       // Right now from Timeliner: what's next
       nextUp: { title: 'Zen 01' },
@@ -93,7 +93,7 @@ describe('everyone in Timeliner has a card', () => {
       key: 'mm_dana', userId: null, site: false, city: 'Manila, Philippines', timezone: 'Asia/Manila', workHours: [9, 18],
       // 9:40 PM in Manila
       offHours: true,
-      flag: { kind: 'no_site_access', text: 'Not on the site — give them site access in Settings → Editors with dana@studio.test' },
+      flag: { kind: 'no_site_access', text: 'Not on the site (they’re in Settings → Editors) — give them site access with dana@studio.test' },
     });
   });
 

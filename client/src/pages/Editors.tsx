@@ -4,7 +4,9 @@
 // one count of videos not matched to a shoot, and the roster. Below the roster, "Editors by client" (each client's
 // editor since the one-editor rule began, its open videos, and its warnings as chips: split across editors, two
 // editors, some not assigned). The roster has a card for everyone in Timeliner with videos and every editor on the site; people to fix (not on
-// the site, or another email here) are flagged on their card and listed in one line above the cards. Each card is
+// the site, or another email here) are flagged on their card and listed in one line above the cards, with a client's
+// editors in Timeliner who aren't on the site and have nothing assigned yet (no card); someone not on the site is
+// added from here in one click (the team's dialog, prefilled), or given site access by an Admin. Each card is
 // calm: their name and biggest client ("Dentist Mike + 2 more"), at most two pills, what they're on (the video they
 // tapped "I'm on this" for, or paused), else what's next by deadline, or that they're off hours, on one line with
 // one line under it; their plate as a bar and one line of counts; and a foot with the last one they finished and
@@ -18,16 +20,17 @@ import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlarmClock, AlertTriangle, ArrowRight, Check, ChevronDown, CircleCheck, CircleHelp, Clapperboard, Eye, ExternalLink, FileText, FileX, Film, History, Layers,
-  Moon, Pause, Pin, PinOff, RefreshCw, RotateCcw, Scissors, Sunrise, TimerOff, UserPlus, Users, X,
+  KeyRound, Moon, Pause, Pin, PinOff, RefreshCw, RotateCcw, Scissors, Sunrise, TimerOff, UserPlus, Users, X,
 } from 'lucide-react';
 import { api, qs, useSave } from '../api';
-import type { BatchSummary, EditingBoard, EditingSync, EditingVideo, EditorFlag, EditorRow, ClientEditing, ScriptDoc } from '../../../shared/types';
+import type { BatchSummary, EditingBoard, EditingSync, EditingVideo, EditorFlag, EditorRow, EditorToAdd, ClientEditing, ScriptDoc } from '../../../shared/types';
 import { FOCUS_STALE_HOURS, isAdmin, isFocusStale, isOnPlate, needsCheck } from '../../../shared/workflow';
 import { dueWords, fmtAgo, fmtDate, fmtHour, fmtStamp, fmtWorked, plural } from '../../../shared/format';
 import { nowInZone, type ISODate } from '../../../shared/dates';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import { Avatar, Button, Chip, Empty, ErrorState, Field, FormError, inputProps, Loading, Panel, useFieldId, useToast } from '../components/ui';
 import { KpiCard } from '../components/StatCards';
+import { AddEditorDialog } from './Settings';
 import { motionAllowed } from '../motion';
 import {
   AgainTag, byTitle, clientName, clockTime, docKind, docName, docSource, midSentence, fmtWhen, focusSeconds, hoursText, localTime, noScripts, notMatched, numberedName,
@@ -57,9 +60,18 @@ const goToCard = (key: string) => (ev: MouseEvent) => {
 
 /** Someone to fix about who they are (not `nothing_assigned`, which is a quiet note on their card). */
 const needsFix = (f: EditorFlag | null): f is EditorFlag => !!f && f.kind !== 'nothing_assigned';
+/**
+ * Someone this page can add to the site: a flagged card, or a client's editor in Timeliner with nothing assigned yet
+ * (`toAdd`). `editorId` is their Settings → Editors entry (`no_site_access`).
+ */
+type Addable = Pick<EditorToAdd, 'name' | 'flag' | 'city' | 'timezone' | 'workHours'> & { editorId?: number | null };
+/** What adding them is, for this person: Add (`not_on_site`), Give site access (an Admin, `no_site_access`), or neither. */
+const addAction = (a: Addable, admin: boolean): 'add' | 'access' | null =>
+  a.flag.kind === 'not_on_site' ? 'add' : a.flag.kind === 'no_site_access' && admin && a.editorId != null ? 'access' : null;
+
 /** The flag in two or three words, for the "Fix these people" line. */
 const FIX_WORDS: Record<EditorFlag['kind'], string> = {
-  not_on_site: 'not on the site', no_site_access: 'no site access', email_differs: 'emails differ', nothing_assigned: 'nothing in Timeliner',
+  not_on_site: 'not on the site', no_site_access: 'no site access', deactivated: 'deactivated here', email_differs: 'emails differ', nothing_assigned: 'nothing in Timeliner',
 };
 
 /** What a card shows under Right now: one of these for each editor. `stale` is an I'm on this left running (isFocusStale). */
@@ -457,24 +469,30 @@ function ClientTile({ c, card }: { c: ClientEditing; card: boolean }) {
 
 function Roster({ b, now, tz, today }: { b: EditingBoard; now: number; tz: string; today: ISODate }) {
   const [open, setOpen] = useState<Set<string>>(() => new Set());
+  // who is being added: kept here, so the sign-in details stay up after the board refreshes without them
+  const [adding, setAdding] = useState<Addable | null>(null);
   const toggle = (id: string) => setOpen((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   // every bar against the fullest plate, so they compare at a glance
   const scale = Math.max(1, ...b.editors.map(plateTotal));
   return (
     <>
       {!b.editors.length && <NoEditors b={b} now={now} />}
-      <FixPeople list={b.editors} />
+      <FixPeople list={b.editors} toAdd={b.toAdd} onAdd={setAdding} />
       {b.editors.length > 0 && (
         <div className="ed-colhead" aria-hidden><span>Editor</span><span>Right now</span><span>On their plate this week</span></div>
       )}
       <div className="ed-list">
         {b.editors.map((e) => (
-          <EditorCard key={e.key} e={e} b={b} scale={scale} now={now} tz={tz} today={today} open={open.has(e.key)} onToggle={() => toggle(e.key)} />
+          <EditorCard key={e.key} e={e} b={b} scale={scale} now={now} tz={tz} today={today} open={open.has(e.key)} onToggle={() => toggle(e.key)} onAdd={setAdding} />
         ))}
         {b.unassigned.length > 0 && <NotAssigned b={b} today={today} />}
       </div>
       {b.editors.length > 0 && <WholeTeam b={b} now={now} />}
       <Legend />
+      {adding && (
+        <AddEditorDialog name={adding.name} email={adding.flag.timelinerEmail} city={adding.city} timezone={adding.timezone} hours={adding.workHours}
+          editorId={adding.flag.kind === 'no_site_access' ? adding.editorId : null} onClose={() => setAdding(null)} />
+      )}
     </>
   );
 }
@@ -497,27 +515,57 @@ function NoEditors({ b, now }: { b: EditingBoard; now: number }) {
       {c && (c.videos === 0
         ? <>The last read found no videos in Timeliner. If there should be some, check that the API key can read Tasks and Projects. </>
         : <>The last read found {plural(c.videos, 'video')} in Timeliner, none of them assigned to anyone or to their client. </>)}
-      Give someone the Editor role in <Link className="link" to="/settings#team">Settings → Team</Link>, with the email they use in Timeliner. Everyone with videos in Timeliner shows up here too.
+      {b.toAdd.length > 0
+        ? <>Your clients’ editors in Timeliner who aren’t on the site are listed below, ready to add.</>
+        : <>Give someone the Editor role in <Link className="link" to="/settings#team">Settings → Team</Link>, with the email they use in Timeliner. Everyone with videos in Timeliner shows up here too.</>}
     </Empty>
   );
 }
 
-/** One line above the cards: the people whose cards are flagged (not on the site, or another email here), each a link to their card. */
-function FixPeople({ list }: { list: EditorRow[] }) {
+/**
+ * One line above the cards: the people whose cards are flagged (not on the site, or another email here), each a link
+ * to their card; then a client's editors in Timeliner who aren't on the site and have nothing assigned yet, who have
+ * no card, each with Add (or Give site access, for an Admin) right there.
+ */
+function FixPeople({ list, toAdd, onAdd }: { list: EditorRow[]; toAdd: EditorToAdd[]; onAdd: (a: Addable) => void }) {
+  const { me } = useBoot();
   const fix = list.filter((e) => needsFix(e.flag));
-  if (!fix.length) return null;
+  const n = fix.length + toAdd.length;
+  if (!n) return null;
+  const head = n === 1 ? 'Fix this person' : 'Fix these people';
   return (
-    <div className="ed-fix" role="group" aria-label={fix.length === 1 ? 'Fix this person' : 'Fix these people'}>
+    <div className="ed-fix" role="group" aria-label={head}>
       <UserPlus aria-hidden />
-      <b className="ed-fix-h">{fix.length === 1 ? 'Fix this person' : 'Fix these people'}</b>
-      <span className="ed-fix-list">
-        {fix.map((e) => (
-          <a key={e.key} className="ed-fix-who" href={`#${cardId(e.key)}`} onClick={goToCard(e.key)}>
-            {e.name}<span className="muted"> · {FIX_WORDS[e.flag!.kind]}</span>
-          </a>
-        ))}
-      </span>
-      <span className="muted ed-fix-how">Each card says which email to use.</span>
+      <b className="ed-fix-h">{head}</b>
+      {fix.length > 0 && (
+        <span className="ed-fix-list">
+          {fix.map((e) => (
+            <a key={e.key} className="ed-fix-who" href={`#${cardId(e.key)}`} onClick={goToCard(e.key)}>
+              {e.name}<span className="muted">{'\u00a0'}· {FIX_WORDS[e.flag!.kind]}</span>
+            </a>
+          ))}
+        </span>
+      )}
+      {fix.length > 0 && <span className="muted ed-fix-how">Each card says which email to use.</span>}
+      {toAdd.length > 0 && (
+        <span className="ed-fix-list">
+          <span className="muted ed-fix-sub">On a client in Timeliner, nothing assigned yet:</span>
+          {toAdd.map((p) => {
+            const action = addAction(p, isAdmin(me.role));
+            // "Ana Lopez (Acme) · Add": their biggest client, as a card leads with it; one line, cut short from the end
+            // (the clients first) with the action kept beside the name (the email the dialog is filled with is the tooltip)
+            const who = <span className="ed-fix-name">{p.name}{p.clients.length > 0 && <span className="muted"> ({p.clients[0]}{p.clients.length > 1 ? ` + ${p.clients.length - 1} more` : ''})</span>}</span>;
+            const email = p.email ?? undefined;
+            return action
+              ? (
+                <button key={p.key} type="button" className="ed-fix-who ed-fix-add" title={email} onClick={() => onAdd(p)}>
+                  {who}<span className="ed-fix-act">· {action === 'add' ? 'Add' : 'Give site access'}</span>
+                </button>
+              )
+              : <span key={p.key} className="ed-fix-who ed-fix-add quiet" title={email}>{who}<span className="ed-fix-act">· an Admin adds them</span></span>;
+          })}
+        </span>
+      )}
     </div>
   );
 }
@@ -546,12 +594,20 @@ function Emphasize({ text, words }: { text: string; words: (string | null)[] }) 
   return <>{text.split(re).map((part, i) => (list.includes(part) ? <b key={i}>{part}</b> : part))}</>;
 }
 
-/** Why a card needs fixing, with the email to use and where to fix it (Settings → Team, or Settings → Editors for an Admin). */
-function FlagLine({ f }: { f: EditorFlag }) {
+/**
+ * Why a card needs fixing, with the email to use and how: Add to the site (the team's dialog, prefilled), Give site
+ * access for an Admin (no_site_access; other managers are told an Admin does it), or Settings → Team when the emails
+ * differ or they're deactivated here (reactivated there, never added again).
+ */
+function FlagLine({ f, e, onAdd }: { f: EditorFlag; e: EditorRow; onAdd: (a: Addable) => void }) {
   const { me } = useBoot();
-  const go = f.kind === 'no_site_access'
-    ? (isAdmin(me.role) ? <Link className="ed-flag-go" to="/settings#editors">Settings → Editors</Link> : <span className="ed-flag-who">an Admin can do this in Settings → Editors</span>)
-    : <Link className="ed-flag-go" to="/settings#team">Settings → Team</Link>;
+  const who: Addable = { name: e.name, flag: f, city: e.city, timezone: e.timezone, workHours: e.workHours, editorId: e.editorId };
+  const action = addAction(who, isAdmin(me.role));
+  const go = action
+    ? <Button className="ed-flag-go" icon={action === 'add' ? <UserPlus aria-hidden /> : <KeyRound aria-hidden />} onClick={() => onAdd(who)}>{action === 'add' ? 'Add to the site' : 'Give site access'}</Button>
+    : f.kind === 'no_site_access'
+      ? (isAdmin(me.role) ? <Link className="ed-flag-go" to="/settings#editors">Settings → Editors</Link> : <span className="ed-flag-who">an Admin can do this in Settings → Editors</span>)
+      : <Link className="ed-flag-go" to="/settings#team">Settings → Team</Link>;
   return (
     <span className="ed-flag fix">
       <UserPlus aria-hidden />
@@ -571,8 +627,8 @@ const videoStatus = (v: EditingVideo): string =>
  * line of counts, and a foot with their last finished video and Videos. A client's warnings are on its tile in
  * Editors by client, and how each video was matched is in Videos.
  */
-function EditorCard({ e, b, scale, now, tz, today, open, onToggle }: {
-  e: EditorRow; b: EditingBoard; scale: number; now: number; tz: string; today: ISODate; open: boolean; onToggle: () => void;
+function EditorCard({ e, b, scale, now, tz, today, open, onToggle, onAdd }: {
+  e: EditorRow; b: EditingBoard; scale: number; now: number; tz: string; today: ISODate; open: boolean; onToggle: () => void; onAdd: (a: Addable) => void;
 }) {
   const drillId = useId();
   const kind = nowKind(e, now);
@@ -674,7 +730,7 @@ function EditorCard({ e, b, scale, now, tz, today, open, onToggle }: {
 
   return (
     <article id={cardId(e.key)} tabIndex={-1} className={`ed-card ${kind}`} aria-label={e.name}>
-      {fix && <div className="ed-flags"><FlagLine f={fix} /></div>}
+      {fix && <div className="ed-flags"><FlagLine f={fix} e={e} onAdd={onAdd} /></div>}
       <div className="ed-who">
         <span className="ed-av"><Avatar name={e.name} id={e.userId} /></span>
         <div className="ed-who-txt">

@@ -6,7 +6,7 @@ import {
   EDITOR_KIND_LABEL, EDITOR_KINDS, editorKindOf, isAdmin, isEditor, isManager, isThumbnailDesigner, isVideoEditor, ROLE_LABEL, type EditorKind, type Role,
 } from '../../../shared/workflow';
 import { AlertTriangle, CalendarClock, Check, CircleAlert, Copy, KeyRound, Plus, RefreshCw, UserPlus } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, useSave } from '../api';
 import type { Editor, Settings, UserSummary } from '../../../shared/types';
 import { computeDeadlines, DEFAULT_RULES, isValidTimeZone } from '../../../shared/dates';
@@ -426,14 +426,25 @@ function ShareDetails({ message, name, onClose }: { message: string; name: strin
   );
 }
 
-function PersonDialog({ user, team = [], preset, onCreated, onClose }: { user?: UserSummary; team?: UserSummary[]; preset?: { name: string; role: Role; city?: string; timezone?: string; hours?: [number, number] }; onCreated?: () => void; onClose: () => void }) {
+/**
+ * What the dialog starts with for someone added from elsewhere: Give site access in Settings → Editors (`access`), or
+ * Add to the site on the Editors tab, with their Timeliner email. Every field can still be changed.
+ */
+interface PersonPreset {
+  name: string; role: Role; editorKind?: EditorKind; email?: string;
+  city?: string; timezone?: string; hours?: [number, number];
+  /** giving someone in Settings → Editors a sign-in (the dialog's title says so) */
+  access?: boolean;
+}
+
+function PersonDialog({ user, team = [], preset, onCreated, onClose }: { user?: UserSummary; team?: UserSummary[]; preset?: PersonPreset; onCreated?: () => void; onClose: () => void }) {
   const toast = useToast();
   const { me } = useBoot();
   const [name, setName] = useState(user?.name ?? preset?.name ?? '');
-  const [email, setEmail] = useState(user?.email ?? '');
+  const [email, setEmail] = useState(user?.email ?? preset?.email ?? '');
   const [role, setRole] = useState<Role>(user?.role ?? preset?.role ?? 'writer');
   // an Editor's one job; only sent while the role is Editor (anyone else has none)
-  const [kind, setKind] = useState<EditorKind>((user && editorKindOf(user)) ?? 'short_form');
+  const [kind, setKind] = useState<EditorKind>((user && editorKindOf(user)) ?? preset?.editorKind ?? 'short_form');
   const editorKind = isEditor(role) ? kind : null;
   const [capacity, setCapacity] = useState(user?.capacityPerDay != null ? String(user.capacityPerDay) : '');
   const { settings } = useBoot();
@@ -467,7 +478,7 @@ function PersonDialog({ user, team = [], preset, onCreated, onClose }: { user?: 
   const ids = { n: useFieldId('n'), e: useFieldId('e'), r: useFieldId('r'), c: useFieldId('c'), p: useFieldId('p') };
   if (share) return <ShareDetails message={share} name={firstName(name)} onClose={onClose} />;
   return (
-    <Dialog open onClose={onClose} title={user ? `Edit ${user.name}` : preset ? `Give ${preset.name} site access` : 'Add a person'} size="narrow"
+    <Dialog open onClose={onClose} title={user ? `Edit ${user.name}` : preset ? (preset.access ? `Give ${preset.name} site access` : `Add ${preset.name} to the site`) : 'Add a person'} size="narrow"
       footer={<div className="form-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary pill" busy={save.isPending} onClick={() => save.mutate(undefined)} icon={user ? undefined : <Plus aria-hidden />}>{user ? 'Save' : 'Add person'}</Button></div>}>
       <form className="form" onSubmit={(e) => { e.preventDefault(); save.mutate(undefined); }}>
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
@@ -565,10 +576,31 @@ function EditorsPanel() {
       {q.data && !editors.length && !signedIn.length && <p className="muted" style={{ fontSize: 13 }}>No editors yet.</p>}
       <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>People here are kept with their city and working hours, and can’t sign in. To let one sign in and see the calendar and finished scripts, click Give site access: they move to the Team as an Editor. Only admins see this list.</p>
       {editing && <EditorDialog editor={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />}
-      {inviting && <PersonDialog preset={{ name: inviting.name, role: 'editor', city: inviting.city, timezone: inviting.timezone, hours: inviting.workHours }}
-        onCreated={() => { const id = inviting.id; api(`/api/editors/${id}?reason=access`, { method: 'DELETE' }).then(() => q.refetch(), () => {}); }} onClose={() => setInviting(null)} />}
+      {inviting && <AddEditorDialog name={inviting.name} city={inviting.city} timezone={inviting.timezone} hours={inviting.workHours} editorId={inviting.id} onClose={() => setInviting(null)} />}
     </Panel>
   );
+}
+
+/**
+ * A video editor added to the team, prefilled: their name, email, the Editor role as a Video editor, and their city,
+ * time zone and hours when known. With `editorId` it's Give site access (Settings → Editors, and the Editors tab for
+ * an Admin): once they're on the team, that entry leaves Settings → Editors. Every screen refreshes after each step.
+ */
+export function AddEditorDialog({ name, email, city, timezone, hours, editorId, onClose }: {
+  name: string; email?: string | null; city?: string | null; timezone?: string | null; hours?: [number, number] | null;
+  /** their entry in Settings → Editors (Give site access) */
+  editorId?: number | null;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const access = editorId != null;
+  const preset: PersonPreset = {
+    name, role: 'editor', editorKind: 'short_form', email: email ?? undefined,
+    city: city ?? undefined, timezone: timezone ?? undefined, hours: hours ?? undefined, access,
+  };
+  // they're on the team now, so their Settings → Editors entry goes (logged as given site access, not as removed)
+  const leaveList = () => { api(`/api/editors/${editorId}?reason=access`, { method: 'DELETE' }).then(() => qc.invalidateQueries(), () => {}); };
+  return <PersonDialog preset={preset} onCreated={access ? leaveList : undefined} onClose={onClose} />;
 }
 
 function EditorDialog({ editor, onClose }: { editor?: Editor; onClose: () => void }) {

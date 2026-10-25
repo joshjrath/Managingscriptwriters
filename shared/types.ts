@@ -1073,23 +1073,27 @@ export interface EditorPlate {
 
 /**
  * Why an editor's card needs fixing, one line each, ready to show:
- * - `not_on_site`: in Timeliner with videos, no site account with their Timeliner email ("Not on the site — add them
- *   in Settings → Team as an Editor with gus@…")
+ * - `not_on_site`: in Timeliner with videos (or a client's editor there with none yet: `EditingBoard.toAdd`), no site
+ *   account with their Timeliner email ("Not on the site — add them as an Editor with gus@…"; the Editors tab adds
+ *   them, prefilled)
  * - `no_site_access`: the same, but their name is in Settings → Editors (the list of editors who don't sign in), whose
- *   city, time zone and hours the card uses ("Not on the site — give them site access in Settings → Editors with gus@…")
+ *   city, time zone and hours the card uses ("Not on the site (they're in Settings → Editors) — give them site access
+ *   with gus@…")
+ * - `deactivated`: their Timeliner email is a deactivated account on the site ("Deactivated on the site as gus@… —
+ *   reactivate them in Settings → Team"); never offered to add, since that email is already on the team
  * - `email_differs`: on the site under the same name with another email ("Their email here (a@…) differs from
  *   Timeliner (b@…) — change one so they match"); their Timeliner work is on the card, but their taps (I'm on this)
  *   can't reach it until the emails match
  * - `nothing_assigned`: an editor on the site with nothing in Timeliner, a quiet note ("Nothing assigned in Timeliner
  *   (their Timeliner email must be a@…)")
  */
-export type EditorFlagKind = 'not_on_site' | 'no_site_access' | 'email_differs' | 'nothing_assigned';
+export type EditorFlagKind = 'not_on_site' | 'no_site_access' | 'deactivated' | 'email_differs' | 'nothing_assigned';
 export interface EditorFlag {
   kind: EditorFlagKind;
   text: string;
   /** their email in Timeliner (null when Timeliner has none, and for `nothing_assigned`) */
   timelinerEmail: string | null;
-  /** their email on the site (`email_differs`, `nothing_assigned`) */
+  /** their email on the site (`email_differs`, `deactivated`, `nothing_assigned`) */
   siteEmail: string | null;
 }
 
@@ -1138,6 +1142,11 @@ export interface EditorRow {
   workHours: [number, number] | null;
   /** outside their working hours right now (from their site profile, or from Settings → Editors when they aren't on the site) */
   offHours: boolean;
+  /**
+   * their entry in Settings → Editors (`no_site_access` only): Give site access takes it off that list once they're
+   * on the team. Their city, time zone and hours above come from it
+   */
+  editorId?: number;
   /** what they tapped on the site (always null when they aren't on the site under their Timeliner email) */
   focus: EditorFocus | null;
   /** what's next by deadline (revisions first) */
@@ -1151,6 +1160,33 @@ export interface EditorRow {
   scripts: ScriptDoc[];
   /** their videos, for the drill-down: everything open, plus approved in the last 7 days */
   videos: EditingVideo[];
+}
+
+/**
+ * Someone the Editors tab offers to add to the site who has no card: a client's editor in Timeliner (on its brand as
+ * an editor, assigned rather than automatic, still active, not a workspace admin, supervisor or guest) with no video
+ * assigned to them yet, and not on the site (no account with their Timeliner email, not even a deactivated one;
+ * nobody here by their name).
+ * Listed in "Fix these people", with what the Add dialog is prefilled with. Worked out on every load, never stored.
+ */
+export interface EditorToAdd {
+  /** stable and unique on the board: `m<memberId>` */
+  key: string;
+  /** their Timeliner member id */
+  memberId: string;
+  name: string;
+  /** their email in Timeliner (null when Timeliner has none) */
+  email: string | null;
+  /** the clients they're the editor of in Timeliner, as Editors by client names them */
+  clients: string[];
+  /** `not_on_site`, or `no_site_access` when their name is in Settings → Editors */
+  flag: EditorFlag;
+  /** from their Settings → Editors entry, when there is one */
+  city: string | null;
+  timezone: string | null;
+  workHours: [number, number] | null;
+  /** their Settings → Editors entry (`no_site_access`), for Give site access; else null */
+  editorId: number | null;
 }
 
 /** How fresh the copy of Timeliner is. */
@@ -1277,6 +1313,8 @@ export interface EditingBoard {
    * on the site. Kept for older screens: each of them now has a card in `editors`, flagged
    */
   unknownAssignees: { name: string; email: string | null; count: number }[];
+  /** a client's editors in Timeliner with nothing assigned yet who aren't on the site: no card, ready to add (by name) */
+  toAdd: EditorToAdd[];
 }
 
 /** An editor's own Home: their videos, straight from Timeliner. */

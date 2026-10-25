@@ -2160,6 +2160,15 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
 .ed-fix-who { display: inline-flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: var(--r-pill); background: var(--row); color: var(--text); font-weight: 600; overflow-wrap: anywhere; transition: background var(--t); }
 .ed-fix-who:hover { background: var(--btn); }
 .ed-fix-how { font-size: 12.5px; }
+/* a client's editor in Timeliner with no card yet: added from the line itself. One line a chip, the action beside the
+   name: the name and clients are cut short from the end (the clients first) */
+.ed-fix-sub { align-self: center; font-size: 12.5px; text-wrap: balance; }
+.ed-fix-add { gap: 0 0.35em; min-width: 0; max-width: 100%; border: 0; cursor: pointer; text-align: left; }
+.ed-fix-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-fix-act { flex: none; font-weight: 700; white-space: nowrap; }
+.ed-fix-who.quiet { font-weight: 500; color: var(--text-2); cursor: default; }
+.ed-fix-who.quiet .ed-fix-act { font-weight: inherit; }
+.ed-fix-who.quiet:hover { background: var(--row); }
 
 /* editors by client (below the roster): each client → its editor, its open videos, and a chip when it's split or some aren't assigned */
 .ed-clients { margin-top: var(--gap); }
