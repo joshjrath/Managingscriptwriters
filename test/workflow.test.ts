@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   allowedFrom, canSendDocument, checkAction, compressRanges, deriveStage, documentState, evenSplit, isAdmin, isManager, isNewWork, isNotMatched, milestone, newlyAdded, parseRanges, progressLabel,
-  splitAssignments, summarize, TIMELINER_APP, timelinerVideoUrl, type ScriptStatus,
+  splitAssignments, summarize, TIMELINER_APP, timelinerVideoUrl, writerHistory, type ScriptStatus,
 } from '../shared/workflow';
 import { makeClock } from '../shared/dates';
 import { parseEntry } from '../shared/parse';
@@ -231,5 +231,26 @@ describe('links into Timeliner', () => {
   });
   it('opens the app, not the home page, when it isn’t about one video', () => {
     expect(TIMELINER_APP).toBe('https://timeliner.io/app');
+  });
+});
+
+describe('who has written a client’s scripts before', () => {
+  const b = (id: number, writers: [number | null, string, number][]) => ({ id, title: `Batch ${id}`, draftDue: null, finalDue: `2026-10-${10 + id}`, writers: writers.map(([userId, name, count]) => ({ userId, name, count })) });
+  it('gives the newest batch’s split and everyone, most scripts first, leaving out who can’t write now', () => {
+    const h = writerHistory([
+      b(1, [[1, 'Sarah', 20], [2, 'Marcus', 11]]),
+      b(3, [[2, 'Marcus', 10], [9, 'Gone', 5], [null, 'Unassigned', 3]]),
+      b(2, [[1, 'Sarah', 25], [3, 'Lee', 4]]),
+    ], (id) => id !== 9);
+    expect(h.last).toEqual({ batchId: 3, title: 'Batch 3', date: '2026-10-13', writers: [{ userId: 2, name: 'Marcus', count: 10 }] });
+    expect(h.everyone).toEqual([
+      { userId: 1, name: 'Sarah', scripts: 45, batches: 2 },
+      { userId: 2, name: 'Marcus', scripts: 21, batches: 2 },
+      { userId: 3, name: 'Lee', scripts: 4, batches: 1 },
+    ]);
+  });
+  it('skips batches nobody still on the team wrote, and is empty for a new client', () => {
+    expect(writerHistory([b(1, [[1, 'Sarah', 5]]), b(2, [[9, 'Gone', 5]])], (id) => id !== 9).last?.batchId).toBe(1);
+    expect(writerHistory([], () => true)).toEqual({ last: null, everyone: [] });
   });
 });

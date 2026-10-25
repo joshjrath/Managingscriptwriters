@@ -480,6 +480,8 @@ a.dt-cap:hover { background: rgba(255, 255, 255, 0.1); color: var(--text); }
 .chip.salmon { --c: var(--salmon); }
 .chip.neutral { --c: var(--neutral); }
 .chip.tentative { --c: var(--tentative); }
+.writer-history { background: var(--row); border-radius: var(--r-row); padding: 10px 12px; margin-bottom: 10px; font-size: 13px; }
+.writer-history svg { vertical-align: -2px; }
 .item .chip, .panel .chip { max-width: 100%; }
 
 /* ── progress ──────────────────────────────────────────────────────────── */
