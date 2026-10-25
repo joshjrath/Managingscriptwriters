@@ -219,7 +219,7 @@ export async function loadBriefings(db: Db, where: { clientId?: number; batchId?
 
 interface ShootRow {
   id: number; client_id: number; client_name: string; title: string | null; start_date: ISODate; end_date: ISODate | null;
-  location: string | null; notes: string | null; cancelled_at: string | null; calendar_uid: string | null;
+  location: string | null; notes: string | null; cancelled_at: string | null; calendar_uid: string | null; scripts_required: boolean;
 }
 
 export async function loadShoots(db: Db, where: { clientId?: number; id?: number; from?: ISODate; to?: ISODate; activeClientsOnly?: boolean }): Promise<Shoot[]> {
@@ -231,7 +231,7 @@ export async function loadShoots(db: Db, where: { clientId?: number; id?: number
   if (where.to) { params.push(where.to); cond.push(`sh.start_date <= $${params.length}`); }
   if (where.activeClientsOnly) cond.push(`c.status <> 'archived'`);
   const rows = await db.query<ShootRow>(
-    `select sh.id, sh.client_id, c.name as client_name, sh.title, sh.start_date, sh.end_date, sh.location, sh.notes, sh.cancelled_at, sh.calendar_uid
+    `select sh.id, sh.client_id, c.name as client_name, sh.title, sh.start_date, sh.end_date, sh.location, sh.notes, sh.cancelled_at, sh.calendar_uid, c.scripts_required
        from shoots sh join clients c on c.id = sh.client_id
       ${cond.length ? 'where ' + cond.join(' and ') : ''}
       order by sh.start_date`,
@@ -248,7 +248,7 @@ export async function loadShoots(db: Db, where: { clientId?: number; id?: number
   }
   return rows.map((r) => ({
     id: r.id, clientId: r.client_id, clientName: r.client_name, title: r.title, startDate: r.start_date, endDate: r.end_date,
-    location: r.location, notes: r.notes, batchIds: batchIds.get(r.id) ?? [], cancelledAt: r.cancelled_at, calendarUid: r.calendar_uid,
+    location: r.location, notes: r.notes, batchIds: batchIds.get(r.id) ?? [], cancelledAt: r.cancelled_at, calendarUid: r.calendar_uid, scriptsRequired: r.scripts_required !== false,
   }));
 }
 

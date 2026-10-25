@@ -291,6 +291,7 @@ function EditClientDialog({ c, open, onClose, managers }: { c: ClientDetail; ope
   const [description, setDescription] = useState(c.description ?? '');
   const [brandVoice, setBrandVoice] = useState(c.brandVoice ?? '');
   const [guidance, setGuidance] = useState(c.guidance ?? '');
+  const [scriptsRequired, setScriptsRequired] = useState(c.scriptsRequired);
   // Mounted only while open, so the form starts from the client as it was then and a refetch never
   // wipes what's being typed. Saving sends only what was changed here, so it can't undo someone else's edit.
   const [base] = useState(c);
@@ -301,6 +302,7 @@ function EditClientDialog({ c, open, onClose, managers }: { c: ClientDetail; ope
     if (description !== (base.description ?? '')) body.description = description;
     if (brandVoice !== (base.brandVoice ?? '')) body.brandVoice = brandVoice;
     if (guidance !== (base.guidance ?? '')) body.guidance = guidance;
+    if (scriptsRequired !== base.scriptsRequired) body.scriptsRequired = scriptsRequired;
     return api(`/api/clients/${c.id}`, { method: 'PATCH', body });
   }, { onSuccess: () => { toast('Client updated'); onClose(); } });
   const f = save.error?.fields ?? {};
@@ -312,6 +314,7 @@ function EditClientDialog({ c, open, onClose, managers }: { c: ClientDetail; ope
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
         <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} /></Field>
         <Field label="Account lead" htmlFor={ids.o}><select className="select" id={ids.o} value={ownerId} onChange={(e) => setOwnerId(e.target.value ? Number(e.target.value) : '')}><option value="">No owner</option>{managers.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</select></Field>
+        <label className="check"><input type="checkbox" checked={!scriptsRequired} onChange={(e) => setScriptsRequired(!e.target.checked)} />No scripts needed: we film this client without scripts</label>
         <Field label="Description" optional htmlFor={ids.d}><textarea className="textarea" id={ids.d} value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
         <Field label="Brand voice" optional htmlFor={ids.v}><textarea className="textarea" id={ids.v} value={brandVoice} onChange={(e) => setBrandVoice(e.target.value)} /></Field>
         <Field label="Writing guidance" optional htmlFor={ids.g}><textarea className="textarea" id={ids.g} value={guidance} onChange={(e) => setGuidance(e.target.value)} style={{ minHeight: 160 }} /></Field>

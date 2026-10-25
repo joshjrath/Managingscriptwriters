@@ -6,16 +6,19 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../server/app';
 import type { Db } from '../server/db';
 import type { Ctx } from '../server/core';
-import { DEFAULT_RULES, estimateNextShoot, mergeShoots, shootPaces } from '../shared/dates';
+import { DEFAULT_RULES, estimateNextShoot, mergeShoots, shootGaps, shootPaces } from '../shared/dates';
 import type { CalendarEvent, ShootForecast } from '../shared/types';
 import { freshDb } from './db';
 
 const rules = { ...DEFAULT_RULES, dayMode: 'calendar' as const, draftOffsetDays: 5, finalOffsetDays: 3 };
 
 describe('pacing shoots', () => {
-  it('counts shoots within a week as one and leaves out shoots with no scripts', () => {
+  it('counts shoots within a week as one, and keeps shoots whose scripts aren’t known', () => {
     expect(mergeShoots([{ start: '2026-09-01', scripts: 20 }, { start: '2026-09-03', scripts: 11 }, { start: '2026-09-20', scripts: 0 }, { start: '2026-10-02', scripts: 40 }]))
-      .toEqual([{ start: '2026-09-01', scripts: 31 }, { start: '2026-10-02', scripts: 40 }]);
+      .toEqual([{ start: '2026-09-01', scripts: 31 }, { start: '2026-09-20', scripts: 0 }, { start: '2026-10-02', scripts: 40 }]);
+    // a gap after a shoot whose scripts aren't known says nothing about days per script
+    expect(shootPaces([{ start: '2026-09-01', scripts: 31 }, { start: '2026-09-20', scripts: 0 }, { start: '2026-10-02', scripts: 40 }])).toEqual([19 / 31]);
+    expect(shootGaps([{ start: '2026-09-01', scripts: 31 }, { start: '2026-09-20', scripts: 0 }, { start: '2026-10-02', scripts: 40 }])).toEqual([19, 12]);
   });
   it('is the days until the next shoot per script the first one had', () => {
     // 31 scripts lasted 31 days; 45 scripts lasted 90 days
@@ -24,16 +27,24 @@ describe('pacing shoots', () => {
   it('waits longer after a bigger shoot, and lands on a working day', () => {
     // 1 day a script: 31 scripts after Oct 2 → Mon Nov 2; 45 scripts → Mon Nov 16
     const past = [{ start: '2026-09-01', scripts: 31 }];
-    expect(estimateNextShoot([...past, { start: '2026-10-02', scripts: 31 }], [], rules)).toMatchObject({ shootDate: '2026-11-02', draftDue: '2026-10-28', finalDue: '2026-10-30', scripts: 31, basis: 'client', daysPerScript: 1 });
+    expect(estimateNextShoot([...past, { start: '2026-10-02', scripts: 31 }], [], rules)).toMatchObject({ shootDate: '2026-11-02', draftDue: '2026-10-28', finalDue: '2026-10-30', scripts: 31, kind: 'scripts', basis: 'client', pace: 1 });
     expect(estimateNextShoot([...past, { start: '2026-10-02', scripts: 45 }], [], rules)?.shootDate).toBe('2026-11-16');
     // 36 days after Oct 2 is Sat Nov 7: moved back to Fri Nov 6, never later
     expect(estimateNextShoot([...past, { start: '2026-10-02', scripts: 36 }], [], rules)?.shootDate).toBe('2026-11-06');
+  });
+  it('goes by the days between shoots when the last shoot’s scripts aren’t known', () => {
+    // a calendar-only shoot last (no scripts known): every 30 days, like the gaps before → Oct 2 + 30 = Sun Nov 1, so Fri Oct 30
+    expect(estimateNextShoot([{ start: '2026-08-03', scripts: 0 }, { start: '2026-09-02', scripts: 12 }, { start: '2026-10-02', scripts: 0 }], [], rules))
+      .toMatchObject({ shootDate: '2026-10-30', kind: 'gap', pace: 30, gaps: 2, scripts: 12 });
+    // a client filmed without scripts: the same
+    expect(estimateNextShoot([{ start: '2026-09-14', scripts: 0 }, { start: '2026-10-12', scripts: 0 }], [], rules)).toMatchObject({ shootDate: '2026-11-09', kind: 'gap', scripts: 0 });
   });
   it('uses the team’s pace for a client with one shoot, and gives up with no history', () => {
     // the median of 2, 3 and 4 days a script: 30 days after Oct 2 is Sun Nov 1, so Fri Oct 30
     expect(estimateNextShoot([{ start: '2026-10-02', scripts: 10 }], [2, 3, 4], rules)).toMatchObject({ shootDate: '2026-10-30', basis: 'team', gaps: 3 });
     expect(estimateNextShoot([{ start: '2026-10-02', scripts: 10 }], [], rules)).toBeNull();
     expect(estimateNextShoot([{ start: '2026-10-02', scripts: 0 }], [1], rules)).toBeNull();
+    expect(estimateNextShoot([], [1], rules)).toBeNull();
   });
 });
 
@@ -90,12 +101,13 @@ describe('next shoots to book', () => {
     expect(list.map((f) => f.clientName)).toEqual(['Beta', 'Acme']);
     // Acme: 31 scripts lasted 31 days, so 45 scripts after Oct 2 → Mon Nov 16, scripts due 3 days before
     expect(list.find((f) => f.clientId === acme)!.estimate).toMatchObject({
-      shootDate: '2026-11-16', finalDue: '2026-11-13', draftDue: '2026-11-11', scripts: 45, basis: 'client', late: false,
+      shootDate: '2026-11-16', finalDue: '2026-11-13', draftDue: '2026-11-11', scripts: 45, source: 'rule', late: false,
       writers: [{ writerId, name: 'Wes Writer', count: 45 }], unassigned: 0,
     });
     // Beta has had one shoot: the team's pace (Acme's 1 day a script; Gamma's next shoot hasn't happened, so it
     // has no gap yet) → 10 days after Oct 12 is Thu Oct 22, so its scripts were due Oct 19: it's behind
-    expect(list.find((f) => f.clientId === beta)!.estimate).toMatchObject({ shootDate: '2026-10-22', finalDue: '2026-10-19', basis: 'team', late: true });
+    expect(list.find((f) => f.clientId === beta)!.estimate).toMatchObject({ shootDate: '2026-10-22', finalDue: '2026-10-19', source: 'rule', late: true });
+    expect(list.find((f) => f.clientId === beta)!.estimate!.why).toMatch(/other clients’ shoots/);
     expect(list.find((f) => f.clientId === beta)!.lastShoot).toMatchObject({ startDate: '2026-10-12', scripts: 10 });
 
     // on the calendar, for managers only: the tentative shoot and the day its scripts are due

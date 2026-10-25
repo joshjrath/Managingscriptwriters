@@ -96,11 +96,11 @@ export function Overview() {
                         <div className="body">
                           <div className="title">{s.clientName}</div>
                           <div className="meta"><span>{fmtRange(s.startDate, s.endDate)}</span></div>
-                          <div className="meta num">{total ? `${ready} / ${total} drafts · ${delivered} delivered` : 'No scripts planned yet'}{s.batches.some((b) => b.progress.unassigned) ? ` · ${s.batches.reduce((n, b) => n + b.progress.unassigned, 0)} unassigned` : ''}</div>
+                          <div className="meta num">{total ? `${ready} / ${total} drafts · ${delivered} delivered` : s.scriptsRequired ? 'No scripts planned yet' : 'No scripts needed'}{s.batches.some((b) => b.progress.unassigned) ? ` · ${s.batches.reduce((n, b) => n + b.progress.unassigned, 0)} unassigned` : ''}</div>
                         </div>
                         <div className="side">
                           <Chip color={s.daysUntil <= 3 ? 'yellow' : 'plain'}>{s.daysUntil === 0 ? 'Today' : s.daysUntil === 1 ? 'Tomorrow' : `In ${s.daysUntil} days`}</Chip>
-                          {!s.batches.length && isManager(me.role) && <button type="button" className="btn sm salmon" onClick={(e) => { e.stopPropagation(); openNew('batch', { clientId: s.clientId, shootId: s.id }); }}>Add scripts</button>}
+                          {!s.batches.length && s.scriptsRequired && isManager(me.role) && <button type="button" className="btn sm salmon" onClick={(e) => { e.stopPropagation(); openNew('batch', { clientId: s.clientId, shootId: s.id }); }}>Add scripts</button>}
                         </div>
                       </div>
                     );
@@ -124,7 +124,7 @@ export function Overview() {
                 {d.scope === 'mine' ? <TodoPanel title="Your to-dos" /> : <TodoPanel all title="Team to-dos" sub="open, for everyone" />}
             </div>
           </div>
-          {isManager(me.role) && <CalendarShootsPanel siteShoots={d.upcomingShoots.filter((s) => !s.batches.length)} batches={d.activeBatches} />}
+          {isManager(me.role) && <CalendarShootsPanel siteShoots={d.upcomingShoots.filter((s) => !s.batches.length && s.scriptsRequired)} batches={d.activeBatches} />}
           {isManager(me.role) && <ShootForecastPanel />}
           <div className="dash ov-dash">
               <Panel title={d.scope === 'mine' ? 'Your workload' : 'Writer workload'}>

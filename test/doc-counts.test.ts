@@ -100,6 +100,7 @@ describe('the next shoot goes by what its document holds', () => {
 
     let f = await forecast();
     expect(f.documents).toEqual({ unread: 1, canRead: true });
+    expect(f.estimates).toEqual({ stale: 0, canEstimate: false });
     expect(f.forecasts[0].lastShoot).toMatchObject({ scripts: 2, fromDocument: false });
 
     const r = await send('POST', '/api/shoot-forecast/read-documents', admin);

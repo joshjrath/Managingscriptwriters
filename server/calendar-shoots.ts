@@ -62,7 +62,9 @@ export async function findCalendarShoots(ctx: Ctx, opts: { includeDismissed?: bo
   const shootsOnCal = events.filter((e) => SHOOT_WORDS.test(e.title));
   if (!shootsOnCal.length) return [];
   const marks = new Map((await db.query<{ uid: string; dismissed_at: string | null }>(`select uid, dismissed_at from calendar_shoot_marks`)).map((m) => [m.uid, m]));
-  const clients = await db.query<{ id: number; name: string }>(`select id, name from clients where status <> 'archived'`);
+  const clients = await db.query<{ id: number; name: string; scripts_required: boolean }>(`select id, name, scripts_required from clients where status <> 'archived'`);
+  // clients filmed without scripts never need planning here
+  const noScripts = new Set(clients.filter((c) => c.scripts_required === false).map((c) => c.id));
   const siteShoots = (await loadShoots(db, { from: addDays(today, -2), activeClientsOnly: true })).filter((s) => !s.cancelledAt);
   const { summaries } = await loadBatches(ctx, {}, clock);
   const day = (at: string) => nowInZone(clock.timezone, new Date(at)).date;
@@ -75,7 +77,7 @@ export async function findCalendarShoots(ctx: Ctx, opts: { includeDismissed?: bo
     const candidates = matchClients(`${e.title} ${e.location ?? ''}`, clients, e.feed_name);
     // a shoot planned from this very event wins; otherwise the site's shoot for one of those clients
     // on the same days (a day either side). Without a client we don't guess.
-    let client = candidates[0] ?? null;
+    let client: { id: number; name: string } | null = candidates[0] ?? null;
     let shoot: (typeof siteShoots)[number] | undefined = siteShoots.find((x) => x.calendarUid === e.uid);
     let batches: typeof summaries = [];
     if (shoot) { client = { id: shoot.clientId, name: shoot.clientName }; batches = summaries.filter((b) => b.shootId === shoot!.id); }
@@ -95,7 +97,7 @@ export async function findCalendarShoots(ctx: Ctx, opts: { includeDismissed?: bo
     const unassigned = batches.reduce((n, b) => n + b.progress.unassigned, 0);
     const total = batches.reduce((n, b) => n + b.progress.total, 0);
     const status: CalendarShoot['status'] | null = !shoot && !batches.length ? 'no_shoot' : !batches.length || !total ? 'no_scripts' : unassigned ? 'unassigned' : null;
-    if (!status) continue;
+    if (!status || (client && noScripts.has(client.id))) continue;
     // start from what this client had last time
     const last = client ? summaries.filter((b) => b.clientId === client!.id && b.progress.total > 0).sort((a, b) => b.id - a.id)[0] : undefined;
     const suggested = last ? {

@@ -338,7 +338,7 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
         if (!e || (q.clientId && f.clientId !== q.clientId) || (q.writerId && !e.writers.some((w) => w.writerId === q.writerId))) continue;
         const base = { clientName: f.clientName, batchId: null, shootId: null, overdue: false, complete: false };
         if (within(e.shootDate, e.shootDate)) events.push({ ...base, id: `t${f.clientId}`, type: 'tentative', start: e.shootDate, end: e.shootDate, title: 'Tentative shoot', tentative: { kind: 'shoot', forecast: f } });
-        if (within(e.finalDue, e.finalDue)) events.push({ ...base, id: `ts${f.clientId}`, type: 'tentative', start: e.finalDue, end: e.finalDue, title: `${e.scripts} scripts due (estimate)`, overdue: e.late, tentative: { kind: 'scripts', forecast: f } });
+        if (e.finalDue && within(e.finalDue, e.finalDue)) events.push({ ...base, id: `ts${f.clientId}`, type: 'tentative', start: e.finalDue, end: e.finalDue, title: `${e.scripts ? plural(e.scripts, 'script') : 'Scripts'} due (estimate)`, overdue: e.late, tentative: { kind: 'scripts', forecast: f } });
       }
     }
     events.push(...(await syncedEvents(me, q.from, q.to, clock.today)));
