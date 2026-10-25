@@ -345,6 +345,8 @@ export interface Shoot {
   cancelledAt: string | null;
   /** the synced-calendar event it was planned from */
   calendarUid: string | null;
+  /** false for a client the team films without scripts: the shoot needs no batch */
+  scriptsRequired: boolean;
 }
 
 /** Editors' view of a shoot: are its scripts ready to cut from? */
@@ -424,6 +426,8 @@ export interface ClientSummary {
 export interface ClientDetail extends ClientSummary {
   brandVoice: string | null;
   guidance: string | null;
+  /** false for a client the team films without scripts */
+  scriptsRequired: boolean;
   briefings: Briefing[];
   resources: Resource[];
   shoots: Shoot[];
@@ -527,7 +531,7 @@ export interface Dashboard {
 
 export interface CalendarEvent {
   id: string;
-  type: 'writing' | 'draft' | 'final' | 'shoot' | 'external';
+  type: 'writing' | 'draft' | 'final' | 'shoot' | 'external' | 'tentative';
   start: ISODate;
   end: ISODate;
   title: string;
@@ -538,6 +542,8 @@ export interface CalendarEvent {
   complete: boolean;
   /** an event from a synced calendar (Google Calendar) */
   external?: ExternalEventInfo;
+  /** a tentative shoot, or the date its scripts are due (managers only): an estimate, not booked */
+  tentative?: { kind: 'shoot' | 'scripts'; forecast: ShootForecast };
 }
 
 export interface ExternalEventInfo {
@@ -787,6 +793,57 @@ export interface CalendarShoot {
   total: number;
   /** what this client's last batch had, to start from */
   suggested: { count: number; split: { writerId: number; name: string; count: number }[] } | null;
+}
+
+/**
+ * A client whose last shoot is over with nothing booked after it (on the site or a synced calendar): when the next
+ * shoot will probably be, and which scripts that needs from whom. Claude's estimate, a manager's change of it, or
+ * the site's own rule while neither is there.
+ */
+export interface ShootForecast {
+  clientId: number;
+  clientName: string;
+  /** false: filmed without scripts, so the estimate has a date and no scripts */
+  scriptsRequired: boolean;
+  /** past shoots known, on the site and on calendars */
+  pastShoots: number;
+  /**
+   * the last shoot that's over (`id` null when it's only on a calendar): its scripts as its document holds them
+   * when Claude has counted them (`fromDocument`), else as many as are on the site (`siteScripts`)
+   */
+  lastShoot: { id: number | null; title: string | null; startDate: ISODate; endDate: ISODate | null; onSite: boolean; scripts: number; siteScripts: number; fromDocument: boolean };
+  /** null when there isn't enough history yet for any estimate */
+  estimate: {
+    shootDate: ISODate;
+    /** null for a client without scripts */
+    draftDue: ISODate | null;
+    finalDue: ISODate | null;
+    /** scripts the shoot will need; null without scripts (or when none are known) */
+    scripts: number | null;
+    /** ai: Claude's · manager: changed by a manager · rule: the site's own, until Claude answers */
+    source: 'ai' | 'manager' | 'rule';
+    confidence: 'high' | 'medium' | 'low' | null;
+    /** what it's based on, in a sentence or two */
+    why: string;
+    /** Claude is asked again: the history changed */
+    updating: boolean;
+    /** last time's writers, each with their share of the scripts, and when to start writing them */
+    writers: { writerId: number; name: string; count: number; startBy: ISODate | null }[];
+    /** scripts with no writer from last time (or whose writer can't take them now) */
+    unassigned: number;
+    /** final delivery (or the shoot, without scripts) would already be past */
+    late: boolean;
+  } | null;
+}
+
+export interface ShootForecasts {
+  forecasts: ShootForecast[];
+  /** estimates a manager denied: hidden until the client shoots again, or brought back */
+  denied: ShootForecast[];
+  /** documents of the shoots they count from that Claude hasn't read yet, and whether the server can read them (an AI key) */
+  documents: { unread: number; canRead: boolean };
+  /** clients Claude has yet to estimate (new, or their history changed), and whether it can */
+  estimates: { stale: number; canEstimate: boolean };
 }
 
 // ── Timeliner ─────────────────────────────────────────────────────────────

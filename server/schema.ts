@@ -736,7 +736,41 @@ alter table settings add column one_editor_since date not null default '2026-10-
   // 36 · the team's Needs review is Timeliner's inProgress step group, whose exact step name and the time a video
   // moved there weren't read before (it counted as still to edit): videos there read them on the next reads
   rereadNeedsReview,
-  // 37 · Thumbnail Studio. An editor's one job (editor_kind: short_form cuts the videos, thumbnail makes thumbnails;
+  // 37 · how many scripts a shoot's document holds, read once by Claude (the scripts PDF from Timeliner, or a
+  // document a writer sent: an uploaded file or a Google Doc/Drive link), for estimating the next shoot. Keyed by the
+  // document itself, so a new version is read again; a document that couldn't be read keeps why (scripts is null)
+  `
+create table document_counts (
+  key text primary key,
+  batch_id bigint not null references batches(id) on delete cascade,
+  scripts int,
+  note text,
+  read_at timestamptz not null default now()
+);
+create index document_counts_batch_idx on document_counts (batch_id);
+`,
+  // 38 · clients the team films but doesn't write scripts for (still estimated a next shoot, with no scripts due),
+  // and each client's next-shoot estimate: Claude's (or the rule's) date and script count, kept so it's asked again
+  // only when the history it came from changes, and a manager's change or denial of it. A row is for the shoot after
+  // `after_date` (the last shoot that's over); a newer shoot starts a fresh estimate
+  `
+alter table clients add column scripts_required boolean not null default true;
+create table shoot_estimates (
+  client_id bigint primary key references clients(id) on delete cascade,
+  after_date date not null,
+  basis text not null,
+  shoot_date date,
+  scripts int,
+  confidence text check (confidence in ('high', 'medium', 'low')),
+  reasoning text,
+  source text not null check (source in ('ai', 'manager')),
+  decision text check (decision in ('changed', 'denied')),
+  decided_by bigint references users(id),
+  decided_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+`,
+  // 39 · Thumbnail Studio. An editor's one job (editor_kind: short_form cuts the videos, thumbnail makes thumbnails;
   // null on an editor is a video editor, so nobody needs a backfill), allowed only while the role is editor, so
   // every write that changes a role must set it too. Thumbnail briefs a manager hands out (the video's title is
   // typed: scripts have no titles), the designer's rounds of options (an unsent round is their private tray, one

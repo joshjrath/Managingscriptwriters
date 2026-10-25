@@ -50,6 +50,8 @@ const clientPatch = z.object({
   description: zs.text(),
   brandVoice: zs.text(),
   guidance: zs.text(),
+  /** false: the team films this client without scripts (no script reminders; a next shoot with no scripts due) */
+  scriptsRequired: z.boolean().optional(),
 });
 
 const resourceCreate = z.object({
@@ -147,7 +149,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const [summary] = (await clientSummaries(ctx, 'all')).filter((c) => c.id === id);
     if (!summary) throw notFound('Client');
-    const c = await db.one<{ brand_voice: string | null; guidance: string | null }>(`select brand_voice, guidance from clients where id = $1`, [id]);
+    const c = await db.one<{ brand_voice: string | null; guidance: string | null; scripts_required: boolean }>(`select brand_voice, guidance, scripts_required from clients where id = $1`, [id]);
     const clock = await clockFor(ctx);
     const [briefings, resources, shoots, batches, activity] = await Promise.all([
       loadBriefings(db, { clientId: id }),
@@ -158,7 +160,7 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     ]);
     return {
       ...summary, description: summary.status === 'prospect' && !isManager(me.role) ? null : summary.description,
-      brandVoice: c?.brand_voice ?? null, guidance: c?.guidance ?? null,
+      brandVoice: c?.brand_voice ?? null, guidance: c?.guidance ?? null, scriptsRequired: c?.scripts_required !== false,
       briefings, resources: resources.filter((r) => !r.briefingId), shoots,
       // editors get the brand material, not the batches; the team's internal history is for managers
       batches: isEditor(me.role) ? [] : batches.summaries, activity: isManager(me.role) ? activity : [],
@@ -213,11 +215,12 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     if (input.description !== undefined) set.description = input.description;
     if (input.brandVoice !== undefined) set.brand_voice = input.brandVoice;
     if (input.guidance !== undefined) set.guidance = input.guidance;
+    if (input.scriptsRequired !== undefined) set.scripts_required = input.scriptsRequired;
     const keys = Object.keys(set);
     if (!keys.length) return { ok: true };
     const r = await db.one(`update clients set ${keys.map((k, i) => `${k} = $${i + 2}`).join(', ')}, updated_at = now() where id = $1 returning id`, [id, ...keys.map((k) => set[k])]);
     if (!r) throw notFound('Client');
-    await logActivity(db, { actor: me, action: 'client.updated', entityType: 'client', entityId: id, clientId: id, summary: `Updated client ${keys.map((k) => k.replace('_', ' ').replace(' id', '')).join(', ')}` });
+    await logActivity(db, { actor: me, action: 'client.updated', entityType: 'client', entityId: id, clientId: id, summary: input.scriptsRequired !== undefined && keys.length === 1 ? (input.scriptsRequired ? 'Scripts needed again for this client' : 'Marked as no scripts needed: shoots only') : `Updated client ${keys.map((k) => k.replace('_', ' ').replace(' id', '')).join(', ')}` });
     return { ok: true };
   });
 

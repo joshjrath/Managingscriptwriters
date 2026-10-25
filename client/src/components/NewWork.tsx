@@ -17,14 +17,14 @@ const withWeekend = (help: string | undefined, d: string | null | undefined) => 
   const w = d ? weekendName(d) : null;
   return [help, w && `Falls on a ${w}.`].filter(Boolean).join(' · ') || undefined;
 };
-import { canWrite, evenSplit, isManager, ROLE_LABEL } from '../../../shared/workflow';
+import { canWrite, evenSplit, isManager, ROLE_LABEL, scaleSplit, writerHistory } from '../../../shared/workflow';
 import { fmtBytes, fmtDate, fmtLong, fmtRange, plural } from '../../../shared/format';
 import { parseEntry, type ParsedEntry } from '../../../shared/parse';
 import type { BatchSummary, ClientDetail, Priority, ResourceCategory } from '../../../shared/types';
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
 
 export type NewWorkTab = 'notes' | 'quick' | 'shoot' | 'batch' | 'client';
-export interface NewWorkPreset { prospect?: boolean; title?: string; clientId?: number; shootId?: number; text?: string; start?: ISODate; end?: ISODate | null; count?: number; split?: SplitPart[]; newClientName?: string; calendarUid?: string }
+export interface NewWorkPreset { prospect?: boolean; title?: string; clientId?: number; shootId?: number; text?: string; start?: ISODate; end?: ISODate | null; count?: number; split?: SplitPart[]; newClientName?: string; calendarUid?: string; noScripts?: boolean }
 
 interface Created {
   kind: 'shoot' | 'batch' | 'client';
@@ -172,6 +172,48 @@ export function SplitEditor({ total, parts, onChange, error }: { total: number; 
         {over && <span className="red">Assigned more scripts than the batch has</span>}
       </div>
       {error && <span className="err" role="alert" style={{ color: '#FF9C94', fontSize: 12.5, fontWeight: 600 }}>{error}</span>}
+    </div>
+  );
+}
+
+/**
+ * Who has written this client's scripts before, above the writers: last time's split, with "Use these writers" (each
+ * keeps their share of this batch's count), and everyone who has, to add with one click.
+ */
+function WriterHistory({ client, total, parts, onChange, onCount }: { client: ClientDetail | undefined; total: number; parts: SplitPart[]; onChange: (p: SplitPart[]) => void; onCount: (n: number) => void }) {
+  const { users, clock } = useBoot();
+  const h = useMemo(() => writerHistory(client?.batches ?? [], (id) => users.some((u) => u.id === id && u.active && canWrite(u.role))), [client, users]);
+  if (!client || !h.last) return null;
+  const last = h.last;
+  const chosen = new Set(parts.map((p) => p.writerId).filter((x) => x !== ''));
+  const useLast = () => {
+    // no count yet: take last time's as well
+    if (total <= 0) onCount(last.writers.reduce((n, w) => n + w.count, 0));
+    const counts = total > 0 ? scaleSplit(last.writers.map((w) => w.count), total) : last.writers.map((w) => w.count);
+    onChange(last.writers.map((w, i) => ({ writerId: w.userId, count: counts[i] })).filter((p) => p.count > 0));
+  };
+  const add = (userId: number) => {
+    const assigned = parts.reduce((n, p) => n + (Number(p.count) || 0), 0);
+    const kept = parts.filter((p) => p.writerId !== '');
+    onChange([...kept, { writerId: userId, count: total > assigned ? total - assigned : '' }]);
+  };
+  const same = last.writers.length === chosen.size && last.writers.every((w) => chosen.has(w.userId));
+  return (
+    <div className="writer-history">
+      <div className="row-flex s2" style={{ alignItems: 'center' }}>
+        <span><Users size={14} aria-hidden /> <b>Last time for {client.name}</b> <span className="muted">({last.title}{last.date ? ` · ${fmtDate(last.date, clock.today)}` : ''})</span>: {last.writers.map((w) => `${w.name.split(' ')[0]} ${w.count}`).join(', ')}</span>
+        {!same && <Button variant="sm" onClick={useLast}>Use these writers</Button>}
+      </div>
+      {h.everyone.length > 0 && (
+        <div className="row-flex s2" style={{ alignItems: 'center', marginTop: 6 }}>
+          <span className="muted">Has written for them:</span>
+          {h.everyone.map((w) => (
+            <button key={w.userId} type="button" className="btn sm ghost" disabled={chosen.has(w.userId)} title={chosen.has(w.userId) ? 'Already writing this batch' : `Add ${w.name}`} onClick={() => add(w.userId)}>
+              {!chosen.has(w.userId) && <Plus aria-hidden />}{w.name.split(' ')[0]} <span className="muted">· {plural(w.scripts, 'script')}, {plural(w.batches, 'batch', 'batches')}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -392,7 +434,8 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   const [end, setEnd] = useState<string>(p?.end ?? '');
   const [count, setCount] = useState<number | ''>(p?.count ?? '');
   // scripts can be planned later, when the count and writers are known
-  const [later, setLater] = useState(false);
+  // (a client filmed without scripts starts there: just the shoot)
+  const [later, setLater] = useState(!!p?.noScripts);
   const [parts, setParts] = useState<SplitPart[]>(p?.split ?? [{ writerId: me.role === 'writer' ? me.id : '', count: '' }]);
   const [title, setTitle] = useState(p?.title ?? '');
   const [batchTitle, setBatchTitle] = useState('');
@@ -498,7 +541,7 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
         </div>
         {!later && <Field label="Scripts needed" htmlFor={ids.count} error={f['batch.targetCount']} help="Writers can be assigned now or later."><input className="input num" type="number" min={1} max={500} inputMode="numeric" value={count} onChange={(e) => setCount(e.target.value === '' ? '' : Number(e.target.value))} {...inputProps(ids.count, f['batch.targetCount'])} /></Field>}
         <div className="field full"><span className="lbl">{later ? 'Deadlines, once scripts are added' : 'Deadlines'}</span><DeadlinePreview start={start as ISODate} draftOverride={draftOverride as ISODate} finalOverride={finalOverride as ISODate} draftFollowsFinal={draftFollows && !!finalOverride} /></div>
-        {!later && <div className="field full"><span className="lbl">Writers <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional — assign later if you’re not sure</span></span><SplitEditor total={Number(count) || 0} parts={parts} onChange={setParts} error={f['batch.split']} /></div>}
+        {!later && <div className="field full"><span className="lbl">Writers <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional — assign later if you’re not sure</span></span><WriterHistory client={client.data} total={Number(count) || 0} parts={parts} onChange={setParts} onCount={setCount} /><SplitEditor total={Number(count) || 0} parts={parts} onChange={setParts} error={f['batch.split']} /></div>}
       </div>
       <div className="field"><span className="lbl">Recording & files <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional</span></span><AttachmentsSection value={attach} onChange={setAttach} errors={f} /></div>
       {clientId !== '' && !later && <div className="field"><span className="lbl">Client resources for the writers <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional · they get these with the batch</span></span><ResourcePicker client={client.data} value={resourceIds} onChange={setResourceIds} /></div>}
@@ -613,7 +656,7 @@ function BatchForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
         <Field label={shoot ? 'Final delivery (override)' : 'Final delivery to Timeliner'} optional={!!shoot} htmlFor={ids.final} error={f.finalDue} help={withWeekend(auto && !final ? `${fmtDate(auto.finalDue)} · ${auto.finalRule}` : undefined, final || auto?.finalDue)}>
           <input className="input" type="date" value={final} onChange={(e) => { const v = e.target.value; setFinal(v); if (draftFollows) setDraft(v ? draftFromFinal(v as ISODate, settings).date : ''); }} {...inputProps(ids.final, f.finalDue)} />
         </Field>
-        <div className="field full"><span className="lbl">Writers</span><SplitEditor total={Number(count) || 0} parts={parts} onChange={setParts} error={f.split} /></div>
+        <div className="field full"><span className="lbl">Writers</span><WriterHistory client={client.data} total={Number(count) || 0} parts={parts} onChange={setParts} onCount={setCount} /><SplitEditor total={Number(count) || 0} parts={parts} onChange={setParts} error={f.split} /></div>
       </div>
       <div className="field"><span className="lbl">Recording & files <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional</span></span><AttachmentsSection value={attach} onChange={setAttach} errors={f} /></div>
       {clientId !== '' && <div className="field"><span className="lbl">Client resources for the writers <span className="opt" style={{ color: 'var(--text-2)', fontWeight: 500, fontSize: 12 }}>optional · they get these with the batch</span></span><ResourcePicker client={client.data} value={resourceIds} onChange={setResourceIds} /></div>}

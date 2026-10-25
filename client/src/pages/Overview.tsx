@@ -1,6 +1,7 @@
 // Overview: the operations dashboard. The four summary cards, work due by day
 // and upcoming shoots come first; then what needs attention (with today and
-// the team's to-dos beside it) and shoots to plan; then writer workload and
+// the team's to-dos beside it), shoots to plan and the next shoots to book
+// (estimated for clients with nothing booked); then writer workload and
 // recent deliveries; active batches and writing progress fold away under
 // More. Every number is derived from script records.
 
@@ -14,6 +15,7 @@ import { isManager, ROLE_LABEL, scriptsLabel } from '../../../shared/workflow';
 import { PipLegend, TodayBump, WritingFeed } from '../components/WritingPulse';
 import { TodoPanel } from '../components/Todos';
 import { CalendarShootsPanel } from '../components/CalendarShoots';
+import { ShootForecastPanel } from '../components/ShootForecast';
 import { TodayPill } from '../components/TodayPill';
 import { StatCards } from '../components/StatCards';
 import { PageHeader, useBoot, useNewWork, useDisplayTz } from '../components/Shell';
@@ -94,11 +96,11 @@ export function Overview() {
                         <div className="body">
                           <div className="title">{s.clientName}</div>
                           <div className="meta"><span>{fmtRange(s.startDate, s.endDate)}</span></div>
-                          <div className="meta num">{total ? `${ready} / ${total} drafts · ${delivered} delivered` : 'No scripts planned yet'}{s.batches.some((b) => b.progress.unassigned) ? ` · ${s.batches.reduce((n, b) => n + b.progress.unassigned, 0)} unassigned` : ''}</div>
+                          <div className="meta num">{total ? `${ready} / ${total} drafts · ${delivered} delivered` : s.scriptsRequired ? 'No scripts planned yet' : 'No scripts needed'}{s.batches.some((b) => b.progress.unassigned) ? ` · ${s.batches.reduce((n, b) => n + b.progress.unassigned, 0)} unassigned` : ''}</div>
                         </div>
                         <div className="side">
                           <Chip color={s.daysUntil <= 3 ? 'yellow' : 'plain'}>{s.daysUntil === 0 ? 'Today' : s.daysUntil === 1 ? 'Tomorrow' : `In ${s.daysUntil} days`}</Chip>
-                          {!s.batches.length && isManager(me.role) && <button type="button" className="btn sm salmon" onClick={(e) => { e.stopPropagation(); openNew('batch', { clientId: s.clientId, shootId: s.id }); }}>Add scripts</button>}
+                          {!s.batches.length && s.scriptsRequired && isManager(me.role) && <button type="button" className="btn sm salmon" onClick={(e) => { e.stopPropagation(); openNew('batch', { clientId: s.clientId, shootId: s.id }); }}>Add scripts</button>}
                         </div>
                       </div>
                     );
@@ -122,7 +124,8 @@ export function Overview() {
                 {d.scope === 'mine' ? <TodoPanel title="Your to-dos" /> : <TodoPanel all title="Team to-dos" sub="open, for everyone" />}
             </div>
           </div>
-          {isManager(me.role) && <CalendarShootsPanel siteShoots={d.upcomingShoots.filter((s) => !s.batches.length)} batches={d.activeBatches} />}
+          {isManager(me.role) && <CalendarShootsPanel siteShoots={d.upcomingShoots.filter((s) => !s.batches.length && s.scriptsRequired)} batches={d.activeBatches} />}
+          {isManager(me.role) && <ShootForecastPanel />}
           <div className="dash ov-dash">
               <Panel title={d.scope === 'mine' ? 'Your workload' : 'Writer workload'}>
                 {!d.workload.length ? <Empty boxed title="No writers yet"><Link className="link" to="/settings#team">Add your team in Settings → Team</Link>.</Empty> : (

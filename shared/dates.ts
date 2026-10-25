@@ -306,3 +306,101 @@ export function suggestStart(draftDue: ISODate, scripts: number, perDay: number,
   }
   return d;
 }
+
+// ── the next shoot, estimated ────────────────────────────────────────────
+
+/** A shoot that has happened, with how many scripts it had (0 when none are known: a shoot only on a calendar). */
+export interface PastShoot { start: ISODate; scripts: number }
+
+/** Shoots this close together are one shoot for pacing (two days of the same shoot, or a pick-up day). */
+export const SAME_SHOOT_DAYS = 7;
+/** How many of the latest gaps between shoots set the pace. */
+export const PACE_GAPS = 4;
+
+export function median(xs: number[]): number | null {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+/** A client's shoots, oldest first, with shoots within `SAME_SHOOT_DAYS` of each other merged into one (their scripts added up). */
+export function mergeShoots(shoots: PastShoot[]): PastShoot[] {
+  const out: PastShoot[] = [];
+  for (const s of [...shoots].sort((a, b) => a.start.localeCompare(b.start))) {
+    const last = out[out.length - 1];
+    if (last && diffDays(s.start, last.start) < SAME_SHOOT_DAYS) last.scripts += s.scripts;
+    else out.push({ ...s });
+  }
+  return out;
+}
+
+/**
+ * How many days one script lasted between each shoot and the next: the days until the next shoot divided by the
+ * scripts the first one had. 31 scripts and the next shoot 31 days later is 1 day a script. Only gaps after a shoot
+ * whose scripts are known; the latest `PACE_GAPS`, oldest first.
+ */
+export function shootPaces(shoots: PastShoot[]): number[] {
+  const merged = mergeShoots(shoots);
+  const out: number[] = [];
+  for (let i = 1; i < merged.length; i++) if (merged[i - 1].scripts > 0) out.push(diffDays(merged[i].start, merged[i - 1].start) / merged[i - 1].scripts);
+  return out.slice(-PACE_GAPS);
+}
+
+/** Days between each shoot and the next, whatever their scripts: the latest `PACE_GAPS`, oldest first. */
+export function shootGaps(shoots: PastShoot[]): number[] {
+  const merged = mergeShoots(shoots);
+  return merged.slice(1).map((s, i) => diffDays(s.start, merged[i].start)).slice(-PACE_GAPS);
+}
+
+export interface ShootEstimate {
+  /** the tentative shoot date */
+  shootDate: ISODate;
+  draftDue: ISODate;
+  finalDue: ISODate;
+  /** scripts expected: as many as the last shoot whose scripts are known */
+  scripts: number;
+  /**
+   * scripts: the last shoot's scripts times the days a script lasts (this client's gaps, or the whole team's when
+   * the client has had only one shoot) · gap: the usual days between this client's shoots (no scripts known for the last one)
+   */
+  kind: 'scripts' | 'gap';
+  /** days one script lasts (kind scripts), or the usual days between shoots (kind gap) */
+  pace: number;
+  basis: 'client' | 'team';
+  /** how many gaps the pace comes from */
+  gaps: number;
+  /** the shoot it counts from (the last one) */
+  from: PastShoot;
+}
+
+/**
+ * The next shoot, estimated from the client's past shoots. When the last shoot's scripts are known it's that shoot
+ * plus its scripts times the days one script has lasted between this client's shoots, so a shoot with 45 scripts
+ * waits longer than one with 31 (the team's pace, `teamPaces`, when the client has no such gap yet). Otherwise it's
+ * the last shoot plus the usual days between this client's shoots. Moved back to a working day, never later, and
+ * its script deadlines follow the usual rules. Null without enough history.
+ */
+export function estimateNextShoot(shoots: PastShoot[], teamPaces: number[], rules: DeadlineRules): ShootEstimate | null {
+  const merged = mergeShoots(shoots);
+  const from = merged[merged.length - 1];
+  if (!from) return null;
+  const scripts = [...merged].reverse().find((s) => s.scripts > 0)?.scripts ?? 0;
+  const own = shootPaces(shoots);
+  const perScript = from.scripts > 0 ? median(own.length ? own : teamPaces) : null;
+  const gaps = shootGaps(shoots);
+  const gap = median(gaps);
+  let kind: ShootEstimate['kind'];
+  let pace: number;
+  let days: number;
+  if (perScript != null && perScript > 0) { kind = 'scripts'; pace = perScript; days = perScript * from.scripts; }
+  else if (gap != null && gap > 0) { kind = 'gap'; pace = gap; days = gap; }
+  else return null;
+  let shootDate = addDays(from.start, Math.max(1, Math.round(days)));
+  if (rules.workingDays.length) while (!rules.workingDays.includes(weekday(shootDate))) shootDate = addDays(shootDate, -1);
+  const d = computeDeadlines(shootDate, rules);
+  return {
+    shootDate, draftDue: d.draftDue, finalDue: d.finalDue, scripts, kind, pace: Math.round(pace * 100) / 100,
+    basis: kind === 'scripts' && !own.length ? 'team' : 'client', gaps: kind === 'scripts' ? (own.length || teamPaces.length) : gaps.length, from,
+  };
+}

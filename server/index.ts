@@ -13,6 +13,8 @@ import { startCalendarSync } from './calendar-feeds';
 import { connectOnStart, timelinerClient } from './timeliner';
 import { startTimelinerSync } from './editing';
 import { seedDemo } from './seed-demo';
+import { claudeScriptCounter } from './doc-counts';
+import { claudeShootEstimator } from './shoot-estimator';
 import { claudeNotesReader } from './notes-import';
 import type { Ctx } from './core';
 
@@ -43,6 +45,9 @@ async function main() {
     setupHint,
     // paste-notes import reads notes with Claude when an API key is configured
     notesReader: config.anthropicApiKey ? claudeNotesReader() : null,
+    // and counts the scripts in shoots' documents, for estimating the next shoot
+    scriptCounter: config.anthropicApiKey ? claudeScriptCounter() : null,
+    shootEstimator: config.anthropicApiKey ? claudeShootEstimator() : null,
     remindersEnabled: config.remindersEnabled,
     calendarAllowPrivate: config.calendarAllowPrivate,
     // the editors' videos are read from Timeliner, and a script document uploaded there marks its batch delivered

@@ -20,7 +20,7 @@ export function audienceOf(p: KindOf): Audience {
 
 /** Updates that only matter to some people (Admins count as managers). */
 export const ONLY_FOR: Record<string, Audience[]> = {
-  '2026-10-16-thumbnail-studio': ['managers', 'designers'],
+  '2026-10-25-thumbnail-studio': ['managers', 'designers'],
   '2026-10-07-calendar-shoots-match': ['managers'], '2026-10-07-editors': ['managers', 'editors'], '2026-10-07-calendar-shoots': ['managers'],
   '2026-10-07-calendar-embed': ['managers'], '2026-10-02-fill-missing-deadlines': ['managers'], '2026-10-02-drafts-from-final': ['managers'],
   '2026-10-01-palettes': ['managers'], '2026-09-30-control-center-people': ['managers'], '2026-09-30-control-center-admin-editors': ['managers'],
@@ -47,8 +47,8 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
-    id: '2026-10-16-thumbnail-studio',
-    date: '2026-10-16',
+    id: '2026-10-25-thumbnail-studio',
+    date: '2026-10-25',
     title: 'Thumbnail Studio: thumbnail designers get their own home',
     summary: 'Thumbnail designers now sign in to their own Studio to make the thumbnails managers hand out on the new Thumbnails page. Managers pick an option or ask for changes.',
     changes: [
@@ -62,6 +62,51 @@ export const CHANGELOG: ChangelogEntry[] = [
       { tag: 'new', text: 'The Thumbnails page lists rounds to review first, then each designer’s briefs with what’s due this week, a Needs a designer group, and what was picked lately. Edit or reassign any brief, and cancel one that’s still open. Managers can open any designer’s Studio read-only; their unsent options stay private, and a designer only sees the options other designers made once one is picked.' },
       { tag: 'improved', text: 'Video editors are now labelled Video editor on the Team page, in the account menu, View as and search, so they’re told apart from thumbnail designers. Thumbnail designers aren’t on the Editors tab and don’t get Scripts final or Shoot moved notices.' },
       { tag: 'improved', text: 'A thumbnail designer can’t be switched to another kind or role while they still have open briefs. Reassign them on the Thumbnails page first.' },
+    ],
+  },
+  {
+    id: '2026-10-25-writers-for-this-client-before',
+    date: '2026-10-25',
+    title: 'See who wrote for a client before',
+    summary: 'When you add scripts for a client, the writers section now shows who wrote their last batch, and everyone who has written for them, so you can pick them in one click.',
+    changes: [
+      { tag: 'new', text: 'New shoot and New batch show “Last time for this client”: the batch and each writer’s count. Use these writers gives them their share of the new count (and fills in the count if it’s empty).' },
+      { tag: 'new', text: 'Below it, everyone who has written for the client, with how many scripts and batches. Tap a name to add them to the batch.' },
+    ],
+  },
+  {
+    id: '2026-10-25-ai-next-shoot-estimates',
+    date: '2026-10-25',
+    title: 'Next shoots: AI estimates you can confirm, change or deny',
+    summary: 'The AI now estimates each client’s next shoot from every past shoot the site knows, including the ones on your synced calendars, and you decide what to do with each estimate.',
+    changes: [
+      { tag: 'new', text: 'Past shoots on every synced calendar (Josh’s included) now count, with the site’s shoots, the documents sent, Timeliner and each client’s notes. Claude reads it all and gives a date, a script count and a line on what it’s based on.' },
+      { tag: 'new', text: 'Each estimate has Confirm (opens the New shoot form filled in, to book it), Change (your own date and script count) and Deny (hides it until the client shoots again; Denied brings it back).' },
+      { tag: 'new', text: 'No scripts needed: tick it for a client you film without scripts (in Change, or Edit client). They still get a next shoot date, with no scripts due, and the site stops asking you to plan scripts for their shoots.' },
+      { tag: 'improved', text: 'With two shoots on record, a client gets an estimate even when the scripts of the last shoot aren’t known: it goes by the usual days between their shoots.' },
+      { tag: 'improved', text: 'Synced calendars now keep a year of past events (they kept 60 days), so older shoots count too.' },
+    ],
+  },
+  {
+    id: '2026-10-25-scripts-counted-from-documents',
+    date: '2026-10-25',
+    title: 'Next shoots to book counts the scripts in each document',
+    summary: 'AI now opens each past shoot’s document and counts its scripts, so a doc with 45 scripts paces the next shoot as 45 even when the site has a different number.',
+    changes: [
+      { tag: 'new', text: 'Claude reads each shoot’s document once: the scripts PDF in Timeliner, or the documents the writers sent (a PDF, a text file, or a Google Doc or Drive link). The tentative date, the script count and each writer’s share go by what it holds.' },
+      { tag: 'new', text: 'Next shoots to book shows “45 scripts in its document”, with the site’s number beside it when they differ, and “Counting scripts in 3 documents…” while it reads.' },
+      { tag: 'improved', text: 'A Google Doc has to be set to “Anyone with the link can view” to be read. One that can’t be opened, or a Word file, is skipped and that shoot counts its scripts on the site instead.' },
+    ],
+  },
+  {
+    id: '2026-10-25-next-shoots-to-book',
+    date: '2026-10-25',
+    title: 'Next shoots to book, estimated for you',
+    summary: 'When a client’s last shoot is over and nothing is booked after it, the site estimates the next shoot from their past shoots and how many scripts each had, and says which scripts are due when and who to give them to.',
+    changes: [
+      { tag: 'new', text: 'A Next shoots to book section on the Overview (admins and managers): for each client whose last shoot is over with nothing booked, a tentative shoot date, how many scripts it needs, when drafts and final scripts are due, and who wrote them last time (with when to start, from each writer’s scripts per day).' },
+      { tag: 'new', text: 'The date counts from the last shoot’s scripts: a shoot with 45 scripts lasts longer than one with 31, at the pace this client’s past shoots have gone (other clients’ pace when they’ve had only one). Only the next shoot is estimated.' },
+      { tag: 'new', text: 'Tentative shoots and their scripts’ due dates show on the Calendar in their own dashed blue, apart from booked shoots. Nothing is assigned until you book it: Plan this shoot opens the New shoot form filled in, for you to set the real date.' },
     ],
   },
   {
