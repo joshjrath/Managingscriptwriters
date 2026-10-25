@@ -1,6 +1,6 @@
 // Shapes returned by the API. The server builds these; the client renders them.
 
-import type { Clock, DayMode, ISODate } from './dates';
+import type { Clock, DayMode, ISODate, ShootEstimate } from './dates';
 import type { WorkspaceTheme } from './palettes';
 import type { DocumentState, Milestone, Progress, Role, ScriptStatus, Stage, VideoState } from './workflow';
 
@@ -511,7 +511,7 @@ export interface Dashboard {
 
 export interface CalendarEvent {
   id: string;
-  type: 'writing' | 'draft' | 'final' | 'shoot' | 'external';
+  type: 'writing' | 'draft' | 'final' | 'shoot' | 'external' | 'tentative';
   start: ISODate;
   end: ISODate;
   title: string;
@@ -522,6 +522,8 @@ export interface CalendarEvent {
   complete: boolean;
   /** an event from a synced calendar (Google Calendar) */
   external?: ExternalEventInfo;
+  /** a tentative shoot, or the date its scripts are due (managers only): an estimate, not booked */
+  tentative?: { kind: 'shoot' | 'scripts'; forecast: ShootForecast };
 }
 
 export interface ExternalEventInfo {
@@ -771,6 +773,35 @@ export interface CalendarShoot {
   total: number;
   /** what this client's last batch had, to start from */
   suggested: { count: number; split: { writerId: number; name: string; count: number }[] } | null;
+}
+
+/**
+ * A client whose last shoot is over with nothing booked after it (on the site or a synced calendar): when the next
+ * shoot will probably be, and which scripts that needs from whom. Worked out on every load, never stored.
+ */
+export interface ShootForecast {
+  clientId: number;
+  clientName: string;
+  /**
+   * the last shoot that's over: its scripts as its document holds them when Claude has counted them
+   * (`fromDocument`), else as many as are on the site (`siteScripts`)
+   */
+  lastShoot: { id: number; title: string | null; startDate: ISODate; endDate: ISODate | null; scripts: number; siteScripts: number; fromDocument: boolean };
+  /** null when there isn't enough history yet (no shoot with scripts, and no other client's gaps to go by) */
+  estimate: (ShootEstimate & {
+    /** the writers who had the last shoot's scripts, with as many as last time, and when to start writing them */
+    writers: { writerId: number; name: string; count: number; startBy: ISODate | null }[];
+    /** scripts whose writer last time can't take them now (deactivated or removed) */
+    unassigned: number;
+    /** final delivery would already be past */
+    late: boolean;
+  }) | null;
+}
+
+export interface ShootForecasts {
+  forecasts: ShootForecast[];
+  /** documents of the shoots they count from that Claude hasn't read yet, and whether the server can read them (an AI key) */
+  documents: { unread: number; canRead: boolean };
 }
 
 // ── Timeliner ─────────────────────────────────────────────────────────────

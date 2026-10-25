@@ -306,3 +306,87 @@ export function suggestStart(draftDue: ISODate, scripts: number, perDay: number,
   }
   return d;
 }
+
+// ── the next shoot, estimated ────────────────────────────────────────────
+
+/** A shoot that has happened, with how many scripts it had. */
+export interface PastShoot { start: ISODate; scripts: number }
+
+/** Shoots this close together are one shoot for pacing (two days of the same shoot, or a pick-up day). */
+export const SAME_SHOOT_DAYS = 7;
+/** How many of the latest gaps between shoots set the pace. */
+export const PACE_GAPS = 4;
+
+export function median(xs: number[]): number | null {
+  if (!xs.length) return null;
+  const s = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+}
+
+/**
+ * A client's shoots, oldest first, with shoots within `SAME_SHOOT_DAYS` of each other merged into one (their
+ * scripts added up). Shoots with no scripts on the site are left out: there is nothing to pace them by.
+ */
+export function mergeShoots(shoots: PastShoot[]): PastShoot[] {
+  const out: PastShoot[] = [];
+  for (const s of [...shoots].filter((x) => x.scripts > 0).sort((a, b) => a.start.localeCompare(b.start))) {
+    const last = out[out.length - 1];
+    if (last && diffDays(s.start, last.start) < SAME_SHOOT_DAYS) last.scripts += s.scripts;
+    else out.push({ ...s });
+  }
+  return out;
+}
+
+/**
+ * How many days one script lasted between each shoot and the next: the days until the next shoot divided by the
+ * scripts the first one had. 31 scripts and the next shoot 31 days later is 1 day a script. The latest
+ * `PACE_GAPS` gaps, oldest first.
+ */
+export function shootPaces(shoots: PastShoot[]): number[] {
+  const merged = mergeShoots(shoots);
+  const out: number[] = [];
+  for (let i = 1; i < merged.length; i++) out.push(diffDays(merged[i].start, merged[i - 1].start) / merged[i - 1].scripts);
+  return out.slice(-PACE_GAPS);
+}
+
+export interface ShootEstimate {
+  /** the tentative shoot date: when the last shoot's scripts run out at the usual pace */
+  shootDate: ISODate;
+  draftDue: ISODate;
+  finalDue: ISODate;
+  /** scripts expected: as many as last time */
+  scripts: number;
+  /** days one script lasts (the median of the latest gaps) */
+  daysPerScript: number;
+  /** the client's own gaps, or the whole team's when the client has had only one shoot */
+  basis: 'client' | 'team';
+  /** how many gaps the pace comes from */
+  gaps: number;
+  /** the shoot it counts from (the last one with scripts) */
+  from: PastShoot;
+}
+
+/**
+ * The next shoot, estimated from the client's past shoots. It's the last shoot (with scripts) plus its scripts
+ * times the days one script has lasted between this client's shoots, so a shoot with 45 scripts waits longer
+ * than one with 31. With only one shoot, the team's pace (`teamPaces`, every client's gaps) stands in. Moved back
+ * to a working day, never later, and its script deadlines follow the usual rules. Null without enough history.
+ */
+export function estimateNextShoot(shoots: PastShoot[], teamPaces: number[], rules: DeadlineRules): ShootEstimate | null {
+  const merged = mergeShoots(shoots);
+  const from = merged[merged.length - 1];
+  if (!from) return null;
+  const own = shootPaces(shoots);
+  const basis = own.length ? 'client' : 'team';
+  const paces = own.length ? own : teamPaces;
+  const pace = median(paces);
+  if (pace == null || !(pace > 0)) return null;
+  let shootDate = addDays(from.start, Math.max(1, Math.round(pace * from.scripts)));
+  if (rules.workingDays.length) while (!rules.workingDays.includes(weekday(shootDate))) shootDate = addDays(shootDate, -1);
+  const d = computeDeadlines(shootDate, rules);
+  return {
+    shootDate, draftDue: d.draftDue, finalDue: d.finalDue, scripts: from.scripts,
+    daysPerScript: Math.round(pace * 100) / 100, basis, gaps: paces.length, from,
+  };
+}

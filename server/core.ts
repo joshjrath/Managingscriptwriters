@@ -20,6 +20,10 @@ export interface Ctx {
   setupHint?: string;
   /** reads pasted notes into an import plan (Claude); absent when no API key is configured */
   notesReader?: import('./notes-import').NotesReader | null;
+  /** counts the scripts in a shoot's document (Claude); absent when no API key is configured */
+  scriptCounter?: import('./doc-counts').ScriptCounter | null;
+  /** fetches a document to count: a Google Doc or Drive link, or Timeliner's download link (tests pass a stand-in) */
+  fetchDoc?: typeof fetch;
   /** reads a synced calendar's iCal link (tests pass a stand-in) */
   fetchCalendar?: (url: string) => Promise<string>;
   /** Timeliner's API, when TIMELINER_API_KEY is set (tests pass a stand-in) */

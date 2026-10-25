@@ -38,6 +38,28 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-25-scripts-counted-from-documents',
+    date: '2026-10-25',
+    title: 'Next shoots to book counts the scripts in each document',
+    summary: 'AI now opens each past shoot’s document and counts its scripts, so a doc with 45 scripts paces the next shoot as 45 even when the site has a different number.',
+    changes: [
+      { tag: 'new', text: 'Claude reads each shoot’s document once: the scripts PDF in Timeliner, or the documents the writers sent (a PDF, a text file, or a Google Doc or Drive link). The tentative date, the script count and each writer’s share go by what it holds.' },
+      { tag: 'new', text: 'Next shoots to book shows “45 scripts in its document”, with the site’s number beside it when they differ, and “Counting scripts in 3 documents…” while it reads.' },
+      { tag: 'improved', text: 'A Google Doc has to be set to “Anyone with the link can view” to be read. One that can’t be opened, or a Word file, is skipped and that shoot counts its scripts on the site instead.' },
+    ],
+  },
+  {
+    id: '2026-10-25-next-shoots-to-book',
+    date: '2026-10-25',
+    title: 'Next shoots to book, estimated for you',
+    summary: 'When a client’s last shoot is over and nothing is booked after it, the site estimates the next shoot from their past shoots and how many scripts each had, and says which scripts are due when and who to give them to.',
+    changes: [
+      { tag: 'new', text: 'A Next shoots to book section on the Overview (admins and managers): for each client whose last shoot is over with nothing booked, a tentative shoot date, how many scripts it needs, when drafts and final scripts are due, and who wrote them last time (with when to start, from each writer’s scripts per day).' },
+      { tag: 'new', text: 'The date counts from the last shoot’s scripts: a shoot with 45 scripts lasts longer than one with 31, at the pace this client’s past shoots have gone (other clients’ pace when they’ve had only one). Only the next shoot is estimated.' },
+      { tag: 'new', text: 'Tentative shoots and their scripts’ due dates show on the Calendar in their own dashed blue, apart from booked shoots. Nothing is assigned until you book it: Plan this shoot opens the New shoot form filled in, for you to set the real date.' },
+    ],
+  },
+  {
     id: '2026-10-09-open-video-in-timeliner',
     date: '2026-10-09',
     title: 'Open in Timeliner opens the video itself',

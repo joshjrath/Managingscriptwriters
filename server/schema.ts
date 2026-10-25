@@ -736,4 +736,17 @@ alter table settings add column one_editor_since date not null default '2026-10-
   // 36 · the team's Needs review is Timeliner's inProgress step group, whose exact step name and the time a video
   // moved there weren't read before (it counted as still to edit): videos there read them on the next reads
   rereadNeedsReview,
+  // 37 · how many scripts a shoot's document holds, read once by Claude (the scripts PDF from Timeliner, or a
+  // document a writer sent: an uploaded file or a Google Doc/Drive link), for estimating the next shoot. Keyed by the
+  // document itself, so a new version is read again; a document that couldn't be read keeps why (scripts is null)
+  `
+create table document_counts (
+  key text primary key,
+  batch_id bigint not null references batches(id) on delete cascade,
+  scripts int,
+  note text,
+  read_at timestamptz not null default now()
+);
+create index document_counts_batch_idx on document_counts (batch_id);
+`,
 ];

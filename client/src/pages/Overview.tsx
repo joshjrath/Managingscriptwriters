@@ -1,6 +1,7 @@
 // Overview: the operations dashboard. The four summary cards, work due by day
 // and upcoming shoots come first; then what needs attention (with today and
-// the team's to-dos beside it) and shoots to plan; then writer workload and
+// the team's to-dos beside it), shoots to plan and the next shoots to book
+// (estimated for clients with nothing booked); then writer workload and
 // recent deliveries; active batches and writing progress fold away under
 // More. Every number is derived from script records.
 
@@ -14,6 +15,7 @@ import { isManager, ROLE_LABEL, scriptsLabel } from '../../../shared/workflow';
 import { PipLegend, TodayBump, WritingFeed } from '../components/WritingPulse';
 import { TodoPanel } from '../components/Todos';
 import { CalendarShootsPanel } from '../components/CalendarShoots';
+import { ShootForecastPanel } from '../components/ShootForecast';
 import { TodayPill } from '../components/TodayPill';
 import { StatCards } from '../components/StatCards';
 import { PageHeader, useBoot, useNewWork, useDisplayTz } from '../components/Shell';
@@ -123,6 +125,7 @@ export function Overview() {
             </div>
           </div>
           {isManager(me.role) && <CalendarShootsPanel siteShoots={d.upcomingShoots.filter((s) => !s.batches.length)} batches={d.activeBatches} />}
+          {isManager(me.role) && <ShootForecastPanel />}
           <div className="dash ov-dash">
               <Panel title={d.scope === 'mine' ? 'Your workload' : 'Writer workload'}>
                 {!d.workload.length ? <Empty boxed title="No writers yet"><Link className="link" to="/settings#team">Add your team in Settings → Team</Link>.</Empty> : (

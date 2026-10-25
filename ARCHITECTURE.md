@@ -37,6 +37,8 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 | Sending documents and reviews | `server/submissions.ts` |
 | Script bank, Today, to-dos, celebrations | `server/script-bank.ts`, `today.ts`, `todos.ts`, `moments.ts` |
 | Synced calendars (Google Calendar iCal), and shoots found on them | `server/calendar-feeds.ts`, `server/ical.ts`, `server/calendar-shoots.ts` |
+| The next shoot, estimated (Overview's Next shoots to book, and tentative shoots on the Calendar, for managers): for each active client whose last shoot is over with nothing booked after it (no shoot on the site that isn't over, none on a synced calendar, no open batch without a shoot), the last shoot plus its scripts times the days a script has lasted between this client's past shoots (`estimateNextShoot` in `shared/dates.ts`; the team's pace when the client has had one shoot), with last time's writers and counts. Only the next shoot, never stored or assigned | `server/forecast.ts`, `client/src/components/ShootForecast.tsx` |
+| How many scripts a past shoot's document holds, counted by Claude for that estimate | `server/doc-counts.ts` |
 | What an editor may call (an allowlist checked before every route) | `server/editor-access.ts` |
 | Master log (activity and audit) | `server/audit.ts` |
 | Reminders (in-process timer, or `npm run reminders` from cron) | `server/reminders.ts`, `server/reminders-cli.ts` |
@@ -46,7 +48,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 | Editors tab: the timed read of Timeliner's videos and who is on each brand (lenient: an odd item is skipped and counted), whom a video belongs to (`OWNER_IDS`: its assignees in Timeliner, and nobody else), matching the copy again after every write (`rematch`), the board (`loadBoard`: a card for everyone in Timeliner with videos, flagged when not on the site; each client's editor and split), the editor's script link (`GET /api/editing/script-pdf/:batchId`), pins, and I'm on this / Pause / Resume / Done | `server/editing.ts` |
 | Editors who don't sign in (Settings → Editors) | `server/control/editors.ts` |
 | Demo data | `server/seed-demo.ts`, `server/seed-cli.ts` |
-| Dates, deadlines, clock, due state | `shared/dates.ts` |
+| Dates, deadlines, clock, due state, and the pace of a client's shoots (`estimateNextShoot`) | `shared/dates.ts` |
 | Statuses, roles, action rules, progress, document state, ranges; a video's state, title ranges (`compressTitles`), a raw camera clip (`isRawTitle`) and a focus left running (`isFocusStale`) | `shared/workflow.ts` |
 | Display wording shared by server and client (dates, times, a video's due words, time worked) | `shared/format.ts` |
 | Quick-entry parser | `shared/parse.ts` |
@@ -132,6 +134,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
   - Each run takes `LOCKS.reminders`, and notifications are de-duplicated by key, so overlapping runs are harmless.
 - **Calendar sync** re-reads each synced calendar every `CALENDAR_SYNC_MINUTES` (15) inside the server (`CALENDAR_SYNC=off` turns it off), and tells managers once about each new shoot it finds.
 - **Paste notes** calls the Anthropic API, only when `ANTHROPIC_API_KEY` is set. Each person can run one read at a time and 30 an hour. If the API fails, the person gets a clear message and nothing is created.
+- **Script counts** (`server/doc-counts.ts`) call the Anthropic API too, only when `ANTHROPIC_API_KEY` is set (`ctx.scriptCounter`). The Overview's Next shoots to book asks `POST /api/shoot-forecast/read-documents` by itself while documents of the shoots it counts from are unread; each call reads up to 6, one run at a time per server. A batch's document is its scripts PDF from Timeliner, else every document its writers sent (each script's newest; only when every script was sent in one). Only Google Docs (exported as text) and Drive files are fetched, from addresses built from their id; uploaded files come from `files`. A count, or why there's none (a private doc, a Word file), is kept in `document_counts` by the document's key (`pdf:<task>:<file>` or `sent:<submission>`), so each version is read once; a network, Timeliner or AI-service failure keeps nothing, so it's read next time.
 - **Timeliner** (`server/timeliner.ts`), only when `TIMELINER_API_KEY` is set:
   - On start-up (once) or from Settings → Timeliner, the server registers a webhook (`TIMELINER_EVENTS`: `version.uploaded` and `file.uploaded`, plus the `task.*` and `project.trashed` messages for the Editors tab) pointing at `PUBLIC_URL` (or `RENDER_EXTERNAL_URL`) + `/hooks/timeliner`, and keeps the signing secret Timeliner returns in `settings`. Already connected, start-up adds any events it lacks (best effort: a read-only key can't) and leaves it switched on or off as Timeliner has it; Connect in Settings switches it back on.
   - `POST /hooks/timeliner` is public and outside `/api` (so the same-page header check doesn't apply); it refuses a message unless `X-Timeliner-Signature` checks out against that secret and is under five minutes old. Each message id is claimed in `timeliner_events` before anything happens, so a repeat is a no-op.
@@ -154,7 +157,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 
 ## Invariants (break one and something real breaks)
 
-1. Every number on every screen (progress, stages, charts, counts) is computed from script rows. Nothing stores a total.
+1. Every number on every screen (progress, stages, charts, counts) is computed from script rows. Nothing stores a total. The one exception is the next-shoot estimate, which goes by how many scripts Claude counted in a past shoot's document (`document_counts`) when it has; it never changes progress or a script.
 2. A script has at most one assignee.
 3. Only `applyScriptAction` changes a script's status.
 4. The written-so-far counter never changes a script's status.

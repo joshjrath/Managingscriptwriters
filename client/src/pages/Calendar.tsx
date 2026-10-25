@@ -3,7 +3,9 @@
 // calendars (Google Calendar) in each calendar's colour. Click an event to
 // open its batch, or a synced event to see its details. Managers can drag a shoot to another day (or click it and
 // choose "Change dates"); a preview shows everything that moves with it
-// before anything changes. Month grid on desktop, agenda list on phones.
+// before anything changes. Managers also see tentative shoots (estimated, not
+// booked) and when their scripts would be due, in their own dashed colour; tap
+// one to plan it. Month grid on desktop, agenda list on phones.
 
 import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -19,6 +21,7 @@ import { PageHeader, useBoot, useDisplayTz, useNewWork } from '../components/She
 import { Button, Dialog, Empty, ErrorState, Loading, Seg } from '../components/ui';
 import { SOFT } from '../motion';
 import { RescheduleDialog } from './BatchDetail';
+import { ForecastDialog } from '../components/ShootForecast';
 import { DAY_COUNTS, DaysTimeline, type DayCount } from '../components/DaysTimeline';
 
 const TYPE = {
@@ -27,6 +30,7 @@ const TYPE = {
   final: { label: 'Final delivery', icon: Send, c: 'var(--yellow)' },
   shoot: { label: 'Shoot', icon: Camera, c: 'var(--salmon)' },
   external: { label: 'Google Calendar', icon: CalendarDays, c: 'var(--text-2)' },
+  tentative: { label: 'Tentative shoots', icon: CalendarClock, c: 'var(--tentative)' },
 } as const;
 
 /** "10:00 AM" in the viewer's time zone, or null for all-day events. */
@@ -63,6 +67,7 @@ export function CalendarPage() {
   const [move, setMove] = useState<Move | null>(null);
   const [picked, setPicked] = useState<CalendarEvent | null>(null);
   const [synced, setSynced] = useState<CalendarEvent | null>(null);
+  const [tentative, setTentative] = useState<CalendarEvent['tentative'] | null>(null);
   const tz = useDisplayTz();
   const openNew = useNewWork();
   const gridStart = startOfWeek(month);
@@ -79,7 +84,7 @@ export function CalendarPage() {
   const events = (q.data?.events ?? []).filter((e) => !hidden.has(e.type) && !(e.external?.linkedShootId && !hidden.has('shoot') && shootIds.has(e.external.linkedShootId)));
   const byDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
-    const order = { shoot: 0, final: 1, draft: 2, writing: 3, external: 4 };
+    const order = { shoot: 0, tentative: 0, final: 1, draft: 2, writing: 3, external: 4 };
     for (const e of events) for (const d of eachDay(e.start > gridStart ? e.start : gridStart, e.end < gridEnd ? e.end : gridEnd)) map.set(d, [...(map.get(d) ?? []), e]);
     for (const list of map.values()) list.sort((a, b) => order[a.type] - order[b.type] || (a.external?.startAt ?? '').localeCompare(b.external?.startAt ?? ''));
     return map;
@@ -95,6 +100,7 @@ export function CalendarPage() {
   const canMove = (e: CalendarEvent) => manager && e.type === 'shoot' && e.shootId != null;
   const open = (e: CalendarEvent) => {
     if (e.external) setSynced(e);
+    else if (e.tentative) setTentative(e.tentative);
     else if (editor) { const id = clients.find((c) => c.name === e.clientName)?.id; if (id) nav(`/scripts?clientId=${id}`); }
     else if (canMove(e)) setPicked(e);
     else if (e.batchId) nav(`/batches/${e.batchId}`);
@@ -142,7 +148,7 @@ export function CalendarPage() {
       );
     }
     const T = TYPE[e.type];
-    const Icon = e.overdue && e.type !== 'writing' ? AlertTriangle : e.complete && e.type !== 'writing' ? Check : T.icon;
+    const Icon = e.overdue && e.type !== 'writing' ? AlertTriangle : e.complete && e.type !== 'writing' ? Check : e.tentative?.kind === 'scripts' ? Send : T.icon;
     const showLabel = e.type !== 'writing' || day === e.start || new Date(day + 'T00:00:00Z').getUTCDay() === 1;
     const status = e.overdue ? ' (overdue)' : e.complete ? ' (complete)' : '';
     const k = diffDays(day, e.start);
@@ -188,7 +194,7 @@ export function CalendarPage() {
         <select className="select sm" style={{ width: 'auto', maxWidth: 220 }} value={clientId} onChange={(e) => setP('clientId', e.target.value)} aria-label="Client"><option value="">All clients</option>{clients.filter((c) => c.status !== 'archived').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
       </div>
       <div className="quick cal-quick" role="group" aria-label="Show event types">
-        {(Object.keys(TYPE) as CalendarEvent['type'][]).filter((t) => !editor || t === 'shoot' || t === 'final' || t === 'external').map((t) => {
+        {(Object.keys(TYPE) as CalendarEvent['type'][]).filter((t) => (!editor || t === 'shoot' || t === 'final' || t === 'external') && (manager || t !== 'tentative')).map((t) => {
           const T = TYPE[t];
           return (
             <button key={t} aria-pressed={!hidden.has(t)} style={{ ['--c' as string]: T.c }} onClick={() => setHidden((h) => { const n = new Set(h); n.has(t) ? n.delete(t) : n.add(t); return n; })}>
@@ -299,6 +305,7 @@ export function CalendarPage() {
           </div>
         </Dialog>
       )}
+      {tentative && <ForecastDialog f={tentative.forecast} onClose={() => setTentative(null)} />}
       {dayOpen && (
         <Dialog open onClose={() => setDayOpen(null)} size="narrow" title={fmtWeekday(dayOpen)} sub={plural((byDay.get(dayOpen) ?? []).length, 'thing', 'things') + ' on this day'}
           footer={<div className="form-actions"><Button variant="ghost" onClick={() => setDayOpen(null)}>Close</Button></div>}>

@@ -15,6 +15,7 @@ import { registerAccountRoutes } from './routes/account';
 import { registerTodoRoutes } from './todos';
 import { registerCalendarFeedRoutes } from './calendar-feeds';
 import { registerCalendarShootRoutes } from './calendar-shoots';
+import { registerForecastRoutes } from './forecast';
 import { registerEditorAccess } from './editor-access';
 import { registerBatchRoutes } from './routes/batches';
 import { registerClientRoutes } from './routes/clients';
@@ -120,6 +121,7 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
   registerTodoRoutes(app, ctx);
   registerCalendarFeedRoutes(app, ctx);
   registerCalendarShootRoutes(app, ctx);
+  registerForecastRoutes(app, ctx);
   registerEditorRoutes(app, ctx);
   registerTimelinerRoutes(app, ctx);
   registerEditingRoutes(app, ctx);
