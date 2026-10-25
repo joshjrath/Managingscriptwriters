@@ -3,7 +3,8 @@
 import type { Clock, DayMode, ISODate } from './dates';
 import type { WorkspaceTheme } from './palettes';
 import type {
-  DocumentState, EditorKind, Milestone, OptionLetter, Progress, Role, ScriptStatus, Stage, ThumbAction, ThumbMime, ThumbState, VideoState,
+  DocumentState, EditorKind, Milestone, OptionLetter, Progress, Role, ScriptStatus, SecondLookResult, Stage, ThumbAction, ThumbMime, ThumbMomentKind,
+  ThumbPinTag, ThumbState, VideoState,
 } from './workflow';
 
 /** Every change request carries `x-scale-media: 1`; a page can't send it cross-site without a CORS preflight, which the server never grants. */
@@ -177,6 +178,8 @@ export interface Bootstrap {
   mode: SessionMode | null;
   /** reading pasted notes with AI is set up on the server (ANTHROPIC_API_KEY) */
   notesImport: boolean;
+  /** a thumbnail option's AI second look is set up on the server (ANTHROPIC_API_KEY): the button shows on a designer's own options (never while an Admin is viewing as them) */
+  secondLook: boolean;
   /** the largest file the server accepts, in MB (UPLOAD_LIMIT_MB) */
   uploadLimitMb: number;
   /** the newest What's new entry this person has opened */
@@ -692,7 +695,7 @@ export interface ImportResult {
   warnings: string[];
 }
 
-export type MomentKind = 'approved' | 'revisions' | 'drafts_done' | 'batch_done' | 'team_drafts_done' | 'team_batch_done';
+export type MomentKind = 'approved' | 'revisions' | 'drafts_done' | 'batch_done' | 'team_drafts_done' | 'team_batch_done' | ThumbMomentKind;
 
 /** Something worth celebrating (or knowing about), shown once as an animation. */
 export interface Moment {
@@ -712,6 +715,25 @@ export interface Moment {
   /** the person did this themselves (shown straight away) */
   self: boolean;
   createdAt: string;
+  /**
+   * thumb_picked and thumb_standout: the pick. These have no batch: batchId is null, batchTitle is the video's title,
+   * numbers is empty and count 0, byName is the manager who picked it and note their reason
+   */
+  thumb?: MomentThumb | null;
+}
+
+/** A thumbnail pick, as its celebration shows it (a thumb_standout was marked Standout: the ring). */
+export interface MomentThumb {
+  briefId: number;
+  /** the video's title */
+  title: string;
+  roundNumber: number;
+  /** picked from the first round sent: the bigger celebration (pickCelebration in shared/workflow.ts) */
+  firstRound: boolean;
+  /** the picked option, for its 16:9 frame */
+  option: { id: number; letter: OptionLetter; url: string; width: number; height: number };
+  /** where the dialog's button goes: the brief in their Studio (thumbBriefPath) */
+  link: string;
 }
 
 export interface ReschedulePreview {
@@ -1335,7 +1357,9 @@ export type FocusAction = 'start' | 'pause' | 'resume' | 'done';
 // ── Thumbnail Studio ──────────────────────────────────────────────────────
 // Managers hand out briefs (GET/POST/PATCH /api/thumbnails), designers send rounds of options from their Studio
 // (GET /api/studio, /api/thumbnails/:id and its options and send), and managers pick one or ask for changes
-// (POST /api/thumbnails/:id/decision). Rules and wording: the Thumbnail Studio section of shared/workflow.ts.
+// (POST /api/thumbnails/:id/decision), with notes pinned on the image and a pick maybe marked Standout. A designer can
+// ask for an AI second look on an option of their own (POST /api/thumbnail-options/:id/second-look). Rules and
+// wording: the Thumbnail Studio sections of shared/workflow.ts.
 
 /** Notification types the thumbnail routes send (each has a colour in Shell.tsx). */
 export const THUMBNAIL_NOTIFICATIONS = ['thumbnail_new', 'thumbnail_sent', 'thumbnail_picked', 'thumbnail_changes'] as const;
@@ -1371,6 +1395,12 @@ export interface ThumbnailOption {
   createdAt: string;
   /** the brief's current winner: its newest sent round's newest decision picked it */
   picked: boolean;
+  /**
+   * the AI second look its maker asked for, sent only to its maker (the designer who uploaded it): null when they
+   * haven't asked yet. Never sent to managers or anyone else (an Admin viewing as the maker included), for whom
+   * it's left out
+   */
+  secondLook?: ThumbnailSecondLook | null;
 }
 
 /** A manager's decision on a sent round. The newest on a round counts; earlier ones stay as history. */
@@ -1389,6 +1419,34 @@ export interface ThumbnailDecision {
   createdAt: string;
   /** a later decision on the same round took its place (Decide again) */
   superseded: boolean;
+  /** a pick the manager marked Standout; never a decision asking for changes */
+  standout: boolean;
+  /**
+   * its notes on spots of the round's options, numbered (n) in the order placed. Managers get every decision's; a
+   * designer gets them only on rounds they sent (a pin is on an option, and another designer's unpicked options stay
+   * private), and none on a brief.decision about someone else's round (an empty list)
+   */
+  pins: ThumbnailPin[];
+}
+
+/**
+ * A manager's note on one spot of an option, dropped with a decision. The pins a round shows are its newest
+ * decision's (currentPins); earlier ones stay with their own decision, as history.
+ */
+export interface ThumbnailPin {
+  id: number;
+  decisionId: number;
+  optionId: number;
+  optionLetter: OptionLetter;
+  /** 0 to 1 across from the picture's left edge (pinAt in shared/workflow.ts) */
+  x: number;
+  /** 0 to 1 down from the picture's top edge */
+  y: number;
+  /** the number on the pin and in the list beside it: 1, 2, 3… in the order they were placed */
+  n: number;
+  /** the note, 1 to PIN_NOTE_MAX characters */
+  body: string;
+  tag: ThumbPinTag | null;
 }
 
 /** One round of options. Unsent, it's the designer's private tray, which only the brief's current designer ever gets. */
@@ -1485,6 +1543,8 @@ export interface ThumbnailWin {
   pickedByName: string;
   /** the manager's reason, when they gave one */
   reason: string | null;
+  /** the manager marked the pick Standout */
+  standout: boolean;
 }
 
 /** One brief in full: GET /api/thumbnails/:id, and what every change to one brief answers with. */
@@ -1507,7 +1567,10 @@ export interface ThumbnailBriefDetail extends ThumbnailBrief {
     edit: boolean;
   };
   look: ThumbnailLook;
-  /** the client's current winners on its other briefs (any designer's), newest first, at most 8 */
+  /**
+   * the client's current winners on its other briefs (any designer's), newest first, at most 8. A designer sees
+   * `standout` only on their own (it's false on other designers' wins)
+   */
   recentWinners: ThumbnailWin[];
 }
 
@@ -1536,6 +1599,11 @@ export interface StudioPayload {
   board: ThumbnailBrief[];
   /** options of theirs that were picked, newest first, at most 60 */
   wins: ThumbnailWin[];
+  /**
+   * "Your best this month": their current winners marked Standout, picked this month (the workspace's time zone, as
+   * pickedThisMonth counts), newest first. Empty hides the strip
+   */
+  best: ThumbnailWin[];
   counts: {
     pickedThisMonth: number;
     /** rounds they sent that are waiting for a decision */
@@ -1607,4 +1675,35 @@ export interface ThumbnailDecisionInput {
   optionId?: number | null;
   /** changes: required (400 with fields.note); pick: an optional reason */
   note?: string | null;
+  /**
+   * notes on spots of this round's options, with either action: at most MAX_PINS (400 fields.pins), each on a live
+   * option of this round (400 fields.pins otherwise). Numbered 1, 2, 3… in the order sent. Left out = none
+   */
+  pins?: ThumbnailPinInput[];
+  /** pick only: mark it Standout (its celebration gets a ring, and it goes in "Your best this month"). true with changes is a 400 with fields.standout */
+  standout?: boolean;
+}
+
+/** One pin sent with a decision. */
+export interface ThumbnailPinInput {
+  /** a live option of the round being decided */
+  optionId: number;
+  /** 0 to 1 across from the picture's left edge (pinAt); outside that is a 400 */
+  x: number;
+  /** 0 to 1 down from the picture's top edge */
+  y: number;
+  /** the note: trimmed, 1 to PIN_NOTE_MAX characters */
+  body: string;
+  /** one of THUMB_PIN_TAGS, or none */
+  tag?: ThumbPinTag | null;
+}
+
+/**
+ * POST /api/thumbnail-options/:id/second-look (no body) answers with this, and it rides on the option
+ * (ThumbnailOption.secondLook) for its maker only. Asking again returns the one kept, without asking Claude again.
+ */
+export interface ThumbnailSecondLook extends SecondLookResult {
+  optionId: number;
+  /** when it was asked */
+  createdAt: string;
 }

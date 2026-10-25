@@ -122,6 +122,18 @@
   --feed-badge-text: #FFFFFF;
   --safe-line: rgba(255, 255, 255, 0.92);
   --safe-shade: color-mix(in srgb, var(--red) 38%, transparent);
+  /* a manager's numbered notes on an option (pins): bright on any picture, with a dark ring and a light halo so
+     they read on a white sky as well as a black background; the Standout ring; Lights down, the option alone on black */
+  --pin: var(--yellow);
+  --pin-text: var(--on-accent);
+  --pin-ring: rgba(8, 8, 10, 0.88);
+  --pin-halo: rgba(255, 255, 255, 0.95);
+  --standout-stops: var(--yellow), var(--salmon), var(--pink), var(--lavender), var(--cyan), var(--mint), var(--yellow);
+  --lights: #000000;
+  --lights-text: #F5F5F7;
+  --lights-text-2: rgba(245, 245, 247, 0.62);
+  --lights-btn: rgba(255, 255, 255, 0.12);
+  --lights-btn-hover: rgba(255, 255, 255, 0.2);
 
   /* motion */
   --t: 150ms;

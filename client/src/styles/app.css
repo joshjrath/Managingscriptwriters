@@ -2525,8 +2525,8 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
 
 /* an option in its frame; a free letter; an image not in the tray yet */
 .opt { display: flex; flex-direction: column; gap: 10px; margin: 0; min-width: 0; }
-.opt > .thumb { box-shadow: 0 0 0 1px var(--studio-line), var(--shadow-thumb); }
-.opt.picked > .thumb { box-shadow: 0 0 0 3px var(--mint), 0 18px 46px -24px color-mix(in srgb, var(--mint) 75%, transparent); }
+.opt > .thumb, .opt > .pin-layer > .thumb { box-shadow: 0 0 0 1px var(--studio-line), var(--shadow-thumb); }
+.opt.picked > .thumb, .opt.picked > .pin-layer > .thumb { box-shadow: 0 0 0 3px var(--mint), 0 18px 46px -24px color-mix(in srgb, var(--mint) 75%, transparent); }
 .opt-cap { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .opt-note { font-size: 13.5px; line-height: 1.45; overflow-wrap: anywhere; }
 .opt-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
@@ -2720,7 +2720,7 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
   box-shadow: 0 24px 56px -30px color-mix(in srgb, var(--c2) 75%, transparent);
 }
 .st-hero-frame { position: relative; min-width: 0; }
-.st-hero-frame > .thumb { --thumb-r: 18px; box-shadow: 0 0 0 1px var(--studio-line), var(--shadow-thumb); }
+.st-hero-frame > .thumb, .st-hero-frame > .pin-layer > .thumb { --thumb-r: 18px; box-shadow: 0 0 0 1px var(--studio-line), var(--shadow-thumb); }
 .st-hero.picked .thumb.ringed, .tb-picked .thumb { box-shadow: 0 0 0 3px var(--on-accent), 0 28px 60px -28px color-mix(in srgb, var(--on-accent) 85%, transparent); }
 .st-hero-body { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; min-width: 0; }
 .st-kicker { font: 800 12px/1.2 var(--font-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); }
@@ -2821,6 +2821,7 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
 .tb-slots { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); gap: 22px 16px; align-items: start; }
 /* the round with the managers, above the next tray */
 .tb-waiting { padding-bottom: 16px; border-bottom: 1px solid var(--line-soft); }
+.tb-waiting.compact .tb-round-head b { font-size: 17px; }
 .tb-next-h { margin-top: 4px; font: 800 18px/1.15 var(--font-display); letter-spacing: -0.02em; }
 .tb-sendbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
 .tb-sendbar .muted { flex: 1 1 200px; font-size: 13px; }
@@ -2842,7 +2843,7 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
 .tb-sbs:is(.c2, .c3) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @container tb-pane (min-width: 760px) { .tb-sbs.c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @container tb-pane (max-width: 440px) { .tb-sbs:is(.c2, .c3) { grid-template-columns: minmax(0, 1fr); } }
-.tb-sbs .opt > .thumb, .tb-decide-pic .thumb { --thumb-r: 12px; }
+.tb-sbs .opt > .thumb, .tb-sbs .opt > .pin-layer > .thumb, .tb-decide-pic .thumb { --thumb-r: 12px; }
 .tb-decide { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 .tb-decide .muted { flex: 1 1 240px; font-size: 13px; }
 .btn.changes { background: color-mix(in srgb, var(--pink) 20%, var(--row)); color: color-mix(in srgb, var(--pink) 45%, var(--text)); }
@@ -2887,6 +2888,222 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
 .tn-wanted { align-self: flex-start; }
 .tn-wanted button { min-width: 40px; justify-content: center; }
 @media (max-width: 900px) { .tn-rv { grid-template-columns: minmax(0, 1fr); } }
+
+/* ── Thumbnail Studio 2: pins, Standout, Compare, keys, Lights down, the second look ─────────────────────── */
+
+/* an option the arrow keys are on; a pick marked Standout */
+.opt.current > .thumb, .opt.current > .pin-layer > .thumb { outline: 2px solid var(--focus); outline-offset: 4px; }
+.opt.standout > .thumb, .opt.standout > .pin-layer > .thumb { box-shadow: 0 0 0 3px var(--yellow), 0 18px 46px -24px color-mix(in srgb, var(--yellow) 70%, transparent); }
+
+/* pins: a manager's numbered notes on spots of an option, over the picture's own box (letterboxed or not) */
+.pin-layer { position: relative; min-width: 0; }
+.pin-catch {
+  position: absolute; inset: 0; z-index: 4; display: block; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 12px;
+  background: transparent; cursor: crosshair; box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--pin) 70%, transparent);
+  transition: background var(--t);
+}
+.pin-catch:hover { background: color-mix(in srgb, var(--pin) 7%, transparent); }
+.pin-catch:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.pin-box { position: absolute; z-index: 5; pointer-events: none; }
+.pin {
+  position: absolute; display: grid; place-items: center; width: 28px; height: 28px; margin: 0; padding: 0; border: 0; border-radius: 50%;
+  transform: translate(-50%, -50%); background: var(--pin); color: var(--pin-text); font: 800 13px/1 var(--font-ui); font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 2px var(--pin-ring), 0 0 0 3.5px var(--pin-halo), 0 6px 16px -4px var(--pin-ring);
+  pointer-events: auto; cursor: pointer; transition: transform 180ms var(--ease-out-back), box-shadow var(--t); animation: pin-in 300ms var(--ease-out-back) backwards;
+}
+/* a 44 px target around the 28 px pin */
+.pin::before { content: ""; position: absolute; inset: -8px; border-radius: 50%; }
+.pin:hover, .pin.open { transform: translate(-50%, -50%) scale(1.14); }
+.pin.open { z-index: 1; box-shadow: 0 0 0 2px var(--pin-ring), 0 0 0 5px var(--pin-halo), 0 8px 22px -4px var(--pin-ring); }
+.pin.blank { background: var(--pin-halo); }
+.pin:focus-visible { outline: 2px solid var(--focus); outline-offset: 5px; }
+@keyframes pin-in { from { transform: translate(-50%, -50%) scale(0.2); opacity: 0; } }
+.pin-pop {
+  --w: min(300px, 100%);
+  position: absolute; z-index: 8; width: var(--w); left: clamp(0px, calc(var(--px) - 150px), calc(100% - var(--w))); top: calc(var(--py) + 22px);
+  padding: 12px; border-radius: 16px; background: var(--panel-2); color: var(--text); text-align: left; box-shadow: var(--shadow-pop);
+  animation: pop 160ms var(--ease-out-quint);
+}
+.pin-pop.up { top: auto; bottom: calc(100% - var(--py) + 22px); }
+.pin-n {
+  display: inline-grid; place-items: center; flex: none; min-width: 22px; height: 22px; padding: 0 6px; border-radius: var(--r-pill);
+  background: var(--pin); color: var(--pin-text); font: 800 12px/1 var(--font-ui); font-variant-numeric: tabular-nums;
+}
+.pin-note { display: flex; flex-direction: column; gap: 6px; }
+.pin-note-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.pin-note-h b { font-size: 13px; }
+.pin-note p { font-size: 14px; line-height: 1.45; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pin-ed { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.pin-ed-l { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; }
+.pin-ed-t { min-height: 74px; font-size: 14px; }
+.pin-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.pin-tag { min-height: 30px; padding: 0 10px; border: 0; border-radius: var(--r-pill); background: var(--row); color: var(--text-2); font: 650 12px/1 var(--font-ui); cursor: pointer; transition: background var(--t), color var(--t); }
+.pin-tag:hover { color: var(--text); }
+.pin-tag[aria-pressed="true"] { background: var(--pin); color: var(--pin-text); }
+.pin-ed-acts { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; }
+@media (pointer: coarse) { .pin-tag { min-height: 44px; padding: 0 14px; } }
+/* the numbered list beside the picture */
+.pin-list { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0; padding: 0; list-style: none; }
+.pin-item { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 8px 10px; border-radius: 12px; background: var(--row); font-size: 13px; line-height: 1.45; }
+.pin-item.editing { display: block; padding: 12px; background: var(--panel-2); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--pin) 45%, transparent); }
+.pin-item-t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.pin-item-l { margin-right: 6px; font: 800 13px/1 var(--font-display); }
+.pin-item-b { white-space: pre-wrap; }
+.pin-item-tag { display: inline-block; margin-left: 6px; padding: 0 7px; border-radius: var(--r-pill); background: var(--btn); color: var(--text-2); font-size: 11px; font-weight: 650; line-height: 1.6; vertical-align: 1px; }
+.pin-item-acts { display: flex; gap: 2px; margin: -6px -6px -6px 0; }
+.pin-list.compact .pin-item { padding: 6px 8px; font-size: 12.5px; }
+.pin-list.on-accent .pin-item { background: var(--sheen); color: inherit; }
+.pin-list.on-accent .pin-item-tag { background: var(--sheen); color: inherit; }
+.pin-list.on-accent .pin-n { box-shadow: 0 0 0 1.5px var(--pin-ring); }
+/* placing them: the review's tools and the line saying how */
+.tb-round-tools { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.tb-pin-hint { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 9px 14px; border-radius: 12px; background: color-mix(in srgb, var(--pin) 11%, var(--row)); font-size: 13px; line-height: 1.45; }
+.tb-pin-hint > svg { width: 16px; height: 16px; flex: none; color: var(--pin); }
+.tb-pin-hint > span { flex: 1 1 220px; min-width: 0; }
+/* the designer's changes note, with the options its pins are on */
+/* (or with second looks under the pictures, which the note mustn't cover) */
+.tb-changes:is(.pinned, .looks) .tb-changes-pics { flex-wrap: wrap; }
+.tb-changes:is(.pinned, .looks) .tb-changes-pics > span { flex: 1 1 200px; max-width: 360px; }
+.tb-changes:is(.pinned, .looks) .tb-changes-note { margin: 12px 0 0; }
+.tb-changes-pics > span { display: flex; flex-direction: column; gap: 8px; }
+.tb-changes-pics > span.current .thumb { outline: 2px solid var(--focus); outline-offset: 4px; }
+.tb-changes-pins { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.tb-changes-pins-h, .st-hero-pins-h { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.tb-changes-pins-h b, .st-hero-pins-h b { font-size: 13.5px; }
+/* the Studio's changes hero: the pins on the option they're most on, the note under it rather than over it */
+.st-hero-frame.pinned .st-note { margin: 12px 0 0; }
+.st-hero-pins { display: flex; flex-direction: column; gap: 8px; width: 100%; min-width: 0; }
+.st-hero-pins .muted { font-size: 12.5px; }
+
+/* Standout: a ring of colour on the picture, a yellow mark beside the pick */
+.eh-badge.standout { --c: var(--yellow); }
+.tb-picked.standout .tb-picked-pic .thumb { box-shadow: 0 0 0 3px var(--yellow), 0 0 0 6px var(--on-accent), 0 28px 60px -28px color-mix(in srgb, var(--on-accent) 85%, transparent); }
+.tb-decided.standout { background: color-mix(in srgb, var(--yellow) 12%, var(--row)); }
+.tb-decided.standout > svg { color: var(--yellow); }
+.rs-dec.standout { background: color-mix(in srgb, var(--yellow) 10%, var(--row)); }
+.tb-standout b { display: inline-flex; align-items: center; gap: 6px; }
+.tb-standout b svg { width: 15px; height: 15px; color: var(--yellow); }
+.tb-decide-pic.standout .thumb { box-shadow: 0 0 0 3px var(--yellow); }
+.tb-decide-pins { gap: 8px; }
+.tb-decide-pins .pin-list { max-height: 220px; overflow-y: auto; }
+.win.standout .thumb { box-shadow: 0 0 0 2.5px var(--yellow), 0 0 30px -8px color-mix(in srgb, var(--yellow) 70%, transparent); }
+/* one row that scrolls sideways, a frame at a time */
+.st-best-list { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(160px, 200px); gap: 16px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; margin: -4px; padding: 4px 4px 12px; list-style: none; }
+.st-best-item { min-width: 0; scroll-snap-align: start; scroll-margin-left: 4px; }
+.st-best-list.animate .st-best-item { animation: dt-in 800ms cubic-bezier(.34, 1.35, .64, 1) backwards; animation-delay: calc(var(--i, 0) * 60ms + 80ms); }
+.st-best-link { display: flex; flex-direction: column; gap: 8px; min-width: 0; border-radius: 16px; }
+.st-best-ring { display: block; padding: 3px; border-radius: 17px; background: conic-gradient(from var(--dt-a), var(--standout-stops)); animation: dt-turn 6s linear infinite; transition: box-shadow 320ms var(--ease-out-quint); }
+.st-best-ring .thumb { --thumb-r: 14px; }
+.st-best-link:hover .st-best-ring, .st-best-link:focus-visible .st-best-ring { box-shadow: 0 18px 40px -18px color-mix(in srgb, var(--yellow) 80%, transparent); }
+.st-best-q { font-size: 12.5px; color: var(--text-2); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* a pick's celebration: the picture in its frame, a standout in its ring */
+.moment-sheet.framed { padding-top: 26px; }
+.moment-frame { position: relative; margin: 0 auto 18px; border-radius: 16px; box-shadow: 0 22px 50px -20px color-mix(in srgb, var(--c) 65%, transparent); }
+.moment-frame .thumb { --thumb-r: 14px; box-shadow: 0 0 0 1px var(--studio-line); }
+.moment-frame.ring { padding: 4px; border-radius: 18px; background: conic-gradient(from var(--dt-a), var(--standout-stops)); animation: dt-turn 4s linear infinite; }
+
+/* the tabs' tools: Lights down and the Keys popover (no keys on a touch screen) */
+.tb-tabs-tools { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+/* three tabs wrap on a phone: a rounded box rather than a stretched pill */
+.tb-tabs .seg { border-radius: 22px; }
+.tb-keys { position: relative; }
+.tb-keys-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: 280px; max-width: calc(100vw - 32px); padding: 14px 16px; border-radius: 16px; background: var(--panel-2); box-shadow: var(--shadow-pop); animation: pop 160ms var(--ease-out-quint); }
+.tb-keys-pop dl { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.tb-keys-pop dl > div { display: grid; grid-template-columns: 64px minmax(0, 1fr); gap: 10px; align-items: baseline; font-size: 13px; }
+.tb-keys-pop dd { margin: 0; color: var(--text-2); }
+.tb-keys-pop p { margin-top: 10px; font-size: 12px; }
+.tb-keys-pop kbd { display: inline-block; min-width: 22px; padding: 2px 6px; border-radius: 6px; background: var(--row); box-shadow: inset 0 -1.5px 0 var(--line); color: var(--text); font: 700 12px/1.4 var(--font-ui); text-align: center; }
+@media (pointer: coarse) { .tb-keys { display: none; } }
+/* S and G work across the brief's main panel, as in Preview in the wild */
+.tb-main.squint { --f-blur: blur(2.4px); }
+.tb-main.grey { --f-grey: grayscale(1); }
+.tb-main .thumb > img { filter: var(--f-blur,) var(--f-grey,); transition: filter 200ms var(--ease), opacity 280ms var(--ease); }
+
+/* Compare: side by side, or one over the other with a line to swipe */
+.cmp { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.cmp-tools, .cmp-pickers { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.cmp-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.cmp-pick-l { font: 700 10.5px/1.2 var(--font-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); }
+.cmp-flick { display: flex; align-items: center; gap: 4px; min-width: 0; }
+@media (pointer: coarse) { .cmp-pickers .seg button { min-width: 44px; justify-content: center; } }
+.cmp-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+/* two columns down to a phone (in a designer's view at 1280 the pane is about 510px: each side still feed size) */
+@container tb-pane (max-width: 380px) { .cmp-side { grid-template-columns: minmax(0, 1fr); } }
+.cmp-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; margin: 0; }
+.cmp-col figcaption { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font-size: 13px; }
+.cmp-col figcaption b { font: 800 16px/1.1 var(--font-display); letter-spacing: -0.02em; }
+.cmp-col figcaption span { color: var(--text-2); }
+.cmp-col .thumb { --thumb-r: 12px; box-shadow: 0 0 0 1px var(--studio-line), var(--shadow-thumb); }
+.cmp-col.now .thumb { box-shadow: 0 0 0 2px var(--salmon), var(--shadow-thumb); }
+.cmp-swipe-wrap { margin: 0; }
+.cmp-swipe { position: relative; overflow: hidden; border-radius: 14px; touch-action: pan-y; cursor: ew-resize; user-select: none; box-shadow: 0 0 0 1px var(--studio-line), var(--shadow-thumb); }
+.cmp-swipe .thumb { --thumb-r: 0px; }
+.cmp-after { position: absolute; inset: 0; clip-path: inset(0 0 0 var(--pos)); }
+.cmp-line { position: absolute; top: 0; bottom: 0; left: var(--pos); z-index: 4; width: 2px; margin-left: -1px; background: var(--pin-halo); box-shadow: 0 0 0 1px var(--pin-ring); pointer-events: none; }
+.cmp-line i { position: absolute; top: 50%; left: 50%; display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; transform: translate(-50%, -50%); background: var(--pin-halo); color: var(--pin-ring); box-shadow: 0 6px 18px -4px var(--pin-ring); }
+.cmp-line i svg { width: 14px; height: 14px; stroke-width: 2.6; }
+.cmp-tag { position: absolute; z-index: 4; top: 10px; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 3px 9px; border-radius: var(--r-pill); background: var(--thumb-scrim); color: var(--text); font: 700 11.5px/1.4 var(--font-ui); backdrop-filter: blur(6px); pointer-events: none; }
+.cmp-tag.l { left: 10px; }
+.cmp-tag.r { right: 10px; }
+.cmp-range { position: absolute; inset: 0; z-index: 5; width: 100%; height: 100%; margin: 0; opacity: 0; pointer-events: none; }
+.cmp-swipe:has(.cmp-range:focus-visible) { outline: 2px solid var(--focus); outline-offset: 3px; }
+.cmp-hint { font-size: 12.5px; }
+
+/* Lights down: one option alone on black */
+.lights { position: fixed; inset: 0; z-index: 300; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px 16px; background: var(--lights); color: var(--lights-text); outline: none; animation: fade 200ms ease-out; }
+.lights-frame { width: min(100%, calc((100dvh - 130px) * 16 / 9)); }
+.lights-frame .thumb { --thumb-r: 6px; background: var(--lights); }
+.lights.squint .thumb > img { filter: blur(2.4px); }
+.lights.grey .thumb > img { filter: grayscale(1); }
+.lights.squint.grey .thumb > img { filter: blur(2.4px) grayscale(1); }
+.lights-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px 18px; max-width: 100%; font-size: 13.5px; }
+.lights-t { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--lights-text-2); overflow-wrap: anywhere; }
+.lights-t b { display: grid; place-items: center; flex: none; min-width: 30px; height: 30px; padding: 0 8px; border-radius: 9px; background: var(--lights-btn); color: var(--lights-text); font: 800 15px/1 var(--font-display); }
+.lights-flick { display: flex; align-items: center; gap: 8px; color: var(--lights-text-2); font-variant-numeric: tabular-nums; }
+.lights-btn { display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 50%; background: var(--lights-btn); color: var(--lights-text); cursor: pointer; transition: background var(--t); }
+.lights-btn:hover { background: var(--lights-btn-hover); }
+.lights-btn svg { width: 20px; height: 20px; }
+.lights-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.lights-hint { color: var(--lights-text-2); font-size: 12.5px; }
+
+/* the second look: private advice on a designer's own option */
+.sl { display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 12px 14px; border-radius: 14px; background: color-mix(in srgb, var(--lavender) 9%, var(--row)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lavender) 22%, transparent); }
+/* it takes the focus of the button pressed for it (outlined only for the keyboard) */
+.sl:focus { outline: none; }
+.sl:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.sl-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 10px; }
+.sl-k { display: inline-flex; align-items: center; gap: 6px; font: 800 11px/1.3 var(--font-ui); letter-spacing: .12em; text-transform: uppercase; color: color-mix(in srgb, var(--lavender) 60%, var(--text)); }
+.sl-k svg { width: 13px; height: 13px; flex: none; }
+.sl-private { font-size: 11.5px; color: var(--text-2); }
+.sl-one { font: 700 15px/1.35 var(--font-display); letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.sl-chips { display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.sl-chips .chip { padding: 2px 8px 2px 6px; font-size: 11.5px; }
+.sl-more { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; min-height: 32px; padding: 0; border: 0; background: none; color: var(--text-2); font: 650 12.5px/1.2 var(--font-ui); cursor: pointer; }
+.sl-more:hover { color: var(--text); }
+.sl-more .chev { width: 15px; height: 15px; transition: transform 200ms var(--ease); }
+.sl-more .chev.up { transform: rotate(180deg); }
+@media (pointer: coarse) { .sl-more { min-height: 44px; } }
+.sl-body { display: flex; flex-direction: column; gap: 10px; }
+.sl-notes { display: flex; flex-direction: column; gap: 8px; margin: 0; }
+.sl-notes > div { padding-left: 10px; border-left: 2px solid var(--c, var(--neutral)); }
+.sl-notes > .strong { --c: var(--mint); }
+.sl-notes > .ok { --c: var(--neutral); }
+.sl-notes > .watch { --c: var(--yellow); }
+.sl-notes dt { font-size: 12.5px; font-weight: 700; }
+.sl-notes dt span { font-weight: 600; color: var(--text-2); }
+.sl-notes dd { margin: 2px 0 0; font-size: 13px; line-height: 1.45; color: var(--text-2); overflow-wrap: anywhere; }
+.sl-try { font: 700 10.5px/1.2 var(--font-ui); letter-spacing: .14em; text-transform: uppercase; color: var(--text-2); }
+.sl-sugs { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-left: 20px; list-style: decimal; font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.sl-sugs li::marker { color: color-mix(in srgb, var(--lavender) 60%, var(--text)); font-weight: 700; }
+.sl-foot { font-size: 11.5px; color: var(--text-2); }
+.sl-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
+.sl-ask .btn { color: color-mix(in srgb, var(--lavender) 55%, var(--text)); }
+.sl-ask-t { font-size: 12px; color: var(--text-2); }
+.sl-skel { display: flex; flex-direction: column; gap: 6px; }
+.sl-skel i { height: 10px; border-radius: 6px; background: linear-gradient(90deg, var(--row) 0%, color-mix(in srgb, var(--lavender) 24%, var(--row)) 50%, var(--row) 100%); background-size: 200% 100%; animation: shimmer 1.3s ease infinite; }
+.sl-skel i:nth-child(1) { width: 92%; }
+.sl-skel i:nth-child(2) { width: 74%; }
+.sl-skel i:nth-child(3) { width: 56%; }
 
 /* motion off (the system setting or the Animations switch): nothing tilts or lifts */
 @media (prefers-reduced-motion: reduce) { :is(.win-link, .bt-link):hover .thumb { transform: none; } .opt.pending.uploading > .thumb::after { animation: none; width: 100%; opacity: .5; } }

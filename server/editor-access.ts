@@ -3,7 +3,8 @@
 // uses to-dos (BASE). Video editors also see their own videos from Timeliner
 // (opening the shoot's scripts PDF for a video of theirs), saying which one
 // they're on; thumbnail designers get their Studio: their briefs, uploading
-// options to their tray and sending a round. Everything else is refused here,
+// options to their tray, sending a round, and an AI second look on an option
+// of theirs. Everything else is refused here,
 // before any route runs, so a new route is closed to editors until it's added
 // to this list on purpose. (An admin viewing the site as an editor gets exactly
 // the same: the kind is the viewed person's.)
@@ -39,7 +40,7 @@ const BY_KIND: Record<EditorKind, Routes> = {
   },
   thumbnail: {
     GET: ['/api/studio', '/api/thumbnails/:id'],
-    POST: ['/api/thumbnails/:id/options', '/api/thumbnails/:id/send'],
+    POST: ['/api/thumbnails/:id/options', '/api/thumbnails/:id/send', '/api/thumbnail-options/:id/second-look'],
     DELETE: ['/api/thumbnail-options/:id'],
   },
 };

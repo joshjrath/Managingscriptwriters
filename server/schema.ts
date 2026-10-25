@@ -839,4 +839,36 @@ create table thumbnail_decisions (
 create index thumbnail_decisions_round_idx on thumbnail_decisions (round_id, created_at desc);
 alter table notifications add column thumbnail_decision_id bigint;
 `,
+  // 40 · Thumbnail Studio, phase 2. Pins: a manager's numbered notes on spots of an option (x and y from the picture's
+  // left and top edges, 0 to 1), dropped with a decision; a newer decision on the round shows its own, and the old
+  // ones stay with theirs. A pick can be a standout (only a pick). Picks are celebrated: the moments check takes two
+  // more kinds (swapped the way migrations 6 and 21 swap theirs), and a moment remembers the decision it came from,
+  // so deciding again takes an unseen one back (as review_id does). A designer's AI second look on one of their
+  // options is kept, one per option, since an option's image never changes.
+  `
+create table thumbnail_pins (
+  id bigint generated always as identity primary key,
+  decision_id bigint not null references thumbnail_decisions(id) on delete cascade,
+  variant_id bigint not null references thumbnail_variants(id),
+  x real not null check (x between 0 and 1),
+  y real not null check (y between 0 and 1),
+  n smallint not null check (n > 0),
+  body text not null,
+  tag text check (tag in ('text', 'faces', 'contrast', 'composition', 'brand', 'crop', 'other')),
+  created_at timestamptz not null default now(),
+  -- each pin's number is its own; this key is also the index a decision's pins are read by (decision_id first)
+  constraint thumbnail_pins_number_key unique (decision_id, n)
+);
+alter table thumbnail_decisions add column standout boolean not null default false;
+alter table thumbnail_decisions add constraint thumbnail_decisions_standout_check check (action = 'pick' or not standout);
+alter table moments drop constraint if exists moments_kind_check;
+alter table moments add constraint moments_kind_check check (kind in ('approved', 'revisions', 'drafts_done', 'batch_done', 'team_drafts_done', 'team_batch_done', 'thumb_picked', 'thumb_standout'));
+alter table moments add column thumbnail_decision_id bigint;
+create table thumbnail_second_looks (
+  variant_id bigint primary key references thumbnail_variants(id),
+  requested_by bigint not null references users(id),
+  result jsonb not null,
+  created_at timestamptz not null default now()
+);
+`,
 ];

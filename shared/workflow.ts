@@ -679,3 +679,145 @@ export const thumbSpecIssues = (img: { width: number; height: number; size: numb
 /** Stored files the site shows as a picture (an <img>, as a client's logo or reference): the image types it serves inline. Never SVG. */
 export const PICTURE_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
 export const isPictureMime = (mime: string | null | undefined) => !!mime && (PICTURE_MIMES as readonly string[]).includes(mime);
+
+// ── Thumbnail Studio: pins, standouts and celebrations ──────────────────
+// With either decision a manager can drop numbered notes on exact spots of the round's options (pins), and a pick
+// can be marked Standout. A pick is celebrated for whoever made the option; asking for changes never is.
+
+/** What a pin is about: its optional tag chip. */
+export const THUMB_PIN_TAGS = ['text', 'faces', 'contrast', 'composition', 'brand', 'crop', 'other'] as const;
+export type ThumbPinTag = (typeof THUMB_PIN_TAGS)[number];
+export const THUMB_PIN_TAG_LABEL: Record<ThumbPinTag, string> = {
+  text: 'Text', faces: 'Faces', contrast: 'Contrast', composition: 'Composition', brand: 'Brand', crop: 'Crop', other: 'Other',
+};
+/** The most pins one decision carries. */
+export const MAX_PINS = 20;
+/** The longest note on a pin. */
+export const PIN_NOTE_MAX = 500;
+
+/** A box on the page, in the same units as the point measured against it (a DOMRect fits). */
+export interface Box { left: number; top: number; width: number; height: number }
+
+/**
+ * The picture's own box inside a frame that shows it whole (object-fit: contain), relative to the frame: centred,
+ * with bars on two sides when its shape isn't the frame's. Pins sit on this box, so a pin stays on its spot when an
+ * option that isn't 16:9 is letterboxed. Until the picture's size is known, it's the whole frame.
+ */
+export function fitContain(frame: { width: number; height: number }, image: { width: number; height: number }): Box {
+  const fw = Math.max(0, frame.width || 0);
+  const fh = Math.max(0, frame.height || 0);
+  if (!(fw > 0 && fh > 0 && image.width > 0 && image.height > 0)) return { left: 0, top: 0, width: fw, height: fh };
+  const scale = Math.min(fw / image.width, fh / image.height);
+  const width = image.width * scale;
+  const height = image.height * scale;
+  return { left: (fw - width) / 2, top: (fh - height) / 2, width, height };
+}
+
+/**
+ * Where a click or tap lands on an option's picture, as a pin keeps it: 0 to 1 across from the picture's left edge
+ * and down from its top edge (so it's the same spot at every size), kept on the picture and rounded to 4 places.
+ * `box` is the picture as drawn (see fitContain), in the point's units. Null when the box has no size.
+ */
+export function pinAt(point: { x: number; y: number }, box: Box): { x: number; y: number } | null {
+  if (!(box.width > 0 && box.height > 0) || !Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+  const unit = (v: number) => Math.round(Math.min(1, Math.max(0, v)) * 10_000) / 10_000;
+  return { x: unit((point.x - box.left) / box.width), y: unit((point.y - box.top) / box.height) };
+}
+
+/**
+ * The pins a round shows: its newest decision's (the API lists a round's decisions newest first). Deciding again
+ * replaces them; earlier pins stay with their own decision, as history.
+ */
+export const currentPins = <P>(round: { decisions: readonly { pins?: readonly P[] }[] }): readonly P[] => round.decisions[0]?.pins ?? [];
+
+/** The celebrations a pick records for whoever made the option: a pick, or a pick marked Standout. Asking for changes is never one. */
+export const THUMB_MOMENT_KINDS = ['thumb_picked', 'thumb_standout'] as const;
+export type ThumbMomentKind = (typeof THUMB_MOMENT_KINDS)[number];
+export const thumbMomentKind = (standout: boolean): ThumbMomentKind => (standout ? 'thumb_standout' : 'thumb_picked');
+/**
+ * A pick's moment key (moments.dedupe_key). The key is unique across the whole table, not per person, so it names
+ * both the person and the decision: each pick is celebrated once for each person, and deciding again is a new one.
+ */
+export const thumbMomentKey = (kind: ThumbMomentKind, userId: number, decisionId: number) => `${kind}:${userId}:${decisionId}`;
+/** How a pick is celebrated: one from the first round sent gets the bigger celebration, any other the smaller; a standout adds a ring. */
+export const pickCelebration = (p: { firstRound: boolean; standout: boolean }): { size: 'big' | 'small'; ring: boolean } => ({
+  size: p.firstRound ? 'big' : 'small', ring: p.standout,
+});
+
+// ── Thumbnail Studio: the AI second look ────────────────────────────────
+// A designer can ask Claude for a quick, private critique of one of their own options (only when the server has an
+// ANTHROPIC_API_KEY). It's advice and never stops a round being sent. One is kept per option, since an option's
+// image never changes; only its maker ever sees it.
+
+/** What a second look judges, in this order: how it reads at the sizes viewers meet it, then against the brief and the client. */
+export const SECOND_LOOK_CHECKS = ['reads_small', 'focal_point', 'words', 'contrast', 'brief_fit', 'brand_fit'] as const;
+export type SecondLookCheckKey = (typeof SECOND_LOOK_CHECKS)[number];
+export const SECOND_LOOK_CHECK_LABEL: Record<SecondLookCheckKey, string> = {
+  reads_small: 'Reads small', focal_point: 'Focal point', words: 'Words', contrast: 'Contrast', brief_fit: 'Fits the brief', brand_fit: 'Fits the client',
+};
+export const SECOND_LOOK_STATUSES = ['strong', 'ok', 'watch'] as const;
+export type SecondLookStatus = (typeof SECOND_LOOK_STATUSES)[number];
+export const SECOND_LOOK_STATUS_LABEL: Record<SecondLookStatus, string> = { strong: 'Strong', ok: 'OK', watch: 'Watch' };
+/** Each status's Chip colour (ui.tsx `Chip color`): strong mint, ok neutral, watch yellow. */
+export const SECOND_LOOK_STATUS_COLOR: Record<SecondLookStatus, string> = { strong: 'mint', ok: 'neutral', watch: 'yellow' };
+/** The longest headline, check note and suggestion a second look keeps, and how many suggestions. */
+export const SECOND_LOOK_LIMITS = { oneLiner: 140, note: 160, suggestion: 160, suggestions: 3 } as const;
+/**
+ * The largest option a second look sends. The API takes at most 10 MB per image once base64-encoded, which is 4/3 the
+ * size of the file, so 7 MB leaves room.
+ */
+export const SECOND_LOOK_MAX_BYTES = 7 * 1024 * 1024;
+
+/** One of the six checks: how it does, and a short note on why. */
+export interface SecondLookCheck { key: SecondLookCheckKey; status: SecondLookStatus; note: string }
+/** What a second look says (kept as thumbnail_second_looks.result). */
+export interface SecondLookResult {
+  /** the headline, at most SECOND_LOOK_LIMITS.oneLiner characters */
+  oneLiner: string;
+  /** exactly the six SECOND_LOOK_CHECKS, in that order */
+  checks: SecondLookCheck[];
+  /** up to three concrete things to do in the design file */
+  suggestions: string[];
+}
+
+/** Why an option can't have a second look, in plain words, or null when it can. Only its size: who may ask is the route's rule. */
+export function secondLookRefusal(option: { size: number }): string | null {
+  if (option.size <= SECOND_LOOK_MAX_BYTES) return null;
+  return `This image is ${fmtBytes(option.size)}, and a second look takes images up to ${SECOND_LOOK_MAX_BYTES / 1024 / 1024} MB. Export a lighter copy (a JPG is usually much smaller) to ask for one.`;
+}
+
+/** Text as a second look keeps it: spaces collapsed, trimmed, and cut at a word break with an ellipsis when it's over `max`. */
+function clipText(v: unknown, max: number): string {
+  const s = typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '';
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max - 1);
+  const at = cut.lastIndexOf(' ');
+  // never half an emoji (the database refuses a lone surrogate), nor a dangling comma before the ellipsis
+  return `${(at >= max * 0.6 ? cut.slice(0, at) : cut).replace(/[\uD800-\uDBFF]$/, '').replace(/[\s,;:–—-]+$/, '')}…`;
+}
+
+/**
+ * A second look's answer made safe to keep and show: every text trimmed and cut to its limit (SECOND_LOOK_LIMITS) at
+ * a word break, the six checks in their order (the first of each key; anything else dropped), and at most three
+ * suggestions, empty ones dropped. Null when it can't be used: no headline, a check missing, or a status that isn't
+ * one of the three. The server runs every answer through this before keeping it.
+ */
+export function tidySecondLook(raw: unknown): SecondLookResult | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as { oneLiner?: unknown; checks?: unknown; suggestions?: unknown };
+  const L = SECOND_LOOK_LIMITS;
+  const oneLiner = clipText(r.oneLiner, L.oneLiner);
+  if (!oneLiner) return null;
+  const given = (Array.isArray(r.checks) ? r.checks : []).filter((c): c is { key?: unknown; status?: unknown; note?: unknown } => !!c && typeof c === 'object');
+  const checks: SecondLookCheck[] = [];
+  for (const key of SECOND_LOOK_CHECKS) {
+    const c = given.find((x) => x.key === key);
+    if (!c || !(SECOND_LOOK_STATUSES as readonly unknown[]).includes(c.status)) return null;
+    checks.push({ key, status: c.status as SecondLookStatus, note: clipText(c.note, L.note) });
+  }
+  const suggestions = (Array.isArray(r.suggestions) ? r.suggestions : [])
+    .map((s) => clipText(s, L.suggestion))
+    .filter(Boolean)
+    .slice(0, L.suggestions);
+  return { oneLiner, checks, suggestions };
+}

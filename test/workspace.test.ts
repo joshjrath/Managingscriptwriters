@@ -8,8 +8,8 @@ import { buildApp } from '../server/app';
 import { openDb, type Db } from '../server/db';
 import type { Ctx } from '../server/core';
 import { DEMO_PASSWORD, seedDemo } from '../server/seed-demo';
-import type { BatchDetail, Counts, StudioPayload, ThumbnailBoard, ThumbnailBriefDetail } from '../shared/types';
-import { thumbSpecIssues } from '../shared/workflow';
+import type { BatchDetail, Counts, Moment, StudioPayload, ThumbnailBoard, ThumbnailBriefDetail } from '../shared/types';
+import { SECOND_LOOK_CHECKS, thumbSpecIssues } from '../shared/workflow';
 import { freshDb } from './db';
 
 const NOW = new Date('2026-09-28T16:00:00Z'); // Monday noon in New York
@@ -128,6 +128,18 @@ describe('the demo workspace', () => {
       const managerView = (await get(`/api/thumbnails/${serum.id}`, josh)).json() as ThumbnailBriefDetail;
       expect([managerView.tray, managerView.draftOptions, managerView.cover]).toEqual([null, 1, null]);
       expect([(await get(draft.url, ana)).status, (await get(draft.url, josh)).status]).toEqual([200, 404]);
+
+      // notes pinned on the round changes were asked on, a standout in "Your best this month" with her celebration
+      // waiting, and a second look kept on her tray option (only hers), all without an API key
+      expect(studio.hero.kind === 'changes' && studio.hero.decision.pins?.map((p) => [p.n, p.optionLetter, p.tag])).toEqual([[1, 'A', 'composition'], [2, 'A', 'text'], [3, 'B', 'contrast']]);
+      expect(studio.best?.map((w) => [w.title, w.standout])).toEqual([['The jacket that folds into itself', true]]);
+      const celebrations = ((await get('/api/moments', ana)).json() as Moment[]).filter((m) => m.thumb);
+      expect(celebrations.map((m) => [m.kind, m.batchId, m.thumb?.title, m.thumb?.roundNumber, m.thumb?.firstRound, m.thumb?.option.letter])).toEqual([
+        ['thumb_standout', null, 'The jacket that folds into itself', 2, false, 'B'],
+      ]);
+      expect(draft.secondLook?.checks.map((c) => c.key)).toEqual([...SECOND_LOOK_CHECKS]);
+      expect(draft.secondLook?.oneLiner).toMatch(/bottle/);
+      expect(JSON.stringify(managerView)).not.toContain(draft.secondLook!.oneLiner);
     } finally {
       await demoApp.close();
       await demo.close();

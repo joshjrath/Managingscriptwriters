@@ -351,3 +351,130 @@ describe('who has written a client’s scripts before', () => {
     expect(writerHistory([], () => true)).toEqual({ last: null, everyone: [] });
   });
 });
+
+describe('pins on a thumbnail option', () => {
+  it('keeps the tags and the moments the database checks in step with the shared lists', async () => {
+    const { THUMB_PIN_TAGS, THUMB_PIN_TAG_LABEL, THUMB_MOMENT_KINDS } = await import('../shared/workflow');
+    const { MIGRATIONS } = await import('../server/schema');
+    const sql = MIGRATIONS[39];
+    expect(typeof sql).toBe('string');
+    const tagCheck = /tag text check \(tag in \(([^)]*)\)\)/.exec(sql as string)?.[1];
+    expect(tagCheck?.split(',').map((t) => t.trim().replace(/'/g, ''))).toEqual([...THUMB_PIN_TAGS]);
+    expect(Object.keys(THUMB_PIN_TAG_LABEL)).toEqual([...THUMB_PIN_TAGS]);
+    const kinds = /moments_kind_check check \(kind in \(([^)]*)\)\)/.exec(sql as string)?.[1].split(',').map((k) => k.trim().replace(/'/g, ''));
+    // the six kinds from before, plus a pick and a standout; asking for changes is never a celebration
+    expect(kinds).toEqual(['approved', 'revisions', 'drafts_done', 'batch_done', 'team_drafts_done', 'team_batch_done', ...THUMB_MOMENT_KINDS]);
+    expect(kinds).not.toContain('thumb_changes');
+  });
+
+  it('finds the picture inside its frame, letterboxed or not', async () => {
+    const { fitContain } = await import('../shared/workflow');
+    expect(fitContain({ width: 640, height: 360 }, { width: 1280, height: 720 })).toEqual({ left: 0, top: 0, width: 640, height: 360 });
+    // a square image in a 16:9 frame: bars left and right
+    expect(fitContain({ width: 640, height: 360 }, { width: 1000, height: 1000 })).toEqual({ left: 140, top: 0, width: 360, height: 360 });
+    // wider than 16:9: bars top and bottom
+    expect(fitContain({ width: 640, height: 360 }, { width: 2000, height: 500 })).toEqual({ left: 0, top: 100, width: 640, height: 160 });
+    // size not known yet, or nothing to fit in: the whole frame
+    expect(fitContain({ width: 640, height: 360 }, { width: 0, height: 0 })).toEqual({ left: 0, top: 0, width: 640, height: 360 });
+    expect(fitContain({ width: 0, height: 0 }, { width: 1280, height: 720 })).toEqual({ left: 0, top: 0, width: 0, height: 0 });
+  });
+
+  it('turns a click into a spot on the picture from 0 to 1, kept on it and rounded', async () => {
+    const { pinAt } = await import('../shared/workflow');
+    const box = { left: 100, top: 50, width: 640, height: 360 };
+    expect(pinAt({ x: 420, y: 230 }, box)).toEqual({ x: 0.5, y: 0.5 });
+    expect(pinAt({ x: 100, y: 50 }, box)).toEqual({ x: 0, y: 0 });
+    // a click on a bar or past the edge stays on the picture
+    expect(pinAt({ x: 40, y: 900 }, box)).toEqual({ x: 0, y: 1 });
+    expect(pinAt({ x: 100 + 640 / 3, y: 50 + 360 * 0.123456 }, box)).toEqual({ x: 0.3333, y: 0.1235 });
+    expect(pinAt({ x: 10, y: 10 }, { left: 0, top: 0, width: 0, height: 360 })).toBeNull();
+    expect(pinAt({ x: Number.NaN, y: 10 }, box)).toBeNull();
+  });
+
+  it('shows the newest decision’s pins on a round; earlier ones stay with their decision', async () => {
+    const { currentPins, MAX_PINS, PIN_NOTE_MAX } = await import('../shared/workflow');
+    expect([MAX_PINS, PIN_NOTE_MAX]).toEqual([20, 500]);
+    const round = { decisions: [{ pins: [{ n: 1 }] }, { pins: [{ n: 1 }, { n: 2 }] }] };
+    expect(currentPins(round)).toEqual([{ n: 1 }]);
+    expect(currentPins({ decisions: [{}, { pins: [{ n: 1 }] }] })).toEqual([]);
+    expect(currentPins({ decisions: [] })).toEqual([]);
+  });
+});
+
+describe('celebrating a thumbnail pick', () => {
+  it('records a pick or a standout, keyed by the person and the decision', async () => {
+    const { thumbMomentKind, thumbMomentKey } = await import('../shared/workflow');
+    expect([thumbMomentKind(false), thumbMomentKind(true)]).toEqual(['thumb_picked', 'thumb_standout']);
+    expect(thumbMomentKey('thumb_picked', 7, 42)).toBe('thumb_picked:7:42');
+    // dedupe keys are unique across the whole table: two people, or two decisions, never share one
+    const keys = [thumbMomentKey('thumb_picked', 7, 42), thumbMomentKey('thumb_picked', 8, 42), thumbMomentKey('thumb_picked', 7, 43), thumbMomentKey('thumb_standout', 7, 42)];
+    expect(new Set(keys).size).toBe(keys.length);
+    expect(thumbMomentKey('thumb_picked', 1, 23)).not.toBe(thumbMomentKey('thumb_picked', 12, 3));
+  });
+
+  it('celebrates a first-round pick bigger, and rings a standout', async () => {
+    const { pickCelebration } = await import('../shared/workflow');
+    expect(pickCelebration({ firstRound: true, standout: false })).toEqual({ size: 'big', ring: false });
+    expect(pickCelebration({ firstRound: false, standout: false })).toEqual({ size: 'small', ring: false });
+    expect(pickCelebration({ firstRound: false, standout: true })).toEqual({ size: 'small', ring: true });
+  });
+});
+
+describe('a thumbnail’s AI second look', () => {
+  const checks = (over: Record<string, unknown> = {}) => ['reads_small', 'focal_point', 'words', 'contrast', 'brief_fit', 'brand_fit']
+    .map((key) => ({ key, status: 'ok', note: `${key} note`, ...(over[key] as object | undefined) }));
+
+  it('takes options up to 7 MB, and says why it won’t take a bigger one', async () => {
+    const { secondLookRefusal, SECOND_LOOK_MAX_BYTES } = await import('../shared/workflow');
+    expect(SECOND_LOOK_MAX_BYTES).toBe(7 * 1024 * 1024);
+    expect(secondLookRefusal({ size: SECOND_LOOK_MAX_BYTES })).toBeNull();
+    expect(secondLookRefusal({ size: 1.4 * 1024 * 1024 })).toBeNull();
+    expect(secondLookRefusal({ size: SECOND_LOOK_MAX_BYTES + 1 })).toMatch(/up to 7 MB/);
+    expect(secondLookRefusal({ size: 8.4 * 1024 * 1024 })).toMatch(/^This image is 8\.4 MB/);
+  });
+
+  it('colours each status as the chips do: strong mint, ok neutral, watch yellow', async () => {
+    const { SECOND_LOOK_STATUS_COLOR, SECOND_LOOK_CHECKS, SECOND_LOOK_CHECK_LABEL } = await import('../shared/workflow');
+    expect(SECOND_LOOK_STATUS_COLOR).toEqual({ strong: 'mint', ok: 'neutral', watch: 'yellow' });
+    expect(Object.keys(SECOND_LOOK_CHECK_LABEL)).toEqual([...SECOND_LOOK_CHECKS]);
+  });
+
+  it('keeps an answer tidy: trimmed, the six checks in order, three suggestions at most', async () => {
+    const { tidySecondLook } = await import('../shared/workflow');
+    const out = tidySecondLook({
+      oneLiner: '  Strong   face,\n but the words fight it.  ',
+      // out of order, with an extra key and a repeat (the first counts)
+      checks: [...checks({ words: { status: 'watch', note: '  Five words:  cut to two.  ' } }).reverse(), { key: 'colour', status: 'ok', note: 'x' }, { key: 'words', status: 'strong', note: 'later' }],
+      suggestions: ['  Cut the words to “TOO LATE”. ', '', '   ', 'Lift the face 10%.', 'Darken the left third.', 'A fourth one.'],
+    });
+    expect(out?.oneLiner).toBe('Strong face, but the words fight it.');
+    expect(out?.checks.map((c) => c.key)).toEqual(['reads_small', 'focal_point', 'words', 'contrast', 'brief_fit', 'brand_fit']);
+    expect(out?.checks[2]).toEqual({ key: 'words', status: 'watch', note: 'Five words: cut to two.' });
+    expect(out?.suggestions).toEqual(['Cut the words to “TOO LATE”.', 'Lift the face 10%.', 'Darken the left third.']);
+    expect(tidySecondLook({ oneLiner: 'Fine.', checks: checks(), suggestions: undefined })?.suggestions).toEqual([]);
+  });
+
+  it('cuts text over its limit at a word break, never mid-emoji', async () => {
+    const { tidySecondLook, SECOND_LOOK_LIMITS } = await import('../shared/workflow');
+    const long = 'The face reads well at feed size but the headline is doing too much work for a phone, '.repeat(3);
+    const out = tidySecondLook({ oneLiner: long, checks: checks({ contrast: { note: long } }), suggestions: [long] })!;
+    expect(out.oneLiner.length).toBeLessThanOrEqual(SECOND_LOOK_LIMITS.oneLiner);
+    expect(out.oneLiner).toMatch(/\w…$/);
+    expect(long.startsWith(out.oneLiner.slice(0, -1))).toBe(true);
+    expect(out.checks[3].note.length).toBeLessThanOrEqual(SECOND_LOOK_LIMITS.note);
+    expect(out.suggestions[0].length).toBeLessThanOrEqual(SECOND_LOOK_LIMITS.suggestion);
+    // no word break to cut at, ending on an emoji: the emoji goes whole
+    const emoji = tidySecondLook({ oneLiner: `${'x'.repeat(138)}😀😀`, checks: checks(), suggestions: [] })!.oneLiner;
+    expect(emoji).toBe(`${'x'.repeat(138)}…`);
+  });
+
+  it('refuses an answer it can’t use: no headline, a check missing, or an odd status', async () => {
+    const { tidySecondLook } = await import('../shared/workflow');
+    expect(tidySecondLook({ oneLiner: '   ', checks: checks(), suggestions: [] })).toBeNull();
+    expect(tidySecondLook({ oneLiner: 'Good', checks: checks().filter((c) => c.key !== 'brand_fit'), suggestions: [] })).toBeNull();
+    expect(tidySecondLook({ oneLiner: 'Good', checks: checks({ focal_point: { status: 'great' } }), suggestions: [] })).toBeNull();
+    expect(tidySecondLook({ oneLiner: 'Good', checks: 'all fine', suggestions: [] })).toBeNull();
+    expect(tidySecondLook(null)).toBeNull();
+    expect(tidySecondLook('Good')).toBeNull();
+  });
+});

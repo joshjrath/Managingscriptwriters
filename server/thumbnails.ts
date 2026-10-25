@@ -9,8 +9,13 @@
 // every brief but sent rounds only (a designer's draft count, never the images), and may open a designer's Studio
 // with ?userId=. Option images are kept only when their own bytes say PNG, JPEG or WebP (server/images.ts), and are
 // stored under that type, never the browser's.
+//
+// A decision can carry pins (numbered notes on spots of the round's options) and a pick can be marked Standout; a
+// pick is celebrated for whoever made the option (recordThumbMoment in server/moments.ts). Pins are on options, so a
+// designer reads them only on rounds they sent. A designer's AI second look on an option (server/second-look.ts)
+// rides on that option for its maker only.
 
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import type { Db } from './db';
 import { clockFor, loadUsers, logActivity, managerIds, notify, type Ctx } from './core';
@@ -19,18 +24,19 @@ import { conflict, forbidden, HttpError, notFound, optionalDate, parse, zs } fro
 import { loadResources } from './records';
 import { storeFile, THUMB_LATEST_SENT, THUMB_WINNER } from './files';
 import { asImageUpload, uploadedImageInfo } from './images';
+import { recordThumbMoment } from './moments';
 import { readForm } from './submissions';
 import { addDays, nowInZone, startOfMonth, startOfWeek, type Clock, type ISODate } from '../shared/dates';
 import { fmtDate, plural } from '../shared/format';
 import {
-  briefOrder, DEFAULT_OPTIONS, isDesignerTurn, isManager, isOpenThumb, isPictureMime, isThumbnailDesigner, JUST_PICKED_MS, MAX_OPTIONS,
-  nextBrief, nextLetter, THUMB_ACTIONS, thumbBriefPath, thumbnailState,
-  type EditorKind, type OptionLetter, type Role, type ThumbAction, type ThumbMime,
+  briefOrder, DEFAULT_OPTIONS, isDesignerTurn, isManager, isOpenThumb, isPictureMime, isThumbnailDesigner, JUST_PICKED_MS, MAX_OPTIONS, MAX_PINS,
+  nextBrief, nextLetter, PIN_NOTE_MAX, THUMB_ACTIONS, THUMB_PIN_TAGS, thumbBriefPath, thumbnailState, tidySecondLook,
+  type EditorKind, type OptionLetter, type Role, type ThumbAction, type ThumbMime, type ThumbPinTag,
 } from '../shared/workflow';
 import {
   fileUrl,
   type Counts, type Me, type StudioHero, type StudioPayload, type ThumbnailBoard, type ThumbnailBrief, type ThumbnailBriefDetail,
-  type ThumbnailDecision, type ThumbnailDesignerLoad, type ThumbnailOption, type ThumbnailRound, type ThumbnailWin,
+  type ThumbnailDecision, type ThumbnailDesignerLoad, type ThumbnailOption, type ThumbnailPin, type ThumbnailRound, type ThumbnailSecondLook, type ThumbnailWin,
 } from '../shared/types';
 
 /** How long a picked or cancelled brief stays on the managers' board. */
@@ -76,6 +82,15 @@ interface OptionRow {
   width: number; height: number; size: number; note: string | null; uploaded_by: number; uploaded_by_name: string; created_at: string;
 }
 
+/**
+ * A kept second look (thumbnail_second_looks.result, as either engine returns jsonb) as an option carries it: tidied
+ * again on the way out, so a row that's somehow odd is left out rather than shown half-formed.
+ */
+export function secondLookOf(optionId: number, stored: unknown, createdAt: string): ThumbnailSecondLook | null {
+  const result = tidySecondLook(typeof stored === 'string' ? JSON.parse(stored) : stored);
+  return result ? { ...result, optionId, createdAt } : null;
+}
+
 const toOption = (r: OptionRow, picked: boolean): ThumbnailOption => ({
   id: r.id, briefId: r.brief_id, roundId: r.round_id, roundNumber: r.round_number, letter: r.letter, fileId: r.file_id, url: fileUrl(r.file_id),
   fileName: r.file_name, mime: r.mime, width: r.width, height: r.height, size: r.size, note: r.note, uploadedById: r.uploaded_by,
@@ -94,6 +109,8 @@ interface Loaded {
   decision: ThumbnailDecision | null;
   state: ThumbnailBrief['state'];
   winner: ThumbnailOption | null;
+  /** the second looks kept on its options, by option id: present() gives each only to the option's maker */
+  looks: Map<number, ThumbnailSecondLook>;
 }
 
 interface BriefWhere {
@@ -123,7 +140,7 @@ async function loadBriefs(db: Db, where: BriefWhere): Promise<Loaded[]> {
   const rows = await db.query<BriefRow>(`${BRIEF_SELECT} ${cond.length ? `where ${cond.join(' and ')}` : ''} order by b.id`, params);
   if (!rows.length) return [];
   const ids = rows.map((r) => r.id);
-  const [rounds, options, decisions] = await Promise.all([
+  const [rounds, options, decisions, pins, looks] = await Promise.all([
     db.query<{ id: number; brief_id: number; number: number; note: string | null; created_by: number; created_by_name: string; created_at: string; sent_at: string | null }>(
       `select r.id, r.brief_id, r.number, r.note, r.created_by, u.name as created_by_name, r.created_at, r.sent_at
          from thumbnail_rounds r join users u on u.id = r.created_by where r.brief_id = any($1::bigint[]) order by r.brief_id, r.number`, [ids],
@@ -131,24 +148,46 @@ async function loadBriefs(db: Db, where: BriefWhere): Promise<Loaded[]> {
     db.query<OptionRow>(`select ${OPTION_COLUMNS} from ${OPTION_JOINS} where r.brief_id = any($1::bigint[]) and v.removed_at is null order by v.round_id, v.letter`, [ids]),
     db.query<{
       id: number; round_id: number; round_number: number; action: ThumbAction; variant_id: number | null; letter: OptionLetter | null; note: string | null;
-      decided_by: number; decided_by_name: string; created_at: string;
+      decided_by: number; decided_by_name: string; created_at: string; standout: boolean;
     }>(
-      `select d.id, d.round_id, r.number as round_number, d.action, d.variant_id, v.letter, d.note, d.decided_by, u.name as decided_by_name, d.created_at
+      `select d.id, d.round_id, r.number as round_number, d.action, d.variant_id, v.letter, d.note, d.decided_by, u.name as decided_by_name, d.created_at, d.standout
          from thumbnail_decisions d join thumbnail_rounds r on r.id = d.round_id join users u on u.id = d.decided_by
          left join thumbnail_variants v on v.id = d.variant_id
         where r.brief_id = any($1::bigint[]) order by d.created_at desc, d.id desc`, [ids],
     ),
+    db.query<{ id: number; decision_id: number; variant_id: number; letter: OptionLetter; x: number; y: number; n: number; body: string; tag: ThumbPinTag | null }>(
+      `select p.id, p.decision_id, p.variant_id, v.letter, p.x, p.y, p.n, p.body, p.tag
+         from thumbnail_pins p join thumbnail_decisions d on d.id = p.decision_id join thumbnail_rounds r on r.id = d.round_id
+         join thumbnail_variants v on v.id = p.variant_id
+        where r.brief_id = any($1::bigint[]) order by p.decision_id, p.n`, [ids],
+    ),
+    db.query<{ variant_id: number; result: unknown; created_at: string }>(
+      `select s.variant_id, s.result, s.created_at from thumbnail_second_looks s join thumbnail_variants v on v.id = s.variant_id
+         join thumbnail_rounds r on r.id = v.round_id where r.brief_id = any($1::bigint[])`, [ids],
+    ),
   ]);
   const optionsOf = new Map<number, OptionRow[]>();
   for (const o of options) optionsOf.set(o.round_id, [...(optionsOf.get(o.round_id) ?? []), o]);
+  const pinsOf = new Map<number, ThumbnailPin[]>();
+  for (const p of pins) {
+    pinsOf.set(p.decision_id, [...(pinsOf.get(p.decision_id) ?? []), {
+      id: p.id, decisionId: p.decision_id, optionId: p.variant_id, optionLetter: p.letter, x: p.x, y: p.y, n: p.n, body: p.body, tag: p.tag,
+    }]);
+  }
   const decisionsOf = new Map<number, ThumbnailDecision[]>();
   for (const d of decisions) {
     const list = decisionsOf.get(d.round_id) ?? [];
     list.push({
       id: d.id, roundId: d.round_id, roundNumber: d.round_number, action: d.action, optionId: d.variant_id, optionLetter: d.letter, note: d.note,
       decidedById: d.decided_by, decidedByName: d.decided_by_name, createdAt: d.created_at, superseded: list.length > 0,
+      standout: !!d.standout, pins: pinsOf.get(d.id) ?? [],
     });
     decisionsOf.set(d.round_id, list);
+  }
+  const looksOf = new Map<number, ThumbnailSecondLook>();
+  for (const k of looks) {
+    const look = secondLookOf(Number(k.variant_id), k.result, k.created_at);
+    if (look) looksOf.set(look.optionId, look);
   }
   const roundsOf = new Map<number, typeof rounds>();
   for (const r of rounds) roundsOf.set(r.brief_id, [...(roundsOf.get(r.brief_id) ?? []), r]);
@@ -169,7 +208,7 @@ async function loadBriefs(db: Db, where: BriefWhere): Promise<Loaded[]> {
     }));
     const latest = latestRow ? list.find((r) => r.id === latestRow.id) ?? null : null;
     const tray = trayRow ? list.find((r) => r.id === trayRow.id) ?? null : null;
-    return { row, rounds: list, latest, tray, decision, state, winner: latest?.options.find((o) => o.picked) ?? null };
+    return { row, rounds: list, latest, tray, decision, state, winner: latest?.options.find((o) => o.picked) ?? null, looks: looksOf };
   });
 }
 
@@ -187,16 +226,31 @@ interface View {
    * asked, for context) but lose their options, apart from the winner
    */
   designer?: number;
+  /** an Admin viewing the site as the designer: second looks stay private to their maker, so none are shown */
+  viewingAs?: boolean;
 }
 
 function present(l: Loaded, view: View): { brief: ThumbnailBrief; rounds: ThumbnailRound[]; tray: ThumbnailRound | null } {
   const r = l.row;
   const past = view.sentBy != null;
   const showTray = view.trayFor != null && r.designer_id === view.trayFor;
+  // the designer looking (current or past); null for managers
+  const maker = view.designer ?? view.sentBy ?? null;
+  // a second look is private to the option's maker: theirs carry it (null when they haven't asked), nobody else's do,
+  // and not even theirs while an Admin is viewing as them
+  const withLook = (o: ThumbnailOption): ThumbnailOption =>
+    (maker != null && !view.viewingAs && o.uploadedById === maker ? { ...o, secondLook: l.looks.get(o.id) ?? null } : o);
+  // pins sit on a round's options, so a designer reads them only on rounds they sent (never on another designer's options)
+  const pinsFor = (round: { createdById: number } | null | undefined) => maker == null || round?.createdById === maker;
+  const noPins = (d: ThumbnailDecision): ThumbnailDecision => ({ ...d, pins: [] });
   const rounds = l.rounds
     .filter((x) => x.sentAt && (!past || x.createdById === view.sentBy))
-    .map((x) => (view.designer == null || x.createdById === view.designer ? x : { ...x, options: x.options.filter((o) => o.picked) }));
-  const tray = showTray && l.tray?.options.length ? l.tray : null;
+    .map((x) => ({
+      ...x,
+      options: (view.designer == null || x.createdById === view.designer ? x.options : x.options.filter((o) => o.picked)).map(withLook),
+      decisions: pinsFor(x) ? x.decisions : x.decisions.map(noPins),
+    }));
+  const tray = showTray && l.tray?.options.length ? { ...l.tray, options: l.tray.options.map(withLook) } : null;
   const designerOk = r.designer_id != null && !!r.designer_active && !r.designer_removed_at && !!r.designer_role
     && isThumbnailDesigner({ role: r.designer_role, editorKind: r.designer_kind });
   // a designer it was taken from: where their own newest round stands, never what came after it (someone else's
@@ -204,7 +258,9 @@ function present(l: Loaded, view: View): { brief: ThumbnailBrief; rounds: Thumbn
   const last = past ? rounds[rounds.length - 1] ?? null : l.latest;
   const theirsIsNewest = !!last && last.id === l.latest?.id;
   const state = past && isOpenThumb(l.state) && !theirsIsNewest ? 'to_design' : l.state;
-  const decision = past && !theirsIsNewest ? null : l.decision;
+  const shownDecision = past && !theirsIsNewest ? null : l.decision;
+  // the newest decision is on the newest sent round: its pins only when that round is the viewer's own
+  const decision = shownDecision && !pinsFor(l.latest) ? noPins(shownDecision) : shownDecision;
   const brief: ThumbnailBrief = {
     id: r.id, clientId: r.client_id, clientName: r.client_name, shootId: r.shoot_id, shootDate: r.shoot_date, title: r.title, brief: r.brief,
     onImage: r.on_image, optionsWanted: r.options_wanted, dueOn: r.due_on, designerId: r.designer_id, designerName: r.designer_name,
@@ -217,16 +273,16 @@ function present(l: Loaded, view: View): { brief: ThumbnailBrief; rounds: Thumbn
 }
 
 /** The current winners of briefs that aren't cancelled (any designer's), newest pick first. */
-async function loadWins(db: Db, where: { madeBy?: number; clientId?: number; exceptBriefId?: number; limit?: number }): Promise<ThumbnailWin[]> {
+export async function loadWins(db: Db, where: { madeBy?: number; clientId?: number; exceptBriefId?: number; limit?: number }): Promise<ThumbnailWin[]> {
   const cond = ['b.cancelled_at is null'];
   const params: unknown[] = [];
   if (where.clientId) { params.push(where.clientId); cond.push(`b.client_id = $${params.length}`); }
   if (where.exceptBriefId) { params.push(where.exceptBriefId); cond.push(`b.id <> $${params.length}`); }
   let by = '';
   if (where.madeBy) { params.push(where.madeBy); by = `and v.uploaded_by = $${params.length}`; }
-  const rows = await db.query<OptionRow & { title: string; client_id: number; client_name: string; picked_at: string; picked_by_name: string; reason: string | null }>(
+  const rows = await db.query<OptionRow & { title: string; client_id: number; client_name: string; picked_at: string; picked_by_name: string; reason: string | null; standout: boolean }>(
     `with w as (select b.id as brief_id, ${THUMB_WINNER('b')} as variant_id from thumbnail_briefs b where ${cond.join(' and ')})
-     select ${OPTION_COLUMNS}, tb.title, tb.client_id, c.name as client_name, pk.created_at as picked_at, pk.picked_by_name, pk.note as reason
+     select ${OPTION_COLUMNS}, tb.title, tb.client_id, c.name as client_name, pk.created_at as picked_at, pk.picked_by_name, pk.note as reason, pk.standout
        from w
        join thumbnail_variants v on v.id = w.variant_id
        join thumbnail_rounds r on r.id = v.round_id
@@ -234,7 +290,7 @@ async function loadWins(db: Db, where: { madeBy?: number; clientId?: number; exc
        join users u on u.id = v.uploaded_by
        join thumbnail_briefs tb on tb.id = w.brief_id
        join clients c on c.id = tb.client_id
-       join lateral (select x.created_at, x.note, xu.name as picked_by_name from thumbnail_decisions x join users xu on xu.id = x.decided_by
+       join lateral (select x.created_at, x.note, x.standout, xu.name as picked_by_name from thumbnail_decisions x join users xu on xu.id = x.decided_by
                       where x.round_id = v.round_id order by x.created_at desc, x.id desc limit 1) pk on true
       where v.removed_at is null ${by}
       order by pk.created_at desc, v.id desc ${where.limit ? `limit ${Math.max(1, Math.floor(where.limit))}` : ''}`,
@@ -242,12 +298,15 @@ async function loadWins(db: Db, where: { madeBy?: number; clientId?: number; exc
   );
   return rows.map((r) => ({
     option: toOption(r, true), briefId: r.brief_id, title: r.title, clientId: r.client_id, clientName: r.client_name,
-    pickedAt: r.picked_at, pickedByName: r.picked_by_name, reason: r.reason,
+    pickedAt: r.picked_at, pickedByName: r.picked_by_name, reason: r.reason, standout: !!r.standout,
   }));
 }
 
-/** One brief as `me` may see it (404 when they may not, so its existence doesn't leak). */
-export async function loadThumbnailDetail(db: Db, me: Me, id: number): Promise<ThumbnailBriefDetail> {
+/**
+ * One brief as `me` may see it (404 when they may not, so its existence doesn't leak). `viewingAs`: an Admin is
+ * viewing the site as `me`, so second looks are left out (they're private to their maker).
+ */
+export async function loadThumbnailDetail(db: Db, me: Me, id: number, opts: { viewingAs?: boolean } = {}): Promise<ThumbnailBriefDetail> {
   const [l] = await loadBriefs(db, { ids: [id] });
   if (!l) throw notFound('Thumbnail brief');
   let viewer: ThumbnailBriefDetail['viewer'];
@@ -257,11 +316,11 @@ export async function loadThumbnailDetail(db: Db, me: Me, id: number): Promise<T
     view = { trayFor: null };
   } else if (isThumbnailDesigner(me) && l.row.designer_id === me.id) {
     viewer = 'designer';
-    view = { trayFor: me.id, designer: me.id };
+    view = { trayFor: me.id, designer: me.id, viewingAs: opts.viewingAs };
   } else if (isThumbnailDesigner(me) && l.rounds.some((r) => r.sentAt && r.createdById === me.id)) {
     // a brief since given to someone else: the rounds they sent, read-only
     viewer = 'past_designer';
-    view = { trayFor: null, sentBy: me.id };
+    view = { trayFor: null, sentBy: me.id, viewingAs: opts.viewingAs };
   } else {
     throw notFound('Thumbnail brief');
   }
@@ -271,6 +330,10 @@ export async function loadThumbnailDetail(db: Db, me: Me, id: number): Promise<T
   const pictures = (r: (typeof resources)[number]) => r.fileId != null && isPictureMime(r.fileMime);
   const open = isOpenThumb(brief.state);
   const inTray = tray?.options.length ?? 0;
+  // the client's picks beside the brief, anyone's (owner's rule); how a manager rated another designer's pick is
+  // private to that designer, so a designer sees Standout only on their own
+  const winners = await loadWins(db, { clientId: brief.clientId, exceptBriefId: brief.id, limit: RECENT_WINNERS });
+  const recentWinners = viewer === 'manager' ? winners : winners.map((w) => (w.standout && w.option.uploadedById !== me.id ? { ...w, standout: false } : w));
   return {
     ...brief, rounds, tray, viewer,
     can: {
@@ -283,7 +346,7 @@ export async function loadThumbnailDetail(db: Db, me: Me, id: number): Promise<T
       clientId: brief.clientId, clientName: brief.clientName, brandVoice: client?.brand_voice ?? null, guidance: client?.guidance ?? null,
       images: resources.filter(pictures), resources: resources.filter((r) => !pictures(r)),
     },
-    recentWinners: await loadWins(db, { clientId: brief.clientId, exceptBriefId: brief.id, limit: RECENT_WINNERS }),
+    recentWinners,
   };
 }
 
@@ -330,7 +393,7 @@ async function activeDesigner(db: Db, id: number): Promise<{ id: number; name: s
 const chooseDesigner = () => new HttpError(400, 'Choose a thumbnail designer', { designerId: 'Choose a thumbnail designer' });
 
 /** Only a thumbnail designer may work on options (managers decide; nobody else has a Studio). */
-function requireDesigner(me: Me): void {
+export function requireDesigner(me: Me): void {
   if (!isThumbnailDesigner(me)) throw forbidden('Only thumbnail designers can do this');
 }
 
@@ -361,12 +424,31 @@ const briefFields = {
   designerId: zs.id.nullable().optional(),
 };
 const createSchema = z.object({ clientId: zs.id, shootId: zs.id.nullable().optional(), ...briefFields, optionsWanted: briefFields.optionsWanted.optional() });
+const ON_THE_IMAGE = 'Put the note on the image';
+/** A note on one spot of an option, sent with a decision (x and y from 0 to 1 across and down the picture: pinAt). */
+const pinSchema = z.object({
+  optionId: zs.id,
+  x: z.number().min(0, ON_THE_IMAGE).max(1, ON_THE_IMAGE),
+  y: z.number().min(0, ON_THE_IMAGE).max(1, ON_THE_IMAGE),
+  body: zs.name('The note', PIN_NOTE_MAX),
+  tag: z.enum(THUMB_PIN_TAGS).nullable().optional(),
+});
+const decisionSchema = z.object({
+  roundId: zs.id,
+  action: z.enum(THUMB_ACTIONS),
+  optionId: zs.id.nullable().optional(),
+  note: zs.text(1000),
+  pins: z.array(pinSchema).max(MAX_PINS, `A decision holds up to ${MAX_PINS} notes on the image`).optional(),
+  standout: z.boolean().optional(),
+});
 const patchSchema = z.object({ ...briefFields, title: briefFields.title.optional(), optionsWanted: briefFields.optionsWanted.optional(), cancelled: z.boolean().optional() });
 
 // ── routes ───────────────────────────────────────────────────────────────
 
 export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
   const { db } = ctx;
+  // a brief as the session sees it; while an Admin views the site as someone, that person's second looks stay out
+  const detail = (req: FastifyRequest, me: Me, id: number) => loadThumbnailDetail(db, me, id, { viewingAs: req.viewingAs != null });
 
   // A designer's Studio: always their own, from the session. A manager names an active designer with ?userId= and
   // gets it read-only, without the unsent tray (only how many options are in it).
@@ -378,7 +460,7 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
     const designer = readOnly ? (q.userId ? await activeDesigner(db, q.userId) : null) : { id: me.id, name: me.name };
     if (!designer) throw notFound('Thumbnail designer');
     // the designer's own view: someone else's rounds on their briefs show without their options (but the winner)
-    const view: View = readOnly ? { trayFor: null } : { trayFor: designer.id, designer: designer.id };
+    const view: View = readOnly ? { trayFor: null } : { trayFor: designer.id, designer: designer.id, viewingAs: req.viewingAs != null };
     const clock = await clockFor(ctx);
 
     const shown = (await loadBriefs(db, { designerId: designer.id, open: true })).map((l) => present(l, view));
@@ -403,10 +485,13 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
     }
 
     const month = startOfMonth(clock.today);
+    const thisMonth = allWins.filter((w) => dayOf(clock, w.pickedAt) >= month);
     return {
       designer, readOnly, hero, justPicked, board, wins,
+      // "Your best this month": the standouts among this month's picks, newest first
+      best: thisMonth.filter((w) => w.standout),
       counts: {
-        pickedThisMonth: allWins.filter((w) => dayOf(clock, w.pickedAt) >= month).length,
+        pickedThisMonth: thisMonth.length,
         waitingOnReview: board.filter((b) => b.state === 'in_review').length,
         dueThisWeek: board.filter((b) => dueThisWeek(b, clock)).length,
         onPlate: board.filter((b) => isDesignerTurn(b.state)).length,
@@ -448,7 +533,7 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
     const me = requireUser(req);
     if (!isThumbnailDesigner(me) && !isManager(me.role)) throw forbidden('Only thumbnail designers and managers can open thumbnail briefs');
     const { id } = parse(idParams, req.params);
-    return loadThumbnailDetail(db, me, id);
+    return detail(req, me, id);
   });
 
   // Hands out a brief. The designer is told straight away.
@@ -484,7 +569,7 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
       }
       return briefId;
     });
-    return loadThumbnailDetail(db, me, id);
+    return detail(req, me, id);
   });
 
   // Edits, reassigns, cancels or reopens a brief: only the fields sent, and only those that differ from what's stored.
@@ -557,7 +642,7 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
         }, me.id);
       }
     });
-    return loadThumbnailDetail(db, me, id);
+    return detail(req, me, id);
   });
 
   // Adds one option (one image per request) to the designer's private tray, starting the tray when there's none.
@@ -599,7 +684,7 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
         [tray!.id, letter, fileId, info.mime, info.width, info.height, note ?? null, me.id],
       );
     });
-    return loadThumbnailDetail(db, me, id);
+    return detail(req, me, id);
   });
 
   // Takes an option out of the tray before it's sent (the row and its file are kept).
@@ -621,7 +706,7 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
       await t.query(`update thumbnail_variants set removed_at = now() where id = $1`, [id]);
       return v.brief_id;
     });
-    return loadThumbnailDetail(db, me, briefId);
+    return detail(req, me, briefId);
   });
 
   // Sends the tray as the next round. A round still waiting for a decision is superseded by it.
@@ -655,22 +740,23 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
         link: managerLink(id),
       }, me.id);
     });
-    return loadThumbnailDetail(db, me, id);
+    return detail(req, me, id);
   });
 
-  // Picks an option of the newest sent round, or asks for changes on it. Deciding again on the same round replaces
-  // the last decision (its unread notification is taken back); a round superseded by a newer one is 409 stale.
+  // Picks an option of the newest sent round, or asks for changes on it, either with notes pinned on spots of the
+  // round's options; a pick may be marked Standout. Deciding again on the same round replaces the last decision (its
+  // pins are the round's from then on, and its unread notification and unseen celebration are taken back); a round
+  // superseded by a newer one is 409 stale. A pick is celebrated for whoever made the option (recordThumbMoment).
   app.post('/api/thumbnails/:id/decision', async (req): Promise<ThumbnailBriefDetail> => {
     const me = requireManager(req);
     const { id } = parse(idParams, req.params);
-    const input = parse(z.object({
-      roundId: zs.id,
-      action: z.enum(THUMB_ACTIONS),
-      optionId: zs.id.nullable().optional(),
-      note: zs.text(1000),
-    }), req.body);
+    const input = parse(decisionSchema, req.body);
     if (input.action === 'changes' && !input.note) throw new HttpError(400, 'Add a note so the designer knows what to change', { note: 'Add a note so the designer knows what to change' });
     if (input.action === 'pick' && !input.optionId) throw new HttpError(400, 'Choose the option you’re picking', { optionId: 'Choose an option' });
+    // the database refuses a standout that isn't a pick too; say it in words instead
+    if (input.standout && input.action !== 'pick') throw new HttpError(400, 'Only a pick can be marked Standout', { standout: 'Only a pick can be marked Standout' });
+    const pins = input.pins ?? [];
+    const standout = input.action === 'pick' && !!input.standout;
     await db.tx(async (t) => {
       const b = await lockBrief(t, id);
       if (!b) throw notFound('Thumbnail brief');
@@ -688,36 +774,59 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
       if (newest && newest.id !== round.id) {
         throw conflict(`${newest.name} sent a newer round (round ${newest.number}) a moment ago. The page has been refreshed: look at the new round before deciding.`, 'stale');
       }
+      // the round's live options: what a pick and every pin must be on
+      const live = new Map((await t.query<{ id: number; letter: string }>(
+        `select id, letter from thumbnail_variants where round_id = $1 and removed_at is null`, [round.id],
+      )).map((o) => [Number(o.id), o.letter]));
       let letter: string | null = null;
       if (input.action === 'pick') {
-        const o = await t.one<{ letter: string }>(`select letter from thumbnail_variants where id = $1 and round_id = $2 and removed_at is null`, [input.optionId, round.id]);
-        if (!o) throw new HttpError(400, 'Choose an option from this round', { optionId: 'Choose an option from this round' });
-        letter = o.letter;
+        letter = live.get(input.optionId!) ?? null;
+        if (!letter) throw new HttpError(400, 'Choose an option from this round', { optionId: 'Choose an option from this round' });
+      }
+      if (pins.some((p) => !live.has(p.optionId))) {
+        throw new HttpError(400, 'Each note has to be on an option of this round', { pins: 'Each note has to be on an option of this round' });
       }
       const d = await t.one<{ id: number }>(
-        `insert into thumbnail_decisions (round_id, action, variant_id, note, decided_by) values ($1,$2,$3,$4,$5) returning id`,
-        [round.id, input.action, input.action === 'pick' ? input.optionId : null, input.note ?? null, me.id],
+        `insert into thumbnail_decisions (round_id, action, variant_id, note, decided_by, standout) values ($1,$2,$3,$4,$5,$6) returning id`,
+        [round.id, input.action, input.action === 'pick' ? input.optionId : null, input.note ?? null, me.id, standout],
       );
       const decisionId = d!.id;
-      // what the designer was told about the decision this one replaces, if they haven't read it yet
+      // numbered 1, 2, 3… in the order they were placed (the database refuses a number twice on one decision)
+      for (const [i, p] of pins.entries()) {
+        await t.query(
+          `insert into thumbnail_pins (decision_id, variant_id, x, y, n, body, tag) values ($1,$2,$3,$4,$5,$6,$7)`,
+          [decisionId, p.optionId, p.x, p.y, i + 1, p.body, p.tag ?? null],
+        );
+      }
+      // what the designer was told about the decision this one replaces, and its celebration, if not read or seen yet
       await t.query(
         `delete from notifications where read_at is null and thumbnail_decision_id in (select id from thumbnail_decisions where round_id = $1 and id <> $2)`,
         [round.id, decisionId],
       );
+      await t.query(
+        `delete from moments where seen_at is null and thumbnail_decision_id in (select id from thumbnail_decisions where round_id = $1 and id <> $2)`,
+        [round.id, decisionId],
+      );
       const picked = input.action === 'pick';
+      const onIt = pins.length ? `, with ${plural(pins.length, 'note')} on the image` : '';
       await logActivity(t, {
         actor: me, action: picked ? 'thumbnail.picked' : 'thumbnail.changes', entityType: 'thumbnail', entityId: id, clientId: b.client_id,
-        summary: picked ? `Picked option ${letter} of round ${round.number} for “${b.title}”` : `Asked for changes on round ${round.number} of “${b.title}”`,
+        summary: picked
+          ? `Picked option ${letter} of round ${round.number} for “${b.title}”${standout ? ' as a standout' : ''}${onIt}`
+          : `Asked for changes on round ${round.number} of “${b.title}”${onIt}`,
         detail: { decisionId, roundId: round.id },
       });
       if (picked) {
+        // celebrated for whoever made the option (their next visit opens with it)
+        await recordThumbMoment(t, decisionId, me);
         // the win is the round's sender's (it goes on their wall), even when the brief has moved to someone else since
         const maker = await activeDesigner(t, round.created_by);
         const reason = input.note ? `: “${input.note}”` : '.';
         if (maker) {
           await notify(t, [maker.id], {
             type: 'thumbnail_picked', title: `Option ${letter} picked · ${b.title}`,
-            body: `${me.name} picked option ${letter} of round ${round.number}${reason}`, link: designerLink(id), thumbnailDecisionId: decisionId,
+            body: `${me.name} picked option ${letter} of round ${round.number}${standout ? ' and marked it Standout' : ''}${reason}`,
+            link: designerLink(id), thumbnailDecisionId: decisionId,
           }, me.id);
         }
         // and the brief's designer, when that's someone else: it's done, so it leaves their board
@@ -732,10 +841,12 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
         // changes: whoever has the brief now makes the next round
         await notify(t, [b.designer_id], {
           type: 'thumbnail_changes', title: `Changes asked · ${b.title}`,
-          body: `${me.name} on round ${round.number}: “${input.note}”`, link: designerLink(id), thumbnailDecisionId: decisionId,
+          // the pins are on the round's options, which only its sender reads
+          body: `${me.name} on round ${round.number}: “${input.note}”${pins.length && b.designer_id === round.created_by ? ` (${plural(pins.length, 'note')} on the image)` : ''}`,
+          link: designerLink(id), thumbnailDecisionId: decisionId,
         }, me.id);
       }
     });
-    return loadThumbnailDetail(db, me, id);
+    return detail(req, me, id);
   });
 }

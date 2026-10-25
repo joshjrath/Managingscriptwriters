@@ -13,11 +13,12 @@ import { applyScriptAction, insertBatch } from './routes/batches';
 import { sendDocument } from './submissions';
 import { bufferFile, storeFile } from './files';
 import { imageInfoOf } from './images';
+import { recordThumbMoment } from './moments';
 import { insertShoot } from './routes/shoots';
 import { insertBriefing } from './routes/clients';
 import { addDays } from '../shared/dates';
 import type { Me } from '../shared/types';
-import { OPTION_LETTERS, thumbBriefPath, type ThumbAction } from '../shared/workflow';
+import { OPTION_LETTERS, thumbBriefPath, tidySecondLook, type ThumbAction, type ThumbPinTag } from '../shared/workflow';
 import { findCity } from '../shared/cities';
 
 export const DEMO_PASSWORD = 'scalemedia-demo';
@@ -225,8 +226,9 @@ async function seed(db: Db, now: Date): Promise<boolean> {
     await db.query(`insert into clients (name, status, owner_id, description, created_by) values ($1, 'prospect', $2, $3, $2)`, [name, ids.josh, desc]);
   }
 
-  // 12 · Thumbnail Studio · Ana, a thumbnail designer, with a pick from last week, one just picked after changes,
-  // changes asked, a round waiting on review, an option in her private tray, one to start, and one needing a designer
+  // 12 · Thumbnail Studio · Ana, a thumbnail designer, with a pick from last week, one just picked after changes (a
+  // standout, with its celebration waiting for her), changes asked with notes pinned on the image, a round waiting on
+  // review, an option in her private tray (with a second look kept on it), one to start, and one needing a designer
   const ana = (await db.one<{ id: number }>(
     `insert into users (email, name, role, editor_kind, password_hash) values ('ana@scalemedia.demo', 'Ana Torres', 'editor', 'thumbnail', $1) returning id`, [hash],
   ))!.id;
@@ -259,11 +261,18 @@ async function seed(db: Db, now: Date): Promise<boolean> {
     }
     return { id: roundId, options };
   };
-  const thumbDecision = async (roundId: number, action: ThumbAction, at: number, o: { optionId?: number; note?: string }) =>
+  const thumbDecision = async (roundId: number, action: ThumbAction, at: number, o: { optionId?: number; note?: string; standout?: boolean }) =>
     (await db.one<{ id: number }>(
-      `insert into thumbnail_decisions (round_id, action, variant_id, note, decided_by, created_at) values ($1,$2,$3,$4,$5,$6) returning id`,
-      [roundId, action, o.optionId ?? null, o.note ?? null, ids.josh, ago(at)],
+      `insert into thumbnail_decisions (round_id, action, variant_id, note, decided_by, created_at, standout) values ($1,$2,$3,$4,$5,$6,$7) returning id`,
+      [roundId, action, o.optionId ?? null, o.note ?? null, ids.josh, ago(at), !!o.standout],
     ))!.id;
+  // a manager's numbered notes on spots of a round's options, dropped with a decision
+  const thumbPins = async (decisionId: number, pins: { optionId: number; x: number; y: number; body: string; tag?: ThumbPinTag }[]) => {
+    for (const [i, p] of pins.entries()) {
+      await db.query(`insert into thumbnail_pins (decision_id, variant_id, x, y, n, body, tag) values ($1,$2,$3,$4,$5,$6,$7)`,
+        [decisionId, p.optionId, p.x, p.y, i + 1, p.body, p.tag ?? null]);
+    }
+  };
   const C = {
     salmon: [255, 138, 117], cyan: [120, 220, 230], lavender: [190, 170, 255], mint: [140, 230, 180], pink: [255, 150, 190], yellow: [255, 230, 90],
     navy: [20, 40, 80], plum: [62, 32, 90], forest: [24, 60, 48], coffee: [70, 40, 30], latte: [200, 140, 90], ink: [40, 30, 50], cream: [250, 240, 230], white: [255, 255, 255],
@@ -290,7 +299,7 @@ async function seed(db: Db, now: Date): Promise<boolean> {
     { from: C.salmon, to: C.coffee, subject: C.cream, words: C.yellow, left: true, note: 'Three words.' },
     { from: C.salmon, to: C.plum, subject: C.cream, words: C.yellow, left: true, note: 'Two words, bigger.' },
   ], { at: 24, sent: 20, note: 'Both keep B’s face. A has three words, B has two.' });
-  const jacketPick = await thumbDecision(jacketR2.id, 'pick', 5, { optionId: jacketR2.options[1], note: 'Two words read best small.' });
+  const jacketPick = await thumbDecision(jacketR2.id, 'pick', 5, { optionId: jacketR2.options[1], note: 'Two words read best small.', standout: true });
 
   // Northwind: changes asked on round 1, so it's the first thing on Ana's Studio
   const harvest = await thumbBrief(northwind, 'What’s in the harvest box', {
@@ -301,6 +310,11 @@ async function seed(db: Db, now: Date): Promise<boolean> {
     { from: C.yellow, to: C.coffee, subject: C.ink, words: C.white, left: true },
   ], { at: 54, sent: 50 });
   const harvestChanges = await thumbDecision(harvestR1.id, 'changes', 22, { note: 'Show the beans, not the box. Warmer light, and put the words on the left.' });
+  await thumbPins(harvestChanges, [
+    { optionId: harvestR1.options[0], x: 0.64, y: 0.5, body: 'The closed box hides the point: tip it open and let the beans spill out here.', tag: 'composition' },
+    { optionId: harvestR1.options[0], x: 0.2, y: 0.24, body: 'Words up here, on the left, and twice the size.', tag: 'text' },
+    { optionId: harvestR1.options[1], x: 0.3, y: 0.55, body: 'Much warmer light on the bags: this reads cold at feed size.', tag: 'contrast' },
+  ]);
 
   // Brightline: round 1 waiting on review (C is 4:3, so its shape check warns)
   const sameWeek = await thumbBrief(brightline, 'Same-week appointments, really', { at: 2 * 24, due: 3, brief: 'A smiling patient and a calendar page with this week circled.', onImage: 'SEEN THIS WEEK' });
@@ -312,7 +326,26 @@ async function seed(db: Db, now: Date): Promise<boolean> {
 
   // Lumen: one option in Ana's tray, not sent yet (managers see only that she's drafting)
   const serum = await thumbBrief(lumen, 'What the night serum actually does', { at: 30, due: 4, brief: 'The bottle on a bedside table at night, soft blue light.', onImage: 'WHILE YOU SLEEP' });
-  await thumbRound(serum, 1, [{ from: C.lavender, to: C.navy, subject: C.cream, words: C.white, note: 'Night blue, bottle centre.' }], { at: 1 });
+  const serumTray = await thumbRound(serum, 1, [{ from: C.lavender, to: C.navy, subject: C.cream, words: C.white, note: 'Night blue, bottle centre.' }], { at: 1 });
+  // the second look she asked for on it (kept, so the demo shows one without an API key); private to her
+  const look = tidySecondLook({
+    oneLiner: 'Calm and on-brief, but the bottle gets lost at feed size: give it more light and fewer, bolder words.',
+    checks: [
+      { key: 'reads_small', status: 'watch', note: 'At phone size the bottle melts into the blue; it needs a rim light or a lighter backdrop.' },
+      { key: 'focal_point', status: 'ok', note: 'The bottle is centred, but the lamp glow in the top right pulls the eye away.' },
+      { key: 'words', status: 'watch', note: 'Three words in a light weight won’t survive 120 px wide. Go heavier, on two lines.' },
+      { key: 'contrast', status: 'watch', note: 'Navy on lavender is close in value; the bottle should be the brightest thing.' },
+      { key: 'brief_fit', status: 'strong', note: 'Bedside table, night, soft blue light: it’s all there.' },
+      { key: 'brand_fit', status: 'ok', note: 'Soft and clean like their other covers, a touch darker than usual.' },
+    ],
+    suggestions: [
+      'Add a warm rim light down the bottle’s left edge so it lifts off the backdrop.',
+      'Set the words in a heavy weight, two lines, in the left third.',
+      'Dim the lamp glow in the top right.',
+    ],
+  });
+  await db.query(`insert into thumbnail_second_looks (variant_id, requested_by, result, created_at) values ($1,$2,$3::jsonb,$4)`,
+    [serumTray.options[0], ana, JSON.stringify(look), ago(0.5)]);
 
   // Kinetic: just handed out, for the coach intro shoot; Harbor & Pine: waiting for a designer
   const dana = await thumbBrief(kinetic, 'Meet coach Dana', {
@@ -328,7 +361,7 @@ async function seed(db: Db, now: Date): Promise<boolean> {
     link: toAna(harvest), thumbnailDecisionId: harvestChanges,
   });
   await notify(db, [ana], {
-    type: 'thumbnail_picked', title: 'Option B picked · The jacket that folds into itself', body: 'Josh Rath picked option B of round 2: “Two words read best small.”',
+    type: 'thumbnail_picked', title: 'Option B picked · The jacket that folds into itself', body: 'Josh Rath picked option B of round 2 and marked it Standout: “Two words read best small.”',
     link: toAna(jacket), thumbnailDecisionId: jacketPick,
   });
   await notify(db, await managerIds(db), {
@@ -342,6 +375,8 @@ async function seed(db: Db, now: Date): Promise<boolean> {
       where not (kind = 'approved' and user_id = $1 and batch_id = $4) and not (kind in ('approved', 'revisions') and user_id = $2 and batch_id = $5) and not (kind = 'team_batch_done' and user_id = $3)`,
     [ids.sarah, ids.marcus, ids.josh, a.batchId, l.batchId],
   );
+  // and Ana's standout pick, the next time she opens the site
+  await recordThumbMoment(db, jacketPick, { name: 'Josh Rath' });
 
   // make the first few days of history look like history
   await db.query(`update activity set created_at = created_at - interval '2 days' where action in ('client.created','briefing.created','shoot.created','batch.created')`);

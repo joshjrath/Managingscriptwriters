@@ -93,6 +93,8 @@ const ACCESS: Record<string, Access> = {
   'POST /api/thumbnails/:id/options': 'user',
   'DELETE /api/thumbnail-options/:id': 'user',
   'POST /api/thumbnails/:id/send': 'user',
+  // a designer's AI second look on an option of their own (only its maker: test/thumbnail-feedback.test.ts)
+  'POST /api/thumbnail-options/:id/second-look': 'user',
 
   'POST /api/users': 'manager',
   'PATCH /api/users/:id': 'manager',
@@ -282,7 +284,8 @@ describe('editors, by kind', () => {
   it('gives thumbnail designers their Studio, and nobody else but managers (who only read it)', async () => {
     const studio = allowed('thumbnail').filter((r) => !allowed('short_form').includes(r));
     expect(studio).toEqual([
-      'DELETE /api/thumbnail-options/:id', 'GET /api/studio', 'GET /api/thumbnails/:id', 'POST /api/thumbnails/:id/options', 'POST /api/thumbnails/:id/send',
+      'DELETE /api/thumbnail-options/:id', 'GET /api/studio', 'GET /api/thumbnails/:id', 'POST /api/thumbnail-options/:id/second-look', 'POST /api/thumbnails/:id/options',
+      'POST /api/thumbnails/:id/send',
     ]);
     const let_in: string[] = [];
     for (const route of studio) {
@@ -292,13 +295,14 @@ describe('editors, by kind', () => {
         const status = await call(method, concrete(url), cookie);
         if (status !== 403) let_in.push(`${who}: ${route} → ${status}`);
       }
-      // managers read a Studio and a brief, but never add, remove or send a designer's options
+      // managers read a Studio and a brief, but never add, remove, send or ask for a second look on a designer's options
       if (method !== 'GET' && (await call(method, concrete(url), manager)) !== 403) let_in.push(`manager: ${route}`);
     }
     expect(let_in).toEqual([]);
     // a designer reaches them (brief 1 doesn't exist, so it's not found rather than refused)
     expect(await call('GET', '/api/studio', editors.thumbnail)).toBe(200);
     expect(await call('GET', '/api/thumbnails/1', editors.thumbnail)).toBe(404);
+    expect(await call('POST', '/api/thumbnail-options/1/second-look', editors.thumbnail)).toBe(404);
   });
 
   it('refuses each kind every other route, in words for their kind', async () => {
