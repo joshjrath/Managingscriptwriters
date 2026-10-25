@@ -13,6 +13,7 @@ import { addDays, diffDays, nowInZone, startOfWeek, workingDaysBetween, type Clo
 import { bothLate, isDraftReady, isNewWork, milestone, nextMilestone, summarize, type Milestone, type ScriptStatus } from '../../shared/workflow';
 import { plural } from '../../shared/format';
 import { sessionMode } from '../recording';
+import { loadShootForecasts } from '../forecast';
 import type {
   AttentionItem, AttentionKind, BatchSummary, Bootstrap, CalendarEvent, Counts, Dashboard, DueCategory, DueDay, Me,
   MyWork, ReviewQueue, ShootReadiness, WriterLoad,
@@ -329,6 +330,16 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
         id: `s${s.id}`, type: 'shoot', start: s.startDate, end: s.endDate ?? s.startDate, title: s.title || 'Shoot', clientName: s.clientName,
         batchId: s.batchIds[0] ?? null, shootId: s.id, overdue: false, complete: (s.endDate ?? s.startDate) < clock.today,
       });
+    }
+    // the next shoot, estimated, for clients with nothing booked: managers plan from it, nobody else sees it
+    if (isManager(me.role)) {
+      for (const f of await loadShootForecasts(ctx)) {
+        const e = f.estimate;
+        if (!e || (q.clientId && f.clientId !== q.clientId) || (q.writerId && !e.writers.some((w) => w.writerId === q.writerId))) continue;
+        const base = { clientName: f.clientName, batchId: null, shootId: null, overdue: false, complete: false };
+        if (within(e.shootDate, e.shootDate)) events.push({ ...base, id: `t${f.clientId}`, type: 'tentative', start: e.shootDate, end: e.shootDate, title: 'Tentative shoot', tentative: { kind: 'shoot', forecast: f } });
+        if (within(e.finalDue, e.finalDue)) events.push({ ...base, id: `ts${f.clientId}`, type: 'tentative', start: e.finalDue, end: e.finalDue, title: `${e.scripts} scripts due (estimate)`, overdue: e.late, tentative: { kind: 'scripts', forecast: f } });
+      }
     }
     events.push(...(await syncedEvents(me, q.from, q.to, clock.today)));
     // editors plan around shoots and when scripts are final, not the writing in between

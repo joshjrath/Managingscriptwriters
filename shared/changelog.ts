@@ -38,6 +38,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-25-next-shoots-to-book',
+    date: '2026-10-25',
+    title: 'Next shoots to book, estimated for you',
+    summary: 'When a client’s last shoot is over and nothing is booked after it, the site estimates the next shoot from their past shoots and how many scripts each had, and says which scripts are due when and who to give them to.',
+    changes: [
+      { tag: 'new', text: 'A Next shoots to book section on the Overview (admins and managers): for each client whose last shoot is over with nothing booked, a tentative shoot date, how many scripts it needs, when drafts and final scripts are due, and who wrote them last time (with when to start, from each writer’s scripts per day).' },
+      { tag: 'new', text: 'The date counts from the last shoot’s scripts: a shoot with 45 scripts lasts longer than one with 31, at the pace this client’s past shoots have gone (other clients’ pace when they’ve had only one). Only the next shoot is estimated.' },
+      { tag: 'new', text: 'Tentative shoots and their scripts’ due dates show on the Calendar in their own dashed blue, apart from booked shoots. Nothing is assigned until you book it: Plan this shoot opens the New shoot form filled in, for you to set the real date.' },
+    ],
+  },
+  {
     id: '2026-10-09-open-video-in-timeliner',
     date: '2026-10-09',
     title: 'Open in Timeliner opens the video itself',

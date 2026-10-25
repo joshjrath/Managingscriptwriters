@@ -11,7 +11,7 @@
      yellow   due today, time-sensitive, primary action
      lavender review
      mint     approved / delivered
-     cyan     in progress, informational
+     cyan     in progress, informational, tentative (estimated, not booked)
      pink     revisions requested
      red      overdue, errors, blockers
    ────────────────────────────────────────────────────────────────────────── */
@@ -50,6 +50,7 @@
   --neutral: #B4B4BE;
 
   /* status mapping */
+  --tentative: var(--cyan); /* a shoot estimated from past shoots, not booked yet */
   --st-not-started: var(--neutral);
   --st-in-progress: var(--cyan);
   --st-review: var(--lavender);

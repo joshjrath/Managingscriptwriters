@@ -37,6 +37,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 | Sending documents and reviews | `server/submissions.ts` |
 | Script bank, Today, to-dos, celebrations | `server/script-bank.ts`, `today.ts`, `todos.ts`, `moments.ts` |
 | Synced calendars (Google Calendar iCal), and shoots found on them | `server/calendar-feeds.ts`, `server/ical.ts`, `server/calendar-shoots.ts` |
+| The next shoot, estimated (Overview's Next shoots to book, and tentative shoots on the Calendar, for managers): for each active client whose last shoot is over with nothing booked after it (no shoot on the site that isn't over, none on a synced calendar, no open batch without a shoot), the last shoot plus its scripts times the days a script has lasted between this client's past shoots (`estimateNextShoot` in `shared/dates.ts`; the team's pace when the client has had one shoot), with last time's writers and counts. Only the next shoot, never stored or assigned | `server/forecast.ts`, `client/src/components/ShootForecast.tsx` |
 | What an editor may call (an allowlist checked before every route) | `server/editor-access.ts` |
 | Master log (activity and audit) | `server/audit.ts` |
 | Reminders (in-process timer, or `npm run reminders` from cron) | `server/reminders.ts`, `server/reminders-cli.ts` |
@@ -46,7 +47,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 | Editors tab: the timed read of Timeliner's videos and who is on each brand (lenient: an odd item is skipped and counted), whom a video belongs to (`OWNER_IDS`: its assignees in Timeliner, and nobody else), matching the copy again after every write (`rematch`), the board (`loadBoard`: a card for everyone in Timeliner with videos, flagged when not on the site; each client's editor and split), the editor's script link (`GET /api/editing/script-pdf/:batchId`), pins, and I'm on this / Pause / Resume / Done | `server/editing.ts` |
 | Editors who don't sign in (Settings → Editors) | `server/control/editors.ts` |
 | Demo data | `server/seed-demo.ts`, `server/seed-cli.ts` |
-| Dates, deadlines, clock, due state | `shared/dates.ts` |
+| Dates, deadlines, clock, due state, and the pace of a client's shoots (`estimateNextShoot`) | `shared/dates.ts` |
 | Statuses, roles, action rules, progress, document state, ranges; a video's state, title ranges (`compressTitles`), a raw camera clip (`isRawTitle`) and a focus left running (`isFocusStale`) | `shared/workflow.ts` |
 | Display wording shared by server and client (dates, times, a video's due words, time worked) | `shared/format.ts` |
 | Quick-entry parser | `shared/parse.ts` |
