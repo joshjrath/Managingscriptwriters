@@ -49,7 +49,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (v
 | Editors who don't sign in (Settings → Editors) | `server/control/editors.ts` |
 | Demo data | `server/seed-demo.ts`, `server/seed-cli.ts` |
 | Dates, deadlines, clock, due state, and the pace of a client's shoots (`estimateNextShoot`) | `shared/dates.ts` |
-| Statuses, roles, action rules, progress, document state, ranges; a video's state, title ranges (`compressTitles`), a raw camera clip (`isRawTitle`) and a focus left running (`isFocusStale`) | `shared/workflow.ts` |
+| Statuses, roles, action rules, progress, document state, ranges, who has written a client's scripts before (`writerHistory`, shown above the writers in New shoot and New batch); a video's state, title ranges (`compressTitles`), a raw camera clip (`isRawTitle`) and a focus left running (`isFocusStale`) | `shared/workflow.ts` |
 | Display wording shared by server and client (dates, times, a video's due words, time worked) | `shared/format.ts` |
 | Quick-entry parser | `shared/parse.ts` |
 | API types and header names | `shared/types.ts` |

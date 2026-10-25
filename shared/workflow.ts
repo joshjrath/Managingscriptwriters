@@ -324,6 +324,33 @@ export function evenSplit(total: number, writers: number): number[] {
   return Array.from({ length: writers }, (_, i) => base + (i < extra ? 1 : 0));
 }
 
+/** One of a client's past batches, as far as who wrote it goes (a `BatchSummary` fits). */
+export interface PastBatch { id: number; title: string; draftDue: ISODate | null; finalDue: ISODate | null; writers: { userId: number | null; name: string; count: number }[] }
+
+/**
+ * Who has written a client's scripts before: its newest batch with a writer (and that batch's split), and everyone
+ * who has, most scripts first, with how many scripts and batches. Only people `canStill` says can write today;
+ * unassigned scripts aren't anyone's.
+ */
+export function writerHistory(batches: PastBatch[], canStill: (userId: number) => boolean) {
+  const theirs = (b: PastBatch) => b.writers.filter((w) => w.userId != null && w.count > 0 && canStill(w.userId)) as { userId: number; name: string; count: number }[];
+  const newest = [...batches].sort((a, b) => b.id - a.id);
+  const lastBatch = newest.find((b) => theirs(b).length);
+  const people = new Map<number, { userId: number; name: string; scripts: number; batches: number }>();
+  for (const b of newest) {
+    for (const w of theirs(b)) {
+      const p = people.get(w.userId) ?? { userId: w.userId, name: w.name, scripts: 0, batches: 0 };
+      p.scripts += w.count;
+      p.batches += 1;
+      people.set(w.userId, p);
+    }
+  }
+  return {
+    last: lastBatch ? { batchId: lastBatch.id, title: lastBatch.title, date: lastBatch.finalDue ?? lastBatch.draftDue, writers: theirs(lastBatch).sort((a, b) => b.count - a.count) } : null,
+    everyone: [...people.values()].sort((a, b) => b.scripts - a.scripts || a.name.localeCompare(b.name)),
+  };
+}
+
 /**
  * Last time's split scaled to a new total, keeping each writer's share: 20 and 11 of 31 become 29 and 16 of 45.
  * Whole scripts by the largest remainder (ties to the earlier writer), so the counts always add up to `total`.

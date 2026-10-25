@@ -38,6 +38,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-25-writers-for-this-client-before',
+    date: '2026-10-25',
+    title: 'See who wrote for a client before',
+    summary: 'When you add scripts for a client, the writers section now shows who wrote their last batch, and everyone who has written for them, so you can pick them in one click.',
+    changes: [
+      { tag: 'new', text: 'New shoot and New batch show “Last time for this client”: the batch and each writer’s count. Use these writers gives them their share of the new count (and fills in the count if it’s empty).' },
+      { tag: 'new', text: 'Below it, everyone who has written for the client, with how many scripts and batches. Tap a name to add them to the batch.' },
+    ],
+  },
+  {
     id: '2026-10-25-ai-next-shoot-estimates',
     date: '2026-10-25',
     title: 'Next shoots: AI estimates you can confirm, change or deny',
