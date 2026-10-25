@@ -144,7 +144,7 @@ function MobileNav({ onClose }: { onClose: () => void }) {
 
 function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapsed?: boolean; mobile?: boolean }) {
   const boot = useBoot();
-  const { me, counts, settings, mode, users } = boot;
+  const { me, counts, settings, mode } = boot;
   const manager = isManager(me.role);
   // editors get a focused site: what's coming up, finished scripts, and the client material they cut from
   const editorItems = [
@@ -162,9 +162,6 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
   ];
-  // managers see Thumbnails once the team has (or had) a thumbnail designer, or there's a brief open or a round waiting for them
-  // (briefs can be written before anyone is a designer, and wait under Needs a designer)
-  const thumbnails = users.some((u) => isThumbnailDesigner(u)) || counts.thumbnailsToReview > 0 || counts.thumbnailsOpen > 0;
   // writers: their own work first, then their Overview and the Production board, then where to find things
   const writerItems = [
     { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 },
@@ -184,7 +181,8 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/review', label: 'Review queue', icon: <ClipboardCheck />, count: counts.reviewQueue || undefined },
     { to: '/writers', label: 'Team', icon: <Users /> },
     { to: '/editors', label: 'Editors', icon: <Clapperboard /> },
-    ...(thumbnails ? [{ to: '/thumbnails', label: 'Thumbnails', icon: <Images />, count: counts.thumbnailsToReview || undefined }] : []),
+    // always there, so the first brief can be written and the page can say how to make someone a thumbnail designer
+    { to: '/thumbnails', label: 'Thumbnails', icon: <Images />, count: counts.thumbnailsToReview || undefined },
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
   ];
