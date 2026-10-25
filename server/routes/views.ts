@@ -333,7 +333,7 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     }
     // the next shoot, estimated, for clients with nothing booked: managers plan from it, nobody else sees it
     if (isManager(me.role)) {
-      for (const f of await loadShootForecasts(ctx)) {
+      for (const f of (await loadShootForecasts(ctx)).forecasts) {
         const e = f.estimate;
         if (!e || (q.clientId && f.clientId !== q.clientId) || (q.writerId && !e.writers.some((w) => w.writerId === q.writerId))) continue;
         const base = { clientName: f.clientName, batchId: null, shootId: null, overdue: false, complete: false };

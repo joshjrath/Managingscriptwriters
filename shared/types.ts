@@ -782,8 +782,11 @@ export interface CalendarShoot {
 export interface ShootForecast {
   clientId: number;
   clientName: string;
-  /** the last shoot that's over */
-  lastShoot: { id: number; title: string | null; startDate: ISODate; endDate: ISODate | null; scripts: number };
+  /**
+   * the last shoot that's over: its scripts as its document holds them when Claude has counted them
+   * (`fromDocument`), else as many as are on the site (`siteScripts`)
+   */
+  lastShoot: { id: number; title: string | null; startDate: ISODate; endDate: ISODate | null; scripts: number; siteScripts: number; fromDocument: boolean };
   /** null when there isn't enough history yet (no shoot with scripts, and no other client's gaps to go by) */
   estimate: (ShootEstimate & {
     /** the writers who had the last shoot's scripts, with as many as last time, and when to start writing them */
@@ -793,6 +796,12 @@ export interface ShootForecast {
     /** final delivery would already be past */
     late: boolean;
   }) | null;
+}
+
+export interface ShootForecasts {
+  forecasts: ShootForecast[];
+  /** documents of the shoots they count from that Claude hasn't read yet, and whether the server can read them (an AI key) */
+  documents: { unread: number; canRead: boolean };
 }
 
 // ── Timeliner ─────────────────────────────────────────────────────────────

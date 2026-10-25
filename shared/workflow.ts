@@ -324,6 +324,24 @@ export function evenSplit(total: number, writers: number): number[] {
   return Array.from({ length: writers }, (_, i) => base + (i < extra ? 1 : 0));
 }
 
+/**
+ * Last time's split scaled to a new total, keeping each writer's share: 20 and 11 of 31 become 29 and 16 of 45.
+ * Whole scripts by the largest remainder (ties to the earlier writer), so the counts always add up to `total`.
+ */
+export function scaleSplit(counts: number[], total: number): number[] {
+  const sum = counts.reduce((n, c) => n + c, 0);
+  if (!sum || total <= 0) return counts.map(() => 0);
+  const exact = counts.map((c) => (c * total) / sum);
+  const out = exact.map(Math.floor);
+  let left = total - out.reduce((n, c) => n + c, 0);
+  for (const i of exact.map((x, i) => ({ r: x - Math.floor(x), i })).sort((a, b) => b.r - a.r || a.i - b.i).map((x) => x.i)) {
+    if (left <= 0) break;
+    out[i]++;
+    left--;
+  }
+  return out;
+}
+
 // ── Editing: where a video stands, read from Timeliner ───────────────────
 
 /** Timeliner's step groups (a task's `statusGroup`). */

@@ -1,12 +1,15 @@
 // Overview and Calendar (admins and managers): the next shoot for each client whose last shoot is over with
 // nothing booked after it, estimated from its past shoots and how many scripts each had. Each says when its
-// scripts are due and who to give them to (last time's writers, as many as last time). Nothing is assigned
-// until the manager books it: Plan this shoot opens the New shoot form filled in, to check and save.
+// scripts are due and who to give them to (last time's writers, each with their share). A shoot's scripts are
+// what its document holds: documents not counted yet are sent to Claude by themselves when the panel opens, a
+// few at a time. Nothing is assigned until the manager books it: Plan this shoot opens the New shoot form filled
+// in, to check and save.
 
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { CalendarClock, Camera, UserPlus } from 'lucide-react';
-import { api } from '../api';
-import type { ShootForecast } from '../../../shared/types';
+import { CalendarClock, Camera, Sparkles, UserPlus } from 'lucide-react';
+import { api, useSave } from '../api';
+import type { ShootForecast, ShootForecasts } from '../../../shared/types';
 import { fmtDate, fmtRange, fmtWeekday, plural, relDay } from '../../../shared/format';
 import { useBoot, useNewWork } from './Shell';
 import { Button, Chip, DateTile, Dialog, Panel } from './ui';
@@ -39,11 +42,21 @@ function AssignLine({ f }: { f: ShootForecast }) {
 export function ShootForecastPanel() {
   const { clock } = useBoot();
   const plan = usePlanForecast();
-  const q = useQuery({ queryKey: ['shoot-forecast'], queryFn: () => api<{ forecasts: ShootForecast[] }>('/api/shoot-forecast'), refetchInterval: 5 * 60_000 });
+  const q = useQuery({ queryKey: ['shoot-forecast'], queryFn: () => api<ShootForecasts>('/api/shoot-forecast'), refetchInterval: 5 * 60_000 });
+  // documents not counted yet: read them with AI, a few at a time, until none are left (or a round reads nothing)
+  const [stopped, setStopped] = useState(false);
+  const read = useSave(() => api<ShootForecasts & { read: number; busy: boolean }>('/api/shoot-forecast/read-documents', { method: 'POST' }), {
+    onSuccess: (out) => { if (!out.read && !out.busy) setStopped(true); },
+  });
+  const unread = q.data?.documents.canRead ? q.data.documents.unread : 0;
+  useEffect(() => {
+    if (unread > 0 && !stopped && !read.isPending && !read.isError) read.mutate(undefined);
+  }, [unread, stopped, read]);
   const list = q.data?.forecasts ?? [];
   if (!list.length) return null;
   return (
-    <Panel className="forecast" title="Next shoots to book" count={list.length} sub="last shoot over, nothing booked yet · estimated from past shoots">
+    <Panel className="forecast" title="Next shoots to book" count={list.length} sub="last shoot over, nothing booked yet · estimated from past shoots"
+      tools={unread > 0 && !stopped && !read.isError ? <Chip color="tentative" icon={<Sparkles aria-hidden />}>Counting scripts in {plural(unread, 'document')}…</Chip> : undefined}>
       <div className="rows">
         {list.map((f) => {
           const e = f.estimate;
@@ -52,7 +65,7 @@ export function ShootForecastPanel() {
             <div key={f.clientId} className={`item with-tile ${e?.late ? 'edge-red' : days != null && days <= 7 ? 'edge-yellow' : ''}`}>
               {e ? <DateTile date={e.shootDate} color="var(--tentative)" /> : <DateTile date={f.lastShoot.startDate} />}
               <div className="body">
-                <div className="top"><Camera size={13} aria-hidden /> Last shoot {fmtRange(f.lastShoot.startDate, f.lastShoot.endDate)} · {plural(f.lastShoot.scripts, 'script')}</div>
+                <div className="top"><Camera size={13} aria-hidden /> Last shoot {fmtRange(f.lastShoot.startDate, f.lastShoot.endDate)} · {plural(f.lastShoot.scripts, 'script')}{f.lastShoot.fromDocument ? ` in its document${f.lastShoot.siteScripts !== f.lastShoot.scripts ? ` (${f.lastShoot.siteScripts} on the site)` : ''}` : ''}</div>
                 <div className="title">{f.clientName}</div>
                 {e ? (
                   <>

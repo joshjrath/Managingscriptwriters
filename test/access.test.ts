@@ -44,6 +44,7 @@ const ACCESS: Record<string, Access> = {
   'GET /api/calendar-shoots': 'manager',
   'POST /api/calendar-shoots/dismiss': 'manager',
   'GET /api/shoot-forecast': 'manager',
+  'POST /api/shoot-forecast/read-documents': 'manager',
   'POST /api/reviews/:id/undo': 'manager',
   'POST /api/settings/recalculate-preview': 'manager',
   'GET /api/counts': 'user',

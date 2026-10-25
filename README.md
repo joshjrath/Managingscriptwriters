@@ -70,6 +70,10 @@ Writers work in one master document, so each batch on **My work**, and their sha
 
 To turn it on, add `ANTHROPIC_API_KEY` (from console.anthropic.com → API keys) to the server's environment — on Render: web service → Environment. It uses Claude Opus 5.5 with structured output (and the API's automatic fallback if a request is declined); expect roughly 5–10 cents per import. Only the notes you paste are sent.
 
+### Next shoots to book (AI counts the scripts)
+
+On the **Overview**, admins and managers see each client whose last shoot is over with nothing booked after it: a tentative date for the next shoot, how many scripts it needs, when they're due and who wrote them last time. The date goes by how many scripts each past shoot had. When `ANTHROPIC_API_KEY` is set, Claude reads each shoot's document once to count them: the scripts PDF in Timeliner, else the documents the writers sent (an uploaded PDF or text file, or a Google Doc or Drive link set to "Anyone with the link can view"). A document it can't open (a private Google Doc, a Word file) is noted, and that shoot counts its scripts on the site instead. The documents are sent to the Anthropic API; expect a few cents each, once per document.
+
 ### Potential clients
 
 The Clients page has a **Potential clients** section for people you're talking to (add one with **Potential client**, or pick *Potential client* in New work → New client). It's only a label: a potential client can have shoots, batches and deadlines like any client, and they show on the calendar, in Production and in reminders as usual. When they sign, **drag the card into Clients** — or press **Mark as client** (on the card or their page) — and it moves across; the history records when they became a client, and new clients get a "New client" tag for a week. Any client can be dragged into Potential clients too, and nothing about their work changes.

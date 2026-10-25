@@ -38,6 +38,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-25-scripts-counted-from-documents',
+    date: '2026-10-25',
+    title: 'Next shoots to book counts the scripts in each document',
+    summary: 'AI now opens each past shoot’s document and counts its scripts, so a doc with 45 scripts paces the next shoot as 45 even when the site has a different number.',
+    changes: [
+      { tag: 'new', text: 'Claude reads each shoot’s document once: the scripts PDF in Timeliner, or the documents the writers sent (a PDF, a text file, or a Google Doc or Drive link). The tentative date, the script count and each writer’s share go by what it holds.' },
+      { tag: 'new', text: 'Next shoots to book shows “45 scripts in its document”, with the site’s number beside it when they differ, and “Counting scripts in 3 documents…” while it reads.' },
+      { tag: 'improved', text: 'A Google Doc has to be set to “Anyone with the link can view” to be read. One that can’t be opened, or a Word file, is skipped and that shoot counts its scripts on the site instead.' },
+    ],
+  },
+  {
     id: '2026-10-25-next-shoots-to-book',
     date: '2026-10-25',
     title: 'Next shoots to book, estimated for you',

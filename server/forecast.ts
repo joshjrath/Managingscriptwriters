@@ -1,19 +1,22 @@
 // The next shoot, estimated (admins and managers): for each active client whose last shoot is over with nothing
 // booked after it, when the next shoot will probably be, when its scripts are due, and who wrote them last time.
 // The pace comes from the client's own past shoots and how many scripts each had (`estimateNextShoot` in
-// shared/dates.ts). Only the next shoot is estimated, never a run of them. Nothing here is stored or assigned:
-// booking the shoot (Plan this shoot) is the manager's.
+// shared/dates.ts). A shoot's scripts are what its document holds when Claude has counted them (server/doc-counts.ts:
+// the scripts PDF, or every document the writers sent), else its scripts on the site. Only the next shoot is
+// estimated, never a run of them. Nothing here is assigned: booking the shoot (Plan this shoot) is the manager's.
 
 import type { FastifyInstance } from 'fastify';
 import { clockFor, loadBatches, loadSettings, loadUsers, rulesOf, type Ctx } from './core';
 import { requireManager } from './auth';
 import { findCalendarShoots } from './calendar-shoots';
+import { batchDocuments, readDocuments, type DocRef } from './doc-counts';
 import { loadShoots } from './records';
-import { estimateNextShoot, shootPaces, suggestStart, dueState, type PastShoot } from '../shared/dates';
-import { canWrite } from '../shared/workflow';
-import type { ShootForecast } from '../shared/types';
+import { estimateNextShoot, PACE_GAPS, shootPaces, suggestStart, dueState, type PastShoot } from '../shared/dates';
+import { canWrite, scaleSplit } from '../shared/workflow';
+import type { ShootForecast, ShootForecasts } from '../shared/types';
 
-export async function loadShootForecasts(ctx: Ctx): Promise<ShootForecast[]> {
+/** The estimates, and the documents of the shoots they count from that Claude hasn't read yet. */
+export async function loadShootForecasts(ctx: Ctx): Promise<{ forecasts: ShootForecast[]; unread: DocRef[] }> {
   const { db } = ctx;
   const settings = await loadSettings(db);
   const clock = await clockFor(ctx, settings);
@@ -23,7 +26,6 @@ export async function loadShootForecasts(ctx: Ctx): Promise<ShootForecast[]> {
   // archived batches still say how many scripts a past shoot had
   const { summaries } = await loadBatches(ctx, { includeArchived: true }, clock);
   const users = new Map((await loadUsers(db)).map((u) => [u.id, u]));
-  const scriptsOf = (shootId: number) => summaries.filter((b) => b.shootId === shootId).reduce((n, b) => n + b.progress.total, 0);
 
   // what's booked already: a shoot on the site that isn't over, one on a synced calendar, or scripts planned without a shoot
   const booked = new Set(shoots.filter((s) => (s.endDate ?? s.startDate) >= clock.today).map((s) => s.clientId));
@@ -32,19 +34,30 @@ export async function loadShootForecasts(ctx: Ctx): Promise<ShootForecast[]> {
     if (!b.shootId && !b.archivedAt && b.stage !== 'delivered' && b.progress.total > 0 && (b.finalDue ?? b.draftDue ?? '') >= clock.today) booked.add(b.clientId);
   }
 
-  const past = new Map<number, (PastShoot & { id: number })[]>();
-  for (const s of shoots) {
-    if ((s.endDate ?? s.startDate) >= clock.today) continue;
-    past.set(s.clientId, [...(past.get(s.clientId) ?? []), { id: s.id, start: s.startDate, scripts: scriptsOf(s.id) }]);
+  // each past shoot's scripts: what its batches' documents hold, else their scripts on the site
+  const over = shoots.filter((s) => (s.endDate ?? s.startDate) < clock.today);
+  const overIds = new Set(over.map((s) => s.id));
+  const docs = await batchDocuments(db, summaries.filter((b) => b.shootId != null && overIds.has(b.shootId)).map((b) => b.id));
+  const past = new Map<number, (PastShoot & { id: number; site: number; fromDocument: boolean; unread: DocRef[] })[]>();
+  for (const s of over) {
+    const bs = summaries.filter((b) => b.shootId === s.id);
+    const site = bs.reduce((n, b) => n + b.progress.total, 0);
+    const scripts = bs.reduce((n, b) => n + (docs.get(b.id)?.scripts ?? b.progress.total), 0);
+    const fromDocument = bs.some((b) => docs.get(b.id)?.scripts != null);
+    past.set(s.clientId, [...(past.get(s.clientId) ?? []), { id: s.id, start: s.startDate, scripts, site, fromDocument, unread: bs.flatMap((b) => docs.get(b.id)?.unread ?? []) }]);
   }
   // every client's gaps, for a client with only one shoot so far
   const teamPaces = [...past.values()].flatMap((list) => shootPaces(list));
 
   const out: ShootForecast[] = [];
+  const unread: DocRef[] = [];
   for (const c of clients) {
     const list = past.get(c.id);
     if (!list?.length || booked.has(c.id)) continue;
-    const last = shoots.find((s) => s.id === list[list.length - 1].id)!;
+    // the documents that pace this client: its latest shoots, newest first
+    unread.push(...list.slice(-(PACE_GAPS + 1)).reverse().flatMap((s) => s.unread));
+    const lastPast = list[list.length - 1];
+    const last = shoots.find((s) => s.id === lastPast.id)!;
     const est = estimateNextShoot(list, teamPaces, rules);
     let estimate: ShootForecast['estimate'] = null;
     if (est) {
@@ -60,23 +73,44 @@ export async function loadShootForecasts(ctx: Ctx): Promise<ShootForecast[]> {
           shares.set(u.id, { name: u.name, count: (shares.get(u.id)?.count ?? 0) + w.count });
         }
       }
-      const writers = [...shares].map(([writerId, x]) => {
+      // when the document held more (or fewer) scripts than the site had, each writer keeps their share of it
+      const byWriter = [...shares];
+      const scaled = scaleSplit([...byWriter.map(([, x]) => x.count), unassigned], est.scripts);
+      const writers = byWriter.map(([writerId, x], i) => {
         const perDay = users.get(writerId)?.capacityPerDay;
-        return { writerId, name: x.name, count: x.count, startBy: perDay ? suggestStart(est.draftDue, x.count, perDay, settings.workingDays) : null };
-      }).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
-      estimate = { ...est, writers, unassigned, late: dueState(est.finalDue, clock).overdue };
+        return { writerId, name: x.name, count: scaled[i], startBy: perDay && scaled[i] ? suggestStart(est.draftDue, scaled[i], perDay, settings.workingDays) : null };
+      }).filter((w) => w.count > 0).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+      estimate = { ...est, writers, unassigned: scaled[scaled.length - 1], late: dueState(est.finalDue, clock).overdue };
     }
     out.push({
       clientId: c.id, clientName: c.name, estimate,
-      lastShoot: { id: last.id, title: last.title, startDate: last.startDate, endDate: last.endDate, scripts: list[list.length - 1].scripts },
+      lastShoot: {
+        id: last.id, title: last.title, startDate: last.startDate, endDate: last.endDate,
+        scripts: lastPast.scripts, siteScripts: lastPast.site, fromDocument: lastPast.fromDocument,
+      },
     });
   }
-  return out.sort((a, b) => (a.estimate?.shootDate ?? '9999').localeCompare(b.estimate?.shootDate ?? '9999') || a.clientName.localeCompare(b.clientName));
+  out.sort((a, b) => (a.estimate?.shootDate ?? '9999').localeCompare(b.estimate?.shootDate ?? '9999') || a.clientName.localeCompare(b.clientName));
+  return { forecasts: out, unread };
 }
 
 export function registerForecastRoutes(app: FastifyInstance, ctx: Ctx) {
-  app.get('/api/shoot-forecast', async (req): Promise<{ forecasts: ShootForecast[] }> => {
+  const answer = async (): Promise<ShootForecasts> => {
+    const { forecasts, unread } = await loadShootForecasts(ctx);
+    return { forecasts, documents: { unread: unread.length, canRead: !!ctx.scriptCounter } };
+  };
+
+  app.get('/api/shoot-forecast', async (req): Promise<ShootForecasts> => {
     requireManager(req);
-    return { forecasts: await loadShootForecasts(ctx) };
+    return answer();
+  });
+
+  // Claude counts the scripts in the documents the estimates count from and haven't been read: a few at a time,
+  // each document once (the page asks again while some are left)
+  app.post('/api/shoot-forecast/read-documents', async (req): Promise<ShootForecasts & { read: number; busy: boolean }> => {
+    requireManager(req);
+    const { unread } = await loadShootForecasts(ctx);
+    const run = unread.length ? await readDocuments(ctx, unread) : { read: 0, busy: false };
+    return { ...(await answer()), ...run };
   });
 }
