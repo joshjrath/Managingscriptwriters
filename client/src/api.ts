@@ -65,9 +65,14 @@ export const queryClient = new QueryClient({
  * A mutation that refreshes every screen after it succeeds, so counts,
  * dashboards and lists never disagree with each other.
  */
-export function useSave<TVars, TOut>(fn: (vars: TVars) => Promise<TOut>, opts: { onSuccess?: (out: TOut, vars: TVars) => void | Promise<void> } = {}) {
+export function useSave<TVars, TOut>(fn: (vars: TVars) => Promise<TOut>, opts: {
+  onSuccess?: (out: TOut, vars: TVars) => void | Promise<void>;
+  /** names the save, so other parts of the page can tell one is running (react-query's useIsMutating) */
+  key?: readonly unknown[];
+} = {}) {
   const qc = useQueryClient();
   return useMutation<TOut, ApiError, TVars>({
+    mutationKey: opts.key,
     mutationFn: fn,
     onSuccess: async (out, vars) => {
       await qc.invalidateQueries();

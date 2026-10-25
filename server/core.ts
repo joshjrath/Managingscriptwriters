@@ -5,7 +5,7 @@ import type { Db } from './db';
 import { makeClock, type Clock, type DeadlineRules, type ISODate } from '../shared/dates';
 import {
   compressRanges, deriveStage, kindsSql, milestone, nextMilestone, summarize, VIDEO_EDITOR_KINDS,
-  type EditorKind, type ScriptLite, type ScriptStatus, type Role,
+  type EditorKind, type ScriptLite, type ScriptStatus, type Role, type SecondLookResult, type ThumbMime,
 } from '../shared/workflow';
 import type { WorkspaceTheme } from '../shared/palettes';
 import type { BatchSummary, Me, Priority, Settings, UserSummary, WriterShare, DateMode } from '../shared/types';
@@ -24,6 +24,8 @@ export interface Ctx {
   scriptCounter?: import('./doc-counts').ScriptCounter | null;
   /** estimates each client's next shoot (Claude); absent when no API key is configured */
   shootEstimator?: import('./shoot-estimator').ShootEstimator | null;
+  /** gives a thumbnail designer's option an AI second look (Claude); absent when no API key is configured */
+  thumbCritic?: ThumbCritic | null;
   /** fetches a document to count: a Google Doc or Drive link, or Timeliner's download link (tests pass a stand-in) */
   fetchDoc?: typeof fetch;
   /** reads a synced calendar's iCal link (tests pass a stand-in) */
@@ -40,6 +42,33 @@ export interface Ctx {
   remindersEnabled?: boolean;
   /** synced calendars may point at private addresses (CALENDAR_ALLOW_PRIVATE, for local testing only) */
   calendarAllowPrivate?: boolean;
+}
+
+/** One image sent for a second look, as the Anthropic API takes it: its type as read from its own bytes, and the bytes in base64. */
+export interface CritiqueImage { mime: ThumbMime; base64: string }
+
+/** What a second look is asked about: the option, the client's winners beside it, and the brief and the client as text. */
+export interface ThumbCritiqueInput {
+  /** the designer's option ("The option:"), at most SECOND_LOOK_MAX_BYTES before encoding */
+  option: CritiqueImage;
+  /**
+   * up to three of the client's current winners this designer may see, newest first ("Reference 1:" …), with any that
+   * would take the request past its size budget already left out
+   */
+  references: CritiqueImage[];
+  /** the video's title, what the thumbnail should show and the words on the image */
+  brief: { title: string; brief: string | null; onImage: string | null };
+  client: { name: string; brandVoice: string | null; guidance: string | null };
+}
+
+/**
+ * Gives one thumbnail option a quick critique: Claude's, when ANTHROPIC_API_KEY is set; tests pass a stand-in, so
+ * they never call the API. It answers with the structured result as parsed, which the route keeps and shows only
+ * after tidySecondLook (shared/workflow.ts). It throws an HttpError with a plain message when Claude declines or runs
+ * out of room, and maps the API's failures the way Paste notes does (server/notes-import.ts), so nothing is kept.
+ */
+export interface ThumbCritic {
+  critique(input: ThumbCritiqueInput): Promise<SecondLookResult>;
 }
 
 // ── settings ─────────────────────────────────────────────────────────────

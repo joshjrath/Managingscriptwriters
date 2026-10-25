@@ -16,6 +16,7 @@ import { seedDemo } from './seed-demo';
 import { claudeScriptCounter } from './doc-counts';
 import { claudeShootEstimator } from './shoot-estimator';
 import { claudeNotesReader } from './notes-import';
+import { claudeThumbCritic } from './second-look';
 import type { Ctx } from './core';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +49,8 @@ async function main() {
     // and counts the scripts in shoots' documents, for estimating the next shoot
     scriptCounter: config.anthropicApiKey ? claudeScriptCounter() : null,
     shootEstimator: config.anthropicApiKey ? claudeShootEstimator() : null,
+    // and gives a thumbnail designer's option a second look
+    thumbCritic: config.anthropicApiKey ? claudeThumbCritic() : null,
     remindersEnabled: config.remindersEnabled,
     calendarAllowPrivate: config.calendarAllowPrivate,
     // the editors' videos are read from Timeliner, and a script document uploaded there marks its batch delivered

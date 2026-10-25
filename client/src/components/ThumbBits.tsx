@@ -1,13 +1,16 @@
 // Pieces the thumbnail pages share (the Studio, a brief, the Thumbnails board): a brief's picture, state and due
 // words, the quick checks on an image (SpecChips), the drop zone (drop anywhere on the page, paste, or choose),
-// an option's frame (OptionSlot, plus the empty and not-yet-added slots), Preview in the wild (every option at the
-// sizes people meet it in a feed, on a plain light or dark feed), the round film strip with its compare, the brief
-// card and the client's look. Everything is built on ui.tsx and the .studio / .thumb styles in app.css.
+// an option's frame (OptionSlot, which takes the pins over its picture and a pin list or second look under its
+// actions, plus the empty and not-yet-added slots), Preview in the wild (every option at the sizes people meet it
+// in a feed, on a plain light or dark feed), a decision in a few words and its chip (a Standout's in yellow), the
+// round film strip with its compare, the brief card and the client's look. Everything is built on ui.tsx and the
+// .studio / .thumb styles in app.css. Pins live in ThumbPins.tsx, Compare and Lights down in ThumbCompare.tsx, the
+// keys in ThumbKeys.tsx and the second look in SecondLook.tsx.
 
 import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, Check, ChevronDown, Columns2, Contrast, ExternalLink, Eye, Frame, Glasses, ImagePlus, Loader2, Moon, RotateCcw, Smartphone, Sun, Upload,
+  AlertTriangle, Check, ChevronDown, Columns2, Contrast, ExternalLink, Eye, Frame, Glasses, ImagePlus, Loader2, Moon, RotateCcw, Smartphone, Sun, Trophy, Upload,
 } from 'lucide-react';
 import {
   isOpenThumb, MAX_OPTIONS, OPTION_LETTERS, THUMB_MIMES, THUMB_STATE_COLOR, THUMB_STATE_LABEL, thumbSpecChecks, type ThumbState,
@@ -197,20 +200,29 @@ export const DropZone = forwardRef<DropZoneHandle, { onFiles: (files: File[]) =>
 
 // ── option slots ─────────────────────────────────────────────────────────
 
-/** One option in its 16:9 frame: its letter, the picture, the designer's one line, the checks, and what can be done. */
-export function OptionSlot({ option, title, fit = 'cover', eager, actions, checks = true, className = '' }: {
+/**
+ * One option in its 16:9 frame: its letter, the picture, the designer's one line, the checks, and what can be done.
+ * `frame` wraps the picture (the pins sit over it: PinLayer in ThumbPins.tsx); `below` follows the actions (the pins'
+ * list, a second look). `standout`: the pick was marked Standout. `current`: the option the arrow keys are on.
+ */
+export function OptionSlot({ option, title, fit = 'cover', eager, actions, checks = true, className = '', frame, below, standout, current }: {
   option: ThumbnailOption; title: string; fit?: 'cover' | 'contain'; eager?: boolean; actions?: ReactNode; checks?: boolean; className?: string;
+  frame?: (picture: ReactNode) => ReactNode; below?: ReactNode; standout?: boolean; current?: boolean;
 }) {
+  const picture = (
+    <Thumb src={option.url} alt={optionAlt(option, title)} fit={fit} eager={eager}>
+      <span className="thumb-letter" aria-hidden>{option.letter}</span>
+      {option.picked && <span className="thumb-tr"><Chip color={standout ? 'yellow' : 'mint'} icon={standout ? <Trophy aria-hidden /> : <Check aria-hidden />}>{standout ? 'Picked · Standout' : 'Picked'}</Chip></span>}
+    </Thumb>
+  );
   return (
-    <figure className={`opt${option.picked ? ' picked' : ''} ${className}`}>
-      <Thumb src={option.url} alt={optionAlt(option, title)} fit={fit} eager={eager}>
-        <span className="thumb-letter" aria-hidden>{option.letter}</span>
-        {option.picked && <span className="thumb-tr"><Chip color="mint" icon={<Check aria-hidden />}>Picked</Chip></span>}
-      </Thumb>
+    <figure className={`opt${option.picked ? ' picked' : ''}${option.picked && standout ? ' standout' : ''}${current ? ' current' : ''} ${className}`} data-option={option.id}>
+      {frame ? frame(picture) : picture}
       <figcaption className="opt-cap">
         {option.note && <p className="opt-note">“{option.note}”</p>}
         {checks && <SpecChips img={option} />}
         {actions && <div className="opt-acts">{actions}</div>}
+        {below}
       </figcaption>
     </figure>
   );
@@ -292,13 +304,19 @@ const STAMP = '12:08';
  * with the brief's title and client, beside the client's recent winners. Squint blurs, Greyscale drains the colour,
  * Safe zone marks what the badge covers and the edges a crop can take. A generic mock-up: no platform's logos or chrome.
  */
-export function PreviewInTheWild({ items, pick, onPick, title, clientName, winners }: {
+export function PreviewInTheWild({ items, pick, onPick, title, clientName, winners, looks }: {
   items: WildItem[]; pick: string | null; onPick: (key: string) => void; title: string; clientName: string; winners: ThumbnailWin[];
+  /** Squint and Greyscale held by the page (a brief's S and G keys), when it holds them */
+  looks?: { squint: boolean; grey: boolean; onSquint: () => void; onGrey: () => void };
 }) {
   const [feed, setFeedState] = useState<'light' | 'dark'>(readFeed);
   const setFeed = (f: 'light' | 'dark') => { setFeedState(f); try { localStorage.setItem(FEED_KEY, f); } catch { /* private mode: this visit only */ } };
-  const [squint, setSquint] = useState(false);
-  const [grey, setGrey] = useState(false);
+  const [ownSquint, setOwnSquint] = useState(false);
+  const [ownGrey, setOwnGrey] = useState(false);
+  const squint = looks ? looks.squint : ownSquint;
+  const grey = looks ? looks.grey : ownGrey;
+  const setSquint = () => (looks ? looks.onSquint() : setOwnSquint((v) => !v));
+  const setGrey = () => (looks ? looks.onGrey() : setOwnGrey((v) => !v));
   const [safe, setSafe] = useState(false);
   const cur = items.find((i) => i.key === pick) ?? items[0] ?? null;
   if (!cur) return <p className="muted wild-none">Nothing to preview yet. Add an option and it shows up here at feed sizes.</p>;
@@ -318,8 +336,8 @@ export function PreviewInTheWild({ items, pick, onPick, title, clientName, winne
           <button type="button" aria-pressed={feed === 'dark'} onClick={() => setFeed('dark')}><Moon aria-hidden />Dark</button>
         </Seg>
         <div className="wild-toggles" role="group" aria-label="Checks">
-          <button type="button" className="wild-tg" aria-pressed={squint} onClick={() => setSquint((v) => !v)} title="Does it read small?"><Glasses aria-hidden />Squint</button>
-          <button type="button" className="wild-tg" aria-pressed={grey} onClick={() => setGrey((v) => !v)} title="Does it work without colour?"><Contrast aria-hidden />Greyscale</button>
+          <button type="button" className="wild-tg" aria-pressed={squint} onClick={setSquint} title="Does it read small? (S)"><Glasses aria-hidden />Squint</button>
+          <button type="button" className="wild-tg" aria-pressed={grey} onClick={setGrey} title="Does it work without colour? (G)"><Contrast aria-hidden />Greyscale</button>
           <button type="button" className="wild-tg" aria-pressed={safe} onClick={() => setSafe((v) => !v)} title="What the length badge covers, and the edges a crop can take"><Frame aria-hidden />Safe zone</button>
         </div>
       </div>
@@ -407,8 +425,21 @@ function FeedLine({ item, size, you }: { item: FeedItem; size: string; you?: boo
 
 // ── the round film strip ─────────────────────────────────────────────────
 
-/** "B picked", "Changes asked": a decision in a few words. */
-const decisionWords = (d: ThumbnailDecision) => (d.action === 'pick' ? `${d.optionLetter ?? 'An option'} picked` : 'Changes asked');
+/** "B picked", "B picked · Standout", "Changes asked": a decision in a few words. */
+export const decisionWords = (d: ThumbnailDecision) => (d.action === 'pick' ? `${d.optionLetter ?? 'An option'} picked${d.standout ? ' · Standout' : ''}` : 'Changes asked');
+
+/** "· 3 notes on the image", or nothing. */
+export const pinWords = (d: ThumbnailDecision | null | undefined) => (d?.pins.length ? plural(d.pins.length, 'note') + ' on the image' : '');
+
+/** A decision's chip: mint for a pick (yellow, with a trophy, for a standout), pink for changes asked. */
+export function DecisionChip({ d }: { d: ThumbnailDecision }) {
+  const pick = d.action === 'pick';
+  return (
+    <Chip color={pick ? (d.standout ? 'yellow' : 'mint') : 'pink'} icon={pick ? (d.standout ? <Trophy aria-hidden /> : <Check aria-hidden />) : <RotateCcw aria-hidden />}>
+      {decisionWords(d)}
+    </Chip>
+  );
+}
 
 /**
  * The brief's story as a film strip: Round 1 A B C → changes asked, with the note → Round 2 → B picked; the tray
@@ -464,10 +495,10 @@ export function RoundStrip({ rounds, tray, title, nextRound, now }: { rounds: Th
                 {r.note && <p className="rs-note">“{r.note}”</p>}
               </div>
               {dec ? (
-                <div className={`rs-step rs-dec ${dec.action}`}>
-                  <Chip color={dec.action === 'pick' ? 'mint' : 'pink'} icon={dec.action === 'pick' ? <Check aria-hidden /> : <RotateCcw aria-hidden />}>{decisionWords(dec)}</Chip>
+                <div className={`rs-step rs-dec ${dec.action}${dec.standout ? ' standout' : ''}`}>
+                  <DecisionChip d={dec} />
                   {dec.note && <p className="rs-note">“{dec.note}”</p>}
-                  <span className="rs-by">{dec.decidedByName} · {fmtAgo(dec.createdAt, now)}{r.decisions.length > 1 ? ' · decided again' : ''}</span>
+                  <span className="rs-by">{dec.decidedByName} · {fmtAgo(dec.createdAt, now)}{r.decisions.length > 1 ? ' · decided again' : ''}{dec.pins.length ? ` · ${pinWords(dec)}` : ''}</span>
                 </div>
               ) : (
                 <div className={`rs-step rs-dec ${r.superseded ? 'skip' : 'wait'}`}>
@@ -494,10 +525,10 @@ export function RoundStrip({ rounds, tray, title, nextRound, now }: { rounds: Th
         <div id={cid} className="rs-compare">
           {[pair.a, pair.b].map((r) => (
             <div key={r.id} className="rs-col">
-              <div className="rs-col-h"><b>{label(r)}</b>{r.decisions[0] && <Chip color={r.decisions[0].action === 'pick' ? 'mint' : 'pink'}>{decisionWords(r.decisions[0])}</Chip>}</div>
+              <div className="rs-col-h"><b>{label(r)}</b>{r.decisions[0] && <DecisionChip d={r.decisions[0]} />}</div>
               {r.decisions[0]?.action === 'changes' && r.decisions[0].note && <p className="rs-note">“{r.decisions[0].note}”</p>}
               <div className="rs-col-opts">
-                {r.options.map((o) => <OptionSlot key={o.id} option={o} title={title} fit="contain" checks={false} />)}
+                {r.options.map((o) => <OptionSlot key={o.id} option={o} title={title} fit="contain" checks={false} standout={o.picked && !!r.decisions[0]?.standout} />)}
               </div>
             </div>
           ))}

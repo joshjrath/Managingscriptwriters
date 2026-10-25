@@ -33,6 +33,8 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-10-08-editors-tab-timeliner': ['managers', 'editors'], '2026-10-08-timeliner-matching': ['managers', 'editors'],
   '2026-10-09-editors-everyone-in-timeliner': ['managers', 'editors'], '2026-10-09-one-editor-since': ['managers', 'editors'],
   '2026-10-09-editors-match-timeliner-assignees': ['managers', 'editors'],
+  '2026-10-25-thumbnail-notes-on-image': ['managers', 'designers'], '2026-10-25-thumbnail-standouts': ['managers', 'designers'],
+  '2026-10-25-thumbnail-compare-keys': ['managers', 'designers'], '2026-10-25-thumbnail-second-look': ['managers', 'designers'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -46,6 +48,52 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-25-thumbnail-notes-on-image',
+    date: '2026-10-25',
+    title: 'Thumbnails: notes pinned on the image',
+    summary: 'When you pick a thumbnail or ask for changes, you can now pin numbered notes on exact spots of an option, and the designer sees each one right where you put it.',
+    changes: [
+      { tag: 'new', text: 'Reviewing a round, press Add note on image, click or tap the spot, and write what to change there, with an optional tag (Text, Faces, Contrast, Composition, Brand, Crop or Other). Each note gets a number, on the picture and in the list below it. Up to 20 notes go with your decision, whether you pick an option or ask for changes.' },
+      { tag: 'new', text: 'On a computer, Tab reaches each note, Enter opens it, the arrow keys move a note you haven’t sent yet and Delete removes it. On a phone, tap to place a note and write it in the list underneath.' },
+      { tag: 'new', text: 'Designers see the numbered notes on the options they were left on: on the changes card at the top of their Studio, and on the brief while they make the next round, with the same numbers in a list beside them. Hide notes takes them off the picture for a clean look.' },
+      { tag: 'improved', text: 'Deciding again starts from the notes you already sent. The newest decision’s notes are the ones the round shows, and earlier ones stay in its history. A designer only sees notes on rounds they sent themselves.' },
+    ],
+  },
+  {
+    id: '2026-10-25-thumbnail-standouts',
+    date: '2026-10-25',
+    title: 'Thumbnails: Standout picks, and a celebration with the picture',
+    summary: 'Managers can mark a pick as a Standout, and designers now get a celebration that shows the picked thumbnail when one of theirs is chosen.',
+    changes: [
+      { tag: 'new', text: 'When you pick an option, tick Mark as Standout for one of the best. It shows on the brief, in the round strip and on the designer’s Wall of wins. Other designers don’t see it among the client’s recent picks.' },
+      { tag: 'new', text: 'The next time a designer opens the site after a pick, it opens with the picked thumbnail in its frame, the video’s title and the client. A pick from the first round gets the bigger celebration, a later round the smaller one, and a Standout a ring of colour. The Animations switch turns the motion off.' },
+      { tag: 'new', text: 'The Studio has a new Your best this month strip under the board: the designer’s picks marked Standout this month. It’s hidden when there are none.' },
+      { tag: 'improved', text: 'Asking for changes is never celebrated. If you decide again before the designer has seen the celebration, it’s taken back.' },
+    ],
+  },
+  {
+    id: '2026-10-25-thumbnail-compare-keys',
+    date: '2026-10-25',
+    title: 'Thumbnails: Compare, Lights down and keyboard shortcuts',
+    summary: 'On a brief you can now compare a new version with the last one, look at one option alone on a dark screen, and work from the keyboard.',
+    changes: [
+      { tag: 'new', text: 'Compare puts this round’s option next to the last round’s version (or the picked one), side by side or with a line you drag to swipe from one to the other. The arrows flick between this round’s options.' },
+      { tag: 'new', text: 'Lights down shows one option alone on black, full screen. The arrow keys flick between options, and Esc brings you back. Squint and Greyscale work there too.' },
+      { tag: 'new', text: 'Keyboard shortcuts on a computer (the Keys button lists them): 1 to 6 open the pick for that option (managers, and you still confirm), F the feed preview, S Squint, G Greyscale, ← → flick between options and L Lights down. They never act while you’re typing in a box.' },
+    ],
+  },
+  {
+    id: '2026-10-25-thumbnail-second-look',
+    date: '2026-10-25',
+    title: 'Thumbnails: an AI second look for designers',
+    summary: 'Designers can ask Claude for a quick, private critique of one of their options, before or after they send it.',
+    changes: [
+      { tag: 'new', text: 'Second look, on an option in your tray or in a round you sent (it stays beside the round while it’s with the managers, and on the changes card while you make the next one), gives a one-line verdict and six checks: Reads small, Focal point, Words, Contrast, Fits the brief and Fits the client. Each is Strong, OK or Watch, with a short note, and you get up to three concrete things to try in the design file.' },
+      { tag: 'new', text: 'It’s advice, just for you: managers and other designers never see it (not even an Admin viewing the site as you), and it never stops you sending a round. Each option is looked at once and the answer is kept, so asking again shows the same one. One at a time, up to 30 an hour, and an image over 7 MB has to be exported smaller first.' },
+      { tag: 'improved', text: 'It needs the AI key on the server (ANTHROPIC_API_KEY, the one Paste notes uses); without it the button doesn’t show. The option, up to three of the client’s picked thumbnails, the brief and the client’s brand voice and guidance are sent to the Anthropic API.' },
+    ],
+  },
   {
     id: '2026-10-25-editors-add-from-timeliner',
     date: '2026-10-25',

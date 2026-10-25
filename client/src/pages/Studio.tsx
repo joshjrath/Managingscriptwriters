@@ -1,10 +1,12 @@
 // Studio (/studio): a thumbnail designer's home, built from GET /api/studio (StudioPayload in shared/types.ts),
 // refreshed every minute. A dark, picture-first room. On top the hero, in the order EditorHome uses for videos:
-// changes asked (the manager's note on the round it was asked on, with "Start round N"), next up (the brief due
-// soonest, in a 16:9 frame or its title card), just picked (the winner, for 12 hours), all clear (the latest
-// wins). Then Your board (a 16:9 grid of open briefs with their state), the Wall of wins (every pick, newest
-// first, filtered by client; a new win flips in with a glint and a few sparks the first time it's seen, when
-// animations are on), a few numbers counted from rows, and to-dos. No timers, points or streaks.
+// changes asked (the manager's note on the round it was asked on, with "Start round N", and their numbered pins
+// on the option they're on), next up (the brief due soonest, in a 16:9 frame or its title card), just picked (the
+// winner, for 12 hours), all clear (the latest wins). Then Your board (a 16:9 grid of open briefs with their state),
+// "Your best this month" (a sideways strip of the picks marked Standout this month, hidden when there are none), the
+// Wall of wins (every pick, newest first, filtered by client, standouts marked; a new win flips in with a glint and a
+// few sparks the first time it's seen, when animations are on), a few numbers counted from rows, and to-dos. No
+// timers, points or streaks.
 // A manager opens a designer's Studio with ?userId= (read-only; their unsent options stay private); an Admin can
 // also View as the designer and see exactly theirs.
 
@@ -22,6 +24,7 @@ import { Chip, Empty, ErrorState, Loading, Panel, Seg, Thumb } from '../componen
 import { KpiCard } from '../components/StatCards';
 import { TodoPanel } from '../components/Todos';
 import { BriefThumb, BriefTile, optionAlt, StateChip, toneFor } from '../components/ThumbBits';
+import { allMarks, HideNotes, marksOn, PinList, PinnedThumb } from '../components/ThumbPins';
 import { useNow } from '../components/EditingBits';
 import { NoDesigners } from './Thumbnails';
 import { burst, centerOf } from '../fx';
@@ -103,6 +106,8 @@ function Studio({ s, refreshFailed }: { s: StudioPayload; refreshFailed: boolean
                 ? <p className="muted st-only">That’s the only one on {s.readOnly ? 'their' : 'your'} board.</p>
                 : <div className="st-grid">{board.map((b, i) => <BriefTile key={b.id} brief={b} to={thumbBriefPath(me, b.id)} today={clock.today} eager={i < 4} />)}</div>}
           </Panel>
+          {/* after the work: a strip of this month's standouts, above the wall they're also on */}
+          <BestThisMonth wins={s.best} readOnly={s.readOnly} />
           <WallOfWins wins={s.wins} readOnly={s.readOnly} designerId={s.designer.id} name={s.readOnly ? s.designer.name : null} />
         </div>
         <div className="stack st-side" style={{ gap: 'var(--gap)' }}>
@@ -149,7 +154,7 @@ function PickedCard({ win, readOnly, now }: { win: ThumbnailWin; readOnly: boole
         </Thumb>
       </div>
       <div className="st-hero-body">
-        <span className="eh-badge"><Sparkles aria-hidden />Just picked</span>
+        <span className="row-flex s2"><span className="eh-badge"><Sparkles aria-hidden />Just picked</span>{win.standout && <span className="eh-badge standout"><Trophy aria-hidden />Standout</span>}</span>
         <h2 className="st-just-title">{win.title}</h2>
         <p className="st-hero-sub">{win.clientName} · {win.pickedByName} picked option {win.option.letter} · {fmtAgo(win.pickedAt, now)}</p>
         {win.reason && <blockquote className="st-hero-quote">{win.reason}</blockquote>}
@@ -171,17 +176,30 @@ function DueLine({ brief }: { brief: ThumbnailBrief }) {
   return d ? <span className={`eh-due ${d.tone}`}>{d.text}</span> : null;
 }
 
+/** How many of the hero's notes the body lists; the rest wait on the brief. */
+const HERO_PINS = 4;
+
 function ChangesHero({ hero, readOnly, now }: { hero: Extract<StudioHero, { kind: 'changes' }>; readOnly: boolean; now: number }) {
   const { me } = useBoot();
+  const [hide, setHide] = useState(false);
   const { brief, decision, round } = hero;
-  const lead = round.options[0] ?? null;
+  // the option with the most notes pinned on it leads, with its pins; the others follow in the strip
+  const pins = decision.pins;
+  const count = (id: number) => pins.filter((p) => p.optionId === id).length;
+  const lead = [...round.options].sort((a, b) => count(b.id) - count(a.id))[0] ?? null;
+  const leadPins = lead ? marksOn(pins, lead.id) : [];
+  const notes = allMarks(pins);
   const go = readOnly ? 'Open brief' : brief.draftOptions ? `Carry on with round ${brief.nextRound}` : `Start round ${brief.nextRound}`;
   return (
     <section className="st-hero changes" aria-label={`Changes asked: ${brief.title}`}>
-      <div className="st-hero-frame">
-        <Thumb src={lead?.url} alt={lead ? optionAlt(lead, brief.title) : brief.title} title={brief.title} sub={brief.clientName} tone={toneFor(brief.id)} eager>
-          {lead && <span className="thumb-letter" aria-hidden>{lead.letter}</span>}
-        </Thumb>
+      <div className={`st-hero-frame${leadPins.length ? ' pinned' : ''}`}>
+        {lead && leadPins.length ? (
+          <PinnedThumb option={lead} pins={leadPins} title={brief.title} hidden={hide} eager><span className="thumb-letter" aria-hidden>{lead.letter}</span></PinnedThumb>
+        ) : (
+          <Thumb src={lead?.url} alt={lead ? optionAlt(lead, brief.title) : brief.title} title={brief.title} sub={brief.clientName} tone={toneFor(brief.id)} eager>
+            {lead && <span className="thumb-letter" aria-hidden>{lead.letter}</span>}
+          </Thumb>
+        )}
         <figure className="st-note">
           <span className="st-note-k"><RotateCcw aria-hidden />Changes asked on round {round.number}</span>
           <blockquote>{decision.note}</blockquote>
@@ -198,6 +216,13 @@ function ChangesHero({ hero, readOnly, now }: { hero: Extract<StudioHero, { kind
         <div className="st-kicker">{brief.clientName}</div>
         <h2 className={`st-hero-title${brief.title.length > 40 ? ' long' : ''}`}>{brief.title}</h2>
         <p className="st-hero-sub">{decision.decidedByName} asked for changes on round {round.number}. <DueLine brief={brief} /></p>
+        {notes.length > 0 && (
+          <div className="st-hero-pins">
+            <div className="st-hero-pins-h"><b>{plural(notes.length, 'note')} on the image</b>{leadPins.length > 0 && <HideNotes hidden={hide} onToggle={() => setHide((v) => !v)} />}</div>
+            <PinList pins={notes.slice(0, HERO_PINS)} letters={new Set(pins.map((p) => p.optionId)).size > 1} />
+            {notes.length > HERO_PINS && <span className="muted">and {plural(notes.length - HERO_PINS, 'more note')} on the brief</span>}
+          </div>
+        )}
         <div className="eh-actions">
           <Link className="btn primary eh-btn xl" to={thumbBriefPath(me, brief.id)}><Play className="ed-fill" aria-hidden />{go}</Link>
         </div>
@@ -244,7 +269,7 @@ function PickedHero({ brief, win, readOnly, now }: { brief: ThumbnailBrief; win:
         </Thumb>
       </div>
       <div className="st-hero-body">
-        <span className="eh-badge"><Sparkles aria-hidden />Just picked</span>
+        <span className="row-flex s2"><span className="eh-badge"><Sparkles aria-hidden />Just picked</span>{win.standout && <span className="eh-badge standout"><Trophy aria-hidden />Standout</span>}</span>
         <div className="st-kicker">{win.clientName}</div>
         <h2 className={`st-hero-title${win.title.length > 40 ? ' long' : ''}`}>{win.title}</h2>
         <p className="st-hero-sub">{win.pickedByName} picked option {win.option.letter} · {fmtAgo(win.pickedAt, now)}</p>
@@ -278,6 +303,34 @@ function ClearHero({ s }: { s: StudioPayload }) {
         </p>
       </div>
     </section>
+  );
+}
+
+// ── your best this month ────────────────────────────────────────────────
+
+/** Their picks marked Standout this month, newest first, each in a ring of colour; nothing at all when there are none. */
+function BestThisMonth({ wins, readOnly }: { wins: ThumbnailWin[]; readOnly: boolean }) {
+  const { me } = useBoot();
+  const allowed = useMotionAllowed();
+  if (!wins.length) return null;
+  return (
+    <Panel title={readOnly ? 'Their best this month' : 'Your best this month'} count={wins.length} sub="the picks a manager marked Standout" className="st-best">
+      <ul className={`st-best-list${allowed ? ' animate' : ''}`}>
+        {wins.map((w, i) => (
+          <li key={w.option.id} className="st-best-item" style={{ ['--i' as string]: Math.min(i, 8) }}>
+            <Link to={thumbBriefPath(me, w.briefId)} className="st-best-link" aria-label={`${w.title}, ${w.clientName}: option ${w.option.letter}, a standout picked by ${w.pickedByName}`}>
+              <span className="st-best-ring">
+                <Thumb src={w.option.url} alt={optionAlt(w.option, w.title)} eager={i < 4}>
+                  <span className="thumb-tl"><Chip color="yellow" icon={<Trophy aria-hidden />}>Standout</Chip></span>
+                </Thumb>
+              </span>
+              <span className="win-cap"><b>{w.title}</b><span>{w.clientName} · {w.pickedByName}</span></span>
+              {w.reason && <q className="st-best-q">{w.reason}</q>}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </Panel>
   );
 }
 
@@ -397,10 +450,11 @@ function WallOfWins({ wins, readOnly, designerId, name }: { wins: ThumbnailWin[]
               // new is new whatever the Animations switch says; only the glint (and the flip-in and sparks) need motion
               const isNew = fresh.has(w.option.id);
               return (
-                <li key={w.option.id} className={`win${isNew ? ' fresh' : ''}`} style={{ ['--i' as string]: Math.min(i, 14) }} data-win={w.option.id}>
-                  <Link to={thumbBriefPath(me, w.briefId)} className="win-link" aria-label={`${w.title}, ${w.clientName}: option ${w.option.letter}, picked ${day(w.pickedAt)}${isNew ? ' (new)' : ''}`}>
+                <li key={w.option.id} className={`win${isNew ? ' fresh' : ''}${w.standout ? ' standout' : ''}`} style={{ ['--i' as string]: Math.min(i, 14) }} data-win={w.option.id}>
+                  <Link to={thumbBriefPath(me, w.briefId)} className="win-link" aria-label={`${w.title}, ${w.clientName}: option ${w.option.letter}, picked ${day(w.pickedAt)}${w.standout ? ', a standout' : ''}${isNew ? ' (new)' : ''}`}>
                     <Thumb src={w.option.url} alt={optionAlt(w.option, w.title)} eager={i < 6}>
                       {isNew && allowed && <span className="dt-glint" aria-hidden />}
+                      {w.standout && <span className="thumb-tl"><Chip color="yellow" icon={<Trophy aria-hidden />}>Standout</Chip></span>}
                       {isNew && <span className="thumb-tr"><Chip color="mint" icon={<Sparkles aria-hidden />}>New</Chip></span>}
                     </Thumb>
                     <span className="win-cap"><b>{w.title}</b><span>{w.clientName} · {day(w.pickedAt)}</span></span>

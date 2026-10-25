@@ -32,6 +32,7 @@ import { registerEditorRoutes } from './control/editors';
 import { registerTimelinerRoutes } from './timeliner';
 import { registerEditingRoutes } from './editing';
 import { registerThumbnailRoutes } from './thumbnails';
+import { registerSecondLookRoutes } from './second-look';
 import { registerUploadCleanup } from './files';
 import type { Db } from './db';
 import { CSRF_HEADER } from '../shared/types';
@@ -127,6 +128,7 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
   registerTimelinerRoutes(app, ctx);
   registerEditingRoutes(app, ctx);
   registerThumbnailRoutes(app, ctx);
+  registerSecondLookRoutes(app, ctx);
 
   app.all('/api/*', async () => { throw new HttpError(404, 'Not found'); });
 

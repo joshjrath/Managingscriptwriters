@@ -1,7 +1,12 @@
 // Celebration moments: "Congrats, your scripts for … just got approved",
-// finished drafts, finished batches, and a calm heads-up for send-backs.
+// finished drafts, finished batches, a calm heads-up for send-backs, and a
+// thumbnail designer's pick (the picked image in its 16:9 frame with the
+// video's title and client: a pick from the first round gets the bigger
+// celebration, any other the smaller one, and a Standout a ring of colour).
 // They play once, the next time the person has the app open (straight away
 // for things they did themselves), and are marked seen as soon as they show.
+// Every bit of motion goes through motionAllowed() (fx.ts, and framer's
+// MotionConfig in motion.tsx), so the Animations switch stills it all.
 
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -10,15 +15,15 @@ import { m } from 'framer-motion';
 import { CheckCheck, PartyPopper, RotateCcw, Send, Sparkles, Trophy } from 'lucide-react';
 import { api } from '../api';
 import type { Moment, MomentKind } from '../../../shared/types';
-import { compressRanges } from '../../../shared/workflow';
+import { compressRanges, pickCelebration } from '../../../shared/workflow';
 import { fmtStamp, plural } from '../../../shared/format';
-import { celebrate, confetti } from '../fx';
+import { burst, celebrate, centerOf, confetti } from '../fx';
 import { SPRING } from '../motion';
 import { useDisplayTz } from './Shell';
-import { Button, useToast } from './ui';
+import { Button, Chip, Thumb, useToast } from './ui';
 
 // a send-back is the thing to act on, so it leads; the celebrations follow
-const RANK: Record<MomentKind, number> = { revisions: -1, batch_done: 0, team_batch_done: 1, drafts_done: 2, team_drafts_done: 3, approved: 4 };
+const RANK: Record<MomentKind, number> = { revisions: -1, batch_done: 0, team_batch_done: 1, drafts_done: 2, team_drafts_done: 3, approved: 4, thumb_standout: 5, thumb_picked: 6 };
 
 /** Several approvals of the same batch read as one. */
 function merge(list: Moment[]): Moment[] {
@@ -75,6 +80,18 @@ function tell(x: Moment): Told {
         body: `All ${plural(x.count, 'script')} for ${x.clientName} are in Timeliner.`,
         icon: <PartyPopper />, tone: 'yellow', cta: { label: 'Open the batch', to: x.batchId ? `/batches/${x.batchId}` : '/my-work' }, big: true, happy: true,
       };
+    case 'thumb_picked':
+    case 'thumb_standout': {
+      const standout = x.kind === 'thumb_standout';
+      const letter = x.thumb?.option.letter;
+      const first = !!x.thumb?.firstRound;
+      return {
+        title: standout ? `Standout! Your option ${letter ?? ''} for “${x.batchTitle}”` : `Option ${letter ?? ''} picked for “${x.batchTitle}”`,
+        body: `${x.byName ?? 'A manager'} picked it${first ? ' from your first round' : ''}${standout ? ' and marked it a standout' : ''}${x.note ? `: “${x.note}”` : '.'} It’s on your wall of wins${standout ? ', and in your best this month' : ''}.`,
+        icon: standout ? <Trophy /> : <Sparkles />, tone: standout ? 'yellow' : 'mint', cta: { label: 'Open the brief', to: x.thumb?.link ?? '/studio' },
+        big: pickCelebration({ firstRound: first, standout }).size === 'big', happy: true,
+      };
+    }
   }
 }
 
@@ -109,8 +126,12 @@ function MomentDialog({ moments, onClose }: { moments: Moment[]; onClose: () => 
   const displayTz = useDisplayTz();
   const nav = useNavigate();
   const ref = useRef<HTMLDialogElement>(null);
+  const frame = useRef<HTMLDivElement>(null);
   const [hero, ...rest] = moments;
   const t = tell(hero);
+  // a thumbnail pick shows the picture itself; a standout wears a ring of colour and throws sparks off it
+  const thumb = hero.kind === 'thumb_picked' || hero.kind === 'thumb_standout' ? hero.thumb ?? null : null;
+  const ring = !!thumb && pickCelebration({ firstRound: thumb.firstRound, standout: hero.kind === 'thumb_standout' }).ring;
   useEffect(() => {
     ref.current?.showModal();
     ref.current?.querySelector<HTMLElement>('[data-autofocus]')?.focus();
@@ -118,18 +139,29 @@ function MomentDialog({ moments, onClose }: { moments: Moment[]; onClose: () => 
       if (t.big) celebrate();
       else if (t.happy) confetti({ y: innerHeight * 0.36, count: 80, spread: 110, power: 13 });
     }, 180);
-    return () => clearTimeout(timer);
-  }, [t.big, t.happy]);
+    const sparks = ring ? setTimeout(() => { const c = centerOf(frame.current); burst(c.x, c.y, { count: 28, distance: 170 }); }, 560) : undefined;
+    return () => { clearTimeout(timer); clearTimeout(sparks); };
+  }, [t.big, t.happy, ring]);
   const words = t.title.split(' ');
   return (
     <dialog ref={ref} className={`moment tone-${t.tone}`} aria-labelledby="moment-title" onClose={onClose}
       onCancel={(e) => { e.preventDefault(); onClose(); }} onClick={(e) => { if (e.target === ref.current) onClose(); }}>
-      <m.div className="moment-sheet" initial={{ opacity: 0, y: 26, scale: 0.94 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: 'spring', stiffness: 260, damping: 22 }}>
-        <m.div className="moment-badge" initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 320, damping: 14, delay: 0.12 }} aria-hidden>
-          <span className="ring1" /><span className="ring2" />
-          {t.icon}
-        </m.div>
-        <div className="moment-kicker">{hero.clientName} · {hero.self ? 'just now' : fmtStamp(hero.createdAt, displayTz)}</div>
+      <m.div className={`moment-sheet${thumb ? ' framed' : ''}`} initial={{ opacity: 0, y: 26, scale: 0.94 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ type: 'spring', stiffness: 260, damping: 22 }}>
+        {thumb ? (
+          <m.div ref={frame} className={`moment-frame${ring ? ' ring' : ''}`} initial={{ opacity: 0, y: 18, scale: 0.88, rotate: -3 }} animate={{ opacity: 1, y: 0, scale: 1, rotate: 0 }}
+            transition={{ type: 'spring', stiffness: 240, damping: 15, delay: 0.1 }}>
+            <Thumb src={thumb.option.url} alt={`Option ${thumb.option.letter} for “${thumb.title}”, the one picked`} fit="contain" eager>
+              <span className="thumb-letter" aria-hidden>{thumb.option.letter}</span>
+              {ring && <span className="thumb-tr"><Chip color="yellow" icon={<Trophy aria-hidden />}>Standout</Chip></span>}
+            </Thumb>
+          </m.div>
+        ) : (
+          <m.div className="moment-badge" initial={{ scale: 0, rotate: -30 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 320, damping: 14, delay: 0.12 }} aria-hidden>
+            <span className="ring1" /><span className="ring2" />
+            {t.icon}
+          </m.div>
+        )}
+        <div className="moment-kicker">{hero.clientName}{thumb ? ` · round ${thumb.roundNumber}` : ''} · {hero.self ? 'just now' : fmtStamp(hero.createdAt, displayTz)}</div>
         <h2 id="moment-title" className="moment-title">
           {words.map((w, i) => (
             <m.span key={i} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ ...SPRING, delay: 0.22 + i * 0.035 }}>{w} </m.span>
