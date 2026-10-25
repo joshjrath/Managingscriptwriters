@@ -5,16 +5,19 @@
 //   npm run demo          → dev servers on a separate demo database
 //   npm run seed:demo     → seed DATA_DIR / DATABASE_URL if it is empty
 
+import { crc32, deflateSync } from 'node:zlib';
 import type { Db } from './db';
 import { hashPassword } from './auth';
-import { clockFor, loadSettings, type Ctx } from './core';
+import { clockFor, loadSettings, managerIds, notify, type Ctx } from './core';
 import { applyScriptAction, insertBatch } from './routes/batches';
 import { sendDocument } from './submissions';
-import { bufferFile } from './files';
+import { bufferFile, storeFile } from './files';
+import { imageInfoOf } from './images';
 import { insertShoot } from './routes/shoots';
 import { insertBriefing } from './routes/clients';
 import { addDays } from '../shared/dates';
 import type { Me } from '../shared/types';
+import { OPTION_LETTERS, thumbBriefPath, type ThumbAction } from '../shared/workflow';
 import { findCity } from '../shared/cities';
 
 export const DEMO_PASSWORD = 'scalemedia-demo';
@@ -52,7 +55,7 @@ async function seed(db: Db, now: Date): Promise<boolean> {
     await db.query(`update users set city = $2, city_code = $3, country = $4, lat = $5, lon = $6, timezone = $7, work_start = $8, work_end = $9 where id = $1`,
       [ids[key], c.name, c.code, c.country, c.lat, c.lon, c.timezone, hours[0], hours[1]]);
   }
-  const me = (key: string, role: 'manager' | 'writer' = 'writer'): Me => ({ id: ids[key], name: people.find((p) => p[1].toLowerCase().startsWith(key))![1], email: '', role, capacityPerDay: null });
+  const me = (key: string, role: 'manager' | 'writer' = 'writer'): Me => ({ id: ids[key], name: people.find((p) => p[1].toLowerCase().startsWith(key))![1], email: '', role, capacityPerDay: null, editorKind: null });
   const josh = me('josh', 'manager');
 
   const settings = await loadSettings(db);
@@ -222,6 +225,117 @@ async function seed(db: Db, now: Date): Promise<boolean> {
     await db.query(`insert into clients (name, status, owner_id, description, created_by) values ($1, 'prospect', $2, $3, $2)`, [name, ids.josh, desc]);
   }
 
+  // 12 · Thumbnail Studio · Ana, a thumbnail designer, with a pick from last week, one just picked after changes,
+  // changes asked, a round waiting on review, an option in her private tray, one to start, and one needing a designer
+  const ana = (await db.one<{ id: number }>(
+    `insert into users (email, name, role, editor_kind, password_hash) values ('ana@scalemedia.demo', 'Ana Torres', 'editor', 'thumbnail', $1) returning id`, [hash],
+  ))!.id;
+  const lisbon = findCity('Lisbon')!;
+  await db.query(`update users set city = $2, city_code = $3, country = $4, lat = $5, lon = $6, timezone = $7, work_start = 9, work_end = 18 where id = $1`,
+    [ana, lisbon.name, lisbon.code, lisbon.country, lisbon.lat, lisbon.lon, lisbon.timezone]);
+  const anaMe: Me = { id: ana, name: 'Ana Torres', email: '', role: 'editor', capacityPerDay: null, editorKind: 'thumbnail' };
+  const ago = (hours: number) => new Date(now.getTime() - hours * 3600_000).toISOString();
+  const thumbBrief = async (clientId: number, title: string, o: { at: number; due?: number; shootId?: number; brief?: string; onImage?: string; noDesigner?: boolean }) =>
+    (await db.one<{ id: number }>(
+      `insert into thumbnail_briefs (client_id, shoot_id, title, brief, on_image, due_on, designer_id, created_by, created_at, updated_at)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9) returning id`,
+      [clientId, o.shootId ?? null, title, o.brief ?? null, o.onImage ?? null, o.due == null ? null : d(o.due), o.noDesigner ? null : ana, ids.josh, ago(o.at)],
+    ))!.id;
+  // a round of Ana's options, sent or still in her tray; each image's type and size are read from its own bytes
+  const thumbRound = async (briefId: number, number: number, looks: DemoLook[], o: { at: number; sent?: number; note?: string }) => {
+    const roundId = (await db.one<{ id: number }>(
+      `insert into thumbnail_rounds (brief_id, number, note, created_by, created_at, sent_at) values ($1,$2,$3,$4,$5,$6) returning id`,
+      [briefId, number, o.note ?? null, ana, ago(o.at), o.sent == null ? null : ago(o.sent)],
+    ))!.id;
+    const options: number[] = [];
+    for (const [i, look] of looks.entries()) {
+      const data = demoThumb(look);
+      const info = (await imageInfoOf(data))!;
+      const fileId = await storeFile(db, anaMe, bufferFile(`option-${OPTION_LETTERS[i].toLowerCase()}.png`, info.mime, data));
+      options.push((await db.one<{ id: number }>(
+        `insert into thumbnail_variants (round_id, letter, file_id, mime, width, height, note, uploaded_by, created_at) values ($1,$2,$3,$4,$5,$6,$7,$8,$9) returning id`,
+        [roundId, OPTION_LETTERS[i], fileId, info.mime, info.width, info.height, look.note ?? null, ana, ago(o.at)],
+      ))!.id);
+    }
+    return { id: roundId, options };
+  };
+  const thumbDecision = async (roundId: number, action: ThumbAction, at: number, o: { optionId?: number; note?: string }) =>
+    (await db.one<{ id: number }>(
+      `insert into thumbnail_decisions (round_id, action, variant_id, note, decided_by, created_at) values ($1,$2,$3,$4,$5,$6) returning id`,
+      [roundId, action, o.optionId ?? null, o.note ?? null, ids.josh, ago(at)],
+    ))!.id;
+  const C = {
+    salmon: [255, 138, 117], cyan: [120, 220, 230], lavender: [190, 170, 255], mint: [140, 230, 180], pink: [255, 150, 190], yellow: [255, 230, 90],
+    navy: [20, 40, 80], plum: [62, 32, 90], forest: [24, 60, 48], coffee: [70, 40, 30], latte: [200, 140, 90], ink: [40, 30, 50], cream: [250, 240, 230], white: [255, 255, 255],
+  } as const;
+
+  // Acme: picked last week, and (after changes on round 1) B of round 2 picked this morning
+  const bag = await thumbBrief(acme, 'Autumn in one bag', { at: 13 * 24, brief: 'The whole autumn kit packed into the trail pack, held up to the camera.', onImage: 'ONE BAG' });
+  const bagR1 = await thumbRound(bag, 1, [
+    { from: C.salmon, to: C.plum, subject: C.ink, words: C.yellow, note: 'The pack as the hero, big and warm.' },
+    { from: C.cyan, to: C.navy, subject: C.cream, words: C.white, left: true },
+  ], { at: 12 * 24, sent: 11 * 24 });
+  await thumbDecision(bagR1.id, 'pick', 10 * 24, { optionId: bagR1.options[0], note: 'The bag reads from across the room.' });
+
+  const jacket = await thumbBrief(acme, 'The jacket that folds into itself', {
+    at: 4 * 24, due: -1, brief: 'Founder holding the jacket folded into its own pocket, surprised face.', onImage: 'FITS IN A POCKET',
+  });
+  const jacketR1 = await thumbRound(jacket, 1, [
+    { from: C.mint, to: C.forest, subject: C.cream, words: C.yellow },
+    { from: C.salmon, to: C.coffee, subject: C.cream, words: C.white, left: true, note: 'Closer on the face.' },
+    { from: C.lavender, to: C.plum, subject: C.pink, words: C.yellow },
+  ], { at: 60, sent: 48 });
+  await thumbDecision(jacketR1.id, 'changes', 36, { note: 'Keep B’s face, but make the words bigger and cut them to three.' });
+  const jacketR2 = await thumbRound(jacket, 2, [
+    { from: C.salmon, to: C.coffee, subject: C.cream, words: C.yellow, left: true, note: 'Three words.' },
+    { from: C.salmon, to: C.plum, subject: C.cream, words: C.yellow, left: true, note: 'Two words, bigger.' },
+  ], { at: 24, sent: 20, note: 'Both keep B’s face. A has three words, B has two.' });
+  const jacketPick = await thumbDecision(jacketR2.id, 'pick', 5, { optionId: jacketR2.options[1], note: 'Two words read best small.' });
+
+  // Northwind: changes asked on round 1, so it's the first thing on Ana's Studio
+  const harvest = await thumbBrief(northwind, 'What’s in the harvest box', {
+    at: 3 * 24, due: 2, brief: 'Open box from above: the bags, a handwritten card, beans spilling out.', onImage: 'WHAT’S INSIDE?',
+  });
+  const harvestR1 = await thumbRound(harvest, 1, [
+    { from: C.latte, to: C.coffee, subject: C.cream, words: C.white },
+    { from: C.yellow, to: C.coffee, subject: C.ink, words: C.white, left: true },
+  ], { at: 54, sent: 50 });
+  const harvestChanges = await thumbDecision(harvestR1.id, 'changes', 22, { note: 'Show the beans, not the box. Warmer light, and put the words on the left.' });
+
+  // Brightline: round 1 waiting on review (C is 4:3, so its shape check warns)
+  const sameWeek = await thumbBrief(brightline, 'Same-week appointments, really', { at: 2 * 24, due: 3, brief: 'A smiling patient and a calendar page with this week circled.', onImage: 'SEEN THIS WEEK' });
+  await thumbRound(sameWeek, 1, [
+    { from: C.pink, to: C.plum, subject: C.cream, words: C.yellow, note: 'The bold one.' },
+    { from: C.cyan, to: C.navy, subject: C.cream, words: C.white, left: true },
+    { from: C.mint, to: C.forest, subject: C.cream, words: C.white, width: 1280, height: 960, note: 'The safe one.' },
+  ], { at: 6, sent: 3, note: 'C is the safe one, A the bold one.' });
+
+  // Lumen: one option in Ana's tray, not sent yet (managers see only that she's drafting)
+  const serum = await thumbBrief(lumen, 'What the night serum actually does', { at: 30, due: 4, brief: 'The bottle on a bedside table at night, soft blue light.', onImage: 'WHILE YOU SLEEP' });
+  await thumbRound(serum, 1, [{ from: C.lavender, to: C.navy, subject: C.cream, words: C.white, note: 'Night blue, bottle centre.' }], { at: 1 });
+
+  // Kinetic: just handed out, for the coach intro shoot; Harbor & Pine: waiting for a designer
+  const dana = await thumbBrief(kinetic, 'Meet coach Dana', {
+    at: 2, due: 6, shootId: k.shootId, brief: 'Dana mid-lift, looking straight at the camera. Bright studio, not gym-dark.', onImage: 'DAY 1 vs DAY 90',
+  });
+  await thumbBrief(harbor, 'Riverside in 60 seconds', { at: 20, due: 8, noDesigner: true, brief: 'The riverfront at golden hour, a front door in the foreground.', onImage: 'WOULD YOU LIVE HERE?' });
+
+  // what Ana and the managers were told
+  const toAna = (briefId: number) => thumbBriefPath(anaMe, briefId);
+  await notify(db, [ana], { type: 'thumbnail_new', title: 'New thumbnail · Meet coach Dana', body: 'Josh Rath gave you the thumbnail for “Meet coach Dana” (Kinetic Fitness Studios).', link: toAna(dana) });
+  await notify(db, [ana], {
+    type: 'thumbnail_changes', title: 'Changes asked · What’s in the harvest box', body: 'Josh Rath on round 1: “Show the beans, not the box. Warmer light, and put the words on the left.”',
+    link: toAna(harvest), thumbnailDecisionId: harvestChanges,
+  });
+  await notify(db, [ana], {
+    type: 'thumbnail_picked', title: 'Option B picked · The jacket that folds into itself', body: 'Josh Rath picked option B of round 2: “Two words read best small.”',
+    link: toAna(jacket), thumbnailDecisionId: jacketPick,
+  });
+  await notify(db, await managerIds(db), {
+    type: 'thumbnail_sent', title: 'Round 1 to review · Same-week appointments, really', body: 'Ana Torres sent round 1 of “Same-week appointments, really”: 3 options. “C is the safe one, A the bold one.”',
+    link: thumbBriefPath(josh, sameWeek),
+  });
+
   // leave a few celebrations to greet people on their first visit; the rest are history
   await db.query(
     `update moments set seen_at = now()
@@ -252,4 +366,59 @@ function demoPdf(title: string, lines: string[]): Buffer {
   out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n${offsets.map((n) => `${String(n).padStart(10, '0')} 00000 n \n`).join('')}`;
   out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return Buffer.from(out, 'latin1');
+}
+
+type RGB = readonly [number, number, number];
+/** How a demo thumbnail option looks: a gradient, a round subject (on the right unless `left`), bars where the words go. */
+interface DemoLook { from: RGB; to: RGB; subject: RGB; words: RGB; left?: boolean; width?: number; height?: number; note?: string }
+
+/**
+ * A plain PNG sketch of a thumbnail for the demo (1280×720 unless asked otherwise): a diagonal gradient, a round
+ * subject with a white cut-out edge and two bars for the words. About 20 KB: each row is stored as the change from
+ * the pixel to its left, which a gradient keeps tiny.
+ */
+function demoThumb(look: DemoLook): Buffer {
+  const w = look.width ?? 1280;
+  const h = look.height ?? 720;
+  const stride = 1 + w * 3;
+  const raw = Buffer.alloc(stride * h);
+  const cx = (look.left ? 0.3 : 0.7) * w;
+  const cy = 0.6 * h;
+  const r2 = (0.36 * h) ** 2;
+  const edge2 = (0.385 * h) ** 2;
+  const x0 = look.left ? 0.56 * w : 0.07 * w;
+  const inBars = (x: number, y: number) => x >= x0 && ((y >= 0.2 * h && y < 0.4 * h && x < x0 + 0.37 * w) || (y >= 0.46 * h && y < 0.62 * h && x < x0 + 0.26 * w));
+  const white: RGB = [255, 255, 255];
+  const px = [0, 0, 0];
+  const prev = [0, 0, 0];
+  for (let y = 0; y < h; y++) {
+    raw[y * stride] = 1; // PNG's "Sub" filter
+    prev.fill(0);
+    for (let x = 0; x < w; x++) {
+      const d = (x - cx) ** 2 + (y - cy) ** 2;
+      const solid = d < r2 ? look.subject : d < edge2 ? white : inBars(x, y) ? look.words : null;
+      if (solid) { px[0] = solid[0]; px[1] = solid[1]; px[2] = solid[2]; } else {
+        const t = (x + y) / (w + h);
+        for (let k = 0; k < 3; k++) px[k] = Math.round(look.from[k] + (look.to[k] - look.from[k]) * t);
+      }
+      const at = y * stride + 1 + x * 3;
+      for (let k = 0; k < 3; k++) { raw[at + k] = (px[k] - prev[k]) & 0xff; prev[k] = px[k]; }
+    }
+  }
+  const chunk = (type: string, data: Buffer) => {
+    const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
+    const out = Buffer.alloc(body.length + 8);
+    out.writeUInt32BE(data.length, 0);
+    body.copy(out, 4);
+    out.writeUInt32BE(crc32(body) >>> 0, body.length + 4);
+    return out;
+  };
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(w, 0);
+  header.writeUInt32BE(h, 4);
+  header[8] = 8; // 8 bits a channel
+  header[9] = 2; // RGB
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0)),
+  ]);
 }

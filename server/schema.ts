@@ -770,4 +770,73 @@ create table shoot_estimates (
   updated_at timestamptz not null default now()
 );
 `,
+  // 39 · Thumbnail Studio. An editor's one job (editor_kind: short_form cuts the videos, thumbnail makes thumbnails;
+  // null on an editor is a video editor, so nobody needs a backfill), allowed only while the role is editor, so
+  // every write that changes a role must set it too. Thumbnail briefs a manager hands out (the video's title is
+  // typed: scripts have no titles), the designer's rounds of options (an unsent round is their private tray, one
+  // per brief), the options themselves (each an image in files, with the type and size read from its own header;
+  // never deleted, only removed from the tray), and managers' decisions on a round (the newest counts). Where a
+  // brief stands is worked out from these, never stored. A notification remembers the decision it came from, so a
+  // new decision on the same round can take the earlier one's unread notification back.
+  `
+alter table users add column editor_kind text;
+alter table users add constraint users_editor_kind_check check (editor_kind is null or (role = 'editor' and editor_kind in ('short_form', 'thumbnail')));
+create table thumbnail_briefs (
+  id bigint generated always as identity primary key,
+  client_id bigint not null references clients(id),
+  shoot_id bigint references shoots(id),
+  title text not null,
+  brief text,
+  on_image text,
+  options_wanted smallint not null default 3 check (options_wanted between 1 and 6),
+  designer_id bigint references users(id),
+  due_on date,
+  created_by bigint not null references users(id),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  cancelled_at timestamptz
+);
+create index thumbnail_briefs_designer_idx on thumbnail_briefs (designer_id) where cancelled_at is null;
+create index thumbnail_briefs_client_idx on thumbnail_briefs (client_id);
+create table thumbnail_rounds (
+  id bigint generated always as identity primary key,
+  brief_id bigint not null references thumbnail_briefs(id),
+  number int not null check (number > 0),
+  note text,
+  created_by bigint not null references users(id),
+  created_at timestamptz not null default now(),
+  sent_at timestamptz,
+  unique (brief_id, number)
+);
+create unique index thumbnail_rounds_tray_key on thumbnail_rounds (brief_id) where sent_at is null;
+create table thumbnail_variants (
+  id bigint generated always as identity primary key,
+  round_id bigint not null references thumbnail_rounds(id),
+  letter text not null check (letter in ('A', 'B', 'C', 'D', 'E', 'F')),
+  file_id bigint not null references files(id),
+  mime text not null check (mime in ('image/png', 'image/jpeg', 'image/webp')),
+  width int not null check (width > 0),
+  height int not null check (height > 0),
+  note text,
+  uploaded_by bigint not null references users(id),
+  created_at timestamptz not null default now(),
+  removed_at timestamptz
+);
+create unique index thumbnail_variants_letter_key on thumbnail_variants (round_id, letter) where removed_at is null;
+create index thumbnail_variants_round_idx on thumbnail_variants (round_id);
+create index thumbnail_variants_file_idx on thumbnail_variants (file_id);
+create table thumbnail_decisions (
+  id bigint generated always as identity primary key,
+  round_id bigint not null references thumbnail_rounds(id),
+  action text not null check (action in ('pick', 'changes')),
+  variant_id bigint references thumbnail_variants(id),
+  note text,
+  decided_by bigint not null references users(id),
+  created_at timestamptz not null default now(),
+  check (action <> 'pick' or variant_id is not null),
+  check (action <> 'changes' or note is not null)
+);
+create index thumbnail_decisions_round_idx on thumbnail_decisions (round_id, created_at desc);
+alter table notifications add column thumbnail_decision_id bigint;
+`,
 ];

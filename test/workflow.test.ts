@@ -234,6 +234,103 @@ describe('links into Timeliner', () => {
   });
 });
 
+describe('kinds of editor', () => {
+  it('reads an editor with no kind as a video editor, and nobody else as an editor of any kind', async () => {
+    const { editorKindOf, isThumbnailDesigner, isVideoEditor } = await import('../shared/workflow');
+    expect(editorKindOf({ role: 'editor', editorKind: null })).toBe('short_form');
+    expect(editorKindOf({ role: 'editor' })).toBe('short_form');
+    expect(editorKindOf({ role: 'editor', editorKind: 'thumbnail' })).toBe('thumbnail');
+    // a stray kind on anyone else means nothing
+    expect(editorKindOf({ role: 'writer', editorKind: 'thumbnail' })).toBeNull();
+    expect(editorKindOf({ role: 'owner', editorKind: null })).toBeNull();
+    expect([isVideoEditor({ role: 'editor' }), isThumbnailDesigner({ role: 'editor' })]).toEqual([true, false]);
+    expect([isVideoEditor({ role: 'editor', editorKind: 'thumbnail' }), isThumbnailDesigner({ role: 'editor', editorKind: 'thumbnail' })]).toEqual([false, true]);
+    expect([isVideoEditor({ role: 'manager' }), isThumbnailDesigner({ role: 'writer', editorKind: 'thumbnail' })]).toEqual([false, false]);
+  });
+
+  it('sends each person home, and names what they do', async () => {
+    const { homePath, personLabel } = await import('../shared/workflow');
+    const { audienceOf } = await import('../shared/changelog');
+    const people = [
+      { role: 'owner', editorKind: null }, { role: 'manager', editorKind: null }, { role: 'writer', editorKind: null },
+      { role: 'editor', editorKind: null }, { role: 'editor', editorKind: 'short_form' }, { role: 'editor', editorKind: 'thumbnail' },
+    ] as const;
+    expect(people.map(homePath)).toEqual(['/overview', '/overview', '/my-work', '/editor', '/editor', '/studio']);
+    expect(people.map(personLabel)).toEqual(['Admin', 'Manager', 'Writer', 'Video editor', 'Video editor', 'Thumbnail designer']);
+    expect(people.map(audienceOf)).toEqual(['managers', 'managers', 'writers', 'editors', 'editors', 'designers']);
+  });
+
+  it('writes the kinds into SQL from the shared lists only', async () => {
+    const { kindsSql, NON_VIDEO_EDITOR_KINDS, VIDEO_EDITOR_KINDS, EDITOR_KINDS } = await import('../shared/workflow');
+    expect(kindsSql(NON_VIDEO_EDITOR_KINDS)).toBe(`'thumbnail'`);
+    expect(kindsSql(VIDEO_EDITOR_KINDS)).toBe(`'short_form'`);
+    expect([...VIDEO_EDITOR_KINDS, ...NON_VIDEO_EDITOR_KINDS].sort()).toEqual([...EDITOR_KINDS].sort());
+    // nothing matches an empty list, and nothing but a kind gets in
+    expect(kindsSql([])).toBe('null');
+    expect(() => kindsSql(["x') or true --" as never])).toThrow();
+  });
+});
+
+describe('where a thumbnail brief stands', () => {
+  it('follows a brief from the tray through rounds, changes, a pick and deciding again', async () => {
+    const { thumbnailState } = await import('../shared/workflow');
+    const open = { cancelledAt: null, draftOptions: 0 };
+    expect(thumbnailState(open, null, null)).toBe('to_design');
+    expect(thumbnailState({ ...open, draftOptions: 2 }, null, null)).toBe('drafting');
+    // round 1 sent: waiting on a manager
+    expect(thumbnailState(open, { id: 1 }, null)).toBe('in_review');
+    expect(thumbnailState(open, { id: 1 }, { roundId: 1, action: 'changes' })).toBe('changes');
+    // still changes while round 2 is being drafted
+    expect(thumbnailState({ ...open, draftOptions: 3 }, { id: 1 }, { roundId: 1, action: 'changes' })).toBe('changes');
+    // round 2 sent: the decision on round 1 no longer counts
+    expect(thumbnailState(open, { id: 2 }, { roundId: 1, action: 'changes' })).toBe('in_review');
+    expect(thumbnailState(open, { id: 2 }, { roundId: 2, action: 'pick' })).toBe('picked');
+    // deciding again on the same round: the newest decision counts
+    expect(thumbnailState(open, { id: 2 }, { roundId: 2, action: 'changes' })).toBe('changes');
+    // cancelled, whatever happened
+    expect(thumbnailState({ ...open, cancelledAt: '2026-10-16T10:00:00Z' }, { id: 2 }, { roundId: 2, action: 'pick' })).toBe('cancelled');
+  });
+
+  it('puts changes asked first, then the soonest due, and never offers one in review, picked or cancelled', async () => {
+    const { nextBrief, briefOrder } = await import('../shared/workflow');
+    const b = (id: number, state: 'to_design' | 'drafting' | 'in_review' | 'changes' | 'picked' | 'cancelled', dueOn: string | null) => ({ id, state, dueOn });
+    const list = [b(1, 'to_design', null), b(2, 'drafting', '2026-10-20'), b(3, 'to_design', '2026-10-18'), b(4, 'changes', '2026-10-30'), b(5, 'in_review', '2026-10-17')];
+    expect(nextBrief(list)?.id).toBe(4);
+    expect(nextBrief(list.filter((x) => x.id !== 4))?.id).toBe(3);
+    expect(nextBrief([b(6, 'in_review', '2026-10-17'), b(7, 'picked', null), b(8, 'cancelled', null)])).toBeNull();
+    expect([...list].sort(briefOrder).map((x) => x.id)).toEqual([4, 3, 2, 1, 5]);
+  });
+
+  it('letters options A to F, six at most', async () => {
+    const { nextLetter, MAX_OPTIONS, OPTION_LETTERS, DEFAULT_OPTIONS } = await import('../shared/workflow');
+    expect(OPTION_LETTERS).toHaveLength(MAX_OPTIONS);
+    expect([MAX_OPTIONS, DEFAULT_OPTIONS]).toEqual([6, 3]);
+    expect(nextLetter([])).toBe('A');
+    expect(nextLetter(['A', 'C'])).toBe('B');
+    expect(nextLetter([...OPTION_LETTERS])).toBeNull();
+  });
+
+  it('checks an image against YouTube’s guidance, only ever as warnings', async () => {
+    const { thumbSpecIssues, thumbSpecChecks, THUMB_SPEC } = await import('../shared/workflow');
+    const keys = (img: { width: number; height: number; size: number; mime: string }) => thumbSpecIssues(img).map((c) => c.key);
+    const mb = 1024 * 1024;
+    expect(keys({ width: 1280, height: 720, size: 1.4 * mb, mime: 'image/png' })).toEqual([]);
+    expect(keys({ width: 1920, height: 1080, size: 1.9 * mb, mime: 'image/jpeg' })).toEqual([]);
+    expect(keys({ width: 1000, height: 563, size: mb, mime: 'image/jpeg' })).toEqual(['size']);
+    expect(thumbSpecIssues({ width: 600, height: 338, size: mb, mime: 'image/jpeg' })[0].detail).toMatch(/640/);
+    expect(keys({ width: 1280, height: 1280, size: mb, mime: 'image/png' })).toEqual(['shape']);
+    expect(keys({ width: 1280, height: 720, size: 2.5 * mb, mime: 'image/png' })).toEqual(['bytes']);
+    expect(keys({ width: 1280, height: 720, size: mb, mime: 'image/webp' })).toEqual(['format']);
+    // the 2 MB is YouTube's limit, not the site's upload limit
+    expect(THUMB_SPEC.maxBytesLabel).toMatch(/YouTube/);
+    expect(thumbSpecChecks({ width: 1280, height: 720, size: 2.5 * mb, mime: 'image/png' }).find((c) => c.key === 'bytes')?.detail).toMatch(/YouTube’s 2 MB/);
+    expect(thumbSpecChecks({ width: 1280, height: 720, size: mb, mime: 'image/png' }).map((c) => c.label)).toEqual(['1280×720', '16:9', '1.0 MB, under 2 MB', 'PNG']);
+    // a small export reads as what it weighs, never "0.0 MB"
+    const bytes = (size: number) => thumbSpecChecks({ width: 1280, height: 720, size, mime: 'image/jpeg' }).find((c) => c.key === 'bytes')?.label;
+    expect([bytes(21 * 1024), bytes(900), bytes(2.4 * mb)]).toEqual(['21 KB, under 2 MB', '900 B, under 2 MB', '2.4 MB']);
+  });
+});
+
 describe('who has written a client’s scripts before', () => {
   const b = (id: number, writers: [number | null, string, number][]) => ({ id, title: `Batch ${id}`, draftDue: null, finalDue: `2026-10-${10 + id}`, writers: writers.map(([userId, name, count]) => ({ userId, name, count })) });
   it('gives the newest batch’s split and everyone, most scripts first, leaving out who can’t write now', () => {

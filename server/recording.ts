@@ -23,7 +23,7 @@ import { auditEvent } from './audit';
 import { HttpError, isApiRequest, parse, requestPath, zs } from './http';
 import type { Ctx } from './core';
 import { RECORDING_ENDED, RECORDING_HEADER, type Me, type SessionMode } from '../shared/types';
-import { isAdmin, ROLE_LABEL } from '../shared/workflow';
+import { isAdmin, personLabel } from '../shared/workflow';
 
 const IDLE_MS = 6 * 3600_000;
 const MAX_SANDBOXES = 2;
@@ -137,10 +137,10 @@ export function routedDb(real: Db, als: AsyncLocalStorage<Db>): Db {
 }
 
 async function loadMember(db: Db, id: number): Promise<Me | null> {
-  const r = await db.one<{ id: number; name: string; email: string; role: Me['role']; capacity_per_day: number | null }>(
-    `select id, name, email, role, capacity_per_day from users where id = $1 and active and removed_at is null`, [id],
+  const r = await db.one<{ id: number; name: string; email: string; role: Me['role']; editor_kind: Me['editorKind']; capacity_per_day: number | null }>(
+    `select id, name, email, role, editor_kind, capacity_per_day from users where id = $1 and active and removed_at is null`, [id],
   );
-  return r ? { id: r.id, name: r.name, email: r.email, role: r.role, capacityPerDay: r.capacity_per_day } : null;
+  return r ? { id: r.id, name: r.name, email: r.email, role: r.role, capacityPerDay: r.capacity_per_day, editorKind: r.editor_kind ?? null } : null;
 }
 
 // Background writes the app makes on its own; while only viewing, they succeed without doing anything.
@@ -332,7 +332,7 @@ export function modeFor(real: Me, viewingAs: Me | null, recording: { startedAt: 
   return {
     realId: real.id,
     realName: real.name,
-    viewingAs: viewingAs ? { id: viewingAs.id, name: viewingAs.name, role: viewingAs.role, roleLabel: ROLE_LABEL[viewingAs.role] } : null,
+    viewingAs: viewingAs ? { id: viewingAs.id, name: viewingAs.name, role: viewingAs.role, roleLabel: personLabel(viewingAs) } : null,
     recording,
   };
 }

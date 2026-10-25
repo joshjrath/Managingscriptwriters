@@ -7,6 +7,7 @@
 // A script returned for revisions is not draft-ready until it is resubmitted.
 
 import { dueState, describeDue, type Clock, type ISODate } from './dates';
+import { fmtBytes } from './format';
 
 export const SCRIPT_STATUSES = [
   'not_started',
@@ -202,6 +203,59 @@ export const isEditor = (role: Role) => role === 'editor';
 /** Who can be given scripts to write. */
 export const canWrite = (role: Role) => role !== 'editor';
 export const ROLE_LABEL: Record<Role, string> = { owner: 'Admin', manager: 'Manager', writer: 'Writer', editor: 'Editor' };
+
+// ── kinds of editor ──────────────────────────────────────────────────────
+// An Editor sign-in (role 'editor', read-only, never given scripts) has one job: cutting the videos
+// (short_form) or making thumbnails (thumbnail). It's stored in users.editor_kind, which the database allows
+// only while the role is editor; a null kind on an editor is a video editor, as every editor was before kinds.
+
+export const EDITOR_KINDS = ['short_form', 'thumbnail'] as const;
+export type EditorKind = (typeof EDITOR_KINDS)[number];
+export const EDITOR_KIND_LABEL: Record<EditorKind, string> = { short_form: 'Video editor', thumbnail: 'Thumbnail designer' };
+
+/** Someone as the kind rules see them: a Me, a UserSummary, or just a role and kind. */
+export interface KindOf { role: Role; editorKind?: EditorKind | null }
+
+/** The kinds that cut videos: the Editors tab, Timeliner's assignees and the "Scripts final" and "Shoot moved" notices are theirs. */
+export const VIDEO_EDITOR_KINDS: readonly EditorKind[] = ['short_form'];
+/** Every other kind: never anyone's video editor. */
+export const NON_VIDEO_EDITOR_KINDS: readonly EditorKind[] = EDITOR_KINDS.filter((k) => !VIDEO_EDITOR_KINDS.includes(k));
+
+/** What kind of editor someone is: null unless their role is editor; an editor with no kind is a video editor. */
+export const editorKindOf = (p: KindOf): EditorKind | null => (isEditor(p.role) ? p.editorKind ?? 'short_form' : null);
+/** Makes thumbnails: their home is the Studio. */
+export const isThumbnailDesigner = (p: KindOf) => editorKindOf(p) === 'thumbnail';
+/** Cuts the videos: their home is /editor, and Timeliner's videos can be theirs. */
+export const isVideoEditor = (p: KindOf) => { const k = editorKindOf(p); return k != null && VIDEO_EDITOR_KINDS.includes(k); };
+
+/**
+ * Kinds written into SQL as a list for `in (…)`: `'thumbnail'`. Only these constants ever go in, never input, and an
+ * empty list is `null` (so `x in (null)` matches nothing).
+ */
+export const kindsSql = (kinds: readonly EditorKind[]): string => {
+  if (kinds.some((k) => !(EDITOR_KINDS as readonly string[]).includes(k))) throw new Error('not an editor kind');
+  return kinds.length ? kinds.map((k) => `'${k}'`).join(', ') : 'null';
+};
+
+/** Where someone lands when they sign in (and where a page they can't use sends them). */
+export function homePath(p: KindOf): '/overview' | '/my-work' | '/editor' | '/studio' {
+  if (isManager(p.role)) return '/overview';
+  if (isThumbnailDesigner(p)) return '/studio';
+  if (isEditor(p.role)) return '/editor';
+  return '/my-work';
+}
+
+/** What someone is, in a word or two: "Admin", "Writer", "Video editor", "Thumbnail designer". */
+export function personLabel(p: KindOf): string {
+  const kind = editorKindOf(p);
+  return kind ? EDITOR_KIND_LABEL[kind] : ROLE_LABEL[p.role];
+}
+
+/** Why an editor's sign-in was refused a route (server/editor-access.ts), worded for their kind. */
+export const EDITOR_REFUSAL: Record<EditorKind, string> = {
+  short_form: 'Editors can see the calendar, finished scripts, clients and resources. Ask an admin for anything else.',
+  thumbnail: 'Thumbnail designers can use their Studio and see the calendar, finished scripts, clients and resources. Ask an admin for anything else.',
+};
 
 export const SCRIPT_ACTIONS = [
   'start', 'reset', 'submit', 'withdraw', 'approve', 'request_revisions', 'deliver', 'undo_delivery',
@@ -494,3 +548,134 @@ export const FOCUS_STALE_HOURS = 10;
  */
 export const isFocusStale = (f: { state: 'on' | 'paused'; since: string }, offHours: boolean, now: number) =>
   f.state === 'on' && (offHours || now - Date.parse(f.since) >= FOCUS_STALE_HOURS * 3600_000);
+
+// ── Thumbnail Studio ─────────────────────────────────────────────────────
+// Managers hand out thumbnail briefs; the brief's designer lines up options (A–F) in a private tray and sends
+// them as a round; a manager picks one or asks for changes. Long videos only: widescreen 1280×720. Where a brief
+// stands is never stored: it's worked out from its rounds and decisions.
+
+export const THUMB_STATES = ['to_design', 'drafting', 'in_review', 'changes', 'picked', 'cancelled'] as const;
+export type ThumbState = (typeof THUMB_STATES)[number];
+
+export const THUMB_STATE_LABEL: Record<ThumbState, string> = {
+  to_design: 'To design', drafting: 'Drafting', in_review: 'In review', changes: 'Changes asked', picked: 'Picked', cancelled: 'Cancelled',
+};
+/**
+ * The Chip colour of each state (ui.tsx `Chip color`), keeping the tokens' meanings: in review lavender, changes pink,
+ * picked mint, drafting cyan. Due today (yellow) and overdue (red) come from the due date, not the state.
+ */
+export const THUMB_STATE_COLOR: Record<ThumbState, string> = {
+  to_design: 'neutral', drafting: 'cyan', in_review: 'lavender', changes: 'pink', picked: 'mint', cancelled: 'neutral',
+};
+
+/** A manager's decision on a sent round. */
+export const THUMB_ACTIONS = ['pick', 'changes'] as const;
+export type ThumbAction = (typeof THUMB_ACTIONS)[number];
+
+/** Still has work in it: not picked, not cancelled. A designer's kind can't change while they have one. */
+export const isOpenThumb = (s: ThumbState) => s !== 'picked' && s !== 'cancelled';
+/** On the designer's plate: nothing sent yet, or changes asked. In review is waiting on a manager. */
+export const isDesignerTurn = (s: ThumbState) => s === 'to_design' || s === 'drafting' || s === 'changes';
+
+/**
+ * Where a brief stands, from its rows:
+ * - cancelled, whatever else happened;
+ * - nothing sent yet: to_design, or drafting once the tray holds a live option;
+ * - its newest sent round has no decision: in_review (a decision on an older round never counts, so a new round
+ *   supersedes a waiting one);
+ * - else that round's newest decision: picked, or changes (still changes while the next round is drafted).
+ */
+export function thumbnailState(
+  brief: { cancelledAt: string | null; draftOptions: number },
+  latestSentRound: { id: number } | null,
+  latestDecision: { roundId: number; action: ThumbAction } | null,
+): ThumbState {
+  if (brief.cancelledAt) return 'cancelled';
+  if (!latestSentRound) return brief.draftOptions > 0 ? 'drafting' : 'to_design';
+  if (!latestDecision || latestDecision.roundId !== latestSentRound.id) return 'in_review';
+  return latestDecision.action === 'pick' ? 'picked' : 'changes';
+}
+
+const THUMB_ORDER: Record<ThumbState, number> = { changes: 0, drafting: 1, to_design: 1, in_review: 2, picked: 3, cancelled: 4 };
+
+/** The order briefs are listed in a designer's board: changes asked first, then the rest of their plate, in review, done; each by due date (undated last), then oldest first. */
+export const briefOrder = (a: { id: number; state: ThumbState; dueOn: ISODate | null }, b: { id: number; state: ThumbState; dueOn: ISODate | null }) =>
+  THUMB_ORDER[a.state] - THUMB_ORDER[b.state] || (a.dueOn ?? '9999-12-31').localeCompare(b.dueOn ?? '9999-12-31') || a.id - b.id;
+
+/** The brief to make next (the Studio's "Next up"): changes asked first, then by due date. Never one in review, picked or cancelled. */
+export function nextBrief<T extends { id: number; state: ThumbState; dueOn: ISODate | null }>(briefs: readonly T[]): T | null {
+  return briefs.filter((b) => isDesignerTurn(b.state)).sort(briefOrder)[0] ?? null;
+}
+
+export const OPTION_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F'] as const;
+export type OptionLetter = (typeof OPTION_LETTERS)[number];
+/** The most options a round can hold (one per letter). */
+export const MAX_OPTIONS = 6;
+/** How many options a new brief asks for, unless the manager says otherwise. */
+export const DEFAULT_OPTIONS = 3;
+/** The first letter no live option in the round has, or null when all six are taken. */
+export const nextLetter = (used: readonly string[]): OptionLetter | null => OPTION_LETTERS.find((l) => !used.includes(l)) ?? null;
+
+/** How long a pick stays the Studio's "Just picked" hero. */
+export const JUST_PICKED_MS = 12 * 3600_000;
+
+/** Where a brief opens: a designer's workbench in their Studio, or the manager's review page. */
+export const thumbBriefPath = (p: KindOf, briefId: number) => (isManager(p.role) ? `/thumbnails/${briefId}` : `/studio/briefs/${briefId}`);
+
+/** The image types the site keeps as a thumbnail option, read from the file's own bytes (server/images.ts). Never SVG. */
+export const THUMB_MIMES = ['image/png', 'image/jpeg', 'image/webp'] as const;
+export type ThumbMime = (typeof THUMB_MIMES)[number];
+export const THUMB_MIME_LABEL: Record<ThumbMime, string> = { 'image/png': 'PNG', 'image/jpeg': 'JPG', 'image/webp': 'WebP' };
+
+/**
+ * YouTube's guidance for a video's custom thumbnail (YouTube Help, "Add video thumbnails", checked 2026-10-16):
+ * 1280×720 with a minimum width of 640, 16:9, under 2 MB, as JPG, GIF or PNG. It changes now and then, so it lives
+ * here only. These only warn; they never stop a hand-in. The 2 MB is YouTube's limit, not the site's: every upload
+ * is capped by UPLOAD_LIMIT_MB.
+ */
+export const THUMB_SPEC = {
+  width: 1280,
+  height: 720,
+  minWidth: 640,
+  ratio: 16 / 9,
+  ratioLabel: '16:9',
+  maxBytes: 2 * 1024 * 1024,
+  maxBytesLabel: 'YouTube’s 2 MB limit',
+  /** of the types the site keeps, the ones YouTube's help lists */
+  youtubeMimes: ['image/jpeg', 'image/png'] as readonly string[],
+} as const;
+
+export type ThumbCheckKey = 'size' | 'shape' | 'bytes' | 'format';
+/** One quick check on an option, as its chip shows it: `label` always, `detail` when it isn't ok. */
+export interface ThumbCheck { key: ThumbCheckKey; ok: boolean; label: string; detail: string | null }
+
+/** The four quick checks on an image against THUMB_SPEC: size, widescreen shape, YouTube's 2 MB, and file type. */
+export function thumbSpecChecks(img: { width: number; height: number; size: number; mime: string }): ThumbCheck[] {
+  const S = THUMB_SPEC;
+  const { width: w, height: h } = img;
+  const big = w >= S.width && h >= S.height;
+  const shape = w > 0 && h > 0 && Math.abs(w / h - S.ratio) / S.ratio <= 0.01;
+  const light = img.size <= S.maxBytes;
+  const format = S.youtubeMimes.includes(img.mime);
+  // "21 KB", "1.4 MB": a small export reads as what it is, never "0.0 MB"
+  const weight = fmtBytes(img.size);
+  return [
+    {
+      key: 'size', ok: big, label: `${w}×${h}`,
+      detail: big ? null : w < S.minWidth ? `Under ${S.minWidth} wide: YouTube needs at least ${S.minWidth}` : `Smaller than ${S.width}×${S.height}: it may look soft on big screens`,
+    },
+    { key: 'shape', ok: shape, label: shape ? S.ratioLabel : `Not ${S.ratioLabel}`, detail: shape ? null : 'Not widescreen: YouTube will show it with bars or cropped' },
+    { key: 'bytes', ok: light, label: light ? `${weight}, under 2 MB` : weight, detail: light ? null : `Over ${S.maxBytesLabel}: export it smaller` },
+    {
+      key: 'format', ok: format, label: THUMB_MIME_LABEL[img.mime as ThumbMime] ?? 'Unknown type',
+      detail: format ? null : 'YouTube’s help lists JPG and PNG: export one of those to be safe',
+    },
+  ];
+}
+
+/** The checks an image doesn't pass (warnings only). */
+export const thumbSpecIssues = (img: { width: number; height: number; size: number; mime: string }): ThumbCheck[] => thumbSpecChecks(img).filter((c) => !c.ok);
+
+/** Stored files the site shows as a picture (an <img>, as a client's logo or reference): the image types it serves inline. Never SVG. */
+export const PICTURE_MIMES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'] as const;
+export const isPictureMime = (mime: string | null | undefined) => !!mime && (PICTURE_MIMES as readonly string[]).includes(mime);

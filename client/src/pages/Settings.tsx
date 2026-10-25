@@ -2,8 +2,10 @@
 // the admin also picks the site's colour palette.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { isAdmin, isManager, ROLE_LABEL, type Role } from '../../../shared/workflow';
-import { AlertTriangle, CalendarClock, Check, Copy, KeyRound, Plus, RefreshCw, UserPlus } from 'lucide-react';
+import {
+  EDITOR_KIND_LABEL, EDITOR_KINDS, editorKindOf, isAdmin, isEditor, isManager, isThumbnailDesigner, isVideoEditor, ROLE_LABEL, type EditorKind, type Role,
+} from '../../../shared/workflow';
+import { AlertTriangle, CalendarClock, Check, CircleAlert, Copy, KeyRound, Plus, RefreshCw, UserPlus } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { api, useSave } from '../api';
 import type { Editor, Settings, UserSummary } from '../../../shared/types';
@@ -295,7 +297,7 @@ function TeamPanel() {
               <div className="body">
                 <div className="title">{u.name}{u.id === me.id ? ' (you)' : ''}</div>
                 <div className="meta ellipsis">{u.email}</div>
-                <div className="meta">{!u.active ? 'Deactivated' : u.role === 'editor' ? 'Read-only sign-in' : u.capacityPerDay ? `${u.capacityPerDay} scripts / working day` : 'Capacity not set'}{u.active && u.city ? ` · ${u.city.split(',')[0]}` : ''}</div>
+                <div className="meta">{!u.active ? 'Deactivated' : isThumbnailDesigner(u) ? `${EDITOR_KIND_LABEL.thumbnail} · read-only sign-in` : isEditor(u.role) ? 'Read-only sign-in' : u.capacityPerDay ? `${u.capacityPerDay} scripts / working day` : 'Capacity not set'}{u.active && u.city ? ` · ${u.city.split(',')[0]}` : ''}</div>
               </div>
             </button>
             <div className="side">
@@ -317,7 +319,7 @@ function TeamPanel() {
       {adding && <PersonDialog onClose={() => setAdding(false)} />}
       {editing && <PersonDialog user={editing} team={team} onClose={() => setEditing(null)} />}
       {sharing && <ShareDetails name={firstName(sharing.name)} onClose={() => setSharing(null)}
-        message={signInMessage({ name: sharing.name, email: sharing.email, password: sharing.tempPassword!, role: sharing.role, orgName: settings.orgName, url: window.location.origin })} />}
+        message={signInMessage({ name: sharing.name, email: sharing.email, password: sharing.tempPassword!, role: sharing.role, editorKind: sharing.editorKind, orgName: settings.orgName, url: window.location.origin })} />}
       {removing && <RemoveDialog user={removing} team={team} onClose={() => setRemoving(null)} />}
     </Panel>
   );
@@ -371,12 +373,13 @@ export function generatePassword(): string {
   return `${chars.slice(0, 4)}-${chars.slice(4, 8)}-${chars.slice(8, 12)}`;
 }
 
-export function signInMessage(p: { name: string; email: string; password: string; role: Role; orgName: string; url: string; reset?: boolean }): string {
+export function signInMessage(p: { name: string; email: string; password: string; role: Role; editorKind?: EditorKind | null; orgName: string; url: string; reset?: boolean }): string {
   const first = p.name.trim().split(/\s+/)[0] || 'there';
+  const designer = isThumbnailDesigner(p);
   return [
     p.reset
       ? `Hi ${first}, your ${p.orgName} password has been reset.`
-      : `Hi ${first}, you've been added to ${p.orgName}'s script production workspace as ${p.role === 'owner' ? 'an admin' : p.role === 'editor' ? 'an editor' : `a ${p.role}`}.`,
+      : `Hi ${first}, you've been added to ${p.orgName}'s script production workspace as ${p.role === 'owner' ? 'an admin' : designer ? 'a thumbnail designer' : p.role === 'editor' ? 'an editor' : `a ${p.role}`}.`,
     '',
     `Sign in: ${p.url}`,
     `Email: ${p.email}`,
@@ -384,7 +387,7 @@ export function signInMessage(p: { name: string; email: string; password: string
     '',
     p.reset
       ? 'Your password was reset, so you’ve been signed out. When you sign in with this one, the site asks you to choose your own.'
-      : `When you sign in, the site asks you to choose your own password (you can also change it any time from the menu under your name). ${p.role === 'writer' ? 'Your scripts, deadlines and briefs are under “My work”.' : p.role === 'editor' ? 'Your home page shows upcoming shoots and the newest finished scripts; the Calendar, Script bank and client material are in the menu.' : ''}`.trim(),
+      : `When you sign in, the site asks you to choose your own password (you can also change it any time from the menu under your name). ${p.role === 'writer' ? 'Your scripts, deadlines and briefs are under “My work”.' : designer ? 'You land on your Studio: the thumbnails you’re asked for, each with its brief and the client’s look, where you send your options and see the ones picked. The Calendar, Script bank and client material are in the menu.' : p.role === 'editor' ? 'Your home page shows upcoming shoots and the newest finished scripts; the Calendar, Script bank and client material are in the menu.' : ''}`.trim(),
   ].join('\n');
 }
 
@@ -429,6 +432,9 @@ function PersonDialog({ user, team = [], preset, onCreated, onClose }: { user?: 
   const [name, setName] = useState(user?.name ?? preset?.name ?? '');
   const [email, setEmail] = useState(user?.email ?? '');
   const [role, setRole] = useState<Role>(user?.role ?? preset?.role ?? 'writer');
+  // an Editor's one job; only sent while the role is Editor (anyone else has none)
+  const [kind, setKind] = useState<EditorKind>((user && editorKindOf(user)) ?? 'short_form');
+  const editorKind = isEditor(role) ? kind : null;
   const [capacity, setCapacity] = useState(user?.capacityPerDay != null ? String(user.capacityPerDay) : '');
   const { settings } = useBoot();
   const [password, setPassword] = useState(() => (user ? '' : generatePassword()));
@@ -443,13 +449,13 @@ function PersonDialog({ user, team = [], preset, onCreated, onClose }: { user?: 
   const deactivating = !!user && user.active && !active;
   const place = { city: city.trim() || null, ...(city.trim() ? { timezone: tz || undefined, workStart: hours[0], workEnd: hours[1] % 24 || 24 } : {}) };
   const save = useSave(() => user
-    ? api<{ moved: number }>(`/api/users/${user.id}`, { method: 'PATCH', body: { name, email, role, active, capacityPerDay: capacity ? Number(capacity) : null, password: password || undefined, ...place, ...(deactivating ? { reassignTo: takeover ? Number(takeover) : null } : {}) } })
-    : api('/api/users', { body: { name, email, role, password, capacityPerDay: capacity ? Number(capacity) : null, ...place } }), {
+    ? api<{ moved: number }>(`/api/users/${user.id}`, { method: 'PATCH', body: { name, email, role, editorKind, active, capacityPerDay: capacity ? Number(capacity) : null, password: password || undefined, ...place, ...(deactivating ? { reassignTo: takeover ? Number(takeover) : null } : {}) } })
+    : api('/api/users', { body: { name, email, role, editorKind, password, capacityPerDay: capacity ? Number(capacity) : null, ...place } }), {
     onSuccess: () => {
       if (!user) onCreated?.();
       if (!user || password) {
         // only now, right after saving, is the plain password known
-        setShare(signInMessage({ name, email: user?.email ?? email.trim().toLowerCase(), password, role, orgName: settings.orgName, url: window.location.origin, reset: !!user }));
+        setShare(signInMessage({ name, email: user?.email ?? email.trim().toLowerCase(), password, role, editorKind, orgName: settings.orgName, url: window.location.origin, reset: !!user }));
         toast(user ? `New password set for ${name}` : `${name} added`);
       } else {
         toast(deactivating ? `${name} deactivated${takeover ? ' · their scripts were handed over' : ''}` : `${name} updated`);
@@ -467,7 +473,7 @@ function PersonDialog({ user, team = [], preset, onCreated, onClose }: { user?: 
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
         <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} /></Field>
         <Field label="Email" htmlFor={ids.e} error={f.email} help="They sign in with this."><input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} {...inputProps(ids.e, f.email)} /></Field>
-        <Field label="Role" htmlFor={ids.r} error={f.role} help={role === 'editor'
+        <Field label="Role" htmlFor={ids.r} error={f.role} help={isEditor(role)
           ? 'Editors see the calendar, finished scripts, clients and resources, and can message the team and get to-dos. Read-only, and they can’t be given scripts.'
           : role === 'owner' ? 'The Admin can do everything, including the Admin-only parts. Only an Admin can make someone an Admin.'
           : 'Managers plan, assign and review everything. Writers work on their own scripts, blockers, resources and deliveries.'}>
@@ -476,6 +482,19 @@ function PersonDialog({ user, team = [], preset, onCreated, onClose }: { user?: 
             {(isAdmin(me.role) || isAdmin(role)) && <option value="owner">Admin</option>}
           </select>
         </Field>
+        {isEditor(role) && (
+          <div className="field">
+            <span className="lbl">Kind</span>
+            <Seg role="group" aria-label="Kind of editor" style={{ alignSelf: 'flex-start' }}>
+              {EDITOR_KINDS.map((k) => <button key={k} type="button" aria-pressed={kind === k} onClick={() => { if (save.error) save.reset(); setKind(k); }}>{EDITOR_KIND_LABEL[k]}</button>)}
+            </Seg>
+            {f.editorKind ? <span className="err" role="alert"><CircleAlert aria-hidden />{f.editorKind}</span> : (
+              <span className="help">{isThumbnailDesigner({ role, editorKind: kind })
+                ? 'Makes thumbnails. Their home is their Studio, where they get the thumbnail briefs you hand out on the Thumbnails page and send their options.'
+                : 'Cuts the videos. Their home shows the videos assigned to them in Timeliner, upcoming shoots and the newest finished scripts.'}</span>
+            )}
+          </div>
+        )}
         {role !== 'editor' && <Field label="Capacity" optional htmlFor={ids.c} error={f.capacityPerDay} help="Scripts per working day. Used for start-date estimates, over-capacity warnings and what counts as a full day on the Overview chart."><input className="input num" type="number" min={0.5} step={0.5} value={capacity} onChange={(e) => setCapacity(e.target.value)} {...inputProps(ids.c, f.capacityPerDay)} /></Field>}
         <PlaceFields optional city={city} tz={tz} hours={hours} f={f}
           onChange={(v) => { if (save.error) save.reset(); if (v.city !== undefined) setCity(v.city); if (v.tz !== undefined) setTz(v.tz); if (v.hours) setHours(v.hours); }} />
@@ -505,7 +524,7 @@ function EditorsPanel() {
   const toast = useToast();
   const remove = useSave((id: number) => api(`/api/editors/${id}`, { method: 'DELETE' }), { onSuccess: () => toast('Editor removed') });
   const { users } = useBoot();
-  const signedIn = users.filter((u) => u.role === 'editor' && u.active);
+  const signedIn = users.filter((u) => isVideoEditor(u) && u.active);
   // once they have a sign-in they're on the team, so the list entry goes
   const [inviting, setInviting] = useState<Editor | null>(null);
   const editors = q.data?.editors ?? [];

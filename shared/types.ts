@@ -2,7 +2,9 @@
 
 import type { Clock, DayMode, ISODate } from './dates';
 import type { WorkspaceTheme } from './palettes';
-import type { DocumentState, Milestone, Progress, Role, ScriptStatus, Stage, VideoState } from './workflow';
+import type {
+  DocumentState, EditorKind, Milestone, OptionLetter, Progress, Role, ScriptStatus, Stage, ThumbAction, ThumbMime, ThumbState, VideoState,
+} from './workflow';
 
 /** Every change request carries `x-scale-media: 1`; a page can't send it cross-site without a CORS preflight, which the server never grants. */
 export const CSRF_HEADER = 'x-scale-media';
@@ -21,6 +23,12 @@ export interface Me {
   email: string;
   role: Role;
   capacityPerDay: number | null;
+  /**
+   * an editor's one job, as stored: 'short_form' (cuts the videos) or 'thumbnail' (makes thumbnails). Always null
+   * for anyone who isn't an editor; an editor with null is a video editor. Read it through editorKindOf,
+   * isVideoEditor or isThumbnailDesigner in shared/workflow.ts, never directly
+   */
+  editorKind: EditorKind | null;
 }
 
 export interface UserSummary extends Me {
@@ -85,6 +93,12 @@ export interface Counts {
   reviewQueue: number;
   unreadNotifications: number;
   attention: number;
+  /** managers: thumbnail rounds sent and waiting for a decision (the Thumbnails menu item); 0 for everyone else */
+  thumbnailsToReview: number;
+  /** managers: thumbnail briefs still open (not picked or cancelled), so the Thumbnails item shows before anyone is a designer; 0 for everyone else */
+  thumbnailsOpen: number;
+  /** thumbnail designers: their briefs on their plate (to design, drafting or changes asked; the Studio menu item); 0 for everyone else */
+  myThumbnails: number;
 }
 
 /** approved = every script in it approved or delivered; delivered = all delivered to Timeliner */
@@ -287,6 +301,8 @@ export interface Resource {
   fileId: number | null;
   fileName: string | null;
   fileSize: number | null;
+  /** the stored file's type ("image/png"), so image resources can show as pictures; null for links */
+  fileMime: string | null;
   notes: string | null;
   createdByName: string;
   createdById: number;
@@ -1277,3 +1293,280 @@ export interface MyEditing {
 }
 
 export type FocusAction = 'start' | 'pause' | 'resume' | 'done';
+
+// ── Thumbnail Studio ──────────────────────────────────────────────────────
+// Managers hand out briefs (GET/POST/PATCH /api/thumbnails), designers send rounds of options from their Studio
+// (GET /api/studio, /api/thumbnails/:id and its options and send), and managers pick one or ask for changes
+// (POST /api/thumbnails/:id/decision). Rules and wording: the Thumbnail Studio section of shared/workflow.ts.
+
+/** Notification types the thumbnail routes send (each has a colour in Shell.tsx). */
+export const THUMBNAIL_NOTIFICATIONS = ['thumbnail_new', 'thumbnail_sent', 'thumbnail_picked', 'thumbnail_changes'] as const;
+export type ThumbnailNotification = (typeof THUMBNAIL_NOTIFICATIONS)[number];
+
+/** A stored file's address, for an <img> (`${url}?download=1` downloads the original at full quality). */
+export const fileUrl = (fileId: number) => `/api/files/${fileId}`;
+
+/**
+ * One option: an image the designer made, lettered A–F in its round (a "variant" in the database). Only live
+ * options are sent; one taken out of the tray before sending never is.
+ */
+export interface ThumbnailOption {
+  id: number;
+  briefId: number;
+  roundId: number;
+  roundNumber: number;
+  letter: OptionLetter;
+  fileId: number;
+  /** `fileUrl(fileId)`: /api/files/:id */
+  url: string;
+  fileName: string;
+  /** what the server read from the file's own header, never the browser's word */
+  mime: ThumbMime;
+  width: number;
+  height: number;
+  /** bytes */
+  size: number;
+  /** the designer's one line: why this one */
+  note: string | null;
+  uploadedById: number;
+  uploadedByName: string;
+  createdAt: string;
+  /** the brief's current winner: its newest sent round's newest decision picked it */
+  picked: boolean;
+}
+
+/** A manager's decision on a sent round. The newest on a round counts; earlier ones stay as history. */
+export interface ThumbnailDecision {
+  id: number;
+  roundId: number;
+  roundNumber: number;
+  action: ThumbAction;
+  /** pick: the option picked */
+  optionId: number | null;
+  optionLetter: OptionLetter | null;
+  /** changes: what to change (always there); pick: the optional one-line reason */
+  note: string | null;
+  decidedById: number;
+  decidedByName: string;
+  createdAt: string;
+  /** a later decision on the same round took its place (Decide again) */
+  superseded: boolean;
+}
+
+/** One round of options. Unsent, it's the designer's private tray, which only the brief's current designer ever gets. */
+export interface ThumbnailRound {
+  id: number;
+  briefId: number;
+  /** 1, 2, 3… in the order they were started */
+  number: number;
+  /** when the designer sent it; null = the unsent tray */
+  sentAt: string | null;
+  /** the designer's note sent with it */
+  note: string | null;
+  createdById: number;
+  createdByName: string;
+  createdAt: string;
+  /** its live options, A first */
+  options: ThumbnailOption[];
+  /** every decision on it, newest first: the first one counts */
+  decisions: ThumbnailDecision[];
+  /** a newer round was sent after it, so it can't be decided any more */
+  superseded: boolean;
+}
+
+/**
+ * A thumbnail brief as the board, the Studio and the review page list it. Its state, counts and winner are worked
+ * out from its rounds and decisions (thumbnailState), never stored.
+ */
+export interface ThumbnailBrief {
+  id: number;
+  clientId: number;
+  clientName: string;
+  shootId: number | null;
+  /** the shoot's first day, when it has one */
+  shootDate: ISODate | null;
+  /** the video's working title, typed by the manager */
+  title: string;
+  /** what the thumbnail should show */
+  brief: string | null;
+  /** suggested words on the image */
+  onImage: string | null;
+  /** 1–6 (MAX_OPTIONS), 3 by default */
+  optionsWanted: number;
+  dueOn: ISODate | null;
+  designerId: number | null;
+  designerName: string | null;
+  /** no designer, or theirs has left, been switched off or isn't a thumbnail designer any more: the board's "Needs a designer" */
+  needsDesigner: boolean;
+  createdById: number;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+  cancelledAt: string | null;
+  state: ThumbState;
+  /** live options in the unsent tray ("Drafting · 2 options"); a manager gets the number, never the images */
+  draftOptions: number;
+  /** the newest sent round's number; 0 when nothing has been sent */
+  roundsSent: number;
+  /** the number the next round sent will have ("Send round 2", "Start round 2") */
+  nextRound: number;
+  /** when the newest round was sent */
+  sentAt: string | null;
+  /** the newest decision on the newest sent round, when there is one */
+  decision: ThumbnailDecision | null;
+  /** the picked option, when the state is picked */
+  winner: ThumbnailOption | null;
+  /**
+   * the picture for its card: the winner, else the newest sent round's first option, else (for its current designer
+   * only) the tray's first; null shows the title card
+   */
+  cover: ThumbnailOption | null;
+}
+
+/** The client's look, shown beside a brief. */
+export interface ThumbnailLook {
+  clientId: number;
+  clientName: string;
+  brandVoice: string | null;
+  guidance: string | null;
+  /** the client's resources that are pictures (isPictureMime(fileMime)), newest first, shown as images */
+  images: Resource[];
+  /** the rest of its resources (links and other files), for Open */
+  resources: Resource[];
+}
+
+/** A picked option, for a Wall of wins or a client's recent winners. */
+export interface ThumbnailWin {
+  /** who made it: option.uploadedById / uploadedByName */
+  option: ThumbnailOption;
+  briefId: number;
+  title: string;
+  clientId: number;
+  clientName: string;
+  pickedAt: string;
+  pickedByName: string;
+  /** the manager's reason, when they gave one */
+  reason: string | null;
+}
+
+/** One brief in full: GET /api/thumbnails/:id, and what every change to one brief answers with. */
+export interface ThumbnailBriefDetail extends ThumbnailBrief {
+  /** its sent rounds, oldest first */
+  rounds: ThumbnailRound[];
+  /** the unsent tray, only for the brief's current designer (null for anyone else, managers included) */
+  tray: ThumbnailRound | null;
+  /** who is looking: its current designer, a manager, or a designer it was taken from (reading the rounds they sent) */
+  viewer: 'designer' | 'manager' | 'past_designer';
+  /** what the viewer may do now */
+  can: {
+    /** add an option to the tray: its current designer, while it's open (not picked or cancelled) and the tray has a free letter */
+    upload: boolean;
+    /** send the tray: its current designer, while it's open and the tray has an option */
+    send: boolean;
+    /** pick or ask for changes on the newest sent round: a manager, while it isn't cancelled */
+    decide: boolean;
+    /** edit, reassign, cancel or reopen: a manager */
+    edit: boolean;
+  };
+  look: ThumbnailLook;
+  /** the client's current winners on its other briefs (any designer's), newest first, at most 8 */
+  recentWinners: ThumbnailWin[];
+}
+
+/**
+ * The Studio's hero, in order of priority: changes asked (the newest note on the round it was asked on, with
+ * "Start round N"), next up (nextBrief), just picked (for JUST_PICKED_MS after the pick), all clear (show the latest wins).
+ */
+export type StudioHero =
+  | { kind: 'changes'; brief: ThumbnailBrief; decision: ThumbnailDecision; round: ThumbnailRound }
+  | { kind: 'next'; brief: ThumbnailBrief }
+  | { kind: 'picked'; brief: ThumbnailBrief; win: ThumbnailWin }
+  | { kind: 'clear' };
+
+/** A designer's Studio: GET /api/studio (a manager may add ?userId=). */
+export interface StudioPayload {
+  designer: { id: number; name: string };
+  /** a manager looking at a designer's Studio: nothing can be changed, and unsent options are left out */
+  readOnly: boolean;
+  hero: StudioHero;
+  /**
+   * their newest pick, while it's under JUST_PICKED_MS old, whatever the hero is: shown on top of a changes or
+   * next-up hero (as EditorHome's Done card sits over Next up); with nothing else on, it's the hero itself
+   */
+  justPicked: ThumbnailWin | null;
+  /** their open briefs (not picked or cancelled), in briefOrder */
+  board: ThumbnailBrief[];
+  /** options of theirs that were picked, newest first, at most 60 */
+  wins: ThumbnailWin[];
+  counts: {
+    pickedThisMonth: number;
+    /** rounds they sent that are waiting for a decision */
+    waitingOnReview: number;
+    /** open briefs due by the end of this week */
+    dueThisWeek: number;
+    /** briefs on their plate: counts.myThumbnails */
+    onPlate: number;
+  };
+}
+
+/** A thumbnail designer on the board, with what they already have. */
+export interface ThumbnailDesignerLoad {
+  id: number;
+  name: string;
+  /** open briefs (not picked or cancelled) */
+  open: number;
+  dueThisWeek: number;
+  inReview: number;
+}
+
+/** The managers' board: GET /api/thumbnails (?clientId= and ?designerId= narrow it). */
+export interface ThumbnailBoard {
+  /** rounds waiting for a decision, oldest sent first, each with every option */
+  toReview: { brief: ThumbnailBrief; round: ThumbnailRound }[];
+  /** briefs that aren't cancelled or picked, plus those picked or cancelled in the last 14 days */
+  briefs: ThumbnailBrief[];
+  /** every active thumbnail designer (offered in New thumbnail), with their load */
+  designers: ThumbnailDesignerLoad[];
+  counts: { toReview: number; changes: number; withDesigners: number; pickedThisWeek: number; needsDesigner: number };
+}
+
+/** POST /api/thumbnails: a new brief. */
+export interface ThumbnailBriefInput {
+  clientId: number;
+  shootId?: number | null;
+  title: string;
+  brief?: string | null;
+  onImage?: string | null;
+  /** 1–6; DEFAULT_OPTIONS when left out */
+  optionsWanted?: number;
+  dueOn?: ISODate | null;
+  /** an active thumbnail designer, or null for "Needs a designer" */
+  designerId?: number | null;
+}
+
+/** PATCH /api/thumbnails/:id: only the fields the manager changed. */
+export interface ThumbnailBriefPatch {
+  title?: string;
+  brief?: string | null;
+  onImage?: string | null;
+  optionsWanted?: number;
+  dueOn?: ISODate | null;
+  designerId?: number | null;
+  /** true cancels it, false reopens it */
+  cancelled?: boolean;
+}
+
+/** POST /api/thumbnails/:id/send: sends the tray as the next round. */
+export interface ThumbnailSendInput {
+  note?: string | null;
+}
+
+/** POST /api/thumbnails/:id/decision, on the newest sent round (an older one is 409 `stale`). */
+export interface ThumbnailDecisionInput {
+  roundId: number;
+  action: ThumbAction;
+  /** pick: an option of that round */
+  optionId?: number | null;
+  /** changes: required (400 with fields.note); pick: an optional reason */
+  note?: string | null;
+}

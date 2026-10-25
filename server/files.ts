@@ -85,6 +85,46 @@ export const EDITOR_FILES = `(exists (select 1 from resources r where r.file_id 
            select 1 from submission_scripts ss join scripts sc on sc.id = ss.script_id
             where ss.submission_id = s.id and sc.removed_at is null and sc.status not in ('approved', 'delivered'))))`;
 
+// ── thumbnail options ────────────────────────────────────────────────────
+// Option images are never in EDITOR_FILES, nor in the rule writers get (anything a live resource, document or
+// review refers to): only managers (sent rounds) and thumbnail designers (their own work, and the picked winners
+// of clients they work for) can open them. The tray of a brief is only ever its current designer's: reassigning a
+// brief takes the old designer's unsent options out of it.
+
+/** SQL: the id of brief `b`'s newest sent round, or null when it has none. */
+export const THUMB_LATEST_SENT = (b: string) =>
+  `(select ls.id from thumbnail_rounds ls where ls.brief_id = ${b}.id and ls.sent_at is not null order by ls.number desc limit 1)`;
+
+/**
+ * SQL: brief `b`'s winner (a thumbnail_variants id): the option its newest sent round's newest decision picked, or
+ * null when that decision asked for changes or there is none. A brief with a winner is picked (thumbnailState).
+ */
+export const THUMB_WINNER = (b: string) =>
+  `(select case when wd.action = 'pick' then wd.variant_id end from thumbnail_decisions wd
+     where wd.round_id = ${THUMB_LATEST_SENT(b)} order by wd.created_at desc, wd.id desc limit 1)`;
+
+/**
+ * The stored files (`f`) a thumbnail designer may open as option images, for the designer whose id is the bound
+ * parameter `me` ("$2"): the unsent tray of a brief that's theirs now; options in rounds they sent (still theirs
+ * to read after the brief moves to someone else); and the current winner of every brief not cancelled for a
+ * client they have or had a brief for, whoever made it. Never another designer's tray or unpicked options, not
+ * even the rounds sent on a brief before it was given to them (owner's rule: only picked ones are shared).
+ */
+export function DESIGNER_FILES(me: string): string {
+  if (!/^\$\d+$/.test(me)) throw new Error('DESIGNER_FILES takes a bound parameter like $2');
+  return `exists (select 1 from thumbnail_variants dv join thumbnail_rounds dr on dr.id = dv.round_id join thumbnail_briefs tb on tb.id = dr.brief_id
+      where dv.file_id = f.id and dv.removed_at is null and (
+            (tb.designer_id = ${me} and dr.sent_at is null)
+         or (dr.created_by = ${me} and dr.sent_at is not null)
+         or (tb.cancelled_at is null and dv.id = ${THUMB_WINNER('tb')} and exists (
+               select 1 from thumbnail_briefs mb where mb.client_id = tb.client_id
+                  and (mb.designer_id = ${me} or exists (select 1 from thumbnail_rounds mr where mr.brief_id = mb.id and mr.created_by = ${me}))))))`;
+}
+
+/** The stored files (`f`) a manager may open as option images: live options in rounds that were sent. Never a designer's unsent tray. */
+export const SENT_OPTION_FILES = `exists (select 1 from thumbnail_variants sv join thumbnail_rounds sr on sr.id = sv.round_id
+      where sv.file_id = f.id and sv.removed_at is null and sr.sent_at is not null)`;
+
 /** Saves an upload into the files table, piece by piece. Run it inside the caller's transaction. */
 export async function storeFile(t: Db, me: Me, file: UploadedFile): Promise<number> {
   const safeName = storedFileName(file.filename);

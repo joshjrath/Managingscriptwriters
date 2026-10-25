@@ -280,3 +280,30 @@ describe('someone who left Timeliner', () => {
     }
   });
 });
+
+describe('thumbnail designers', () => {
+  it('are never a client’s editor nor a video’s, even when Timeliner has them editing its brand', async () => {
+    const r = await w.send('POST', '/api/users', w.admin, { name: 'Tess Thumbs', email: 'tess@scale.test', role: 'editor', editorKind: 'thumbnail', password: 'team-password-1' });
+    expect(r.status).toBe(200);
+    const tess = { id: 'm_tess', email: 'tess@scale.test', firstName: 'Tess', lastName: 'Thumbs', role: 'editor' };
+    const paintId = await w.client('Paint Co');
+    w.tl.brands.b_paint = 'Paint Co';
+    w.tl.projects.p_paint = { id: 'p_paint', name: 'Paint Co Reels', nodeId: 'b_paint', createdAt: '2026-01-05T15:00:00Z', subFolders: [] };
+    const paint = { projectId: 'p_paint', brandId: 'b_paint', subFolderId: null };
+    w.api.members = async () => [...members, tess];
+    w.tl.onBrand.b_paint = [{ role: 'editor', automatic: false, member: tess }];
+    add(['t_p1', 'Paint 01', 'toDo', { ...paint, assigneeIds: ['m_leo'] }], ['t_p2', 'Paint 02', 'toDo', { ...paint, assigneeIds: ['m_tess'] }]);
+    try {
+      b = await w.sync();
+      // Leo cuts its videos, so he's its editor (from them); the designer on its brand isn't one of its editors
+      expect(b.clients.find((c) => c.clientId === paintId)).toMatchObject({ editor: { name: 'Leo Martins' }, editorFrom: 'videos', editors: [] });
+      // the video only she's on is nobody's, and she has no card, flagged or not
+      expect(b.editors.find((e) => e.name === 'Tess Thumbs' || e.memberId === 'm_tess')).toBeUndefined();
+      expect(b.unassigned.flatMap((g) => g.videoTitles)).toContain('Paint 02');
+    } finally {
+      w.api.members = async () => members;
+      w.tl.tasks = w.tl.tasks.filter((t) => !t.id.startsWith('t_p'));
+      delete w.tl.onBrand.b_paint;
+    }
+  });
+});

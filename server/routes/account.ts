@@ -7,9 +7,12 @@ import {
   SESSION_COOKIE, setSessionCookie, sha, validatePassword, verifyPassword,
 } from '../auth';
 import { assigneesOf, batchLink, loadSettings, loadUsers, logActivity, notify, rulesOf, settingsFor, type Ctx } from '../core';
-import { compressRanges, isAdmin, isEditor, isManager, ROLE_LABEL, type Role } from '../../shared/workflow';
+import {
+  compressRanges, EDITOR_KINDS, editorKindOf, isAdmin, isEditor, isManager, isThumbnailDesigner, personLabel, type EditorKind, type KindOf, type Role,
+} from '../../shared/workflow';
 import { auditEvent } from '../audit';
 import { LOCKS, type Db } from '../db';
+import { THUMB_WINNER } from '../files';
 import type { Me, Settings, UserSummary } from '../../shared/types';
 import { conflict, forbidden, HttpError, notFound, parse, zs } from '../http';
 import { computeDeadlines, isValidTimeZone } from '../../shared/dates';
@@ -199,6 +202,24 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     if (!others?.n) throw new HttpError(400, 'Keep at least one active admin');
   }
 
+  /** An editor's kind only means something while the role is editor (the database refuses one on anyone else). */
+  function kindFor(role: Role, kind: EditorKind | null | undefined): EditorKind | null {
+    if (kind && !isEditor(role)) throw new HttpError(400, 'Only an Editor has a kind (video editor or thumbnail designer)', { editorKind: 'Only for an Editor' });
+    return isEditor(role) ? kind ?? null : null;
+  }
+
+  /** A thumbnail designer stays one while they have open briefs (not picked or cancelled): those go to someone else first. */
+  async function keepDesigner(id: number, name: string, before: KindOf, after: KindOf, field: 'role' | 'editorKind') {
+    if (!isThumbnailDesigner(before) || isThumbnailDesigner(after)) return;
+    const open = await db.one<{ n: number }>(
+      `select count(*)::int as n from thumbnail_briefs b where b.designer_id = $1 and b.cancelled_at is null and ${THUMB_WINNER('b')} is null`, [id],
+    );
+    const n = Number(open?.n ?? 0);
+    if (n > 0) {
+      throw new HttpError(400, `${name} still has ${n} open thumbnail brief${n === 1 ? '' : 's'}. Reassign ${n === 1 ? 'it' : 'them'} on the Thumbnails page first.`, { [field]: 'Reassign their thumbnail briefs first' });
+    }
+  }
+
   app.get('/api/users', async (req) => {
     return { users: await teamFor(requireUser(req)) };
   });
@@ -239,9 +260,12 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const me = requireManager(req);
     const input = parse(z.object({
       name: zs.name('Name', 120), email, role: z.enum(ROLES), password, capacityPerDay: capacity,
+      /** an editor's one job; only for the Editor role */
+      editorKind: z.enum(EDITOR_KINDS).nullable().optional(),
       city, timezone, workStart: hour.optional(), workEnd: hour.optional(),
     }), req.body);
     guardAdmin(me, null, input.role);
+    const editorKind = kindFor(input.role, input.editorKind);
     const place = placeColumns(input);
     const err = validatePassword(input.password);
     if (err) throw new HttpError(400, err, { password: err });
@@ -252,20 +276,20 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     if (existing) {
       // someone who was removed earlier comes back with their history intact
       await db.query(
-        `update users set name = $2, role = $3, password_hash = $4, temp_password = $5, capacity_per_day = $6, active = true, removed_at = null, updated_at = now() where id = $1`,
-        [existing.id, input.name, input.role, hash, input.password, input.capacityPerDay ?? null],
+        `update users set name = $2, role = $3, editor_kind = $7, password_hash = $4, temp_password = $5, capacity_per_day = $6, active = true, removed_at = null, updated_at = now() where id = $1`,
+        [existing.id, input.name, input.role, hash, input.password, input.capacityPerDay ?? null, editorKind],
       );
       id = existing.id;
     } else {
       const row = await db.one<{ id: number }>(
-        `insert into users (email, name, role, password_hash, temp_password, capacity_per_day) values ($1,$2,$3,$4,$5,$6) returning id`,
-        [input.email, input.name, input.role, hash, input.password, input.capacityPerDay ?? null],
+        `insert into users (email, name, role, editor_kind, password_hash, temp_password, capacity_per_day) values ($1,$2,$3,$7,$4,$5,$6) returning id`,
+        [input.email, input.name, input.role, hash, input.password, input.capacityPerDay ?? null, editorKind],
       );
       id = row!.id;
     }
     const placeKeys = Object.keys(place);
     if (placeKeys.length) await db.query(`update users set ${placeKeys.map((k, i) => `${k} = $${i + 2}`).join(', ')} where id = $1`, [id, ...placeKeys.map((k) => place[k])]);
-    await logActivity(db, { actor: me, action: 'user.created', entityType: 'user', entityId: id, summary: `${existing ? 'Re-added' : 'Added'} ${input.name} as ${ROLE_LABEL[input.role]}` });
+    await logActivity(db, { actor: me, action: 'user.created', entityType: 'user', entityId: id, summary: `${existing ? 'Re-added' : 'Added'} ${input.name} as ${personLabel({ role: input.role, editorKind })}` });
     return { users: await teamFor(me) };
   });
 
@@ -274,18 +298,27 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const input = parse(z.object({
       name: zs.name('Name', 120).optional(), email: email.optional(), role: z.enum(ROLES).optional(), active: z.boolean().optional(),
+      /** an editor's one job; only for the Editor role (the form sends it with every field) */
+      editorKind: z.enum(EDITOR_KINDS).nullable().optional(),
       capacityPerDay: capacity, password: z.string().max(200).optional(),
       city, timezone, workStart: hour.optional(), workEnd: hour.optional(),
       /** when deactivating: who takes over their unfinished scripts (null leaves them unassigned) */
       reassignTo: zs.id.nullable().optional(),
     }), req.body);
-    const u = await db.one<{ role: Role; active: boolean; name: string; email: string; removed_at: string | null; city: string | null; country: string | null; timezone: string | null; capacity_per_day: number | null; work_start: number | null; work_end: number | null }>(
-      `select role, active, name, email, removed_at, city, country, timezone, capacity_per_day, work_start, work_end from users where id = $1`, [id],
+    const u = await db.one<{ role: Role; editor_kind: EditorKind | null; active: boolean; name: string; email: string; removed_at: string | null; city: string | null; country: string | null; timezone: string | null; capacity_per_day: number | null; work_start: number | null; work_end: number | null }>(
+      `select role, editor_kind, active, name, email, removed_at, city, country, timezone, capacity_per_day, work_start, work_end from users where id = $1`, [id],
     );
     if (!u || u.removed_at) throw notFound('Team member');
     guardAdmin(me, u, input.role);
     // the form sends every field, so only an actual change of role counts
     const roleChange = input.role !== undefined && input.role !== u.role;
+    // and of kind: what they do, not how it's stored (an editor with no kind is a video editor already)
+    const nextRole = input.role ?? u.role;
+    const before: KindOf = { role: u.role, editorKind: u.editor_kind };
+    const kindIn = kindFor(nextRole, input.editorKind);
+    const after: KindOf = { role: nextRole, editorKind: !isEditor(nextRole) ? null : input.editorKind !== undefined ? kindIn : u.editor_kind };
+    const kindChange = editorKindOf(before) !== editorKindOf(after);
+    await keepDesigner(id, u.name, before, after, roleChange ? 'role' : 'editorKind');
     if (isAdmin(u.role) && (roleChange || input.active === false)) await keepAnAdmin(id);
     if (isManager(u.role) && ((input.role && !isManager(input.role)) || input.active === false)) await keepAManager(id);
     // an editor writes nothing: move their unfinished scripts first
@@ -304,6 +337,8 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
       set.email = input.email;
     }
     if (input.role !== undefined && input.role !== u.role) set.role = input.role;
+    // in the same write as the role: the database allows a kind only on an editor
+    if (roleChange || kindChange) set.editor_kind = after.editorKind ?? null;
     if (input.active !== undefined && input.active !== u.active) set.active = input.active;
     if (input.capacityPerDay !== undefined && Number(input.capacityPerDay ?? 0) !== Number(u.capacity_per_day ?? 0)) set.capacity_per_day = input.capacityPerDay;
     const place = placeColumns(input, u);
@@ -328,7 +363,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
         const what: string[] = [];
         if (set.name !== undefined) what.push(`name ${u.name} → ${input.name}`);
         if (set.email !== undefined) what.push(`email → ${input.email}`);
-        if (set.role !== undefined) what.push(`role ${ROLE_LABEL[u.role]} → ${ROLE_LABEL[input.role!]}`);
+        if (set.role !== undefined || kindChange) what.push(`role ${personLabel(before)} → ${personLabel(after)}`);
         if (set.active === false) what.push(`deactivated${moved ? ` (${moved} unfinished scripts ${target ? `moved to ${target.name}` : 'unassigned'})` : ''}`);
         if (set.active === true) what.push('reactivated');
         if (set.capacity_per_day !== undefined) what.push(`capacity ${u.capacity_per_day ?? 'not set'} → ${input.capacityPerDay ?? 'not set'} a day`);
