@@ -14,7 +14,8 @@ import { notifyNewCalendarShoots } from './calendar-shoots';
 import type { CalendarFeed } from '../shared/types';
 
 const MAX_BYTES = 10 * 1024 * 1024;
-const PAST_DAYS = 60;
+/** a year back: past shoots on a calendar pace the next one (server/forecast.ts) */
+const PAST_DAYS = 400;
 const FUTURE_DAYS = 400;
 
 interface FeedRow { id: number; name: string; url: string; color: string; visibility: 'managers' | 'editors' | 'everyone'; last_synced_at: string | null; last_error: string | null; event_count: number }

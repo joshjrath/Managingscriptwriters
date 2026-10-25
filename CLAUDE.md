@@ -3,6 +3,7 @@
 - **Every change to the platform gets a What's new entry.** Add it to the top of `CHANGELOG` in `shared/changelog.ts` (newest first, a new unique `id`, today's date, plain-language text for managers and writers). The What's new page and its "new" dot read from there, and it is meant to list every change since the first version.
 - Never edit a migration that has shipped; append a new one to `MIGRATIONS` in `server/schema.ts`.
 - Before pushing: `npm run verify` (typecheck, lint with zero warnings, tests, build). It's what CI runs.
+- **Always make it live.** Once a change is pushed, open a pull request into the default branch (`claude/adoring-hawking-gagqwc`; there is no `main`) and merge it once CI passes on its head commit. Render deploys from that branch. The owner has asked for this every time, without being asked again.
 
 `ARCHITECTURE.md` maps the code: where things live, how a request is handled, how access works, and the invariants. Read the parts you're about to touch.
 

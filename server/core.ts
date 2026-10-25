@@ -22,6 +22,8 @@ export interface Ctx {
   notesReader?: import('./notes-import').NotesReader | null;
   /** counts the scripts in a shoot's document (Claude); absent when no API key is configured */
   scriptCounter?: import('./doc-counts').ScriptCounter | null;
+  /** estimates each client's next shoot (Claude); absent when no API key is configured */
+  shootEstimator?: import('./shoot-estimator').ShootEstimator | null;
   /** fetches a document to count: a Google Doc or Drive link, or Timeliner's download link (tests pass a stand-in) */
   fetchDoc?: typeof fetch;
   /** reads a synced calendar's iCal link (tests pass a stand-in) */

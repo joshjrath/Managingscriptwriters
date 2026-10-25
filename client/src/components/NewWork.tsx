@@ -24,7 +24,7 @@ import type { BatchSummary, ClientDetail, Priority, ResourceCategory } from '../
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
 
 export type NewWorkTab = 'notes' | 'quick' | 'shoot' | 'batch' | 'client';
-export interface NewWorkPreset { prospect?: boolean; title?: string; clientId?: number; shootId?: number; text?: string; start?: ISODate; end?: ISODate | null; count?: number; split?: SplitPart[]; newClientName?: string; calendarUid?: string }
+export interface NewWorkPreset { prospect?: boolean; title?: string; clientId?: number; shootId?: number; text?: string; start?: ISODate; end?: ISODate | null; count?: number; split?: SplitPart[]; newClientName?: string; calendarUid?: string; noScripts?: boolean }
 
 interface Created {
   kind: 'shoot' | 'batch' | 'client';
@@ -392,7 +392,8 @@ function ShootForm({ preset, onCreated }: { preset?: NewWorkPreset; onCreated: (
   const [end, setEnd] = useState<string>(p?.end ?? '');
   const [count, setCount] = useState<number | ''>(p?.count ?? '');
   // scripts can be planned later, when the count and writers are known
-  const [later, setLater] = useState(false);
+  // (a client filmed without scripts starts there: just the shoot)
+  const [later, setLater] = useState(!!p?.noScripts);
   const [parts, setParts] = useState<SplitPart[]>(p?.split ?? [{ writerId: me.role === 'writer' ? me.id : '', count: '' }]);
   const [title, setTitle] = useState(p?.title ?? '');
   const [batchTitle, setBatchTitle] = useState('');

@@ -749,4 +749,25 @@ create table document_counts (
 );
 create index document_counts_batch_idx on document_counts (batch_id);
 `,
+  // 38 · clients the team films but doesn't write scripts for (still estimated a next shoot, with no scripts due),
+  // and each client's next-shoot estimate: Claude's (or the rule's) date and script count, kept so it's asked again
+  // only when the history it came from changes, and a manager's change or denial of it. A row is for the shoot after
+  // `after_date` (the last shoot that's over); a newer shoot starts a fresh estimate
+  `
+alter table clients add column scripts_required boolean not null default true;
+create table shoot_estimates (
+  client_id bigint primary key references clients(id) on delete cascade,
+  after_date date not null,
+  basis text not null,
+  shoot_date date,
+  scripts int,
+  confidence text check (confidence in ('high', 'medium', 'low')),
+  reasoning text,
+  source text not null check (source in ('ai', 'manager')),
+  decision text check (decision in ('changed', 'denied')),
+  decided_by bigint references users(id),
+  decided_at timestamptz,
+  updated_at timestamptz not null default now()
+);
+`,
 ];
