@@ -6,14 +6,14 @@
 // "Your best this month" (a sideways strip of the picks marked Standout this month, hidden when there are none), the
 // Wall of wins (every pick, newest first, filtered by client, standouts marked; a new win flips in with a glint and a
 // few sparks the first time it's seen, when animations are on), a few numbers counted from rows, and to-dos. No
-// timers, points or streaks.
+// timers, points or streaks. The designer's References (their private boards) are a tap away in the header.
 // A manager opens a designer's Studio with ?userId= (read-only; their unsent options stay private); an Admin can
 // also View as the designer and see exactly theirs.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, CalendarClock, CircleCheck, Clock, Image as ImageIcon, Play, RotateCcw, SkipForward, Sparkles, Trophy } from 'lucide-react';
+import { ArrowRight, CalendarClock, CircleCheck, Clock, Image as ImageIcon, Images, Play, RotateCcw, SkipForward, Sparkles, Trophy } from 'lucide-react';
 import { api, qs, type ApiError } from '../api';
 import type { StudioHero, StudioPayload, ThumbnailBrief, ThumbnailWin } from '../../../shared/types';
 import { isManager, isThumbnailDesigner, thumbBriefPath } from '../../../shared/workflow';
@@ -88,6 +88,7 @@ function Studio({ s, refreshFailed }: { s: StudioPayload; refreshFailed: boolean
         crumbs={s.readOnly ? <><Link to="/thumbnails">Thumbnails</Link><span aria-hidden>›</span><span>Studio</span></> : undefined}
         sub={<>{s.readOnly ? 'What they see, read-only. Their unsent options stay private.' : 'Your next thumbnail, your board and your wall of wins.'}{refreshFailed && <span role="status"> · couldn’t refresh just now, so this may be out of date</span>}</>}
         hideNewWork>
+        {!s.readOnly && isThumbnailDesigner(me) && <Link className="btn pill" to="/studio/refs"><Images aria-hidden />References</Link>}
         {s.readOnly && others.length > 1 && (
           <select className="select st-switch" value={s.designer.id} onChange={(e) => nav(`/studio?userId=${e.target.value}`)} aria-label="Whose Studio">
             {others.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}

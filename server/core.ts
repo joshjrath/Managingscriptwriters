@@ -5,7 +5,7 @@ import type { Db } from './db';
 import { makeClock, type Clock, type DeadlineRules, type ISODate } from '../shared/dates';
 import {
   compressRanges, deriveStage, kindsSql, milestone, nextMilestone, summarize, VIDEO_EDITOR_KINDS,
-  type EditorKind, type ScriptLite, type ScriptStatus, type Role, type SecondLookResult, type ThumbMime,
+  type BrandColour, type EditorKind, type ScriptLite, type ScriptStatus, type Role, type SecondLookResult, type ThumbIdea, type ThumbMime,
 } from '../shared/workflow';
 import type { WorkspaceTheme } from '../shared/palettes';
 import type { BatchSummary, Me, Priority, Settings, UserSummary, WriterShare, DateMode } from '../shared/types';
@@ -26,6 +26,8 @@ export interface Ctx {
   shootEstimator?: import('./shoot-estimator').ShootEstimator | null;
   /** gives a thumbnail designer's option an AI second look (Claude); absent when no API key is configured */
   thumbCritic?: ThumbCritic | null;
+  /** suggests three directions for a new thumbnail brief (Claude); absent when no API key is configured */
+  briefHelper?: BriefHelper | null;
   /** fetches a document to count: a Google Doc or Drive link, or Timeliner's download link (tests pass a stand-in) */
   fetchDoc?: typeof fetch;
   /** reads a synced calendar's iCal link (tests pass a stand-in) */
@@ -58,7 +60,11 @@ export interface ThumbCritiqueInput {
   references: CritiqueImage[];
   /** the video's title, what the thumbnail should show and the words on the image */
   brief: { title: string; brief: string | null; onImage: string | null };
-  client: { name: string; brandVoice: string | null; guidance: string | null };
+  client: {
+    name: string; brandVoice: string | null; guidance: string | null;
+    /** the client's brand kit, as text: its colours (names and hex), do's and don'ts. Null or left out when it has none */
+    brand?: { colours: BrandColour[]; dos: string | null; donts: string | null } | null;
+  };
 }
 
 /**
@@ -69,6 +75,27 @@ export interface ThumbCritiqueInput {
  */
 export interface ThumbCritic {
   critique(input: ThumbCritiqueInput): Promise<SecondLookResult>;
+}
+
+/** What AI brief ideas are asked about (text only): the video, the client's look, and what was picked for it before. */
+export interface BriefIdeasInput {
+  /** the video's working title, as the manager typed it */
+  title: string;
+  client: { name: string; brandVoice: string | null; guidance: string | null; dos: string | null; donts: string | null };
+  /** the shoot the video is from, when the manager chose one */
+  shoot: { title: string | null; date: ISODate } | null;
+  /** the client's last 10 picked briefs, newest pick first: the video's title, what it should show, and the words on the image */
+  picked: { title: string; brief: string | null; onImage: string | null }[];
+}
+
+/**
+ * Suggests three directions for a new thumbnail brief: Claude's, when ANTHROPIC_API_KEY is set; tests pass a stand-in,
+ * so they never call the API. It answers with the structured result as parsed, which the route sends only after
+ * tidyThumbIdeas (shared/workflow.ts). It throws an HttpError with a plain message when Claude declines or runs out of
+ * room, and maps the API's failures the way Paste notes does (server/notes-import.ts). Nothing is kept.
+ */
+export interface BriefHelper {
+  suggest(input: BriefIdeasInput): Promise<{ ideas: ThumbIdea[] }>;
 }
 
 // ── settings ─────────────────────────────────────────────────────────────

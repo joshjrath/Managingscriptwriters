@@ -113,3 +113,63 @@ export function darkTextContrast(hex: string): number {
   const dark = 0.0059; // #111113
   return (l + 0.05) / (dark + 0.05);
 }
+
+// ── colours of a client's brand (the brand kit) ──────────────────────────
+
+/** '#abc', 'abc', ' #AaBbCc ' → '#AABBCC': a colour as HEX takes it (and as a brand kit keeps it); null when it isn't one. */
+export function normalizeHex(v: string | null | undefined): string | null {
+  const s = (v ?? '').trim().replace(/^#/, '');
+  if (/^[0-9a-fA-F]{3}$/.test(s)) return `#${[...s].map((c) => c + c).join('')}`.toUpperCase();
+  return /^[0-9a-fA-F]{6}$/.test(s) ? `#${s}`.toUpperCase() : null;
+}
+
+/** A colour's relative luminance (WCAG): 0 for black to 1 for white. NaN when it isn't a colour normalizeHex reads. */
+export function relativeLuminance(hex: string): number {
+  const h = normalizeHex(hex);
+  if (!h) return Number.NaN;
+  const ch = (i: number) => {
+    const c = parseInt(h.slice(i, i + 2), 16) / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * ch(1) + 0.7152 * ch(3) + 0.0722 * ch(5);
+}
+
+/** The contrast between two colours (WCAG ratio): 1 for the same colour, 21 for black on white, whichever way round. */
+export function contrastRatio(a: string, b: string): number {
+  const [x, y] = [relativeLuminance(a), relativeLuminance(b)];
+  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
+}
+
+/** The most colours "Pick colours from logo" offers. */
+export const LOGO_COLOURS_MAX = 6;
+
+/**
+ * The main colours of a picture, for "Pick colours from logo" (the browser reads the logo with a canvas; the server
+ * never decodes images). `rgba` is its pixels as getImageData().data gives them: red, green, blue and alpha, 0–255
+ * each. Transparent pixels and near-white or near-black ones (a logo's background, its outline) are skipped; the rest
+ * are grouped into close shades. The most common groups, each at least 1% of the pixels counted and clearly different
+ * from every colour before it, come back as #RRGGBB, most common first, at most `max`.
+ */
+export function dominantColours(rgba: ArrayLike<number>, max = LOGO_COLOURS_MAX): string[] {
+  const groups = new Map<number, { n: number; r: number; g: number; b: number }>();
+  let counted = 0;
+  for (let i = 0; i + 3 < rgba.length; i += 4) {
+    const [r, g, b, a] = [rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]].map((v) => Math.min(255, Math.max(0, Math.round(v))));
+    if (a < 128 || Math.min(r, g, b) >= 235 || Math.max(r, g, b) <= 24) continue;
+    const key = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+    const s = groups.get(key) ?? { n: 0, r: 0, g: 0, b: 0 };
+    s.n++; s.r += r; s.g += g; s.b += b;
+    groups.set(key, s);
+    counted++;
+  }
+  const least = Math.max(1, counted * 0.01);
+  const picked: number[][] = [];
+  for (const s of [...groups.values()].filter((x) => x.n >= least).sort((x, y) => y.n - x.n)) {
+    if (picked.length >= max) break;
+    const c = [s.r / s.n, s.g / s.n, s.b / s.n].map(Math.round);
+    // a shade of one already picked (closer than about a fifth of the way across the colour cube) isn't another colour
+    if (picked.some((p) => Math.hypot(p[0] - c[0], p[1] - c[1], p[2] - c[2]) < 48)) continue;
+    picked.push(c);
+  }
+  return picked.map((c) => `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`.toUpperCase());
+}

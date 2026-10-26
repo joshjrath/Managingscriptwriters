@@ -21,7 +21,7 @@ import type { Db } from './db';
 import { clockFor, loadUsers, logActivity, managerIds, notify, type Ctx } from './core';
 import { requireManager, requireUser } from './auth';
 import { conflict, forbidden, HttpError, notFound, optionalDate, parse, zs } from './http';
-import { loadResources } from './records';
+import { loadClientBrand, loadResources } from './records';
 import { storeFile, THUMB_LATEST_SENT, THUMB_WINNER } from './files';
 import { asImageUpload, uploadedImageInfo } from './images';
 import { recordThumbMoment } from './moments';
@@ -43,7 +43,8 @@ import {
 const BOARD_RECENT_DAYS = 14;
 /** The most picked options on a Studio's Wall of wins, and beside a brief. */
 const WALL_SIZE = 60;
-const RECENT_WINNERS = 8;
+/** The most of a client's winners shown beside a brief and on the client's page (its Brand kit). */
+export const RECENT_WINNERS = 8;
 
 // ── SQL ──────────────────────────────────────────────────────────────────
 
@@ -326,7 +327,7 @@ export async function loadThumbnailDetail(db: Db, me: Me, id: number, opts: { vi
   }
   const { brief, rounds, tray } = present(l, view);
   const client = await db.one<{ brand_voice: string | null; guidance: string | null }>(`select brand_voice, guidance from clients where id = $1`, [brief.clientId]);
-  const resources = await loadResources(db, { clientId: brief.clientId, clientOnly: true });
+  const [resources, brand] = await Promise.all([loadResources(db, { clientId: brief.clientId, clientOnly: true }), loadClientBrand(db, brief.clientId)]);
   const pictures = (r: (typeof resources)[number]) => r.fileId != null && isPictureMime(r.fileMime);
   const open = isOpenThumb(brief.state);
   const inTray = tray?.options.length ?? 0;
@@ -343,7 +344,7 @@ export async function loadThumbnailDetail(db: Db, me: Me, id: number, opts: { vi
       edit: viewer === 'manager',
     },
     look: {
-      clientId: brief.clientId, clientName: brief.clientName, brandVoice: client?.brand_voice ?? null, guidance: client?.guidance ?? null,
+      clientId: brief.clientId, clientName: brief.clientName, brandVoice: client?.brand_voice ?? null, guidance: client?.guidance ?? null, brand,
       images: resources.filter(pictures), resources: resources.filter((r) => !pictures(r)),
     },
     recentWinners,

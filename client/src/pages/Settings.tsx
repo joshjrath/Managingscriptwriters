@@ -8,7 +8,7 @@ import {
 import { AlertTriangle, CalendarClock, Check, CircleAlert, Copy, KeyRound, Plus, RefreshCw, UserPlus } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, useSave } from '../api';
-import type { Editor, Settings, UserSummary } from '../../../shared/types';
+import type { Editor, EditorInput, Settings, UserSummary } from '../../../shared/types';
 import { computeDeadlines, DEFAULT_RULES, isValidTimeZone } from '../../../shared/dates';
 import { fmtCutoff, fmtHour, fmtLong, fmtStamp, plural } from '../../../shared/format';
 import { CITIES, cityLabel, findCity, shiftLength, shiftOf, timeZoneList, zoneOffset } from '../../../shared/cities';
@@ -17,7 +17,7 @@ import { applyTheme, restoreTheme } from '../theme';
 import { CalendarFeedsPanel } from '../components/CalendarFeeds';
 import { TimelinerPanel } from '../components/TimelinerPanel';
 import { PageHeader, useBoot } from '../components/Shell';
-import { Avatar, Button, Chip, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, Term, useFieldId, useToast } from '../components/ui';
+import { Avatar, Button, Chip, copyText, Dialog, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, Term, useFieldId, useToast } from '../components/ui';
 
 const HOURS = Array.from({ length: 24 }, (_, h) => h);
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -391,24 +391,6 @@ export function signInMessage(p: { name: string; email: string; password: string
   ].join('\n');
 }
 
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    // fallback for browsers that block the clipboard API
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.position = 'fixed';
-    ta.style.opacity = '0';
-    document.body.appendChild(ta);
-    ta.select();
-    const ok = document.execCommand('copy');
-    ta.remove();
-    return ok;
-  }
-}
-
 function ShareDetails({ message, name, onClose }: { message: string; name: string; onClose: () => void }) {
   const recording = !!useBoot().mode?.recording;
   const [copied, setCopied] = useState<'idle' | 'ok' | 'fail'>('idle');
@@ -543,14 +525,14 @@ function EditorsPanel() {
     <Panel id="editors" title="Editors" sub="no sign-in" count={editors.length} tools={<Button variant="sm" icon={<UserPlus aria-hidden />} onClick={() => setEditing('new')}>Add editor</Button>}>
       {q.isLoading && <Loading height={80} />}
       {q.isError && <ErrorState error={q.error} retry={() => q.refetch()} />}
-      <div className="rows">
+      <div className="rows ed-rows">
         {editors.map((e) => (
           <div key={e.id} className="item">
             <div className="row-flex" style={{ flexWrap: 'nowrap', minWidth: 0 }}>
               <Avatar name={e.name} id={100000 + e.id} />
               <div className="body">
                 <div className="title">{e.name}</div>
-                <div className="meta">{e.city} · {e.workHours[1] - e.workHours[0] >= 24 ? 'Around the clock' : `${fmtHour(e.workHours[0], true)} to ${fmtHour(e.workHours[1] % 24, true)}`}</div>
+                <div className="meta">{EDITOR_KIND_LABEL[e.editorKind ?? 'short_form']} · {e.city} · {e.workHours[1] - e.workHours[0] >= 24 ? 'Around the clock' : `${fmtHour(e.workHours[0], true)} to ${fmtHour(e.workHours[1] % 24, true)}`}</div>
               </div>
             </div>
             <div className="side">
@@ -574,20 +556,23 @@ function EditorsPanel() {
         </div>
       )}
       {q.data && !editors.length && !signedIn.length && <p className="muted" style={{ fontSize: 13 }}>No editors yet.</p>}
-      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>People here are kept with their city and working hours, and can’t sign in. To let one sign in and see the calendar and finished scripts, click Give site access: they move to the Team as an Editor. Only admins see this list.</p>
+      <p className="muted" style={{ fontSize: 12.5, marginTop: 12 }}>People here are kept with their city and working hours, and can’t sign in. To let one sign in and see the calendar and finished scripts, click Give site access: they move to the Team as an Editor of their kind (a video editor or a thumbnail designer). Only admins see this list.</p>
       {editing && <EditorDialog editor={editing === 'new' ? undefined : editing} onClose={() => setEditing(null)} />}
-      {inviting && <AddEditorDialog name={inviting.name} city={inviting.city} timezone={inviting.timezone} hours={inviting.workHours} editorId={inviting.id} onClose={() => setInviting(null)} />}
+      {inviting && <AddEditorDialog name={inviting.name} city={inviting.city} timezone={inviting.timezone} hours={inviting.workHours} editorKind={inviting.editorKind} editorId={inviting.id} onClose={() => setInviting(null)} />}
     </Panel>
   );
 }
 
 /**
- * A video editor added to the team, prefilled: their name, email, the Editor role as a Video editor, and their city,
- * time zone and hours when known. With `editorId` it's Give site access (Settings → Editors, and the Editors tab for
- * an Admin): once they're on the team, that entry leaves Settings → Editors. Every screen refreshes after each step.
+ * An editor added to the team, prefilled: their name, email, the Editor role with their kind (a Video editor unless
+ * their Settings → Editors entry says Thumbnail designer), and their city, time zone and hours when known. With
+ * `editorId` it's Give site access (Settings → Editors, and the Editors tab for an Admin): once they're on the team,
+ * that entry leaves Settings → Editors. Every screen refreshes after each step.
  */
-export function AddEditorDialog({ name, email, city, timezone, hours, editorId, onClose }: {
+export function AddEditorDialog({ name, email, city, timezone, hours, editorKind, editorId, onClose }: {
   name: string; email?: string | null; city?: string | null; timezone?: string | null; hours?: [number, number] | null;
+  /** what their Settings → Editors entry says they do; none (or not given) is a video editor */
+  editorKind?: EditorKind | null;
   /** their entry in Settings → Editors (Give site access) */
   editorId?: number | null;
   onClose: () => void;
@@ -595,7 +580,7 @@ export function AddEditorDialog({ name, email, city, timezone, hours, editorId, 
   const qc = useQueryClient();
   const access = editorId != null;
   const preset: PersonPreset = {
-    name, role: 'editor', editorKind: 'short_form', email: email ?? undefined,
+    name, role: 'editor', editorKind: editorKind ?? 'short_form', email: email ?? undefined,
     city: city ?? undefined, timezone: timezone ?? undefined, hours: hours ?? undefined, access,
   };
   // they're on the team now, so their Settings → Editors entry goes (logged as given site access, not as removed)
@@ -609,9 +594,12 @@ function EditorDialog({ editor, onClose }: { editor?: Editor; onClose: () => voi
   const [city, setCity] = useState(editor?.city ?? '');
   const [tz, setTz] = useState(editor?.timezone ?? '');
   const [hours, setHours] = useState<[number, number]>(editor?.workHours ?? [9, 18]);
+  // what they do: an entry nobody has set stays unset (it reads as a video editor) until a kind is chosen here
+  const [kind, setKind] = useState<EditorKind | null>(editor ? editor.editorKind ?? null : 'short_form');
+  const shownKind: EditorKind = kind ?? 'short_form';
   const ids = { n: useFieldId('ed-n') };
-  const body = { name, city, timezone: tz || undefined, workStart: hours[0], workEnd: hours[1] % 24 || 24 };
-  const save = useSave(() => (editor ? api(`/api/editors/${editor.id}`, { method: 'PATCH', body }) : api('/api/editors', { body })), {
+  const body: EditorInput = { name, city, timezone: tz || undefined, workStart: hours[0], workEnd: hours[1] % 24 || 24, editorKind: kind };
+  const save = useSave(() => (editor ? api(`/api/editors/${editor.id}`, { method: 'PATCH', body: { ...body } }) : api('/api/editors', { body: { ...body } })), {
     onSuccess: () => { toast(editor ? `${name} updated` : `${name} added`); onClose(); },
   });
   const f = save.error?.fields ?? {};
@@ -621,6 +609,17 @@ function EditorDialog({ editor, onClose }: { editor?: Editor; onClose: () => voi
       <form className="form" onSubmit={(e) => { e.preventDefault(); save.mutate(undefined); }}>
         <FormError error={save.error && !Object.keys(f).length ? save.error : null} />
         <Field label="Name" htmlFor={ids.n} error={f.name}><input className="input" value={name} onChange={(e) => setName(e.target.value)} {...inputProps(ids.n, f.name)} data-autofocus /></Field>
+        <div className="field">
+          <span className="lbl">Kind</span>
+          <Seg role="group" aria-label="Kind of editor" style={{ alignSelf: 'flex-start' }}>
+            {EDITOR_KINDS.map((k) => <button key={k} type="button" aria-pressed={shownKind === k} onClick={() => { if (save.error) save.reset(); setKind(k); }}>{EDITOR_KIND_LABEL[k]}</button>)}
+          </Seg>
+          {f.editorKind ? <span className="err" role="alert"><CircleAlert aria-hidden />{f.editorKind}</span> : (
+            <span className="help">{shownKind === 'thumbnail'
+              ? 'Makes thumbnails. Give site access starts them as a Thumbnail designer, with their own Studio. The Editors tab leaves them out.'
+              : 'Cuts the videos. The Editors tab and Timeliner’s rules count them as a video editor.'}</span>
+          )}
+        </div>
         <PlaceFields city={city} tz={tz} hours={hours} f={f}
           onChange={(v) => { if (save.error) save.reset(); if (v.city !== undefined) setCity(v.city); if (v.tz !== undefined) setTz(v.tz); if (v.hours) setHours(v.hours); }} />
         <button type="submit" hidden />

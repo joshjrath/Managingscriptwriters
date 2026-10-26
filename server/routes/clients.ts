@@ -2,14 +2,19 @@
 
 import { DESIGNER_FILES, EDITOR_FILES, fileStream, isBlockedFile, SENT_OPTION_FILES, spool, storedFileName, storeFile, type UploadedFile } from '../files';
 import type { FastifyInstance } from 'fastify';
-import { isEditor, isManager, isThumbnailDesigner, type Role } from '../../shared/workflow';
+import {
+  BRAND_LIMITS, brandChanges, EMPTY_BRAND, isEditor, isHttpsUrl, isManager, isThumbnailDesigner, type BrandColour, type BrandFont, type BrandKitFields,
+  type Role,
+} from '../../shared/workflow';
+import { HEX, normalizeHex } from '../../shared/palettes';
 import { z } from 'zod';
 import { clockFor, isAssignedTo, loadBatches, loadSettings, logActivity, type Ctx } from '../core';
 import { requireManager, requireUser } from '../auth';
 import { forbidden, HttpError, notFound, optionalDate, parse, zs } from '../http';
-import { loadActivity, loadBriefings, loadResources, loadShoots } from '../records';
+import { brandLists, loadActivity, loadBriefings, loadClientBrand, loadResources, loadShoots } from '../records';
+import { loadWins, RECENT_WINNERS } from '../thumbnails';
 import { batchFields, insertBatch } from './batches';
-import type { ClientDetail, ClientSummary, Me, ResourceCategory } from '../../shared/types';
+import type { ClientBrand, ClientDetail, ClientSummary, Me, ResourceCategory, ThumbnailWin } from '../../shared/types';
 import { RESOURCE_CATEGORIES } from '../../shared/types';
 import { fmtDate } from '../../shared/format';
 import type { Db } from '../db';
@@ -64,6 +69,65 @@ const resourceCreate = z.object({
   notes: zs.text(2000),
 });
 
+// ── a client's brand kit (PATCH /api/clients/:id/brand) ─────────────────
+// Problems with the colours or the fonts are reported on the list itself (fields.colours, fields.fonts), not on one
+// entry of it, so the form shows them beside the swatches or the fonts.
+
+/** A list in a brand kit: every entry checked by `item`, the first problem reported on the list. */
+const brandList = <T>(what: string, max: number, item: z.ZodType<T>) =>
+  z.array(z.unknown(), `Send the ${what} as a list`)
+    .max(max, `A brand kit holds up to ${max} ${what}`)
+    .transform((list, ctx) => {
+      const out: T[] = [];
+      for (const v of list) {
+        const r = item.safeParse(v);
+        if (!r.success) {
+          ctx.addIssue({ code: 'custom', message: r.error.issues[0]?.message ?? `Check the ${what}` });
+          return z.NEVER;
+        }
+        out.push(r.data);
+      }
+      return out;
+    });
+
+/** A colour's or a font's name: on one line, 1 to BRAND_LIMITS.name characters. */
+const brandName = (what: string) =>
+  z.string(`Give each ${what} a name`)
+    .transform((v) => v.replace(/\s+/g, ' ').trim())
+    .pipe(z.string().min(1, `Give each ${what} a name`).max(BRAND_LIMITS.name, `Keep each ${what}’s name to ${BRAND_LIMITS.name} characters`));
+
+const brandColour: z.ZodType<BrandColour> = z.object({
+  name: brandName('colour'),
+  // HEX (shared/palettes.ts), kept in capitals; '#abc' reads as '#AABBCC'
+  hex: z.string('Give each colour a code like #1E88E5').transform((v, ctx) => {
+    const hex = normalizeHex(v);
+    if (hex && HEX.test(hex)) return hex;
+    ctx.addIssue({ code: 'custom', message: `“${v.trim().slice(0, 20)}” isn’t a colour code. Use one like #1E88E5` });
+    return z.NEVER;
+  }),
+});
+
+const brandFont: z.ZodType<BrandFont> = z.object({
+  name: brandName('font'),
+  url: z.string('Use a link starting with https://').nullable().optional().transform((v, ctx) => {
+    const url = v?.trim() ?? '';
+    if (!url) return null;
+    if (url.length <= 2000 && isHttpsUrl(url)) return url;
+    ctx.addIssue({ code: 'custom', message: 'Use a secure link for each font, starting with https://' });
+    return z.NEVER;
+  }),
+  resourceId: z.number('Choose a font file from this client’s resources').int().positive().nullable().optional().transform((v) => v ?? null),
+});
+
+const brandPatch = z.object({
+  colours: brandList('colours', BRAND_LIMITS.colours, brandColour).optional(),
+  fonts: brandList('fonts', BRAND_LIMITS.fonts, brandFont).optional(),
+  dos: zs.text(BRAND_LIMITS.notes),
+  donts: zs.text(BRAND_LIMITS.notes),
+});
+
+const BRAND_FIELD_WORDS: Record<keyof BrandKitFields, string> = { colours: 'colours', fonts: 'fonts', dos: 'do’s', donts: 'don’ts' };
+
 async function duplicateName(db: Db, name: string, exceptId?: number) {
   const r = await db.one<{ id: number; status: string }>(`select id, status from clients where lower(name) = lower($1) and ($2::bigint is null or id <> $2)`, [name, exceptId ?? null]);
   if (r) {
@@ -114,6 +178,22 @@ export async function insertBriefing(t: Db, me: Me, clientId: number, input: z.i
   return id;
 }
 
+/**
+ * The client's current winners for its page (newest first, at most RECENT_WINNERS): all of them for managers; for a
+ * thumbnail designer only those they may open (DESIGNER_FILES: so only when they have or had a brief for this client),
+ * with Standout only on their own, as beside a brief. Left out (undefined) for writers and video editors.
+ */
+async function clientWinners(db: Db, me: Me, clientId: number): Promise<ThumbnailWin[] | undefined> {
+  if (isManager(me.role)) return loadWins(db, { clientId, limit: RECENT_WINNERS });
+  if (!isThumbnailDesigner(me)) return undefined;
+  const wins = await loadWins(db, { clientId, limit: RECENT_WINNERS });
+  if (!wins.length) return [];
+  const open = new Set((await db.query<{ id: number }>(
+    `select f.id from files f where f.id = any($1::bigint[]) and ${DESIGNER_FILES('$2')}`, [wins.map((w) => w.option.fileId), me.id],
+  )).map((f) => Number(f.id)));
+  return wins.filter((w) => open.has(w.option.fileId)).map((w) => (w.standout && w.option.uploadedById !== me.id ? { ...w, standout: false } : w));
+}
+
 /** Writers may add resources to batches they work on; managers anywhere. */
 async function checkResourceAccess(db: Db, me: Me, clientId: number, batchId: number | null | undefined, briefingId: number | null | undefined) {
   const client = await db.one(`select 1 from clients where id = $1`, [clientId]);
@@ -151,12 +231,14 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
     if (!summary) throw notFound('Client');
     const c = await db.one<{ brand_voice: string | null; guidance: string | null; scripts_required: boolean }>(`select brand_voice, guidance, scripts_required from clients where id = $1`, [id]);
     const clock = await clockFor(ctx);
-    const [briefings, resources, shoots, batches, activity] = await Promise.all([
+    const [briefings, resources, shoots, batches, activity, brand, recentWinners] = await Promise.all([
       loadBriefings(db, { clientId: id }),
       loadResources(db, { clientId: id }),
       loadShoots(db, { clientId: id }),
       loadBatches(ctx, { clientId: id, includeArchived: true }, clock),
       loadActivity(db, { clientId: id, limit: 80 }),
+      loadClientBrand(db, id),
+      clientWinners(db, me, id),
     ]);
     return {
       ...summary, description: summary.status === 'prospect' && !isManager(me.role) ? null : summary.description,
@@ -164,7 +246,54 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
       briefings, resources: resources.filter((r) => !r.briefingId), shoots,
       // editors get the brand material, not the batches; the team's internal history is for managers
       batches: isEditor(me.role) ? [] : batches.summaries, activity: isManager(me.role) ? activity : [],
+      // the brand kit is for everyone who may see the client; its winners only for managers and thumbnail designers
+      brand, ...(recentWinners ? { recentWinners } : {}),
     };
+  });
+
+  // Edits a client's brand kit: only the fields sent, and of those only what differs from the kit as kept (brandChanges,
+  // which the form uses too). A font's file must be a stored file among this client's live resources (one the kit
+  // already names may stay after it's removed: it shows without its file). The client row is locked first.
+  app.patch('/api/clients/:id/brand', async (req): Promise<ClientBrand> => {
+    const me = requireManager(req);
+    const { id } = parse(z.object({ id: zs.id }), req.params);
+    const input = parse(brandPatch, req.body);
+    await db.tx(async (t) => {
+      const client = await t.one<{ name: string; status: string }>(`select name, status from clients where id = $1 for update`, [id]);
+      if (!client) throw notFound('Client');
+      if (client.status === 'archived') throw new HttpError(409, `${client.name} is archived. Restore them first.`, undefined, 'archived');
+      const kept = await t.one<{ colours: unknown; fonts: unknown; dos: string | null; donts: string | null }>(
+        `select colours, fonts, dos, donts from client_brand where client_id = $1`, [id],
+      );
+      const before: BrandKitFields | null = kept ? { ...brandLists(kept.colours, kept.fonts), dos: kept.dos, donts: kept.donts } : null;
+      const changed = brandChanges(before, input);
+      const fields = (Object.keys(changed) as (keyof BrandKitFields)[]).filter((k) => changed[k] !== undefined);
+      if (!fields.length) return;
+      if (changed.fonts) {
+        const already = new Set((before?.fonts ?? []).map((f) => f.resourceId).filter((r) => r != null));
+        const asked = [...new Set(changed.fonts.map((f) => f.resourceId).filter((r): r is number => r != null && !already.has(r)))];
+        const live = asked.length
+          ? new Set((await t.query<{ id: number }>(
+            `select id from resources where id = any($1::bigint[]) and client_id = $2 and removed_at is null and file_id is not null`, [asked, id],
+          )).map((r) => Number(r.id)))
+          : new Set<number>();
+        if (asked.some((r) => !live.has(r))) {
+          throw new HttpError(400, 'Choose a font file from this client’s resources', { fonts: 'Choose a font file from this client’s resources' });
+        }
+      }
+      const next = { ...(before ?? EMPTY_BRAND), ...changed };
+      await t.query(
+        `insert into client_brand (client_id, colours, fonts, dos, donts, updated_by, updated_at) values ($1, $2::jsonb, $3::jsonb, $4, $5, $6, now())
+         on conflict (client_id) do update set colours = excluded.colours, fonts = excluded.fonts, dos = excluded.dos, donts = excluded.donts,
+                                               updated_by = excluded.updated_by, updated_at = excluded.updated_at`,
+        [id, JSON.stringify(next.colours), JSON.stringify(next.fonts), next.dos, next.donts, me.id],
+      );
+      await logActivity(t, {
+        actor: me, action: 'client.brand', entityType: 'client', entityId: id, clientId: id,
+        summary: `Updated ${client.name}’s brand kit: ${fields.map((k) => BRAND_FIELD_WORDS[k]).join(', ')}`,
+      });
+    });
+    return (await loadClientBrand(db, id)) ?? { clientId: id, ...EMPTY_BRAND, fonts: [], updatedByName: null, updatedAt: ctx.now().toISOString() };
   });
 
   /** A client's internal owner must be an active team member (one who has since left can stay on). */

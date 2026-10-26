@@ -13,14 +13,16 @@
 // - A designer the brief was taken from reads the rounds they sent.
 // Everyone gets Compare (this round's option against the last round's, side by side or with a swipe), Preview in
 // the wild (every option at feed sizes, beside the client's recent winners), Lights down (one option alone on black,
-// full screen), the round film strip, and on a desktop the keys (ThumbKeys.tsx).
+// full screen), the Brand drawer (the client's brand kit beside the work, with a designer's own references for that
+// client under it; the Brand button or B), the round film strip, and on a desktop the keys (ThumbKeys.tsx).
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  ArrowRight, Ban, Check, CircleAlert, Columns2, Contrast, Download, Eye, Glasses, Image as ImageIcon, MapPinPlus, Maximize2, Pencil, RotateCcw, Send, Sparkles,
-  Trash2, Trophy, Undo2,
+  ArrowRight, Ban, Check, CircleAlert, Columns2, Contrast, Download, Eye, Glasses, Image as ImageIcon, MapPinPlus, Maximize2, Palette, Pencil, RotateCcw, Send,
+  Sparkles, Trash2, Trophy, Undo2, X,
 } from 'lucide-react';
 import { api, useSave, type ApiError } from '../api';
 import type { ThumbnailBriefDetail, ThumbnailDecision, ThumbnailDecisionInput, ThumbnailOption, ThumbnailRound } from '../../../shared/types';
@@ -42,6 +44,8 @@ import { useNow } from '../components/EditingBits';
 import { burst, centerOf, plane } from '../fx';
 import { motionAllowed } from '../motion';
 import { BriefDialog, CancelBriefDialog, useReopenBrief } from './Thumbnails';
+import { BrandKit } from '../components/BrandKit';
+import { BriefRefs } from './StudioRefs';
 
 export function ThumbBriefPage() {
   const { id } = useParams();
@@ -73,6 +77,15 @@ function Workbench({ d }: { d: ThumbnailBriefDetail }) {
   const [lights, setLights] = useState(false);
   const [cur, setCur] = useState(0);
   const [keyed, setKeyed] = useState(false);
+  const [brand, setBrand] = useState(false);
+  const brandBtn = useRef<HTMLButtonElement>(null);
+  const brandId = `tb-brand-${useId().replace(/:/g, '')}`;
+  // closing gives the keyboard back to the Brand button when it was in the drawer (or nowhere)
+  const closeBrand = useCallback(() => {
+    setBrand(false);
+    const el = document.activeElement;
+    if (!el || el === document.body || el.closest('.tb-brand')) requestAnimationFrame(() => brandBtn.current?.focus({ preventScroll: true }));
+  }, []);
   const reopen = useReopenBrief();
   const tray = useTray(d);
   const latest = d.rounds[d.rounds.length - 1] ?? null;
@@ -149,6 +162,7 @@ function Workbench({ d }: { d: ThumbnailBriefDetail }) {
       case 'squint': setSquint((v) => !v); return;
       case 'grey': setGrey((v) => !v); return;
       case 'lights': if (stage.length) setLights((v) => !v); return;
+      case 'brand': if (brand) closeBrand(); else setBrand(true); return;
       case 'prev': flick(-1); return;
       case 'next': flick(1); return;
     }
@@ -170,7 +184,7 @@ function Workbench({ d }: { d: ThumbnailBriefDetail }) {
   const paneLabel = view === 'work' ? workLabel : view === 'compare' ? 'Compare' : 'Preview in the wild';
   return (
     // a manager's review puts the round first whenever the columns stack: it's what they came to decide on
-    <div className={`studio tb${manager ? ' review' : ''}`}>
+    <div className={`studio tb${manager ? ' review' : ''}${brand ? ' brand-open' : ''}`}>
       <PageHeader title={d.title} crumbs={crumbs} hideNewWork
         sub={<span className="row-flex s2"><StateChip brief={d} /><DueTag dueOn={d.dueOn} today={clock.today} state={d.state} />{d.roundsSent > 0 && <span className="muted">{plural(d.roundsSent, 'round')} sent</span>}</span>}>
         {tools}
@@ -191,7 +205,7 @@ function Workbench({ d }: { d: ThumbnailBriefDetail }) {
                   : d.state === 'cancelled' && <Button variant="sm ghost" icon={<Undo2 aria-hidden />} busy={reopen.isPending} onClick={() => reopen.mutate(d.id)}>Reopen</Button>}
               </div>
             ) : undefined} />
-          <ClientLook look={d.look} />
+          <ClientLook look={d.look} onBrand={() => setBrand(true)} />
         </div>
         <section className={`panel tb-main${squint ? ' squint' : ''}${grey ? ' grey' : ''}`} aria-label={paneLabel}>
           <div className="tb-tabs">
@@ -208,6 +222,8 @@ function Workbench({ d }: { d: ThumbnailBriefDetail }) {
               </div>
             )}
             <div className="tb-tabs-tools">
+              <Button ref={brandBtn} variant={`sm ${brand ? 'primary' : 'ghost'}`} icon={<Palette aria-hidden />} aria-expanded={brand} aria-controls={brand ? brandId : undefined}
+                onClick={() => (brand ? closeBrand() : setBrand(true))} title="The client’s brand kit, beside the work (B)">Brand</Button>
               {stage.length > 0 && <Button variant="sm ghost" icon={<Maximize2 aria-hidden />} onClick={() => setLights(true)} title="Lights down (L)">Lights down</Button>}
               <KeysPopover manager={manager && d.can.decide} />
             </div>
@@ -235,9 +251,61 @@ function Workbench({ d }: { d: ThumbnailBriefDetail }) {
 
       {ask && latest && <DecideDialog d={d} round={latest} ask={ask} again={!!latest.decisions[0]} pins={pins} onClose={() => setAsk(null)} />}
       {lights && stage.length > 0 && <LightsDown options={stage} index={at} onIndex={setCur} title={d.title} squint={squint} grey={grey} onClose={() => setLights(false)} />}
+      {brand && <BrandDrawer d={d} id={brandId} designer={designer} onClose={closeBrand} />}
       {edit && <BriefDialog brief={d} focus={edit === 'designer' ? 'designer' : undefined} onClose={() => setEdit(null)} />}
       {cancelling && <CancelBriefDialog brief={d} onClose={() => setCancelling(false)} />}
     </div>
+  );
+}
+
+/** Where the Brand drawer is the whole screen (app.css): there the page behind it is inert while it's open. */
+const DRAWER_FULL = '(max-width: 560px)';
+
+/**
+ * The client's brand kit beside the work: a panel on the right that leaves the page usable (from a laptop up the page
+ * makes room for it; narrower, it sits over the right side). On a phone it's the whole screen, and the page behind it
+ * is inert, so Tab and a screen reader stay in it. A designer's own references for the client are under the kit. It
+ * takes focus when it opens; Esc inside it, its close button, the Brand button or B close it.
+ */
+function BrandDrawer({ d, id, designer, onClose }: { d: ThumbnailBriefDetail; id: string; designer: boolean; onClose: () => void }) {
+  const box = useRef<HTMLElement>(null);
+  const hid = useId();
+  useEffect(() => { box.current?.focus({ preventScroll: true }); }, []);
+  useEffect(() => {
+    // the page (its skip link, rail, top bar and content); the drawer and the toasts are outside it
+    const behind = [...document.querySelectorAll<HTMLElement>('#root > .skip-link, #root > .app')];
+    const full = window.matchMedia(DRAWER_FULL);
+    const apply = () => { for (const el of behind) el.inert = full.matches; };
+    apply();
+    full.addEventListener('change', apply);
+    return () => { full.removeEventListener('change', apply); for (const el of behind) el.inert = false; };
+  }, []);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('dialog[open]')) return;
+      if (!box.current?.contains(document.activeElement)) return;
+      e.preventDefault();
+      onClose();
+    };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [onClose]);
+  const look = d.look;
+  return createPortal(
+    <aside id={id} ref={box} tabIndex={-1} className="tb-brand" aria-labelledby={hid}>
+      <div className="tb-brand-head">
+        <div className="tb-brand-t">
+          <h2 id={hid}>{look.clientName}’s brand kit</h2>
+          <span className="sub">beside “{d.title}”<span className="tb-brand-key"> · B to close</span></span>
+        </div>
+        <button type="button" className="icon-btn" onClick={onClose} aria-label="Close the brand kit"><X /></button>
+      </div>
+      <div className="tb-brand-body">
+        <BrandKit variant="drawer" clientId={look.clientId} clientName={look.clientName} brand={look.brand ?? null} resources={[...look.images, ...look.resources]} />
+        {designer && <BriefRefs clientId={look.clientId} clientName={look.clientName} />}
+      </div>
+    </aside>,
+    document.body,
   );
 }
 

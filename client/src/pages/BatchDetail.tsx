@@ -11,7 +11,7 @@ import {
 import { api, useSave, type ApiError } from '../api';
 import type { BatchDetail, ClientDetail, MyWork, Priority, ReschedulePreview, Resource, ResourceCategory, Script, Submission } from '../../../shared/types';
 import { PRIORITIES, PRIORITY_LABEL, RESOURCE_CATEGORIES, RESOURCE_LABEL } from '../../../shared/types';
-import { allowedFrom, canWrite, checkAction, compressRanges, parseRanges, ROLE_LABEL, scriptsLabel, STATUS_LABEL, type ScriptAction, type ScriptStatus, isManager } from '../../../shared/workflow';
+import { allowedFrom, canWrite, checkAction, compressRanges, isPictureMime, parseRanges, PICTURE_MIMES, ROLE_LABEL, scriptsLabel, STATUS_LABEL, type ScriptAction, type ScriptStatus, isManager } from '../../../shared/workflow';
 import { addDays, computeDeadlines, diffDays, draftFromFinal, isISODate, suggestStart, type ISODate } from '../../../shared/dates';
 import { cutoffIn, fmtBytes, fmtCutoff, fmtDate, fmtLong, fmtRange, fmtStamp, fmtTimeZoneAbbr, plural } from '../../../shared/format';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
@@ -779,7 +779,7 @@ function ScriptDialog({ s, b, onClose }: { s: Script; b: BatchDetail; onClose: (
 
 // ── brief, review notes, deliveries ──────────────────────────────────────
 
-const RES_ICON: Record<ResourceCategory, ReactNode> = { folder: <Link2 />, example: <FileText />, asset: <Upload />, recording: <PlayCircle />, document: <FileText />, other: <Link2 /> };
+const RES_ICON: Record<ResourceCategory, ReactNode> = { folder: <Link2 />, example: <FileText />, asset: <Upload />, recording: <PlayCircle />, document: <FileText />, other: <Link2 />, logo: <Upload />, reference: <Upload />, font: <FileText /> };
 
 export function ResourceRow({ r, onRemove, extra }: { r: Resource; onRemove?: () => void; extra?: ReactNode }) {
   const href = r.kind === 'file' ? `/api/files/${r.fileId}` : r.url!;
@@ -1192,13 +1192,19 @@ function BlockerDialog({ b, open, onClose }: { b: BatchDetail; open: boolean; on
   );
 }
 
-export function ResourceDialog({ open, onClose, clientId, batchId, briefingId }: { open: boolean; onClose: () => void; clientId: number; batchId?: number; briefingId?: number }) {
+export function ResourceDialog({ open, onClose, clientId, batchId, briefingId, category: startAs }: {
+  open: boolean; onClose: () => void; clientId: number; batchId?: number; briefingId?: number;
+  /** the type it opens on (a Brand kit's Add logo, Add font file: a file to upload); otherwise it keeps the last one chosen */
+  category?: ResourceCategory;
+}) {
   const toast = useToast();
   const { uploadLimitMb } = useBoot();
   const [mode, setMode] = useState<'link' | 'file'>('link');
   const [title, setTitle] = useState('');
   const [url, setUrl] = useState('');
-  const [category, setCategory] = useState<ResourceCategory>('folder');
+  const [category, setCategory] = useState<ResourceCategory>(startAs ?? 'folder');
+  // opened for a logo, a reference or a font file: that type, as a file
+  useEffect(() => { if (open && startAs) { setCategory(startAs); setMode('file'); } }, [open, startAs]);
   const [file, setFile] = useState<File | null>(null);
   const [local, setLocal] = useState<Record<string, string>>({});
   const reset = () => { setTitle(''); setUrl(''); setFile(null); setLocal({}); };
@@ -1215,6 +1221,12 @@ export function ResourceDialog({ open, onClose, clientId, batchId, briefingId }:
   }, { onSuccess: () => { toast(mode === 'link' ? 'Link added' : 'File uploaded'); reset(); onClose(); } });
   const f = { ...local, ...(save.error?.fields ?? {}) };
   const ids = { t: useFieldId('rt'), u: useFieldId('ru'), c: useFieldId('rc'), f: useFieldId('rf') };
+  // a logo or a reference shows as a picture in the brand kit (and a logo's colours can be picked) only as an image the site shows
+  const picture = category === 'logo' || category === 'reference';
+  const why = category === 'logo' ? 'it shows as a picture and its colours can be picked' : 'it shows as a picture';
+  const fileHelp = !picture ? `Up to ${uploadLimitMb} MB. Only signed-in team members can open it.`
+    : file && !isPictureMime(file.type) ? `This file will be kept to download, but won’t show as a picture. Use a PNG, JPG, GIF or WebP file instead, so ${why}.`
+    : `PNG, JPG, GIF or WebP, so ${why}. Up to ${uploadLimitMb} MB.`;
   const submit = () => {
     const errs: Record<string, string> = {};
     if (mode === 'link' && !/^https?:\/\/\S+$/i.test(url)) errs.url = 'Use a full link starting with https://';
@@ -1234,8 +1246,13 @@ export function ResourceDialog({ open, onClose, clientId, batchId, briefingId }:
         <FormError error={save.error && !Object.keys(save.error.fields).length ? save.error : null} />
         <Field label="Title" optional={mode === 'file'} htmlFor={ids.t} error={f.title}><input className="input" value={title} onChange={(e) => setTitle(e.target.value)} {...inputProps(ids.t, f.title)} /></Field>
         {mode === 'link'
-          ? <Field label="Link" htmlFor={ids.u} error={f.url}><input className="input" type="url" placeholder="https://" value={url} onChange={(e) => setUrl(e.target.value)} {...inputProps(ids.u, f.url)} /></Field>
-          : <Field label="File" htmlFor={ids.f} error={f.file} help={`Up to ${uploadLimitMb} MB. Only signed-in team members can open it.`}><input className="input" type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} {...inputProps(ids.f, f.file)} /></Field>}
+          ? <Field key="link" label="Link" htmlFor={ids.u} error={f.url}><input className="input" type="url" placeholder="https://" value={url} onChange={(e) => setUrl(e.target.value)} {...inputProps(ids.u, f.url)} /></Field>
+          : (
+            // its own input (a key apiece): the link's is controlled, a file input never is
+            <Field key="file" label="File" htmlFor={ids.f} error={f.file} help={fileHelp}>
+              <input className="input" type="file" accept={picture ? PICTURE_MIMES.join(',') : undefined} onChange={(e) => setFile(e.target.files?.[0] ?? null)} {...inputProps(ids.f, f.file)} />
+            </Field>
+          )}
         <Field label="Type" htmlFor={ids.c}><select className="select" id={ids.c} value={category} onChange={(e) => setCategory(e.target.value as ResourceCategory)}>{RESOURCE_CATEGORIES.map((c) => <option key={c} value={c}>{RESOURCE_LABEL[c]}</option>)}</select></Field>
       </div>
     </Dialog>

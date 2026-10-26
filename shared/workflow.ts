@@ -8,6 +8,7 @@
 
 import { dueState, describeDue, type Clock, type ISODate } from './dates';
 import { fmtBytes } from './format';
+import { contrastRatio, MIN_ACCENT_CONTRAST, normalizeHex, relativeLuminance } from './palettes';
 
 export const SCRIPT_STATUSES = [
   'not_started',
@@ -227,6 +228,12 @@ export const editorKindOf = (p: KindOf): EditorKind | null => (isEditor(p.role) 
 export const isThumbnailDesigner = (p: KindOf) => editorKindOf(p) === 'thumbnail';
 /** Cuts the videos: their home is /editor, and Timeliner's videos can be theirs. */
 export const isVideoEditor = (p: KindOf) => { const k = editorKindOf(p); return k != null && VIDEO_EDITOR_KINDS.includes(k); };
+/**
+ * Someone kept in Settings → Editors (who doesn't sign in, so has no role) cuts videos unless their entry names
+ * another kind: no kind is a video editor, as every entry was before kinds. The Editors tab and Timeliner's rules
+ * take only these.
+ */
+export const isVideoEditorKind = (kind: EditorKind | null | undefined) => VIDEO_EDITOR_KINDS.includes(kind ?? 'short_form');
 
 /**
  * Kinds written into SQL as a list for `in (…)`: `'thumbnail'`. Only these constants ever go in, never input, and an
@@ -820,4 +827,159 @@ export function tidySecondLook(raw: unknown): SecondLookResult | null {
     .filter(Boolean)
     .slice(0, L.suggestions);
   return { oneLiner, checks, suggestions };
+}
+
+// ── a client's brand kit ─────────────────────────────────────────────────
+// Managers keep each client's colours, fonts, do's and don'ts (client_brand, PATCH /api/clients/:id/brand); everyone
+// who may see the client reads them, beside the client's logos and references (resources in those categories). The
+// Thumbnail Studio shows the kit beside a brief, and the AI second look reads it.
+
+/** One brand colour: what the client calls it, and #RRGGBB (HEX in shared/palettes.ts; kept in capitals). */
+export interface BrandColour { name: string; hex: string }
+/** One brand font: its name, and where to get it: an https link and/or a font file kept as one of the client's resources. */
+export interface BrandFont { name: string; url: string | null; resourceId: number | null }
+/** A brand kit's editable fields, as kept and as an edit carries them. */
+export interface BrandKitFields { colours: BrandColour[]; fonts: BrandFont[]; dos: string | null; donts: string | null }
+/** A client with no kit yet reads as this. */
+export const EMPTY_BRAND: BrandKitFields = { colours: [], fonts: [], dos: null, donts: null };
+
+/** The most colours and fonts a kit holds, the longest colour or font name, and the longest do's (and don'ts). */
+export const BRAND_LIMITS = { colours: 12, fonts: 6, name: 40, notes: 1000 } as const;
+
+/** A secure web link (a font's): https, with a host. Plain http is refused. */
+export const isHttpsUrl = (v: string) => /^https:\/\/[^\s/?#@]+(?:[/?#]\S*)?$/i.test(v);
+
+/** What's wrong with one colour of the kit editor, field by field, so every problem shows at once (none: `{}`). */
+export function brandColourProblems(c: { name: string; hex: string }): { name?: string; hex?: string } {
+  const out: { name?: string; hex?: string } = {};
+  if (!c.name.trim()) out.name = 'Give it a name';
+  if (!normalizeHex(c.hex)) out.hex = 'Use a colour code like #1F6FEB';
+  return out;
+}
+
+/** What's wrong with one font of the kit editor, field by field (none: `{}`). Its link is optional, but https when given. */
+export function brandFontProblems(f: { name: string; url: string }): { name?: string; url?: string } {
+  const out: { name?: string; url?: string } = {};
+  if (!f.name.trim()) out.name = 'Give it a name';
+  if (f.url.trim() && !isHttpsUrl(f.url.trim())) out.url = 'Use a secure link that starts with https://';
+  return out;
+}
+
+const tidyLine = (v: unknown) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim() : '');
+const tidyNote = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+
+/** A kit's fields as they're kept: names on one line and trimmed, hex in capitals, links trimmed, do's and don'ts trimmed (empty is none). Only the fields given. */
+export function tidyBrand(k: Partial<BrandKitFields>): Partial<BrandKitFields> {
+  const out: Partial<BrandKitFields> = {};
+  if (k.colours !== undefined) out.colours = k.colours.map((c) => ({ name: tidyLine(c.name), hex: normalizeHex(c.hex) ?? tidyLine(c.hex) }));
+  if (k.fonts !== undefined) out.fonts = k.fonts.map((f) => ({ name: tidyLine(f.name), url: tidyLine(f.url) || null, resourceId: f.resourceId ?? null }));
+  if (k.dos !== undefined) out.dos = tidyNote(k.dos);
+  if (k.donts !== undefined) out.donts = tidyNote(k.donts);
+  return out;
+}
+
+/**
+ * The fields of `next` that differ from the kit as kept (`before`; null when the client has none yet), tidied
+ * (tidyBrand): what an edit sends, and what the server treats as changed. Colours and fonts compare as whole lists, in
+ * order (so moving a swatch is a change), colours by name and hex in any case, fonts by name, link and file.
+ */
+export function brandChanges(before: BrandKitFields | null, next: Partial<BrandKitFields>): Partial<BrandKitFields> {
+  const was = tidyBrand(before ?? EMPTY_BRAND);
+  const now = tidyBrand(next);
+  const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const out: Partial<BrandKitFields> = {};
+  if (now.colours !== undefined && !same(now.colours, was.colours)) out.colours = now.colours;
+  if (now.fonts !== undefined && !same(now.fonts, was.fonts)) out.fonts = now.fonts;
+  if (now.dos !== undefined && now.dos !== was.dos) out.dos = now.dos;
+  if (now.donts !== undefined && now.donts !== was.donts) out.donts = now.donts;
+  return out;
+}
+
+/** How a kit's darkest and lightest colours read together: the WCAG ratio, its label ("4.5:1", never rounded up) and whether text would be readable (4.5:1, AA). */
+export interface BrandContrast { dark: string; light: string; ratio: number; label: string; readable: boolean }
+
+/** The contrast between a kit's darkest and lightest colours (by luminance), or null with fewer than two different colours. */
+export function brandContrast(colours: readonly { hex: string }[]): BrandContrast | null {
+  const hexes = [...new Set(colours.map((c) => normalizeHex(c.hex)).filter((h): h is string => !!h))];
+  if (hexes.length < 2) return null;
+  const byLight = hexes.map((hex) => ({ hex, l: relativeLuminance(hex) })).sort((a, b) => a.l - b.l);
+  const dark = byLight[0].hex;
+  const light = byLight[byLight.length - 1].hex;
+  const ratio = contrastRatio(dark, light);
+  return { dark, light, ratio, label: `${(Math.floor(ratio * 10) / 10).toFixed(1)}:1`, readable: ratio >= MIN_ACCENT_CONTRAST };
+}
+
+// ── Thumbnail Studio: reference boards ──────────────────────────────────
+// A thumbnail designer keeps a private board of pictures to work from, per client or general: images they upload
+// (checked like options), winners they may see, and clients' image resources. Only its owner ever sees a ref, or
+// opens an uploaded one.
+
+/** What a ref is: an image they uploaded, a picked option they may see, or one of a client's image resources. */
+export const THUMB_REF_SOURCES = ['upload', 'winner', 'resource'] as const;
+export type ThumbRefSource = (typeof THUMB_REF_SOURCES)[number];
+/** The most refs one designer keeps on their boards. Only the ones they can still open count: not taken-off ones, nor a winner un-picked or a resource removed since. */
+export const MAX_REFS = 300;
+/** The longest caption on a ref. */
+export const REF_CAPTION_MAX = 200;
+/** GET /api/thumbnail-refs?clientId=general: only the general board (refs with no client). */
+export const GENERAL_BOARD = 'general';
+
+/** A ref's source from its row: exactly one of its upload, winner and resource is set (thumbnail_refs_source_check); null otherwise. */
+export function refSource(r: { fileId: number | null; variantId: number | null; resourceId: number | null }): ThumbRefSource | null {
+  const set = [r.fileId, r.variantId, r.resourceId].map((v) => v != null);
+  if (set.filter(Boolean).length !== 1) return null;
+  return set[0] ? 'upload' : set[1] ? 'winner' : 'resource';
+}
+
+// ── Thumbnail Studio: AI brief ideas ────────────────────────────────────
+// In New thumbnail a manager can ask Claude for three directions for the video (only when the server has an
+// ANTHROPIC_API_KEY): what it should show, the words on the image and why. Nothing is kept: an idea only fills the form.
+
+/** How many ideas one ask gives: always exactly this many. */
+export const THUMB_IDEA_COUNT = 3;
+/** The longest "what it should show", words on the image (characters, and words) and "why" an idea keeps. */
+export const THUMB_IDEA_LIMITS = { show: 200, words: 32, wordCount: 4, why: 120 } as const;
+
+/** One direction for a thumbnail: what it should show, the words on the image (may be empty) and why it works. */
+export interface ThumbIdea { show: string; words: string; why: string }
+
+/** Text compared as words: lower case, letters and digits only. */
+const plainWords = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+
+/**
+ * The words on the image as an idea keeps them: on one line, trimmed, without wrapping quotes. Empty when they don't
+ * fit (over THUMB_IDEA_LIMITS.wordCount words or .words characters: half a phrase reads wrong on an image, so they're
+ * dropped rather than cut) or just repeat the video's title.
+ */
+function imageWords(v: unknown, title: string): string {
+  const L = THUMB_IDEA_LIMITS;
+  const s = tidyLine(v).replace(/^["'“”‘’«»]+|["'“”‘’«»]+$/g, '').trim();
+  if (!s || s.length > L.words || s.split(' ').length > L.wordCount) return '';
+  return plainWords(s) && plainWords(s) === plainWords(title) ? '' : s;
+}
+
+/**
+ * Claude's ideas made safe to show: each "what it should show" and "why" trimmed and cut to its limit at a word break
+ * (as a second look's text is), the words on the image kept only when they fit (imageWords), ideas with nothing to show
+ * or showing the same as one before dropped, and the first THUMB_IDEA_COUNT kept. Null when fewer than that are left.
+ * The server runs every answer through this before sending it.
+ */
+export function tidyThumbIdeas(raw: unknown, title: string): ThumbIdea[] | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const list = (raw as { ideas?: unknown }).ideas;
+  if (!Array.isArray(list)) return null;
+  const L = THUMB_IDEA_LIMITS;
+  const seen = new Set<string>();
+  const out: ThumbIdea[] = [];
+  for (const item of list) {
+    if (out.length === THUMB_IDEA_COUNT) break;
+    if (!item || typeof item !== 'object') continue;
+    const i = item as { show?: unknown; words?: unknown; why?: unknown };
+    const show = clipText(i.show, L.show);
+    const key = plainWords(show);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ show, words: imageWords(i.words, title), why: clipText(i.why, L.why) });
+  }
+  return out.length === THUMB_IDEA_COUNT ? out : null;
 }

@@ -501,3 +501,22 @@ export function Term({ k, children }: { k: keyof typeof GLOSSARY; children?: Rea
 export function ExtLink({ href, children, className = 'link' }: { href: string; children: ReactNode; className?: string }) {
   return <a href={href} target="_blank" rel="noopener noreferrer" className={className}>{children}</a>;
 }
+
+/** Puts text on the clipboard; false when the browser wouldn't (say so, and show the text so it can be copied by hand). */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    // fallback for browsers that block the clipboard API
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  }
+}

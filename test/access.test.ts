@@ -95,6 +95,12 @@ const ACCESS: Record<string, Access> = {
   'POST /api/thumbnails/:id/send': 'user',
   // a designer's AI second look on an option of their own (only its maker: test/thumbnail-feedback.test.ts)
   'POST /api/thumbnail-options/:id/second-look': 'user',
+  // a designer's own reference boards: thumbnail designers only, managers refused too (only their own refs, and only
+  // they open an uploaded one: test/thumbnail-studio-3.test.ts)
+  'GET /api/thumbnail-refs': 'user',
+  'POST /api/thumbnail-refs': 'user',
+  'PATCH /api/thumbnail-refs/:id': 'user',
+  'DELETE /api/thumbnail-refs/:id': 'user',
 
   'POST /api/users': 'manager',
   'PATCH /api/users/:id': 'manager',
@@ -118,6 +124,7 @@ const ACCESS: Record<string, Access> = {
   'POST /api/clients/:id/stage': 'manager',
   'POST /api/clients/:id/archive': 'manager',
   'POST /api/clients/:id/briefings': 'manager',
+  'PATCH /api/clients/:id/brand': 'manager',
   'PATCH /api/briefings/:id': 'manager',
   'POST /api/script-bank/past': 'manager',
   'DELETE /api/script-bank/past/:id': 'manager',
@@ -127,6 +134,8 @@ const ACCESS: Record<string, Access> = {
   'POST /api/thumbnails': 'manager',
   'PATCH /api/thumbnails/:id': 'manager',
   'POST /api/thumbnails/:id/decision': 'manager',
+  // AI brief ideas in New thumbnail (nothing is saved)
+  'POST /api/thumbnails/suggest': 'manager',
 
   'GET /api/audit': 'admin',
   'PUT /api/settings/theme': 'admin',
@@ -284,7 +293,8 @@ describe('editors, by kind', () => {
   it('gives thumbnail designers their Studio, and nobody else but managers (who only read it)', async () => {
     const studio = allowed('thumbnail').filter((r) => !allowed('short_form').includes(r));
     expect(studio).toEqual([
-      'DELETE /api/thumbnail-options/:id', 'GET /api/studio', 'GET /api/thumbnails/:id', 'POST /api/thumbnail-options/:id/second-look', 'POST /api/thumbnails/:id/options',
+      'DELETE /api/thumbnail-options/:id', 'DELETE /api/thumbnail-refs/:id', 'GET /api/studio', 'GET /api/thumbnail-refs', 'GET /api/thumbnails/:id',
+      'PATCH /api/thumbnail-refs/:id', 'POST /api/thumbnail-options/:id/second-look', 'POST /api/thumbnail-refs', 'POST /api/thumbnails/:id/options',
       'POST /api/thumbnails/:id/send',
     ]);
     const let_in: string[] = [];
@@ -303,6 +313,10 @@ describe('editors, by kind', () => {
     expect(await call('GET', '/api/studio', editors.thumbnail)).toBe(200);
     expect(await call('GET', '/api/thumbnails/1', editors.thumbnail)).toBe(404);
     expect(await call('POST', '/api/thumbnail-options/1/second-look', editors.thumbnail)).toBe(404);
+    // a reference board is the designer's own: managers don't read it either
+    expect(await call('GET', '/api/thumbnail-refs', manager)).toBe(403);
+    expect(await call('GET', '/api/thumbnail-refs', editors.thumbnail)).toBe(200);
+    expect(await call('DELETE', '/api/thumbnail-refs/1', editors.thumbnail)).toBe(404);
   });
 
   it('refuses each kind every other route, in words for their kind', async () => {

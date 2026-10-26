@@ -478,3 +478,210 @@ describe('a thumbnail’s AI second look', () => {
     expect(tidySecondLook('Good')).toBeNull();
   });
 });
+
+describe('a client’s brand kit', () => {
+  it('reads a colour the way the hex input takes it, and nothing that isn’t one', async () => {
+    const { normalizeHex, HEX } = await import('../shared/palettes');
+    expect(normalizeHex('#abc')).toBe('#AABBCC');
+    expect(normalizeHex(' a1b2c3 ')).toBe('#A1B2C3');
+    expect(normalizeHex('#A1b2C3')).toBe('#A1B2C3');
+    expect(HEX.test(normalizeHex('fff')!)).toBe(true);
+    for (const v of ['red', '#abcd', '#12345', '#1234567', '', '   ', null, undefined, '##abc']) expect(normalizeHex(v)).toBeNull();
+  });
+
+  it('measures contrast as WCAG does, either way round', async () => {
+    const { contrastRatio, relativeLuminance } = await import('../shared/palettes');
+    expect(relativeLuminance('#FFFFFF')).toBe(1);
+    expect(relativeLuminance('#000')).toBe(0);
+    expect(relativeLuminance('nope')).toBeNaN();
+    expect(contrastRatio('#000000', '#FFFFFF')).toBe(21);
+    expect(contrastRatio('#FFFFFF', '#000000')).toBe(21);
+    expect(contrastRatio('#E53935', '#E53935')).toBe(1);
+    expect(contrastRatio('#777777', '#FFFFFF')).toBeCloseTo(4.48, 2);
+  });
+
+  it('pairs the darkest and lightest colours, and never rounds a ratio up', async () => {
+    const { brandContrast } = await import('../shared/workflow');
+    const kit = brandContrast([{ hex: '#E53935' }, { hex: '#f4ed70' }, { hex: '#0A1A3A' }]);
+    expect(kit).toMatchObject({ dark: '#0A1A3A', light: '#F4ED70', readable: true });
+    expect(kit!.ratio).toBeGreaterThan(14);
+    expect(kit!.label).toMatch(/^\d+\.\d:1$/);
+    // 4.48:1 reads as 4.4:1, under the 4.5 text needs
+    expect(brandContrast([{ hex: '#FFFFFF' }, { hex: '#777777' }])).toMatchObject({ dark: '#777777', light: '#FFFFFF', label: '4.4:1', readable: false });
+    expect(brandContrast([{ hex: '#000000' }, { hex: '#FFFFFF' }])?.label).toBe('21.0:1');
+    // fewer than two different colours: nothing to compare
+    expect(brandContrast([{ hex: '#fff' }, { hex: '#FFFFFF' }])).toBeNull();
+    expect(brandContrast([{ hex: '#E53935' }, { hex: 'not a colour' }])).toBeNull();
+    expect(brandContrast([])).toBeNull();
+  });
+
+  it('takes only secure links for fonts', async () => {
+    const { isHttpsUrl } = await import('../shared/workflow');
+    for (const ok of ['https://fonts.google.com/specimen/Inter', 'HTTPS://example.com', 'https://example.com?family=Inter#x']) expect(isHttpsUrl(ok)).toBe(true);
+    for (const bad of ['http://fonts.google.com', 'https://', 'https:// example.com', 'javascript:alert(1)', 'fonts.google.com', 'https://user@evil.example', 'ftp://x.com']) expect(isHttpsUrl(bad)).toBe(false);
+  });
+
+  it('names every problem on a kit editor row at once, field by field', async () => {
+    const { brandColourProblems, brandFontProblems } = await import('../shared/workflow');
+    // a nameless colour with a half-typed code: both, so one save shows everything to fix
+    expect(brandColourProblems({ name: ' ', hex: '#12' })).toEqual({ name: 'Give it a name', hex: 'Use a colour code like #1F6FEB' });
+    expect(brandColourProblems({ name: 'Ink', hex: '#12' })).toEqual({ hex: 'Use a colour code like #1F6FEB' });
+    expect(brandColourProblems({ name: '', hex: '0a1a3a' })).toEqual({ name: 'Give it a name' });
+    expect(brandColourProblems({ name: 'Ink', hex: '#0a1a3a' })).toEqual({});
+    expect(brandFontProblems({ name: '', url: 'http://fonts.example' })).toEqual({ name: 'Give it a name', url: 'Use a secure link that starts with https://' });
+    expect(brandFontProblems({ name: 'Inter', url: '  ' })).toEqual({});
+    expect(brandFontProblems({ name: 'Inter', url: ' https://fonts.google.com/specimen/Inter ' })).toEqual({});
+  });
+
+  it('sends and saves only what changed, compared tidied', async () => {
+    const { brandChanges, EMPTY_BRAND } = await import('../shared/workflow');
+    const kept = {
+      colours: [{ name: 'Ink', hex: '#0A1A3A' }, { name: 'Lemon', hex: '#F4ED70' }],
+      fonts: [{ name: 'Inter', url: 'https://fonts.google.com/specimen/Inter', resourceId: null, file: null }],
+      dos: 'Faces big', donts: null,
+    };
+    // the same kit, typed differently: no change
+    expect(brandChanges(kept, { colours: [{ name: '  Ink ', hex: '#0a1a3a' }, { name: 'Lemon', hex: 'f4ed70' }], dos: ' Faces big\n', donts: '  ' })).toEqual({});
+    expect(brandChanges(kept, { fonts: [{ name: 'Inter', url: 'https://fonts.google.com/specimen/Inter ', resourceId: null }] })).toEqual({});
+    // moving a swatch is a change, and the tidied list is what's kept
+    expect(brandChanges(kept, { colours: [{ name: 'Lemon', hex: '#f4ed70' }, { name: 'Ink', hex: '#0A1A3A' }] })).toEqual({
+      colours: [{ name: 'Lemon', hex: '#F4ED70' }, { name: 'Ink', hex: '#0A1A3A' }],
+    });
+    expect(brandChanges(kept, { dos: '', donts: ' No clichés ' })).toEqual({ dos: null, donts: 'No clichés' });
+    expect(brandChanges(kept, { fonts: [{ name: 'Inter', url: '', resourceId: 12 }] })).toEqual({ fonts: [{ name: 'Inter', url: null, resourceId: 12 }] });
+    // a client with no kit yet reads as an empty one
+    expect(brandChanges(null, { colours: [], fonts: [], dos: null })).toEqual({});
+    expect(brandChanges(null, { colours: [{ name: 'Red', hex: '#e53935' }] })).toEqual({ colours: [{ name: 'Red', hex: '#E53935' }] });
+    expect(EMPTY_BRAND).toEqual({ colours: [], fonts: [], dos: null, donts: null });
+  });
+
+  it('keeps the categories, limits and kinds the migration checks in step with the shared lists', async () => {
+    const { BRAND_LIMITS, EDITOR_KINDS } = await import('../shared/workflow');
+    const { BRAND_CATEGORIES, RESOURCE_CATEGORIES, RESOURCE_LABEL } = await import('../shared/types');
+    const { MIGRATIONS } = await import('../server/schema');
+    const sql = MIGRATIONS[40];
+    expect(typeof sql).toBe('string');
+    const list = (re: RegExp) => re.exec(sql as string)?.[1].split(',').map((k) => k.trim().replace(/'/g, ''));
+    expect(list(/resources_category_check check \(category in \(([^)]*)\)\)/)).toEqual([...RESOURCE_CATEGORIES]);
+    // the categories from migration 1 stay, in their order
+    expect(RESOURCE_CATEGORIES.slice(0, 6)).toEqual(['folder', 'example', 'asset', 'recording', 'document', 'other']);
+    expect(Object.keys(RESOURCE_LABEL)).toEqual([...RESOURCE_CATEGORIES]);
+    expect(BRAND_CATEGORIES.every((c) => RESOURCE_CATEGORIES.includes(c))).toBe(true);
+    expect(list(/editors_editor_kind_check check \(editor_kind is null or editor_kind in \(([^)]*)\)\)/)).toEqual([...EDITOR_KINDS]);
+    expect(sql).toContain(`jsonb_array_length(colours) <= ${BRAND_LIMITS.colours}`);
+    expect(sql).toContain(`jsonb_array_length(fonts) <= ${BRAND_LIMITS.fonts}`);
+    expect(BRAND_LIMITS).toEqual({ colours: 12, fonts: 6, name: 40, notes: 1000 });
+  });
+
+  it('reads an entry in Settings → Editors with no kind as a video editor', async () => {
+    const { isVideoEditorKind } = await import('../shared/workflow');
+    expect([null, undefined, 'short_form', 'thumbnail'].map((k) => isVideoEditorKind(k as 'short_form' | null | undefined))).toEqual([true, true, true, false]);
+  });
+});
+
+describe('picking colours from a logo', () => {
+  const px = (hex: string, n: number, alpha = 255) =>
+    Array.from({ length: n }, () => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16), alpha]).flat();
+
+  it('gives the main colours, most common first, skipping the background, the outline and transparency', async () => {
+    const { dominantColours } = await import('../shared/palettes');
+    const logo = [...px('#FFFFFF', 300), ...px('#1E88E5', 50), ...px('#000000', 30), ...px('#E53935', 100), ...px('#FAFAFA', 30), ...px('#0B0B0D', 20), ...px('#F4ED70', 60, 40)];
+    expect(dominantColours(logo)).toEqual(['#E53935', '#1E88E5']);
+    expect(dominantColours(new Uint8ClampedArray(logo))).toEqual(['#E53935', '#1E88E5']);
+    expect(dominantColours(px('#FFFFFF', 50))).toEqual([]);
+    expect(dominantColours([])).toEqual([]);
+  });
+
+  it('counts close shades as one colour, its average', async () => {
+    const { dominantColours } = await import('../shared/palettes');
+    // the same group of shades: one colour, their average
+    expect(dominantColours([...px('#E53935', 1), ...px('#E33B37', 1)])).toEqual(['#E43A36']);
+    // shades either side of a group's edge are still one colour
+    expect(dominantColours([...px('#EF3F3F', 60), ...px('#F04040', 40), ...px('#1E88E5', 30)])).toEqual(['#EF3F3F', '#1E88E5']);
+  });
+
+  it('gives six at most, and leaves out specks', async () => {
+    const { dominantColours, LOGO_COLOURS_MAX } = await import('../shared/palettes');
+    const eight = ['#E53935', '#1E88E5', '#43A047', '#FDD835', '#8E24AA', '#FB8C00', '#00ACC1', '#6D4C41'];
+    const many = eight.flatMap((h, i) => px(h, 80 - i * 5));
+    expect(LOGO_COLOURS_MAX).toBe(6);
+    expect(dominantColours(many)).toEqual(eight.slice(0, 6));
+    expect(dominantColours(many, 3)).toEqual(eight.slice(0, 3));
+    // under 1% of what's counted: a speck of anti-aliasing, not a brand colour
+    expect(dominantColours([...px('#E53935', 199), ...px('#1E88E5', 1)])).toEqual(['#E53935']);
+  });
+});
+
+describe('a designer’s reference boards', () => {
+  it('is exactly one of an upload, a winner or a resource, as the database checks', async () => {
+    const { refSource, MAX_REFS, REF_CAPTION_MAX, THUMB_REF_SOURCES } = await import('../shared/workflow');
+    const { MIGRATIONS } = await import('../server/schema');
+    expect(refSource({ fileId: 4, variantId: null, resourceId: null })).toBe('upload');
+    expect(refSource({ fileId: null, variantId: 9, resourceId: null })).toBe('winner');
+    expect(refSource({ fileId: null, variantId: null, resourceId: 2 })).toBe('resource');
+    expect(refSource({ fileId: null, variantId: null, resourceId: null })).toBeNull();
+    expect(refSource({ fileId: 4, variantId: 9, resourceId: null })).toBeNull();
+    expect(THUMB_REF_SOURCES).toEqual(['upload', 'winner', 'resource']);
+    expect([MAX_REFS, REF_CAPTION_MAX]).toEqual([300, 200]);
+    expect(MIGRATIONS[40]).toContain('check (num_nonnulls(file_id, variant_id, resource_id) = 1)');
+  });
+});
+
+describe('AI brief ideas', () => {
+  const idea = (show: string, words = 'TOO LATE', why = 'A face and one problem read at feed size.') => ({ show, words, why });
+
+  it('keeps three ideas, tidied', async () => {
+    const { tidyThumbIdeas } = await import('../shared/workflow');
+    const out = tidyThumbIdeas({
+      ideas: [
+        idea('  Him   holding the\n burnt pan,  shocked. ', '  “ONE PAN”  ', ' Shock reads small.  '),
+        idea('The empty fridge, door open, cold light.', ''),
+        idea('Split screen: day 1 vs day 30.', '$1 A WEEK'),
+      ],
+    }, 'I lived on $1 a week');
+    expect(out).toEqual([
+      { show: 'Him holding the burnt pan, shocked.', words: 'ONE PAN', why: 'Shock reads small.' },
+      { show: 'The empty fridge, door open, cold light.', words: '', why: 'A face and one problem read at feed size.' },
+      { show: 'Split screen: day 1 vs day 30.', words: '$1 A WEEK', why: 'A face and one problem read at feed size.' },
+    ]);
+  });
+
+  it('drops words that don’t fit or just repeat the title, rather than cutting them', async () => {
+    const { tidyThumbIdeas, THUMB_IDEA_LIMITS } = await import('../shared/workflow');
+    expect(THUMB_IDEA_LIMITS).toEqual({ show: 200, words: 32, wordCount: 4, why: 120 });
+    const out = tidyThumbIdeas({
+      ideas: [
+        idea('A', 'THIS IS FAR TOO MANY'),
+        idea('B', 'X'.repeat(33)),
+        idea('C', 'I Lived on $1 a Week!'),
+      ],
+    }, 'I lived on $1 a week')!;
+    expect(out.map((i) => i.words)).toEqual(['', '', '']);
+    const fits = tidyThumbIdeas({ ideas: [idea('A', 'FOUR WORDS FIT HERE'), idea('B', 'X'.repeat(32)), idea('C', 'A WEEK')] }, 'I lived on $1 a week')!;
+    expect(fits.map((i) => i.words)).toEqual(['FOUR WORDS FIT HERE', 'X'.repeat(32), 'A WEEK']);
+  });
+
+  it('cuts a long idea at a word break, and skips empty or repeated ones', async () => {
+    const { tidyThumbIdeas, THUMB_IDEA_LIMITS } = await import('../shared/workflow');
+    const long = 'Close on his face lit by the open fridge, the empty shelves behind him, one sad lemon in the door, '.repeat(3);
+    const out = tidyThumbIdeas({
+      ideas: [idea(long, 'ONE LEMON', long), idea('   '), { words: 'NO SHOW' }, 'nonsense', idea('Close on his FACE, lit by the open fridge!'), idea('close on his face lit by the open fridge'), idea('The receipt for $1, crumpled.'), idea('Day 30: thin, smiling.'), idea('A fourth.')],
+    }, 'Living on $1')!;
+    expect(out).toHaveLength(3);
+    expect(out[0].show.length).toBeLessThanOrEqual(THUMB_IDEA_LIMITS.show);
+    expect(out[0].show).toMatch(/\w…$/);
+    expect(out[0].why.length).toBeLessThanOrEqual(THUMB_IDEA_LIMITS.why);
+    // the same direction worded the same way, whatever the case and punctuation, counts once
+    expect(out.slice(1).map((i) => i.show)).toEqual(['Close on his FACE, lit by the open fridge!', 'The receipt for $1, crumpled.']);
+  });
+
+  it('refuses an answer without three usable ideas', async () => {
+    const { tidyThumbIdeas } = await import('../shared/workflow');
+    expect(tidyThumbIdeas({ ideas: [idea('A'), idea('B')] }, 'T')).toBeNull();
+    expect(tidyThumbIdeas({ ideas: [idea('A'), idea('a!'), idea('B')] }, 'T')).toBeNull();
+    expect(tidyThumbIdeas({ ideas: 'three good ones' }, 'T')).toBeNull();
+    expect(tidyThumbIdeas({}, 'T')).toBeNull();
+    expect(tidyThumbIdeas(null, 'T')).toBeNull();
+    expect(tidyThumbIdeas([idea('A'), idea('B'), idea('C')], 'T')).toBeNull();
+  });
+});

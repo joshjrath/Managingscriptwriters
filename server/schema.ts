@@ -871,4 +871,43 @@ create table thumbnail_second_looks (
   created_at timestamptz not null default now()
 );
 `,
+  // 41 · Thumbnail Studio, phase 3. Each client's brand kit, one row per client, kept by managers: its colours (a list
+  // of { name, hex }, at most 12), fonts (a list of { name, url?, resourceId? }, at most 6), do's and don'ts. A
+  // resource can now be a client's logo, a reference or a font file: the category check is swapped the way migrations
+  // 6 and 21 swap theirs (migration 1 wrote it inline, so it's named resources_category_check; nothing has widened it
+  // since). A thumbnail designer's private reference board: each ref is exactly one of an image they uploaded
+  // (file_id), a picked option they may see (variant_id) or one of a client's image resources (resource_id), on a
+  // client's board or the general one (client_id null); taken off with removed_at, never deleted. And people kept in
+  // Settings → Editors (who don't sign in) get a kind too; only its value is checked, since that table has no role.
+  `
+create table client_brand (
+  client_id bigint primary key references clients(id),
+  colours jsonb not null default '[]'::jsonb,
+  fonts jsonb not null default '[]'::jsonb,
+  dos text,
+  donts text,
+  updated_by bigint references users(id),
+  updated_at timestamptz not null default now(),
+  constraint client_brand_colours_check check (case when jsonb_typeof(colours) = 'array' then jsonb_array_length(colours) <= 12 else false end),
+  constraint client_brand_fonts_check check (case when jsonb_typeof(fonts) = 'array' then jsonb_array_length(fonts) <= 6 else false end)
+);
+alter table resources drop constraint if exists resources_category_check;
+alter table resources add constraint resources_category_check check (category in ('folder', 'example', 'asset', 'recording', 'document', 'other', 'logo', 'reference', 'font'));
+create table thumbnail_refs (
+  id bigint generated always as identity primary key,
+  user_id bigint not null references users(id),
+  client_id bigint references clients(id),
+  file_id bigint references files(id),
+  variant_id bigint references thumbnail_variants(id),
+  resource_id bigint references resources(id),
+  caption text,
+  created_at timestamptz not null default now(),
+  removed_at timestamptz,
+  constraint thumbnail_refs_source_check check (num_nonnulls(file_id, variant_id, resource_id) = 1)
+);
+create index thumbnail_refs_user_idx on thumbnail_refs (user_id, created_at desc) where removed_at is null;
+create index thumbnail_refs_file_idx on thumbnail_refs (file_id) where file_id is not null;
+alter table editors add column editor_kind text;
+alter table editors add constraint editors_editor_kind_check check (editor_kind is null or editor_kind in ('short_form', 'thumbnail'));
+`,
 ];

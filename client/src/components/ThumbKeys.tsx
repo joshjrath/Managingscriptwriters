@@ -1,7 +1,8 @@
 // Desktop shortcuts on a brief's page, and the small "Keys" popover that lists them. A key never acts while someone
 // is typing (in an input, a textarea, a select or anything editable), while a dialog is open, or with Ctrl, Cmd or
 // Alt held. 1–6 only opens the manager's confirm for that option; it never decides by itself. L is "Lights down":
-// the option's frame full screen (requestFullscreen), Esc to come back.
+// the option's frame full screen (requestFullscreen), Esc to come back. B opens and closes the Brand drawer (the
+// client's brand kit, and a designer's references for that client) beside the work.
 
 import { useEffect, useId, useRef, useState } from 'react';
 import { Keyboard } from 'lucide-react';
@@ -10,7 +11,7 @@ import { MAX_OPTIONS } from '../../../shared/workflow';
 /** What a shortcut asks the page to do. */
 export type ThumbKeyAction =
   | { kind: 'pick'; index: number }
-  | { kind: 'feed' | 'squint' | 'grey' | 'prev' | 'next' | 'lights' };
+  | { kind: 'feed' | 'squint' | 'grey' | 'prev' | 'next' | 'lights' | 'brand' };
 
 /** What the Keys popover lists, in order. `managers`: only in a manager's review. */
 export const THUMB_KEYS: readonly { keys: string; what: string; managers?: boolean }[] = [
@@ -20,6 +21,7 @@ export const THUMB_KEYS: readonly { keys: string; what: string; managers?: boole
   { keys: 'G', what: 'Greyscale' },
   { keys: '← →', what: 'Flick between options' },
   { keys: 'L', what: 'Lights down (Esc to come back)' },
+  { keys: 'B', what: 'Brand kit drawer' },
 ];
 
 /** Focus is somewhere keys mean text (or a control's own arrows): an input, a textarea, a select, anything editable. */
@@ -37,6 +39,7 @@ export function thumbKeyAction(e: Pick<KeyboardEvent, 'key' | 'repeat'>, manager
     case 's': return { kind: 'squint' };
     case 'g': return { kind: 'grey' };
     case 'l': return { kind: 'lights' };
+    case 'b': return { kind: 'brand' };
     default: return null;
   }
 }

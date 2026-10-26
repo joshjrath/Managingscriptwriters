@@ -18,7 +18,7 @@ import { insertShoot } from './routes/shoots';
 import { insertBriefing } from './routes/clients';
 import { addDays } from '../shared/dates';
 import type { Me } from '../shared/types';
-import { OPTION_LETTERS, thumbBriefPath, tidySecondLook, type ThumbAction, type ThumbPinTag } from '../shared/workflow';
+import { OPTION_LETTERS, thumbBriefPath, tidySecondLook, type BrandKitFields, type ThumbAction, type ThumbPinTag } from '../shared/workflow';
 import { findCity } from '../shared/cities';
 
 export const DEMO_PASSWORD = 'scalemedia-demo';
@@ -378,6 +378,48 @@ async function seed(db: Db, now: Date): Promise<boolean> {
   // and Ana's standout pick, the next time she opens the site
   await recordThumbMoment(db, jacketPick, { name: 'Josh Rath' });
 
+  // 13 · Brand kits for Acme and Northwind (colours, a font, do's and don'ts, and a logo resource drawn like the demo
+  // thumbnails, in the kit's own colours so "Pick colours from logo" finds them), and three pictures on Ana's
+  // reference boards: one she uploaded (General), her first Acme winner, and Acme's logo
+  const brandKit = (clientId: number, kit: BrandKitFields) =>
+    db.query(`insert into client_brand (client_id, colours, fonts, dos, donts, updated_by, updated_at) values ($1,$2::jsonb,$3::jsonb,$4,$5,$6,$7)`,
+      [clientId, JSON.stringify(kit.colours), JSON.stringify(kit.fonts), kit.dos, kit.donts, ids.josh, ago(3 * 24)]);
+  const logo = async (clientId: number, title: string, look: DemoLogo) => {
+    const data = demoLogo(look);
+    const info = (await imageInfoOf(data))!;
+    const fileId = await storeFile(db, josh, bufferFile(`${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}.png`, info.mime, data));
+    return (await db.one<{ id: number }>(
+      `insert into resources (client_id, kind, category, title, file_id, created_by, created_at) values ($1,'file','logo',$2,$3,$4,$5) returning id`,
+      [clientId, title, fileId, ids.josh, ago(4 * 24)],
+    ))!.id;
+  };
+  const K = {
+    trail: [47, 93, 80], ember: [232, 116, 59], charcoal: [35, 38, 43], roast: [59, 36, 24], crema: [217, 160, 102], leaf: [78, 125, 74],
+  } as const;
+  await brandKit(acme, {
+    colours: [{ name: 'Trail green', hex: '#2F5D50' }, { name: 'Ember', hex: '#E8743B' }, { name: 'Bone', hex: '#F3EDE2' }, { name: 'Charcoal', hex: '#23262B' }],
+    fonts: [{ name: 'Bricolage Grotesque', url: 'https://fonts.google.com/specimen/Bricolage+Grotesque', resourceId: null }],
+    dos: 'The product big and in use, outdoors, in real weather: rain, mud, low sun. Words in Bone or Ember, top left. Logo bottom right, small.',
+    donts: 'No studio-white backgrounds. No superlatives on the image (“best”, “ultimate”). Never the old orange-only logo.',
+  });
+  const acmeLogo = await logo(acme, 'Acme logo', { mark: K.ember, inner: K.trail, words: K.charcoal });
+  await brandKit(northwind, {
+    colours: [{ name: 'Roast', hex: '#3B2418' }, { name: 'Crema', hex: '#D9A066' }, { name: 'Oat', hex: '#F6EFE4' }, { name: 'Leaf', hex: '#4E7D4A' }],
+    fonts: [{ name: 'Fraunces', url: 'https://fonts.google.com/specimen/Fraunces', resourceId: null }],
+    dos: 'Name the origin on the image when there’s room. Warm, natural light. Hands and beans, close up.',
+    donts: 'No “bold” or “smooth”. No dark, moody café shots. Never coffee in a paper cup.',
+  });
+  await logo(northwind, 'Northwind logo', { mark: K.roast, inner: K.crema, words: K.leaf });
+
+  const ref = (at: number, r: { clientId: number | null; fileId?: number; optionId?: number; resourceId?: number; caption: string }) =>
+    db.query(`insert into thumbnail_refs (user_id, client_id, file_id, variant_id, resource_id, caption, created_at) values ($1,$2,$3,$4,$5,$6,$7)`,
+      [ana, r.clientId, r.fileId ?? null, r.optionId ?? null, r.resourceId ?? null, r.caption, ago(at)]);
+  const mood = demoThumb({ from: C.pink, to: C.navy, subject: C.cream, words: C.yellow, left: true });
+  const moodFile = await storeFile(db, anaMe, bufferFile('big-face-one-word.png', (await imageInfoOf(mood))!.mime, mood));
+  await ref(50, { clientId: null, fileId: moodFile, caption: 'Big face, one heavy word: the contrast I keep coming back to.' });
+  await ref(26, { clientId: acme, optionId: bagR1.options[0], caption: 'Reads from across the room. Keep the warmth.' });
+  await ref(2, { clientId: acme, resourceId: acmeLogo, caption: 'Logo bottom right, small.' });
+
   // make the first few days of history look like history
   await db.query(`update activity set created_at = created_at - interval '2 days' where action in ('client.created','briefing.created','shoot.created','batch.created')`);
   return true;
@@ -440,6 +482,41 @@ function demoThumb(look: DemoLook): Buffer {
       for (let k = 0; k < 3; k++) { raw[at + k] = (px[k] - prev[k]) & 0xff; prev[k] = px[k]; }
     }
   }
+  return demoPng(w, h, 2, raw);
+}
+
+/** How a demo client's logo looks: a round mark, a peak inside it, and two bars for the name, on a see-through background. */
+interface DemoLogo { mark: RGB; inner: RGB; words: RGB }
+
+/**
+ * A plain PNG logo for the demo (640×320, with transparency): solid shapes in the logo's three colours and nothing
+ * else, so "Pick colours from logo" finds exactly those, most of the mark first.
+ */
+function demoLogo(look: DemoLogo): Buffer {
+  const [w, h] = [640, 320];
+  const stride = 1 + w * 4;
+  const raw = Buffer.alloc(stride * h);
+  const [cx, cy, r2] = [0.25 * w, 0.5 * h, (0.36 * h) ** 2];
+  const [top, base, half] = [cy - 0.2 * h, cy + 0.16 * h, 0.22 * h];
+  const inPeak = (x: number, y: number) => y >= top && y <= base && Math.abs(x - cx) <= ((y - top) / (base - top)) * half;
+  const inBars = (x: number, y: number) => x >= 0.47 * w && ((y >= 0.3 * h && y < 0.46 * h && x < 0.92 * w) || (y >= 0.54 * h && y < 0.66 * h && x < 0.78 * w));
+  const px = [0, 0, 0, 0];
+  const prev = [0, 0, 0, 0];
+  for (let y = 0; y < h; y++) {
+    raw[y * stride] = 1; // PNG's "Sub" filter
+    prev.fill(0);
+    for (let x = 0; x < w; x++) {
+      const solid = inPeak(x, y) ? look.inner : (x - cx) ** 2 + (y - cy) ** 2 < r2 ? look.mark : inBars(x, y) ? look.words : null;
+      if (solid) { px[0] = solid[0]; px[1] = solid[1]; px[2] = solid[2]; px[3] = 255; } else px.fill(0);
+      const at = y * stride + 1 + x * 4;
+      for (let k = 0; k < 4; k++) { raw[at + k] = (px[k] - prev[k]) & 0xff; prev[k] = px[k]; }
+    }
+  }
+  return demoPng(w, h, 6, raw);
+}
+
+/** A PNG file from its filtered rows: 8 bits a channel, colour type 2 (RGB) or 6 (RGB with alpha). */
+function demoPng(w: number, h: number, colourType: 2 | 6, raw: Buffer): Buffer {
   const chunk = (type: string, data: Buffer) => {
     const body = Buffer.concat([Buffer.from(type, 'latin1'), data]);
     const out = Buffer.alloc(body.length + 8);
@@ -452,7 +529,7 @@ function demoThumb(look: DemoLook): Buffer {
   header.writeUInt32BE(w, 0);
   header.writeUInt32BE(h, 4);
   header[8] = 8; // 8 bits a channel
-  header[9] = 2; // RGB
+  header[9] = colourType;
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), chunk('IHDR', header), chunk('IDAT', deflateSync(raw, { level: 9 })), chunk('IEND', Buffer.alloc(0)),
   ]);

@@ -156,7 +156,8 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
   ];
   // thumbnail designers: their Studio (briefs, rounds and wins), then what video editors have too
   const designerItems = [
-    { to: '/studio', label: 'Studio', icon: <Palette />, count: counts.myThumbnails || undefined },
+    { to: '/studio', label: 'Studio', icon: <Palette />, count: counts.myThumbnails || undefined, not: '/studio/refs' },
+    { to: '/studio/refs', label: 'References', icon: <Images /> },
     { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
@@ -172,7 +173,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
   ];
-  const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; fresh?: boolean; show?: boolean }[] = isThumbnailDesigner(me) ? designerItems : isEditor(me.role) ? editorItems : !manager ? writerItems : [
+  const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; fresh?: boolean; show?: boolean; not?: string }[] = isThumbnailDesigner(me) ? designerItems : isEditor(me.role) ? editorItems : !manager ? writerItems : [
     { to: '/overview', label: 'Overview', icon: <LayoutDashboard />, count: counts.attention || undefined, hot: counts.attention > 0 },
     { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 },
     { to: '/production', label: 'Production', icon: <Columns3 /> },
@@ -203,7 +204,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
       <LayoutGroup id={mobile ? 'nav-mobile' : 'nav'}>
         <nav className="nav">
           {items.map((it) => (
-            <NavItem key={it.to} to={it.to} icon={it.icon} label={it.label} collapsed={collapsed}>
+            <NavItem key={it.to} to={it.to} icon={it.icon} label={it.label} collapsed={collapsed} not={it.not}>
               {it.fresh && <span className="new-pill" aria-label="Has new work">New</span>}
               {it.count != null && !it.fresh && (() => {
                 // say what the number counts, the way the page it opens counts it
@@ -247,13 +248,18 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
   );
 }
 
-/** A sidebar link; the highlight glides between links as you move around. */
-function NavItem({ to, icon, label, collapsed, children }: { to: string; icon: ReactNode; label: string; collapsed?: boolean; children?: ReactNode }) {
+/**
+ * A sidebar link; the highlight glides between links as you move around. It's lit on its page and the pages under it,
+ * except under `not` (the Studio's References has its own item).
+ */
+function NavItem({ to, icon, label, collapsed, not, children }: { to: string; icon: ReactNode; label: string; collapsed?: boolean; not?: string; children?: ReactNode }) {
+  const { pathname } = useLocation();
+  const away = !!not && (pathname === not || pathname.startsWith(`${not}/`));
   return (
-    <NavLink to={to} className={({ isActive }) => (isActive ? 'active' : '')} title={collapsed ? label : undefined}>
+    <NavLink to={to} className={({ isActive }) => (isActive && !away ? 'active' : '')} aria-current={away ? false : undefined} title={collapsed ? label : undefined}>
       {({ isActive }) => (
         <>
-          {isActive && <m.span layoutId="nav-pill" className="nav-pill" transition={SPRING} />}
+          {isActive && !away && <m.span layoutId="nav-pill" className="nav-pill" transition={SPRING} />}
           {icon}
           <span className="label">{label}</span>
           {children}

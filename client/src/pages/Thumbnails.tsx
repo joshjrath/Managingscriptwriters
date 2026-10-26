@@ -5,16 +5,21 @@
 // whose designer has left, and what was picked or cancelled lately. Filters by client and designer.
 // New thumbnail (BriefDialog) asks for the client, the shoot if there is one, the video's title (typed), what it
 // should show, words for the image, how many options, a due date and a thumbnail designer; editing sends only the
-// fields that changed, compared with a snapshot taken when the dialog opened (as Edit batch does). Edit, Reassign
-// and Cancel are on each brief, and on its review page.
+// fields that changed, compared with a snapshot taken when the dialog opened (as Edit batch does). Once a client and
+// a title are in, "Suggest ideas" (only when the server has the AI: boot.briefIdeas) asks Claude for three directions
+// (POST /api/thumbnails/suggest; nothing is saved), and "Use this" fills what it should show and the words on the
+// image, which the manager can still change (and which then count as changed for Edit). Edit, Reassign and Cancel
+// are on each brief, and on its review page.
 
-import { useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, Ban, ClipboardCheck, Image as ImageIcon, Inbox, Palette, Pencil, Plus, RotateCcw, Trophy, Undo2, UserPlus, Users } from 'lucide-react';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { ArrowRight, Ban, Check, ClipboardCheck, Image as ImageIcon, Inbox, Lightbulb, Palette, Pencil, Plus, RotateCcw, Sparkles, Trophy, Undo2, UserPlus, Users } from 'lucide-react';
 import { api, qs, useSave, type ApiError } from '../api';
-import type { ClientDetail, ThumbnailBoard, ThumbnailBrief, ThumbnailBriefDetail, ThumbnailBriefInput, ThumbnailBriefPatch, ThumbnailDesignerLoad } from '../../../shared/types';
-import { briefOrder, DEFAULT_OPTIONS, isOpenThumb, isThumbnailDesigner, MAX_OPTIONS } from '../../../shared/workflow';
+import type {
+  ClientDetail, ThumbnailBoard, ThumbnailBrief, ThumbnailBriefDetail, ThumbnailBriefInput, ThumbnailBriefPatch, ThumbnailDesignerLoad, ThumbnailSuggestInput, ThumbnailSuggestions,
+} from '../../../shared/types';
+import { briefOrder, DEFAULT_OPTIONS, isOpenThumb, isThumbnailDesigner, MAX_OPTIONS, THUMB_IDEA_COUNT, type ThumbIdea } from '../../../shared/workflow';
 import { addDays, type ISODate } from '../../../shared/dates';
 import { fmtAgo, fmtRange, plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
@@ -203,7 +208,7 @@ export function useReopenBrief() {
  * already have. Editing sends only what changed since the dialog opened; the client and shoot stay as they are.
  */
 export function BriefDialog({ brief, focus, designers, onClose }: { brief: ThumbnailBrief | null; focus?: 'designer'; designers?: ThumbnailDesignerLoad[]; onClose: () => void }) {
-  const { users, clock } = useBoot();
+  const { users, clock, briefIdeas } = useBoot();
   const toast = useToast();
   const nav = useNavigate();
   // the snapshot this form started from: saving compares against it, so a refetch never undoes what's typed
@@ -297,6 +302,10 @@ export function BriefDialog({ brief, focus, designers, onClose }: { brief: Thumb
         <Field label="Video title" htmlFor={ids.t} error={f.title} help="The video’s working title, as the designer should read it. Scripts don’t have titles, so type it here.">
           <input className="input" value={title} maxLength={200} data-autofocus={editing && !focus ? true : undefined} onChange={(e) => setTitle(e.target.value)} {...inputProps(ids.t, f.title)} />
         </Field>
+        {briefIdeas && (!base || isOpenThumb(base.state)) && (
+          <SuggestIdeas clientId={editing ? base!.clientId : clientId ? Number(clientId) : null} shootId={editing ? base!.shootId ?? null : shootId ? Number(shootId) : null}
+            title={title} brief={text} onImage={onImage} onUse={(i) => { setText(i.show); setOnImage(i.words); }} />
+        )}
         <Field label="What it should show" optional htmlFor={ids.b} error={f.brief} help="The idea: who’s in it, the feeling, what to avoid.">
           <textarea className="textarea" value={text} maxLength={4000} onChange={(e) => setText(e.target.value)} {...inputProps(ids.b, f.brief)} />
         </Field>
@@ -326,6 +335,77 @@ export function BriefDialog({ brief, focus, designers, onClose }: { brief: Thumb
         </Field>
       </form>
     </Dialog>
+  );
+}
+
+/**
+ * "Suggest ideas": three directions for this video from Claude, from the client's look and what was picked for them
+ * before. Nothing is saved; "Use this" fills what it should show and the words on the image (Undo puts back what was
+ * there). Offered once a client and a title are in.
+ */
+function SuggestIdeas({ clientId, shootId, title, brief, onImage, onUse }: {
+  clientId: number | null; shootId: number | null; title: string; brief: string; onImage: string; onUse: (idea: ThumbIdea) => void;
+}) {
+  const hid = useId();
+  const [undo, setUndo] = useState<{ show: string; words: string } | null>(null);
+  // the last ideas that came back (and the title they were for): an ask that fails leaves them showing under its error
+  const [last, setLast] = useState<(ThumbnailSuggestions & { title: string }) | null>(null);
+  const ask = useMutation<ThumbnailSuggestions & { title: string }, ApiError, ThumbnailSuggestInput>({
+    mutationFn: async (input) => ({ ...(await api<ThumbnailSuggestions>('/api/thumbnails/suggest', { body: { ...input } })), title: input.title }),
+    onSuccess: (out) => setLast(out),
+  });
+  const list = useRef<HTMLUListElement>(null);
+  const undoBtn = useRef<HTMLButtonElement>(null);
+  const ready = clientId != null && !!title.trim();
+  const ideas = last?.ideas ?? [];
+  const stale = !!last && last.title !== title.trim();
+  const go = () => { if (ready) { setUndo(null); ask.mutate({ clientId: clientId!, shootId, title: title.trim() }); } };
+  const using = (i: ThumbIdea) => brief.trim() === i.show && onImage.trim() === i.words;
+  // the button pressed is swapped for its other half (Use this ⇄ Undo): the keyboard goes there, not out of the dialog
+  const refocus = (to: () => Element | null | undefined) => requestAnimationFrame(() => { const el = to(); if (el instanceof HTMLElement) el.focus(); });
+  return (
+    <section className="tn-ideas" aria-labelledby={hid}>
+      <div className="tn-ideas-head">
+        <span id={hid} className="tn-ideas-t"><Sparkles aria-hidden /><b>Ideas for the brief</b></span>
+        <Button variant="sm" icon={<Lightbulb aria-hidden />} busy={ask.isPending} disabled={!ready} onClick={go}>
+          {last ? 'Suggest again' : 'Suggest ideas'}
+        </Button>
+        <span className="help">{!ready ? 'Choose the client and type the title first.' : stale ? `These were for “${last?.title}”. Ask again for the new title.` : 'Three directions from the client’s look and what was picked before. Nothing is saved.'}</span>
+      </div>
+      <FormError error={ask.error} />
+      {ask.isPending && (
+        <ul className="tn-idea-list" aria-label="Thinking of ideas…" role="status">
+          {Array.from({ length: THUMB_IDEA_COUNT }, (_, i) => <li key={i} className="tn-idea wait"><span className="sl-skel" aria-hidden><i /><i /><i /></span></li>)}
+        </ul>
+      )}
+      {!ask.isPending && ideas.length > 0 && (
+        <ul ref={list} className="tn-idea-list">
+          {ideas.map((idea, i) => {
+            const on = using(idea);
+            return (
+              <li key={i} className={`tn-idea${on ? ' on' : ''}`}>
+                <span className="tn-idea-n" aria-hidden>{i + 1}</span>
+                <p className="tn-idea-show"><span className="sr-only">Idea {i + 1}: </span>{idea.show}</p>
+                {idea.words ? <span className="tb-words">{idea.words}</span> : <span className="dim tn-idea-none">No words on the image</span>}
+                {idea.why && <p className="tn-idea-why">{idea.why}</p>}
+                {on ? (
+                  <span className="tn-idea-used" role="status">
+                    <Check aria-hidden />In the brief
+                    {undo && (
+                      <button ref={undoBtn} type="button" className="linkbtn"
+                        onClick={() => { onUse({ show: undo.show, words: undo.words, why: '' }); setUndo(null); refocus(() => list.current?.children[i]?.querySelector('button')); }}>Undo</button>
+                    )}
+                  </span>
+                ) : (
+                  <Button variant="sm" onClick={() => { setUndo({ show: brief, words: onImage }); onUse(idea); refocus(() => undoBtn.current); }}
+                    aria-label={`Use idea ${i + 1}: fill in what it should show and the words on the image`}>Use this</Button>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
   );
 }
 

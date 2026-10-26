@@ -17,6 +17,7 @@ import { claudeScriptCounter } from './doc-counts';
 import { claudeShootEstimator } from './shoot-estimator';
 import { claudeNotesReader } from './notes-import';
 import { claudeThumbCritic } from './second-look';
+import { claudeBriefHelper } from './brief-ideas';
 import type { Ctx } from './core';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -51,6 +52,8 @@ async function main() {
     shootEstimator: config.anthropicApiKey ? claudeShootEstimator() : null,
     // and gives a thumbnail designer's option a second look
     thumbCritic: config.anthropicApiKey ? claudeThumbCritic() : null,
+    // and suggests directions for a new thumbnail brief
+    briefHelper: config.anthropicApiKey ? claudeBriefHelper() : null,
     remindersEnabled: config.remindersEnabled,
     calendarAllowPrivate: config.calendarAllowPrivate,
     // the editors' videos are read from Timeliner, and a script document uploaded there marks its batch delivered

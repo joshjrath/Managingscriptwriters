@@ -134,6 +134,13 @@
   --lights-text-2: rgba(245, 245, 247, 0.62);
   --lights-btn: rgba(255, 255, 255, 0.12);
   --lights-btn-hover: rgba(255, 255, 255, 0.2);
+  /* a client's brand kit and a designer's reference boards: the ring that keeps a dark brand colour visible on a dark
+     panel, the checker a logo sits on (mid greys, so white and black logos both show and see-through parts read as
+     see-through), and the width of a brief's Brand drawer */
+  --swatch-ring: rgba(255, 255, 255, 0.18);
+  --checker-a: #7C7C86;
+  --checker-b: #8E8E98;
+  --brand-drawer-w: 380px;
 
   /* motion */
   --t: 150ms;

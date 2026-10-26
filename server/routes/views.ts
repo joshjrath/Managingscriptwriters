@@ -179,7 +179,9 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     const seen = await db.one<{ whats_new_seen: string | null; timezone: string | null; timezone_confirmed_at: string | null; temp: boolean }>(
       `select whats_new_seen, timezone, timezone_confirmed_at, temp_password is not null as temp from users where id = $1`, [me.id]);
     return {
-      me, mode: sessionMode(req), notesImport: !!ctx.notesReader, secondLook: !!ctx.thumbCritic && !req.viewingAs, uploadLimitMb: Math.round(ctx.uploadLimitBytes / 1024 / 1024), whatsNewSeen: seen?.whats_new_seen ?? null,
+      me, mode: sessionMode(req), notesImport: !!ctx.notesReader, secondLook: !!ctx.thumbCritic && !req.viewingAs,
+      // AI brief ideas in New thumbnail, for managers; off while an Admin views as someone, as the route is (it would use their limits)
+      briefIdeas: !!ctx.briefHelper && !req.viewingAs, uploadLimitMb: Math.round(ctx.uploadLimitBytes / 1024 / 1024), whatsNewSeen: seen?.whats_new_seen ?? null,
       timezone: { mine: seen?.timezone ?? null, confirmed: !!seen?.timezone_confirmed_at },
       // still on the temporary password someone gave them: ask for their own
       mustChangePassword: !!seen?.temp && !sessionMode(req)?.viewingAs,
