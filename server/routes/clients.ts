@@ -1,6 +1,9 @@
 // Clients, briefing/ideation-call records, resources and secure file access.
 
-import { DESIGNER_FILES, EDITOR_FILES, fileStream, isBlockedFile, SENT_OPTION_FILES, spool, storedFileName, storeFile, type UploadedFile } from '../files';
+import {
+  DESIGNER_FILES, EDITOR_FILES, FILE_CACHE, fileStream, isBlockedFile, SENT_OPTION_FILES, spool, storedFileName, storeFile, THUMB_FILE_CACHE, THUMB_PICTURE,
+  type UploadedFile,
+} from '../files';
 import type { FastifyInstance } from 'fastify';
 import {
   BRAND_LIMITS, brandChanges, EMPTY_BRAND, isEditor, isHttpsUrl, isManager, isThumbnailDesigner, type BrandColour, type BrandFont, type BrandKitFields,
@@ -515,8 +518,8 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
       : isThumbnailDesigner(me) ? { sql: `(${EDITOR_FILES} or ${DESIGNER_FILES('$2')})`, params: [me.id] }
         : isEditor(me.role) ? { sql: EDITOR_FILES, params: [] }
           : { sql: anyLive, params: [] };
-    const f = await db.one<{ filename: string; mime: string; size: number; stored: number }>(
-      `select f.filename, f.mime, f.size, octet_length(f.data) as stored from files f where f.id = $1 and ${rule.sql}`, [id, ...rule.params],
+    const f = await db.one<{ filename: string; mime: string; size: number; stored: number; thumb: boolean }>(
+      `select f.filename, f.mime, f.size, octet_length(f.data) as stored, ${THUMB_PICTURE} as thumb from files f where f.id = $1 and ${rule.sql}`, [id, ...rule.params],
     );
     if (!f) throw notFound('File');
     const inline = SAFE_INLINE.has(f.mime) && (req.query as Record<string, string>).download !== '1';
@@ -526,7 +529,8 @@ export function registerClientRoutes(app: FastifyInstance, ctx: Ctx) {
       .header('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename="${encoded}"; filename*=UTF-8''${encoded}`)
       .header('X-Content-Type-Options', 'nosniff')
       .header('Content-Security-Policy', "default-src 'none'; img-src 'self'; style-src 'unsafe-inline'; sandbox")
-      .header('Cache-Control', 'private, max-age=300');
+      // an option's or a reference board's picture never changes under its id: kept a day (a wall of them loads once)
+      .header('Cache-Control', f.thumb ? THUMB_FILE_CACHE : FILE_CACHE);
     // Streamed in pieces rather than loaded whole. In Recording mode, files copied
     // from the real workspace keep their contents there (the copy holds none).
     const here = ctx.dbNow?.() ?? db;

@@ -6,17 +6,20 @@
 // "Your best this month" (a sideways strip of the picks marked Standout this month, hidden when there are none), the
 // Wall of wins (every pick, newest first, filtered by client, standouts marked; a new win flips in with a glint and a
 // few sparks the first time it's seen, when animations are on), a few numbers counted from rows, and to-dos. No
-// timers, points or streaks. The designer's References (their private boards) are a tap away in the header.
+// timers, points or streaks. A win marked live has a small Live badge, linking to the video in a new tab. The
+// designer's References (their private boards) are a tap away in the header, and their Portfolio (every win with how
+// it came about, and private growth figures: StudioPortfolio.tsx) from the Wall of wins. The first-round pick rate is
+// only ever on the portfolio, never here.
 // A manager opens a designer's Studio with ?userId= (read-only; their unsent options stay private); an Admin can
 // also View as the designer and see exactly theirs.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowRight, CalendarClock, CircleCheck, Clock, Image as ImageIcon, Images, Play, RotateCcw, SkipForward, Sparkles, Trophy } from 'lucide-react';
+import { ArrowRight, BookOpen, CalendarClock, CircleCheck, Clock, Image as ImageIcon, Images, Play, RotateCcw, SkipForward, Sparkles, Trophy } from 'lucide-react';
 import { api, qs, type ApiError } from '../api';
 import type { StudioHero, StudioPayload, ThumbnailBrief, ThumbnailWin } from '../../../shared/types';
-import { isManager, isThumbnailDesigner, thumbBriefPath } from '../../../shared/workflow';
+import { isManager, isThumbnailDesigner, portfolioPath, thumbBriefPath } from '../../../shared/workflow';
 import { dueWords, fmtAgo, fmtDate, plural } from '../../../shared/format';
 import { onOrAfterDay, startOfMonth } from '../../../shared/dates';
 import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
@@ -24,6 +27,7 @@ import { Chip, Empty, ErrorState, Loading, Panel, Seg, Thumb } from '../componen
 import { KpiCard } from '../components/StatCards';
 import { TodoPanel } from '../components/Todos';
 import { BriefThumb, BriefTile, optionAlt, StateChip, toneFor } from '../components/ThumbBits';
+import { LiveBadge } from '../components/ThumbLive';
 import { allMarks, HideNotes, marksOn, PinList, PinnedThumb } from '../components/ThumbPins';
 import { useNow } from '../components/EditingBits';
 import { NoDesigners } from './Thumbnails';
@@ -40,20 +44,27 @@ export function StudioPage() {
   return <StudioView key={userId || 'me'} userId={userId} />;
 }
 
-/** A manager who opened /studio without saying whose: every designer's Studio, one tap each. */
-function PickDesigner({ missing }: { missing?: boolean }) {
+/**
+ * A manager who opened /studio (or /studio/portfolio) without saying whose: every designer's Studio (or portfolio),
+ * one tap each.
+ */
+export function PickDesigner({ missing, page = 'studio' }: { missing?: boolean; page?: 'studio' | 'portfolio' }) {
   const { users } = useBoot();
   const designers = users.filter((u) => u.active && !u.removed && isThumbnailDesigner(u));
+  const studio = page === 'studio';
   return (
     <div className="studio">
-      <PageHeader title="Studios" sub={missing ? 'That person isn’t a thumbnail designer any more. Pick another.' : 'Each thumbnail designer’s Studio, read-only. Their unsent options stay private.'} hideNewWork
+      <PageHeader title={studio ? 'Studios' : 'Portfolios'} hideNewWork
+        sub={missing ? 'That person isn’t a thumbnail designer any more. Pick another.'
+          : studio ? 'Each thumbnail designer’s Studio, read-only. Their unsent options stay private.'
+          : 'Each thumbnail designer’s picks, how they came about and how they’re growing, read-only.'}
         crumbs={<Link to="/thumbnails">Thumbnails</Link>} />
       {!designers.length ? <NoDesigners /> : (
         <div className="st-people">
           {designers.map((u) => (
-            <Link key={u.id} to={`/studio?userId=${u.id}`} className="st-person">
+            <Link key={u.id} to={studio ? `/studio?userId=${u.id}` : portfolioPath({ userId: u.id })} className="st-person">
               <span className="st-person-n">{u.name}</span>
-              <span className="muted">Open their Studio</span>
+              <span className="muted">{studio ? 'Open their Studio' : 'Open their portfolio'}</span>
               <ArrowRight aria-hidden />
             </Link>
           ))}
@@ -432,17 +443,25 @@ function WallOfWins({ wins, readOnly, designerId, name }: { wins: ThumbnailWin[]
   const day = (ts: string) => new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', ...(ts.slice(0, 4) !== clock.today.slice(0, 4) ? { year: 'numeric' } : {}), timeZone: tz }).format(new Date(ts));
   return (
     <Panel id="st-wall" tabIndex={-1} title="Wall of wins" count={wins.length} sub={name ? `every thumbnail of ${name}’s that was picked` : 'every thumbnail of yours that was picked'} className="st-wall"
-      tools={clients.length > 1 && clients.length <= 6 ? (
-        <Seg role="group" aria-label="Client">
-          <button type="button" aria-pressed={client === 'all'} onClick={() => setClient('all')}>All</button>
-          {clients.map((c) => <button key={c.id} type="button" aria-pressed={client === c.id} onClick={() => setClient(c.id)}>{c.name}</button>)}
-        </Seg>
-      ) : clients.length > 6 ? (
-        <select className="select sm" value={client} onChange={(e) => setClient(e.target.value === 'all' ? 'all' : Number(e.target.value))} aria-label="Client">
-          <option value="all">All clients</option>
-          {clients.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.n})</option>)}
-        </select>
-      ) : undefined}>
+      tools={(
+        <>
+          {clients.length > 1 && clients.length <= 6 ? (
+            <Seg role="group" aria-label="Client">
+              <button type="button" aria-pressed={client === 'all'} onClick={() => setClient('all')}>All</button>
+              {clients.map((c) => <button key={c.id} type="button" aria-pressed={client === c.id} onClick={() => setClient(c.id)}>{c.name}</button>)}
+            </Seg>
+          ) : clients.length > 6 ? (
+            <select className="select sm" value={client} onChange={(e) => setClient(e.target.value === 'all' ? 'all' : Number(e.target.value))} aria-label="Client">
+              <option value="all">All clients</option>
+              {clients.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.n})</option>)}
+            </select>
+          ) : null}
+          {/* every win with how it came about, and private growth: a manager opens the designer's, read-only */}
+          <Link className="btn sm ghost" to={readOnly ? portfolioPath({ userId: designerId }) : portfolioPath()}>
+            <BookOpen aria-hidden />{readOnly ? 'Their portfolio' : 'Your portfolio'}
+          </Link>
+        </>
+      )}>
       {!wins.length
         ? <Empty boxed icon={<Trophy />} title={name ? `Nothing of ${name}’s picked yet` : 'Your wall starts with your first pick'}>Every option a manager picks hangs here, newest first.</Empty>
         : (
@@ -452,7 +471,7 @@ function WallOfWins({ wins, readOnly, designerId, name }: { wins: ThumbnailWin[]
               const isNew = fresh.has(w.option.id);
               return (
                 <li key={w.option.id} className={`win${isNew ? ' fresh' : ''}${w.standout ? ' standout' : ''}`} style={{ ['--i' as string]: Math.min(i, 14) }} data-win={w.option.id}>
-                  <Link to={thumbBriefPath(me, w.briefId)} className="win-link" aria-label={`${w.title}, ${w.clientName}: option ${w.option.letter}, picked ${day(w.pickedAt)}${w.standout ? ', a standout' : ''}${isNew ? ' (new)' : ''}`}>
+                  <Link to={thumbBriefPath(me, w.briefId)} className="win-link" aria-label={`${w.title}, ${w.clientName}: option ${w.option.letter}, picked ${day(w.pickedAt)}${w.standout ? ', a standout' : ''}${w.live ? ', live' : ''}${isNew ? ' (new)' : ''}`}>
                     <Thumb src={w.option.url} alt={optionAlt(w.option, w.title)} eager={i < 6}>
                       {isNew && allowed && <span className="dt-glint" aria-hidden />}
                       {w.standout && <span className="thumb-tl"><Chip color="yellow" icon={<Trophy aria-hidden />}>Standout</Chip></span>}
@@ -460,6 +479,8 @@ function WallOfWins({ wins, readOnly, designerId, name }: { wins: ThumbnailWin[]
                     </Thumb>
                     <span className="win-cap"><b>{w.title}</b><span>{w.clientName} · {day(w.pickedAt)}</span></span>
                   </Link>
+                  {/* beside the link, over the picture's corner: a link can't sit inside another */}
+                  {w.live && <span className="win-over"><LiveBadge live={w.live} /></span>}
                 </li>
               );
             })}

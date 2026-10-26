@@ -405,7 +405,7 @@ describe('whose brief and image is whose', () => {
     expect((await notes(people.dan.id)).filter((n) => n.link === `/studio/briefs/${s.id}`).map((n) => n.type)).toEqual(['thumbnail_new']);
     // Dee: read-only, her round only; her tray is gone
     const dee = (await detail(s.id, people.dee.cookie)).body as ThumbnailBriefDetail;
-    expect([dee.viewer, dee.tray, dee.rounds.map((r) => r.number), dee.can]).toEqual(['past_designer', null, [1], { upload: false, send: false, decide: false, edit: false }]);
+    expect([dee.viewer, dee.tray, dee.rounds.map((r) => r.number), dee.can]).toEqual(['past_designer', null, [1], { upload: false, send: false, decide: false, edit: false, markLive: false }]);
     expect([await fileStatus(s.a.fileId, people.dee.cookie), await fileStatus(draft.fileId, people.dee.cookie)]).toEqual([200, 404]);
     expect((await upload(s.id, people.dee.cookie)).status).toBe(404);
     // Dan carries on in the same tray, and round 2 is his; Dee's round shows, but her unpicked options stay hers
@@ -571,7 +571,7 @@ describe('the Studio, the board and the badges', () => {
     const board = (await send('GET', `/api/thumbnails?designerId=${zed.id}`, people.max.cookie)).body as ThumbnailBoard;
     expect(board.briefs.map((b) => [b.title, b.state])).toEqual([['Asked', 'changes'], ['Fresh', 'to_design'], ['Waiting', 'in_review'], ['Done', 'picked']]);
     expect(board.toReview.map((x) => [x.brief.id, x.round.id, x.round.options.length])).toEqual([[waiting.id, waiting.round.id, 2]]);
-    expect(board.counts).toEqual({ toReview: 1, changes: 1, withDesigners: 2, pickedThisWeek: 1, needsDesigner: 0 });
+    expect(board.counts).toEqual({ toReview: 1, changes: 1, withDesigners: 2, pickedThisWeek: 1, needsDesigner: 0, toMarkLive: 0 });
     expect(board.designers.find((d) => d.id === zed.id)).toEqual({ id: zed.id, name: 'Zed Zoom', open: 3, dueThisWeek: 1, inReview: 1 });
     expect(board.designers.every((d) => d.id !== people.vic.id && d.id !== people.wes.id)).toBe(true);
     // narrowed by client

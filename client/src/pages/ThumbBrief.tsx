@@ -9,8 +9,12 @@
 //   "Add note on image" to pin numbered notes on exact spots, "Pick B" (optionally marked Standout) with an
 //   optional reason or "Ask for changes" with a required note, the pins going with either, and Decide again until
 //   the designer sends another round. A newer round sent meanwhile is a 409 "stale": a toast, and the page
-//   refreshes. Unsent options never reach a manager. The winner downloads at full quality.
+//   refreshes. Unsent options never reach a manager. The winner downloads at full quality. Once it's picked, "Mark
+//   live" (Went live, once marked) records where and when it went live and the Test & Compare winner (ThumbLive.tsx);
+//   when the linked Timeliner video is Posted and it isn't marked yet, the pick says so. The brief card shows the
+//   Timeliner video it's for, with its step.
 // - A designer the brief was taken from reads the rounds they sent.
+// Everyone who sees the pick sees where it went live, once a manager has marked it.
 // Everyone gets Compare (this round's option against the last round's, side by side or with a swipe), Preview in
 // the wild (every option at feed sizes, beside the client's recent winners), Lights down (one option alone on black,
 // full screen), the Brand drawer (the client's brand kit beside the work, with a designer's own references for that
@@ -21,7 +25,7 @@ import { createPortal } from 'react-dom';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  ArrowRight, Ban, Check, CircleAlert, Columns2, Contrast, Download, Eye, Glasses, Image as ImageIcon, MapPinPlus, Maximize2, Palette, Pencil, RotateCcw, Send,
+  ArrowRight, Ban, Check, CircleAlert, Columns2, Contrast, Download, Eye, Glasses, Image as ImageIcon, MapPinPlus, Maximize2, Palette, Pencil, Radio, RotateCcw, Send,
   Sparkles, Trash2, Trophy, Undo2, X,
 } from 'lucide-react';
 import { api, useSave, type ApiError } from '../api';
@@ -45,6 +49,7 @@ import { burst, centerOf, plane } from '../fx';
 import { motionAllowed } from '../motion';
 import { BriefDialog, CancelBriefDialog, useReopenBrief } from './Thumbnails';
 import { BrandKit } from '../components/BrandKit';
+import { LiveSummary, WentLiveDialog } from '../components/ThumbLive';
 import { BriefRefs } from './StudioRefs';
 
 export function ThumbBriefPage() {
@@ -71,6 +76,7 @@ function Workbench({ d }: { d: ThumbnailBriefDetail }) {
   const [pick, setPick] = useState<string | null>(null);
   const [edit, setEdit] = useState<null | 'all' | 'designer'>(null);
   const [cancelling, setCancelling] = useState(false);
+  const [marking, setMarking] = useState(false);
   const [ask, setAsk] = useState<Ask | null>(null);
   const [squint, setSquint] = useState(false);
   const [grey, setGrey] = useState(false);
@@ -174,6 +180,7 @@ function Workbench({ d }: { d: ThumbnailBriefDetail }) {
   const tools: ReactNode = manager ? (
     <>
       {d.winner && <a className="btn mint pill" href={`${d.winner.url}?download=1`} download={d.winner.fileName}><Download aria-hidden />Download {d.winner.letter}</a>}
+      {d.can.markLive && <Button variant="pill" icon={<Radio aria-hidden />} onClick={() => setMarking(true)}>{d.live ? 'Went live' : 'Mark live'}</Button>}
       {d.can.edit && <Button variant="pill" icon={<Pencil aria-hidden />} onClick={() => setEdit('all')}>Edit</Button>}
       {d.designerId && !d.needsDesigner && <Link className="btn ghost pill" to={`/studio?userId=${d.designerId}`}>{d.designerName}’s Studio<ArrowRight aria-hidden /></Link>}
     </>
@@ -190,7 +197,8 @@ function Workbench({ d }: { d: ThumbnailBriefDetail }) {
         {tools}
       </PageHeader>
 
-      <TopNote d={d} now={now} currentId={currentId} onReopen={manager && d.can.edit ? () => reopen.mutate(d.id) : undefined} reopening={reopen.isPending} />
+      <TopNote d={d} now={now} currentId={currentId} onReopen={manager && d.can.edit ? () => reopen.mutate(d.id) : undefined} reopening={reopen.isPending}
+        onMarkLive={d.can.markLive ? () => setMarking(true) : undefined} />
 
       <div className="tb-work">
         <div className="tb-side">
@@ -254,6 +262,7 @@ function Workbench({ d }: { d: ThumbnailBriefDetail }) {
       {brand && <BrandDrawer d={d} id={brandId} designer={designer} onClose={closeBrand} />}
       {edit && <BriefDialog brief={d} focus={edit === 'designer' ? 'designer' : undefined} onClose={() => setEdit(null)} />}
       {cancelling && <CancelBriefDialog brief={d} onClose={() => setCancelling(false)} />}
+      {marking && <WentLiveDialog brief={d} onClose={() => setMarking(false)} />}
     </div>
   );
 }
@@ -309,8 +318,13 @@ function BrandDrawer({ d, id, designer, onClose }: { d: ThumbnailBriefDetail; id
   );
 }
 
-/** The one thing to know first: a manager's note asking for changes, the pick, a round waiting, a cancelled or moved brief. */
-function TopNote({ d, now, currentId, onReopen, reopening }: { d: ThumbnailBriefDetail; now: number; currentId: number | null; onReopen?: () => void; reopening: boolean }) {
+/**
+ * The one thing to know first: a manager's note asking for changes, the pick (and where it went live), a round
+ * waiting, a cancelled or moved brief.
+ */
+function TopNote({ d, now, currentId, onReopen, reopening, onMarkLive }: {
+  d: ThumbnailBriefDetail; now: number; currentId: number | null; onReopen?: () => void; reopening: boolean; onMarkLive?: () => void;
+}) {
   const { me } = useBoot();
   const dec = d.decision;
   const latest = d.rounds[d.rounds.length - 1] ?? null;
@@ -329,7 +343,7 @@ function TopNote({ d, now, currentId, onReopen, reopening }: { d: ThumbnailBrief
   if (d.state === 'picked' && d.winner) {
     // the win goes on the wall of whoever made it, who may not be the brief's designer now
     const mine = d.winner.uploadedById === me.id;
-    const tail = d.viewer !== 'designer' ? ' · download it at full quality and post it yourself' : mine ? ' · it’s on your wall of wins' : ` · it’s on ${d.winner.uploadedByName}’s wall of wins`;
+    const tail = d.viewer !== 'designer' ? (d.live ? '' : ' · download it at full quality and post it yourself') : mine ? ' · it’s on your wall of wins' : ` · it’s on ${d.winner.uploadedByName}’s wall of wins`;
     const notes = marksOn(dec?.pins, d.winner.id);
     return (
       <div className={`tb-picked${dec?.standout ? ' standout' : ''}`}>
@@ -347,6 +361,14 @@ function TopNote({ d, now, currentId, onReopen, reopening }: { d: ThumbnailBrief
           {dec?.note && <q>{dec.note}</q>}
           {notes.length > 0 && <PinList pins={notes} className="on-accent" />}
           <span className="tb-picked-by">{dec ? `${dec.decidedByName} · ${fmtAgo(dec.createdAt, now)}` : ''}{tail}</span>
+          <LiveSummary live={d.live} title={d.title} className="on-accent" />
+          {/* managers: the linked video is out in Timeliner but nobody has said where it went live (Mark live is also in the header) */}
+          {onMarkLive && !d.live && d.video?.posted && (
+            <span className="tb-live-ask">
+              <span><b>Posted in Timeliner.</b> Mark it live?</span>
+              <Button variant="eh-btn dark" icon={<Radio aria-hidden />} onClick={onMarkLive}>Mark live</Button>
+            </span>
+          )}
         </div>
       </div>
     );

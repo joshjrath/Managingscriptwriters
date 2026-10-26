@@ -9,23 +9,35 @@
 // a title are in, "Suggest ideas" (only when the server has the AI: boot.briefIdeas) asks Claude for three directions
 // (POST /api/thumbnails/suggest; nothing is saved), and "Use this" fills what it should show and the words on the
 // image, which the manager can still change (and which then count as changed for Edit). Edit, Reassign and Cancel
-// are on each brief, and on its review page.
+// are on each brief, and on its review page. New thumbnail and Edit can link the Timeliner video the thumbnail is for
+// (GET /api/thumbnails/timeliner-videos: the client's open videos and those posted in the last 90 days, from the
+// site's copy of Timeliner; titles only, since scripts have none), and picking one fills an empty title (and a title
+// it filled follows the link: titleForVideo). When that video is Posted and the pick isn't marked live, the board asks gently
+// ("Posted in Timeliner — mark it live?"), worked out on load, and Mark it live opens the Went live dialog
+// (ThumbLive.tsx) right there; every picked brief in "Picked or cancelled lately" has Mark live too. Each designer's
+// group links to their Studio and their portfolio.
 
 import { useId, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useMutation, useQuery } from '@tanstack/react-query';
-import { ArrowRight, Ban, Check, ClipboardCheck, Image as ImageIcon, Inbox, Lightbulb, Palette, Pencil, Plus, RotateCcw, Sparkles, Trophy, Undo2, UserPlus, Users } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  ArrowRight, Ban, BookOpen, Check, CircleAlert, ClipboardCheck, ExternalLink, Image as ImageIcon, Inbox, Lightbulb, Palette, Pencil, Plus, Radio, RotateCcw, Sparkles, Trophy, Undo2, UserPlus, Users,
+} from 'lucide-react';
 import { api, qs, useSave, type ApiError } from '../api';
 import type {
   ClientDetail, ThumbnailBoard, ThumbnailBrief, ThumbnailBriefDetail, ThumbnailBriefInput, ThumbnailBriefPatch, ThumbnailDesignerLoad, ThumbnailSuggestInput, ThumbnailSuggestions,
+  TimelinerVideoChoices,
 } from '../../../shared/types';
-import { briefOrder, DEFAULT_OPTIONS, isOpenThumb, isThumbnailDesigner, MAX_OPTIONS, THUMB_IDEA_COUNT, type ThumbIdea } from '../../../shared/workflow';
+import {
+  briefOrder, DEFAULT_OPTIONS, isOpenThumb, isThumbnailDesigner, MAX_OPTIONS, portfolioPath, THUMB_IDEA_COUNT, TIMELINER_VIDEO_DAYS, timelinerVideoUrl, titleForVideo, type ThumbIdea,
+} from '../../../shared/workflow';
 import { addDays, type ISODate } from '../../../shared/dates';
-import { fmtAgo, fmtRange, plural } from '../../../shared/format';
+import { fmtAgo, fmtDate, fmtRange, plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
-import { Avatar, Button, Dialog, Empty, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, Thumb, useFieldId, useToast } from '../components/ui';
+import { Avatar, Button, Chip, Dialog, Empty, ErrorState, Field, FormError, inputProps, Loading, Panel, Seg, Thumb, useFieldId, useToast } from '../components/ui';
 import { KpiCard } from '../components/StatCards';
-import { BriefTile, DueTag, optionAlt } from '../components/ThumbBits';
+import { BriefThumb, BriefTile, DueTag, optionAlt, VideoFact } from '../components/ThumbBits';
+import { WentLiveDialog } from '../components/ThumbLive';
 import { useNow } from '../components/EditingBits';
 
 const boardPath = (clientId: string, designerId: string) => `/api/thumbnails${qs({ clientId, designerId })}`;
@@ -39,6 +51,7 @@ export function ThumbnailsPage() {
   const q = useQuery({ queryKey: ['thumbnails', clientId, designerId], queryFn: () => api<ThumbnailBoard>(boardPath(clientId, designerId)), refetchInterval: 60_000 });
   const [dialog, setDialog] = useState<null | { brief: ThumbnailBrief | null; focus?: 'designer' }>(null);
   const [cancelling, setCancelling] = useState<ThumbnailBrief | null>(null);
+  const live = useMarkLive();
   const reopen = useReopenBrief();
   const set = (k: string, v: string) => { const p = new URLSearchParams(params); if (v) p.set(k, v); else p.delete(k); setParams(p, { replace: true }); };
   const jump = (id: string) => document.getElementById(id)?.scrollIntoView({ block: 'start' });
@@ -63,6 +76,12 @@ export function ThumbnailsPage() {
       {isOpenThumb(x.state)
         ? <Button variant="sm ghost" icon={<Ban aria-hidden />} onClick={() => setCancelling(x)} aria-label={`Cancel ${x.title}`}>Cancel</Button>
         : x.state === 'cancelled' && <Button variant="sm ghost" icon={<Undo2 aria-hidden />} busy={reopen.isPending && reopen.variables === x.id} onClick={() => reopen.mutate(x.id)} aria-label={`Reopen ${x.title}`}>Reopen</Button>}
+      {x.state === 'picked' && (
+        <Button variant="sm ghost" icon={<Radio aria-hidden />} busy={live.opening === x.id} onClick={(e) => void live.open(x.id, e.currentTarget)}
+          aria-label={x.live ? `Change where ${x.title} went live` : `Mark ${x.title} live`}>
+          {x.live ? 'Went live' : 'Mark live'}
+        </Button>
+      )}
     </div>
   );
   const tile = (x: ThumbnailBrief, i: number, designer = false) => <BriefTile key={x.id} brief={x} to={`/thumbnails/${x.id}`} today={clock.today} eager={i < 4} designer={designer} foot={actions(x)} />;
@@ -86,7 +105,7 @@ export function ThumbnailsPage() {
             {(clientId || designerId) && <Button variant="sm ghost" onClick={() => setParams(new URLSearchParams(), { replace: true })}>Clear filters</Button>}
           </div>
 
-          <Panel id="tn-review" title="To review" count={b.toReview.length} sub="rounds waiting on you, oldest first" className="tn-review">
+          <Panel id="tn-review" tabIndex={-1} title="To review" count={b.toReview.length} sub="rounds waiting on you, oldest first" className="tn-review">
             {!b.toReview.length
               ? <Empty boxed icon={<Inbox />} title="Nothing waiting on you">A round shows up here the moment a designer sends it. Their drafts stay private until then.</Empty>
               : (
@@ -112,6 +131,8 @@ export function ThumbnailsPage() {
               )}
           </Panel>
 
+          {b.toMarkLive.length > 0 && <ToMarkLive briefs={b.toMarkLive} opening={live.opening} onMark={(x, from) => void live.open(x.id, from)} />}
+
           {!b.designers.length && !open.length && (
             <Panel className="tn-first">
               <Empty icon={<Palette />} title="No thumbnail designers yet">
@@ -134,7 +155,10 @@ export function ThumbnailsPage() {
                   <h2 id={`tn-d-${dz.id}`}>{dz.name}</h2>
                   <span className="muted">{plural(dz.open, 'open brief')} · {dz.dueThisWeek} due this week · {dz.inReview} in review</span>
                 </div>
-                <Link className="btn sm ghost" to={`/studio?userId=${dz.id}`}>Open their Studio<ArrowRight aria-hidden /></Link>
+                <span className="tn-group-links">
+                  <Link className="btn sm ghost" to={portfolioPath({ userId: dz.id })}><BookOpen aria-hidden />Portfolio</Link>
+                  <Link className="btn sm ghost" to={`/studio?userId=${dz.id}`}>Open their Studio<ArrowRight aria-hidden /></Link>
+                </span>
               </div>
               {briefs.length
                 ? <div className="st-grid">{briefs.map((x, i) => tile(x, i))}</div>
@@ -151,7 +175,73 @@ export function ThumbnailsPage() {
       )}
       {dialog && <BriefDialog brief={dialog.brief} focus={dialog.focus} designers={b?.designers} onClose={() => setDialog(null)} />}
       {cancelling && <CancelBriefDialog brief={cancelling} onClose={() => setCancelling(null)} />}
+      {live.brief && <WentLiveDialog brief={live.brief} onClose={live.close} />}
     </div>
+  );
+}
+
+/**
+ * Opens the Went live dialog from the board: the brief in full is fetched first (the button shows it's working
+ * meanwhile, so the dialog can't know what opened it). The keyboard comes back to that button when the dialog closes;
+ * when a save took it away (a "mark it live?" row goes once marked), to the row that took its place, else to To review.
+ */
+function useMarkLive() {
+  const qc = useQueryClient();
+  const toast = useToast();
+  const [brief, setBrief] = useState<ThumbnailBriefDetail | null>(null);
+  const [opening, setOpening] = useState<number | null>(null);
+  const from = useRef<{ el: HTMLElement; row: number } | null>(null);
+  const back = () => {
+    const f = from.current;
+    from.current = null;
+    if (!f) return;
+    // after React has drawn the board without the dialog (and without the row, once it's marked)
+    requestAnimationFrame(() => {
+      if (f.el.isConnected) { f.el.focus(); return; }
+      const rows = document.querySelectorAll<HTMLElement>('.tn-live-row > .btn');
+      (rows[Math.min(Math.max(f.row, 0), rows.length - 1)] ?? document.getElementById('tn-review'))?.focus();
+    });
+  };
+  const open = async (id: number, el: HTMLElement) => {
+    const row = el.closest('.tn-live-row');
+    from.current = { el, row: row ? [...document.querySelectorAll('.tn-live-row')].indexOf(row) : -1 };
+    setOpening(id);
+    try {
+      setBrief(await qc.fetchQuery({ queryKey: ['thumbnail', id], queryFn: () => api<ThumbnailBriefDetail>(`/api/thumbnails/${id}`) }));
+    } catch (err) {
+      toast((err as Error).message, 'error');
+      back();
+    } finally {
+      setOpening(null);
+    }
+  };
+  return { brief, opening, open, close: () => { setBrief(null); back(); } };
+}
+
+/**
+ * "Posted in Timeliner — mark it live?": picked thumbnails whose linked video is Posted in the site's copy of
+ * Timeliner but that nobody has marked live yet. Worked out on every load; nothing is stored, and it goes away once
+ * marked.
+ */
+function ToMarkLive({ briefs, opening, onMark }: { briefs: ThumbnailBrief[]; opening: number | null; onMark: (b: ThumbnailBrief, from: HTMLElement) => void }) {
+  return (
+    <Panel title="Posted in Timeliner — mark it live?" count={briefs.length} sub="their videos are out: add the link and the day, and the designer sees it on their portfolio" className="tn-live">
+      <ul className="tn-live-list">
+        {briefs.map((x) => (
+          <li key={x.id} className="tn-live-row">
+            <Link to={`/thumbnails/${x.id}`} className="tn-live-pic" aria-label={`${x.title}, ${x.clientName}: open the brief`}>
+              <BriefThumb brief={x} />
+            </Link>
+            <div className="tn-live-body">
+              <b className="tn-live-t">{x.title}</b>
+              <span className="tn-live-k">{x.clientName}{x.winner ? ` · ${x.winner.letter} by ${x.winner.uploadedByName}` : ''}</span>
+              {x.video && <VideoFact video={x.video} />}
+            </div>
+            <Button variant="mint pill" icon={<Radio aria-hidden />} busy={opening === x.id} onClick={(e) => onMark(x, e.currentTarget)} aria-label={`Mark ${x.title} live`}>Mark it live</Button>
+          </li>
+        ))}
+      </ul>
+    </Panel>
   );
 }
 
@@ -206,6 +296,7 @@ export function useReopenBrief() {
 /**
  * A new brief, or an existing one edited (`brief`). Only thumbnail designers are offered, each with what they
  * already have. Editing sends only what changed since the dialog opened; the client and shoot stay as they are.
+ * The Timeliner video it's for is optional: picking one fills the title when it's empty.
  */
 export function BriefDialog({ brief, focus, designers, onClose }: { brief: ThumbnailBrief | null; focus?: 'designer'; designers?: ThumbnailDesignerLoad[]; onClose: () => void }) {
   const { users, clock, briefIdeas } = useBoot();
@@ -223,8 +314,14 @@ export function BriefDialog({ brief, focus, designers, onClose }: { brief: Thumb
   const [wanted, setWanted] = useState(base?.optionsWanted ?? DEFAULT_OPTIONS);
   const [dueOn, setDueOn] = useState<string>(base?.dueOn ?? '');
   const [designerId, setDesignerId] = useState<number | ''>(startDesigner);
+  const startVideo = base?.timelinerTaskId ?? '';
+  const [videoId, setVideoId] = useState(startVideo);
+  // the title the Timeliner video picker last filled in: it follows the pick while nobody has typed over it
+  const autoTitle = useRef<string | null>(null);
   const [local, setLocal] = useState<Record<string, string>>({});
-  const ids = { c: useFieldId('tb-c'), s: useFieldId('tb-s'), t: useFieldId('tb-t'), b: useFieldId('tb-b'), w: useFieldId('tb-w'), d: useFieldId('tb-d'), z: useFieldId('tb-z') };
+  const ids = {
+    c: useFieldId('tb-c'), s: useFieldId('tb-s'), v: useFieldId('tb-v'), t: useFieldId('tb-t'), b: useFieldId('tb-b'), w: useFieldId('tb-w'), d: useFieldId('tb-d'), z: useFieldId('tb-z'),
+  };
 
   const client = useQuery({ queryKey: ['client', Number(clientId)], queryFn: () => api<ClientDetail>(`/api/clients/${clientId}`), enabled: !editing && !!clientId });
   // who can be given it, with their load: from the board when it's open, else asked for here
@@ -261,6 +358,7 @@ export function BriefDialog({ brief, focus, designers, onClose }: { brief: Thumb
     if (wanted !== base.optionsWanted) body.optionsWanted = wanted;
     if ((dueOn || null) !== (base.dueOn ?? null)) body.dueOn = (dueOn || null) as ISODate | null;
     if (designerId !== startDesigner) body.designerId = designerId === '' ? null : designerId;
+    if (videoId !== startVideo) body.timelinerTaskId = videoId || null;
     return body;
   };
   const changed = editing ? Object.keys(patchBody()).length > 0 : true;
@@ -274,6 +372,7 @@ export function BriefDialog({ brief, focus, designers, onClose }: { brief: Thumb
     const input: ThumbnailBriefInput = {
       clientId: Number(clientId), shootId: shootId ? Number(shootId) : null, title: title.trim(), brief: text.trim() || null, onImage: onImage.trim() || null,
       optionsWanted: wanted, dueOn: (dueOn || null) as ISODate | null, designerId: designerId === '' ? null : designerId,
+      ...(videoId ? { timelinerTaskId: videoId } : {}),
     };
     save.mutate({ ...input });
   };
@@ -289,7 +388,8 @@ export function BriefDialog({ brief, focus, designers, onClose }: { brief: Thumb
           <div className="form-grid">
             <Field label="Client" htmlFor={ids.c} error={f.clientId}>
               {/* a new brief starts at its first field; Edit at the title, Reassign at the designer */}
-              <ClientSelect id={ids.c} value={clientId} invalid={f.clientId} autoFocus onChange={(v) => { setClientId(v); setShootId(''); }} />
+              <ClientSelect id={ids.c} value={clientId} invalid={f.clientId} autoFocus
+                onChange={(v) => { setClientId(v); setShootId(''); setVideoId(''); setTitle(titleForVideo(title, autoTitle.current, null)); autoTitle.current = null; }} />
             </Field>
             <Field label="Shoot" optional htmlFor={ids.s} error={f.shootId} help={clientId && client.isLoading ? 'Loading the client’s shoots…' : undefined}>
               <select className="select" value={shootId} onChange={(e) => setShootId(e.target.value)} disabled={!clientId} {...inputProps(ids.s, f.shootId)}>
@@ -299,7 +399,14 @@ export function BriefDialog({ brief, focus, designers, onClose }: { brief: Thumb
             </Field>
           </div>
         )}
-        <Field label="Video title" htmlFor={ids.t} error={f.title} help="The video’s working title, as the designer should read it. Scripts don’t have titles, so type it here.">
+        <VideoPicker id={ids.v} clientId={editing ? base!.clientId : clientId ? Number(clientId) : null} value={videoId} error={f.timelinerTaskId} briefId={base?.id ?? null}
+          kept={base?.timelinerTaskId ? { taskId: base.timelinerTaskId, title: base.video?.title ?? null } : null}
+          onChange={(v) => {
+            setVideoId(v?.taskId ?? '');
+            const next = titleForVideo(title, autoTitle.current, v);
+            if (next !== title) { setTitle(next); autoTitle.current = v ? next : null; }
+          }} />
+        <Field label="Video title" htmlFor={ids.t} error={f.title} help="The video’s working title, as the designer should read it. Scripts don’t have titles, so type it here, or pick the Timeliner video above.">
           <input className="input" value={title} maxLength={200} data-autofocus={editing && !focus ? true : undefined} onChange={(e) => setTitle(e.target.value)} {...inputProps(ids.t, f.title)} />
         </Field>
         {briefIdeas && (!base || isOpenThumb(base.state)) && (
@@ -335,6 +442,54 @@ export function BriefDialog({ brief, focus, designers, onClose }: { brief: Thumb
         </Field>
       </form>
     </Dialog>
+  );
+}
+
+/**
+ * "Timeliner video": the client's videos in the site's copy of Timeliner (open, or posted in the last 90 days, newest
+ * made first; titles only), to say which video the thumbnail is for. A link kept from before stays offered even when
+ * the copy no longer has the video. Picking one fills an empty title (the form does that).
+ */
+function VideoPicker({ id, clientId, value, error, briefId, kept, onChange }: {
+  id: string; clientId: number | null; value: string; error?: string; briefId: number | null;
+  kept: { taskId: string; title: string | null } | null; onChange: (v: { taskId: string; title: string } | null) => void;
+}) {
+  const { clients, clock } = useBoot();
+  const q = useQuery({
+    queryKey: ['timeliner-videos', clientId],
+    queryFn: () => api<TimelinerVideoChoices>(`/api/thumbnails/timeliner-videos${qs({ clientId })}`),
+    enabled: clientId != null,
+  });
+  const videos = q.data?.videos ?? [];
+  const chosen = videos.find((v) => v.taskId === value) ?? null;
+  const keptMissing = !!kept && !videos.some((v) => v.taskId === kept.taskId);
+  const clientName = clients.find((c) => c.id === clientId)?.name ?? 'this client';
+  const help = clientId == null ? 'Choose the client first.'
+    : q.isLoading ? 'Loading the client’s videos from Timeliner…'
+    : q.isError ? `Couldn’t load ${clientName}’s videos: ${(q.error as Error).message}`
+    : !q.data?.syncedAt && !videos.length ? 'The site hasn’t read Timeliner yet, so there are no videos to pick. You can link one later with Edit.'
+    : !videos.length ? `No open videos for ${clientName} in Timeliner, and none posted in the last ${TIMELINER_VIDEO_DAYS} days.`
+    : `${clientName}’s open videos, and those posted in the last ${TIMELINER_VIDEO_DAYS} days. Picking one fills an empty title.`;
+  const words = (v: TimelinerVideoChoices['videos'][number]) => `${v.title} · ${v.step}${v.createdAt ? ` · made ${fmtDate(v.createdAt.slice(0, 10) as ISODate, clock.today)}` : ''}${v.briefId && v.briefId !== briefId ? ' · has a brief' : ''}`;
+  return (
+    <div className="field tn-video">
+      <label htmlFor={id}>Timeliner video<span className="opt">optional</span></label>
+      <select className="select" value={value} disabled={clientId == null || (q.isLoading && !keptMissing)}
+        onChange={(e) => { const v = videos.find((x) => x.taskId === e.target.value); onChange(v ? { taskId: v.taskId, title: v.title } : e.target.value && kept ? { taskId: kept.taskId, title: kept.title ?? '' } : null); }}
+        {...inputProps(id, error)}>
+        <option value="">No video linked</option>
+        {keptMissing && kept && <option value={kept.taskId}>{kept.title ?? 'The video linked before'} · not in Timeliner’s list now</option>}
+        {videos.map((v) => <option key={v.taskId} value={v.taskId}>{words(v)}</option>)}
+      </select>
+      {error ? <span className="err" role="alert" id={`${id}-err`}><CircleAlert aria-hidden />{error}</span> : <span className="help">{help}</span>}
+      {chosen && (
+        <span className="tn-video-on">
+          <Chip color={chosen.posted ? 'mint' : 'cyan'} dot={!chosen.posted} icon={chosen.posted ? <Radio aria-hidden /> : undefined}>{chosen.step}</Chip>
+          {chosen.briefId && chosen.briefId !== briefId && <span className="muted">Another brief already names this video</span>}
+          <a className="link" href={timelinerVideoUrl(chosen.taskId)} target="_blank" rel="noopener noreferrer">Open in Timeliner<ExternalLink aria-hidden /><span className="sr-only"> (opens in a new tab)</span></a>
+        </span>
+      )}
+    </div>
   );
 }
 

@@ -7,10 +7,10 @@
 import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, ListTodo, Palette, PenLine, Search, Users } from 'lucide-react';
+import { AlertTriangle, BookOpen, ListTodo, Palette, PenLine, Search, Users } from 'lucide-react';
 import { api } from '../api';
 import type { Dashboard, UserSummary } from '../../../shared/types';
-import { isEditor, isManager, isThumbnailDesigner, isVideoEditor, personLabel } from '../../../shared/workflow';
+import { isEditor, isManager, isThumbnailDesigner, isVideoEditor, personLabel, portfolioPath } from '../../../shared/workflow';
 import { fmtDate, plural } from '../../../shared/format';
 import { PageHeader, useBoot } from '../components/Shell';
 import { Avatar, Button, Chip, Empty, Panel } from '../components/ui';
@@ -63,7 +63,7 @@ export function WritersPage() {
           )}
           {designers.length > 0 && (
             <>
-              <h2 className="team-sub">Thumbnail designers <span className="muted">make the videos’ thumbnails; their briefs and picks are in their Studio</span></h2>
+              <h2 className="team-sub">Thumbnail designers <span className="muted">make the videos’ thumbnails; their briefs are in their Studio, their picks and how they’re growing in their portfolio</span></h2>
               <div className="writer-grid">{designers.map(card)}</div>
             </>
           )}
@@ -109,6 +109,7 @@ function WriterCard({ u, manager, self, load, openTodos, today, onTodo }: {
       <div className="row-flex s2 writer-actions">
         {manager && !isEditor(u.role) && <Link to={self ? '/my-work' : `/my-work?userId=${u.id}`} className="btn sm"><PenLine aria-hidden />{self ? 'My work' : 'Their work'}</Link>}
         {manager && isThumbnailDesigner(u) && <Link to={`/studio?userId=${u.id}`} className="btn sm"><Palette aria-hidden />Open their Studio</Link>}
+        {manager && isThumbnailDesigner(u) && <Link to={portfolioPath({ userId: u.id })} className="btn sm"><BookOpen aria-hidden />Portfolio</Link>}
         {manager && <Button variant="sm ghost" icon={<ListTodo aria-hidden />} onClick={onTodo}>Add to-do</Button>}
       </div>
     </section>

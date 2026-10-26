@@ -62,6 +62,9 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post('/api/auth/logout', async (req, reply) => {
     await destroySession(db, req.cookies[SESSION_COOKIE]);
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
+    // the browser forgets the files it kept (thumbnail pictures are kept a day: THUMB_FILE_CACHE), so the next person
+    // to sign in on it never reads them from its cache
+    reply.header('Clear-Site-Data', '"cache"');
     // the person actually signed in, not whoever they were viewing as; and a
     // failed log entry must never leave them signed in
     const who = req.realUser ?? req.user;

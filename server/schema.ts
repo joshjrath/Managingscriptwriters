@@ -910,4 +910,20 @@ create index thumbnail_refs_file_idx on thumbnail_refs (file_id) where file_id i
 alter table editors add column editor_kind text;
 alter table editors add constraint editors_editor_kind_check check (editor_kind is null or editor_kind in ('short_form', 'thumbnail'));
 `,
+  // 42 · Thumbnail Studio, phase 4. A picked thumbnail can be marked live: the video's link (https) and the day it went
+  // live, who marked it and when, YouTube Test & Compare's winner among the brief's sent options, and a note. Anything
+  // marked needs the day (thumbnail_briefs_published_check), so clearing it is every field back to null. A brief can
+  // name the Timeliner video it's for (its task id, from the site's copy of Timeliner; no foreign key, since the copy
+  // loses rows), indexed for finding the brief of a video. Every column is nullable and starts empty: nothing to backfill.
+  `
+alter table thumbnail_briefs add column published_url text;
+alter table thumbnail_briefs add column published_on date;
+alter table thumbnail_briefs add column published_by bigint references users(id);
+alter table thumbnail_briefs add column published_at timestamptz;
+alter table thumbnail_briefs add column timeliner_task_id text;
+alter table thumbnail_briefs add column test_winner_variant_id bigint references thumbnail_variants(id);
+alter table thumbnail_briefs add column test_note text;
+alter table thumbnail_briefs add constraint thumbnail_briefs_published_check check (published_on is not null or num_nonnulls(published_url, test_winner_variant_id, test_note) = 0);
+create index thumbnail_briefs_timeliner_idx on thumbnail_briefs (timeliner_task_id) where timeliner_task_id is not null;
+`,
 ];

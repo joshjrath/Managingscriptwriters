@@ -4,7 +4,7 @@
 // (opening the shoot's scripts PDF for a video of theirs), saying which one
 // they're on; thumbnail designers get their Studio: their briefs, uploading
 // options to their tray, sending a round, an AI second look on an option
-// of theirs, and their own reference boards. Everything else is refused here,
+// of theirs, their own reference boards and their portfolio. Everything else is refused here,
 // before any route runs, so a new route is closed to editors until it's added
 // to this list on purpose. (An admin viewing the site as an editor gets exactly
 // the same: the kind is the viewed person's.)
@@ -39,7 +39,7 @@ const BY_KIND: Record<EditorKind, Routes> = {
     POST: ['/api/editing/focus'],
   },
   thumbnail: {
-    GET: ['/api/studio', '/api/thumbnails/:id', '/api/thumbnail-refs'],
+    GET: ['/api/studio', '/api/studio/portfolio', '/api/thumbnails/:id', '/api/thumbnail-refs'],
     POST: ['/api/thumbnails/:id/options', '/api/thumbnails/:id/send', '/api/thumbnail-options/:id/second-look', '/api/thumbnail-refs'],
     PATCH: ['/api/thumbnail-refs/:id'],
     DELETE: ['/api/thumbnail-options/:id', '/api/thumbnail-refs/:id'],

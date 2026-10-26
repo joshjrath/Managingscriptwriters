@@ -3373,3 +3373,223 @@ h1, h2, h3, .title, .wc-client, .wc-batch, .t, .ellipsis-wrap { overflow-wrap: a
 @media (prefers-reduced-motion: reduce) { .ref-open:hover .ref-pic, .ref-open:focus-visible .ref-pic { transform: none; } .tb-brand { animation: none; } }
 :root[data-motion="off"] :is(.ref-open:hover, .ref-open:focus-visible) .ref-pic { transform: none; }
 :root[data-motion="off"] .tb-brand { animation: none; }
+
+/* ── Thumbnail Studio 4: went live, the portfolio, private growth ─────────────────────────────────────────── */
+
+/* the Live badge: a small mint chip on a win that went live, a link to the video in a new tab (44 px to a finger) */
+.live-badge { position: relative; display: inline-flex; border-radius: var(--r-pill); text-decoration: none; }
+a.live-badge:hover .chip { background: color-mix(in srgb, var(--mint) 32%, var(--thumb-scrim)); }
+a.live-badge:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (pointer: coarse) { .live-badge::before { content: ""; position: absolute; inset: -10px; } }
+/* over a win's picture, beside its link (a link can't sit in another): the picture's bottom-left corner */
+.win { position: relative; }
+.win-over, .pf-over { position: absolute; z-index: 6; top: 0; left: 0; right: 0; aspect-ratio: 16 / 9; pointer-events: none; }
+:is(.win-over, .pf-over) .live-badge { position: absolute; left: 8px; bottom: 8px; pointer-events: auto; }
+:is(.win-over, .pf-over) .chip { background: var(--thumb-scrim); backdrop-filter: blur(6px); }
+
+/* "Went live: youtube.com/watch?v=… · Oct 20", and Test & Compare's winner */
+.live-sum { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.live-line { display: flex; align-items: flex-start; gap: 7px; min-width: 0; font-size: 13.5px; line-height: 1.45; }
+.live-line > svg { width: 15px; height: 15px; flex: none; margin-top: 2px; color: var(--mint); }
+.live-line-t { min-width: 0; overflow-wrap: anywhere; }
+.live-line-a { color: color-mix(in srgb, var(--mint) 55%, var(--text)); font-weight: 650; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--mint) 45%, transparent); }
+.live-line-a:hover { text-decoration-color: currentColor; }
+.live-line-a svg { width: 12px; height: 12px; margin-left: 3px; vertical-align: -1px; }
+.live-line-d { color: var(--text-2); white-space: nowrap; }
+.live-test { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.live-test-pic { width: 72px; flex: none; }
+.live-test-pic .thumb { --thumb-r: 8px; }
+.live-test-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: 13px; line-height: 1.45; }
+.live-test-k { display: inline-flex; align-items: center; gap: 6px; font: 700 10.5px/1.2 var(--font-ui); letter-spacing: .12em; text-transform: uppercase; color: var(--text-2); }
+.live-test-k svg { width: 13px; height: 13px; }
+.live-test-t q { color: var(--text-2); overflow-wrap: anywhere; }
+/* on the mint pick banner of a brief */
+.live-sum.on-accent { align-self: stretch; padding-top: 10px; border-top: 1px solid color-mix(in srgb, var(--on-accent) 16%, transparent); }
+.on-accent :is(.live-line > svg, .live-line-a, .live-line-d, .live-test-k, .live-test-t q) { color: inherit; }
+.on-accent .live-line-a { text-decoration-color: currentColor; }
+.on-accent .live-line-a:focus-visible { outline: 2px solid var(--on-accent); outline-offset: 2px; }
+.tb-live-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 13.5px; }
+
+/* the Timeliner video a brief is for (managers), on its card and in New thumbnail / Edit */
+.tb-video { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.tb-video-t { display: inline-flex; align-items: flex-start; gap: 6px; min-width: 0; overflow-wrap: anywhere; }
+.tb-video-t > svg { width: 15px; height: 15px; flex: none; margin-top: 3px; color: var(--text-2); }
+.tb-video-a, .tn-video-on .link { font-size: 13px; }
+:is(.tb-video-a, .tn-video-on .link) svg { width: 12px; height: 12px; margin-left: 3px; vertical-align: -1px; }
+.tn-video-on { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 13px; }
+/* a link on its own, not words in a sentence: 44 px to a finger */
+@media (pointer: coarse) { .tb-video-a, .tn-video-on .link { display: inline-flex; align-items: center; min-height: 44px; } }
+
+/* the managers' board: "Posted in Timeliner — mark it live?", gently */
+.tn-live {
+  margin-bottom: var(--gap);
+  background: radial-gradient(60% 120% at 100% 0%, color-mix(in srgb, var(--mint) 9%, transparent), transparent 60%), var(--panel);
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--mint) 26%, transparent);
+}
+.tn-live-list { display: flex; flex-direction: column; gap: 10px; }
+.tn-live-row { display: grid; grid-template-columns: 140px minmax(0, 1fr) auto; gap: 12px 16px; align-items: center; padding: 10px 14px 10px 10px; border-radius: var(--r-card); background: var(--row); }
+.tn-live-pic { display: block; border-radius: 10px; }
+.tn-live-pic .thumb { --thumb-r: 10px; }
+.tn-live-pic:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.tn-live-body { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.tn-live-t { font: 800 17px/1.2 var(--font-display); letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.tn-live-k { font-size: 12.5px; color: var(--text-2); overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .tn-live-row { grid-template-columns: 96px minmax(0, 1fr); }
+  .tn-live-row > .btn { grid-column: 1 / -1; }
+}
+.tn-group-links { display: flex; flex-wrap: wrap; gap: 4px; }
+
+/* the Went live dialog */
+.wl-intro, .wl-back { font-size: 13.5px; line-height: 1.5; }
+.wl-back { padding: 10px 14px; border-radius: 12px; background: color-mix(in srgb, var(--red) 10%, var(--row)); }
+.form-grid.wl-grid { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); }
+@media (max-width: 760px) { .form-grid.wl-grid { grid-template-columns: minmax(0, 1fr); } }
+.wl-test { margin: 0; padding: 0; border: 0; min-width: 0; }
+.wl-test > legend { float: left; width: 100%; padding: 0; margin-bottom: 7px; }
+.wl-test > legend + * { clear: left; }
+.wl-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 128px), 1fr)); gap: 10px; }
+.wl-opt { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 6px; border-radius: 14px; background: var(--row); cursor: pointer; transition: box-shadow var(--t), background var(--t); }
+.wl-opt:hover { background: var(--row-hover); }
+.wl-opt.on { background: color-mix(in srgb, var(--mint) 10%, var(--row)); box-shadow: inset 0 0 0 2px var(--mint); }
+.wl-opt:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.wl-opt .thumb { --thumb-r: 9px; }
+.wl-opt-t { padding: 0 2px 2px; font-size: 12.5px; font-weight: 650; overflow-wrap: anywhere; }
+.wl-opt.none { justify-content: center; min-height: 92px; }
+.wl-none { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; font-size: 12.5px; font-weight: 650; color: var(--text-2); }
+.wl-none svg { width: 18px; height: 18px; }
+.wl-opt.on .wl-none { color: var(--text); }
+.textarea.wl-note { min-height: 72px; }
+
+/* the portfolio: a wall of cards that turn over to their story, and a quiet growth panel beside it */
+.pf-cols { align-items: start; }
+.pf-gone { margin-bottom: var(--gap); align-items: center; }
+@media (pointer: coarse) { .pf-gone .btn { min-width: 44px; } }
+.pf-filters { margin-bottom: 18px; }
+/* a few clients as buttons, never wider than the panel: a long name ends in … (its whole name is the button's title) */
+.pf-filters .seg { max-width: 100%; border-radius: 22px; }
+.pf-filters .seg button { max-width: 100%; min-width: 0; }
+.pf-select { width: auto; max-width: 100%; }
+/* two cards across beside the growth panel on a laptop */
+.pf-wall { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr)); align-items: start; gap: 18px 16px; transition: opacity 200ms var(--ease); }
+.pf-wall.busy { opacity: .55; }
+.pf-card { min-width: 0; perspective: 1400px; }
+.pf-wall.animate .pf-card { animation: dt-in 800ms cubic-bezier(.34, 1.35, .64, 1) backwards; animation-delay: calc(var(--i, 0) * 45ms + 60ms); }
+/* the face that's showing sets the card's height (a turned card grows to its story); the other lies over it, inert.
+   A turn grows or shrinks the card in step with it (FlipCard animates its height), so the cards below glide rather
+   than jump, and while it does neither face is cut short */
+.pf-flip { position: relative; display: grid; }
+.pf-face { grid-area: 1 / 1; position: relative; display: flex; flex-direction: column; gap: 8px; min-width: 0; border-radius: 16px; }
+.pf-card:not(.turned) .pf-back, .pf-card.turned .pf-front { position: absolute; inset: 0; overflow: hidden; }
+.pf-card[data-moving] { z-index: 1; }
+.pf-card[data-moving] :is(.pf-front, .pf-back) { bottom: auto; overflow: visible; }
+.pf-flip[data-mode="turn"] { transform-style: preserve-3d; transition: transform 640ms var(--ease-out-quint); }
+.pf-flip[data-mode="turn"] .pf-face { -webkit-backface-visibility: hidden; backface-visibility: hidden; }
+.pf-flip[data-mode="turn"] .pf-back { transform: rotateY(180deg); }
+.pf-card.turned .pf-flip[data-mode="turn"] { transform: rotateY(180deg); }
+/* animations off or reduced motion: no turning, the faces crossfade (a fade, not movement, so it still plays) */
+.pf-flip[data-mode="fade"] .pf-face { transition: opacity 200ms var(--ease); }
+/* the hidden face is inert too (no focus, no screen reader), so it can take keyboard focus the moment it shows */
+.pf-flip[data-mode="fade"] .pf-back, .pf-card.turned .pf-flip[data-mode="fade"] .pf-front { opacity: 0; pointer-events: none; }
+.pf-card.turned .pf-flip[data-mode="fade"] .pf-back { opacity: 1; pointer-events: auto; }
+@media (prefers-reduced-motion: reduce) { .pf-flip[data-mode="fade"] .pf-face { transition-duration: 200ms !important; } }
+:root[data-motion="off"] .pf-flip[data-mode="fade"] .pf-face { transition-duration: 200ms !important; }
+/* the front: the picture, its words, and one button over the whole face that turns it */
+.pf-front .thumb { box-shadow: 0 0 0 1px var(--studio-line); transition: transform 320ms var(--ease-out-quint), box-shadow 320ms var(--ease-out-quint); }
+.pf-card.standout .pf-front .thumb { box-shadow: 0 0 0 2px color-mix(in srgb, var(--yellow) 70%, transparent); }
+.pf-front:hover .thumb, .pf-front:has(.pf-turn:focus-visible) .thumb { box-shadow: 0 0 0 2.5px var(--mint), 0 22px 44px -24px color-mix(in srgb, var(--mint) 70%, transparent); }
+@media (hover: hover) and (pointer: fine) { .pf-wall.animate .pf-front:hover .thumb { transform: translateY(-3px); } }
+.pf-turn { position: absolute; inset: 0; z-index: 5; width: 100%; height: 100%; margin: 0; padding: 0; border: 0; border-radius: 16px; background: transparent; cursor: pointer; }
+.pf-turn:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.pf-hint { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--thumb-scrim); color: var(--text); backdrop-filter: blur(6px); opacity: 0; transform: scale(.85); transition: opacity 200ms var(--ease), transform 200ms var(--ease-out-back); }
+.pf-hint svg { width: 16px; height: 16px; }
+.pf-front:hover .pf-hint, .pf-front:has(.pf-turn:focus-visible) .pf-hint { opacity: 1; transform: none; }
+@media (hover: none) { .pf-hint { opacity: 1; transform: none; } }
+.pf-cap { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 0 2px; }
+.pf-cap b { font: 700 15px/1.25 var(--font-display); letter-spacing: -0.015em; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.pf-cap span { font-size: 12.5px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pf-peek { display: inline-flex; align-items: center; gap: 6px; padding: 0 2px 2px; font-size: 12px; font-weight: 650; color: var(--text-2); }
+.pf-peek svg { width: 13px; height: 13px; flex: none; }
+.pf-peek.first { color: color-mix(in srgb, var(--mint) 60%, var(--text)); }
+/* the back: how it came about */
+.pf-back { gap: 10px; padding: 14px; background: radial-gradient(80% 60% at 100% 0%, color-mix(in srgb, var(--mint) 10%, transparent), transparent 60%), var(--row); box-shadow: inset 0 0 0 1px var(--studio-line); }
+.pf-card.standout .pf-back { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--yellow) 45%, transparent); }
+.pf-card.target .pf-face { box-shadow: 0 0 0 2.5px var(--mint), 0 0 34px -6px color-mix(in srgb, var(--mint) 70%, transparent); }
+.pf-back-head { display: flex; align-items: flex-start; gap: 8px; }
+.pf-back-tt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pf-back-t { font: 800 16px/1.2 var(--font-display); letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.pf-back-k { font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
+.pf-back-btn { flex: none; margin: -6px -6px 0 0; }
+.pf-back-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+@media (pointer: coarse) { .pf-back-btn { width: 44px; height: 44px; } }
+.pf-story { display: flex; flex-direction: column; gap: 8px; }
+.pf-story-lead { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: color-mix(in srgb, var(--pink) 50%, var(--text)); }
+.pf-story-lead.first { color: color-mix(in srgb, var(--mint) 60%, var(--text)); }
+.pf-story-lead svg { width: 14px; height: 14px; flex: none; }
+.pf-steps { display: flex; flex-direction: column; gap: 6px; }
+.pf-step { position: relative; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 8px; align-items: start; }
+.pf-step + .pf-step::before { content: ""; position: absolute; left: 14px; top: -6px; width: 2px; height: 6px; background: var(--line); }
+.pf-step-n { display: grid; place-items: center; height: 22px; border-radius: 7px; background: var(--btn); color: var(--text); font: 800 11.5px/1 var(--font-display); }
+.pf-step.changes .pf-step-n { background: color-mix(in srgb, var(--pink) 28%, var(--row)); }
+.pf-step.picked .pf-step-n { background: var(--mint); color: var(--on-accent); }
+.pf-step.theirs .pf-step-n { background: transparent; box-shadow: inset 0 0 0 1.5px var(--line); color: var(--text-2); }
+.pf-step-b { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding-top: 2px; }
+.pf-step-t { font-size: 12.5px; overflow-wrap: anywhere; }
+.pf-step-q { font-size: 12.5px; color: var(--text-2); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.pf-who { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; font-size: 12.5px; color: var(--text-2); }
+.pf-notlive { font-size: 12.5px; color: var(--text-3); }
+.pf-back .live-line { font-size: 12.5px; }
+.pf-back .live-test-pic { width: 60px; }
+.pf-back-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line-soft); }
+.pf-back-acts .btn { padding: 0 10px; }
+
+/* private growth: quiet, no scores */
+.pf-growth { display: flex; flex-direction: column; gap: 18px; }
+.pf-growth .panel-head { margin-bottom: 0; }
+.pf-chart { display: flex; flex-direction: column; gap: 10px; margin: 0; }
+.pf-chart-h { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 13px; }
+.pf-chart-h span { color: var(--text-2); font-variant-numeric: tabular-nums; }
+.pf-bars { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; }
+/* six bars of 44 px across a phone's panel */
+@media (max-width: 480px) { .pf-bars { gap: 4px; } }
+.pf-bar { min-width: 0; }
+.pf-bar-btn {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; margin: 0; padding: 8px 2px; border: 0; border-radius: 16px;
+  background: color-mix(in srgb, var(--text) 4%, transparent); color: var(--text); font: inherit; cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--studio-line); transition: background var(--t), box-shadow var(--t);
+}
+.pf-bar-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.pf-bar-btn:disabled { cursor: default; }
+.pf-bar-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.pf-bar.now .pf-bar-btn { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--yellow) 70%, transparent); }
+.pf-bar.on .pf-bar-btn { background: color-mix(in srgb, var(--mint) 12%, transparent); box-shadow: inset 0 0 0 2px var(--mint); }
+.pf-bar-n { font: 800 20px/1 var(--font-display); letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+.pf-bar.none .pf-bar-n { color: var(--text-3); }
+.pf-bar-track { position: relative; width: min(60%, 34px); height: 96px; overflow: hidden; border-radius: 10px; background: var(--track); }
+.pf-bar-lvl {
+  position: absolute; left: 0; right: 0; bottom: 0; transform-origin: bottom;
+  background:
+    radial-gradient(120% 50% at 50% 0%, var(--sheen), transparent 60%),
+    linear-gradient(180deg, color-mix(in srgb, var(--mint) 72%, var(--text)), var(--mint) 55%, color-mix(in srgb, var(--mint) 62%, var(--frame)));
+  transition: height 900ms cubic-bezier(.34, 1.3, .64, 1);
+}
+.pf-bar-lvl::after { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px; background: color-mix(in srgb, var(--text) 65%, transparent); box-shadow: 0 0 10px color-mix(in srgb, var(--text) 55%, transparent); }
+.pf-bar.none .pf-bar-lvl::after { display: none; }
+.pf-bars.animate .pf-bar-lvl { animation: dt-rise 1100ms cubic-bezier(.34, 1.3, .64, 1) backwards; animation-delay: calc(var(--i, 0) * 70ms + 200ms); }
+.pf-bar-m { font-size: 11.5px; font-weight: 650; line-height: 1.15; text-align: center; color: var(--text-2); overflow-wrap: anywhere; }
+.pf-bar.now .pf-bar-m { color: var(--text); }
+.pf-lines { display: flex; flex-direction: column; gap: 10px; }
+.pf-lines li { display: flex; align-items: flex-start; gap: 10px; font-size: 14px; line-height: 1.5; }
+.pf-lines svg { width: 16px; height: 16px; flex: none; margin-top: 3px; color: var(--text-2); }
+.pf-themes .section-title { margin-bottom: 10px; }
+.pf-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.pf-tag-n { margin-left: 2px; color: var(--text); font-variant-numeric: tabular-nums; }
+.pf-quiet { margin-top: 8px; font-size: 12.5px; }
+@media (min-width: 761px) and (max-width: 1180px) {
+  /* stacked under the wall: the chart beside the sentences */
+  .pf-growth { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: start; }
+  .pf-growth > .panel-head, .pf-growth > .pf-themes { grid-column: 1 / -1; }
+}
+/* motion off: nothing lifts */
+@media (prefers-reduced-motion: reduce) { .pf-front:hover .thumb { transform: none; } .pf-hint { transition: none; } }
+:root[data-motion="off"] .pf-front:hover .thumb { transform: none; }

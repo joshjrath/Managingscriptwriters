@@ -3,21 +3,24 @@
 // an option's frame (OptionSlot, which takes the pins over its picture and a pin list or second look under its
 // actions, plus the empty and not-yet-added slots), Preview in the wild (every option at the sizes people meet it
 // in a feed, on a plain light or dark feed), a decision in a few words and its chip (a Standout's in yellow), the
-// round film strip with its compare, the brief card and the client's look (with its colours; the whole brand kit is
-// BrandKit.tsx, in the brief's Brand drawer), and the page-wide drop and paste (usePageDrop, which the reference
-// boards use too). Everything is built on ui.tsx and the .studio / .thumb styles in app.css. Pins live in
+// round film strip with its compare, the brief card (with, for managers, the Timeliner video it's for: VideoFact) and
+// the client's look (with its colours; the whole brand kit is BrandKit.tsx, in the brief's Brand drawer), and the
+// page-wide drop and paste (usePageDrop, which the reference boards use too). Went live is ThumbLive.tsx. Everything is built on ui.tsx and the .studio / .thumb styles in app.css. Pins live in
 // ThumbPins.tsx, Compare and Lights down in ThumbCompare.tsx, the keys in ThumbKeys.tsx and the second look in
 // SecondLook.tsx.
 
 import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, Check, ChevronDown, Columns2, Contrast, ExternalLink, Eye, Frame, Glasses, ImagePlus, Loader2, Moon, Palette, RotateCcw, Smartphone, Sun, Trophy, Upload,
+  AlertTriangle, Check, ChevronDown, Clapperboard, Columns2, Contrast, ExternalLink, Eye, Frame, Glasses, ImagePlus, Loader2, Moon, Palette, Radio, RotateCcw, Smartphone, Sun,
+  Trophy, Upload,
 } from 'lucide-react';
 import {
   isOpenThumb, MAX_OPTIONS, OPTION_LETTERS, THUMB_MIMES, THUMB_STATE_COLOR, THUMB_STATE_LABEL, thumbSpecChecks, type ThumbState,
 } from '../../../shared/workflow';
-import { fileUrl, RESOURCE_LABEL, type ThumbnailBrief, type ThumbnailDecision, type ThumbnailLook, type ThumbnailOption, type ThumbnailRound, type ThumbnailWin } from '../../../shared/types';
+import {
+  fileUrl, RESOURCE_LABEL, type ThumbnailBrief, type ThumbnailDecision, type ThumbnailLook, type ThumbnailOption, type ThumbnailRound, type ThumbnailVideoLink, type ThumbnailWin,
+} from '../../../shared/types';
 import { dueWords, fmtAgo, fmtLong, fmtDate, plural, type DueTone } from '../../../shared/format';
 import type { ISODate } from '../../../shared/dates';
 import { Button, Chip, Field, inputProps, Seg, Thumb, useFieldId } from './ui';
@@ -568,9 +571,28 @@ export function BriefCard({ brief, today, tools }: { brief: ThumbnailBrief; toda
         <div><dt>Due</dt><dd>{brief.dueOn ? fmtLong(brief.dueOn) : <span className="dim">No date</span>}</dd></div>
         <div><dt>Designer</dt><dd>{brief.needsDesigner ? <span className="dim">Needs a designer</span> : brief.designerName}</dd></div>
         <div><dt>From</dt><dd>{brief.createdByName}</dd></div>
+        {/* managers only (designers never get the key), and only once one is linked: Edit's picker says how */}
+        {brief.video && <div className="wide"><dt>Timeliner video</dt><dd><VideoFact video={brief.video} /></dd></div>}
       </dl>
       {tools}
     </section>
+  );
+}
+
+/**
+ * The Timeliner video a brief is for (managers): its title and current step in the site's copy of Timeliner, and
+ * "Open in Timeliner". A link the copy no longer has says so.
+ */
+export function VideoFact({ video }: { video: ThumbnailVideoLink }) {
+  return (
+    <span className="tb-video">
+      <span className="tb-video-t">
+        <Clapperboard aria-hidden />
+        {video.title ? <b>{video.title}</b> : <span className="dim">Not in the site’s copy of Timeliner any more</span>}
+      </span>
+      {video.step && <Chip color={video.posted ? 'mint' : 'cyan'} icon={video.posted ? <Radio aria-hidden /> : undefined} dot={!video.posted}>{video.step}</Chip>}
+      <a className="link tb-video-a" href={video.url} target="_blank" rel="noopener noreferrer">Open in Timeliner<ExternalLink aria-hidden /><span className="sr-only"> (opens in a new tab)</span></a>
+    </span>
   );
 }
 
@@ -655,7 +677,7 @@ export function BriefTile({ brief, to, today, foot, eager, designer }: { brief: 
   const who = designer ? (brief.needsDesigner ? 'needs a designer' : brief.designerName) : null;
   return (
     <article className={`bt ${brief.state}`}>
-      <Link to={to} className="bt-link" aria-label={`${brief.title}, ${brief.clientName}: ${stateWords(brief)}${due ? `, ${due.text.toLowerCase()}` : ''}${who ? `, ${who}` : ''}`}>
+      <Link to={to} className="bt-link" aria-label={`${brief.title}, ${brief.clientName}: ${stateWords(brief)}${brief.live ? ', live' : ''}${due ? `, ${due.text.toLowerCase()}` : ''}${who ? `, ${who}` : ''}`}>
         <BriefThumb brief={brief} eager={eager}>
           <span className="thumb-tl"><StateChip brief={brief} /></span>
           {brief.roundsSent > 0 && <span className="thumb-tr thumb-pill" aria-hidden>R{brief.roundsSent}</span>}
@@ -665,6 +687,8 @@ export function BriefTile({ brief, to, today, foot, eager, designer }: { brief: 
           <span className="bt-meta">
             <span className="ellipsis">{brief.clientName}{who ? ` · ${who}` : ''}</span>
             {due && <span className={`eh-due ${due.tone}`}>{due.text}</span>}
+            {/* a chip, not the Live link: the whole tile is already a link */}
+            {brief.live && <Chip color="mint" icon={<Radio aria-hidden />}>Live</Chip>}
           </span>
         </span>
       </Link>
