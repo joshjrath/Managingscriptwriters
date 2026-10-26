@@ -3,8 +3,8 @@
 import type { Clock, DayMode, ISODate } from './dates';
 import type { WorkspaceTheme } from './palettes';
 import type {
-  DocumentState, EditorKind, Milestone, OptionLetter, Progress, Role, ScriptStatus, SecondLookResult, Stage, ThumbAction, ThumbMime, ThumbMomentKind,
-  ThumbPinTag, ThumbState, VideoState,
+  BrandColour, BrandFont, BrandKitFields, DocumentState, EditorKind, Milestone, OptionLetter, Progress, Role, ScriptStatus, SecondLookResult, Stage,
+  ThumbAction, ThumbIdea, ThumbMime, ThumbMomentKind, ThumbPinTag, ThumbRefSource, ThumbState, VideoState,
 } from './workflow';
 
 /** Every change request carries `x-scale-media: 1`; a page can't send it cross-site without a CORS preflight, which the server never grants. */
@@ -54,6 +54,27 @@ export interface Editor {
   /** IANA time zone: the city's, unless one was chosen */
   timezone: string;
   workHours: [number, number];
+  /**
+   * what they do (editors.editor_kind), the same kinds as a sign-in's: null on an entry nobody has set reads as a video
+   * editor (isVideoEditorKind). "Give site access" presets the new sign-in's kind from it
+   */
+  editorKind: EditorKind | null;
+}
+
+/**
+ * POST /api/editors and PATCH /api/editors/:id (Admins): an entry in Settings → Editors. The form sends every field,
+ * so the server compares each with the stored row before treating it as changed.
+ */
+export interface EditorInput {
+  name: string;
+  /** a city from the list ("London, United Kingdom") */
+  city: string;
+  /** an IANA time zone; the city's when left out */
+  timezone?: string;
+  workStart?: number;
+  workEnd?: number;
+  /** one of EDITOR_KINDS, or null for not set (a video editor). Left out: kept as it is on PATCH, null on POST */
+  editorKind?: EditorKind | null;
 }
 
 export interface Settings {
@@ -180,6 +201,12 @@ export interface Bootstrap {
   notesImport: boolean;
   /** a thumbnail option's AI second look is set up on the server (ANTHROPIC_API_KEY): the button shows on a designer's own options (never while an Admin is viewing as them) */
   secondLook: boolean;
+  /**
+   * AI brief ideas are set up on the server (ANTHROPIC_API_KEY, ctx.briefHelper): New thumbnail offers "Suggest
+   * ideas" to managers only when this is true (POST /api/thumbnails/suggest), and it's false while an Admin views as
+   * someone (the route answers 403 `viewing_as` then)
+   */
+  briefIdeas: boolean;
   /** the largest file the server accepts, in MB (UPLOAD_LIMIT_MB) */
   uploadLimitMb: number;
   /** the newest What's new entry this person has opened */
@@ -314,11 +341,18 @@ export interface Resource {
   attached?: boolean;
 }
 
-export type ResourceCategory = 'folder' | 'example' | 'asset' | 'recording' | 'document' | 'other';
-export const RESOURCE_CATEGORIES: ResourceCategory[] = ['folder', 'example', 'asset', 'recording', 'document', 'other'];
+export type ResourceCategory = 'folder' | 'example' | 'asset' | 'recording' | 'document' | 'other' | 'logo' | 'reference' | 'font';
+/** In the order the type lists offer them; the database checks the same list (resources_category_check, migration 41). */
+export const RESOURCE_CATEGORIES: ResourceCategory[] = ['folder', 'example', 'asset', 'recording', 'document', 'other', 'logo', 'reference', 'font'];
 export const RESOURCE_LABEL: Record<ResourceCategory, string> = {
   folder: 'Folder', example: 'Example', asset: 'Asset', recording: 'Recording', document: 'Document', other: 'Other',
+  logo: 'Logo', reference: 'Reference', font: 'Font',
 };
+/**
+ * The categories a client's Brand kit shows beside its colours: logos and references (as pictures when they're
+ * images: isPictureMime(fileMime)), and font files (to download)
+ */
+export const BRAND_CATEGORIES: readonly ResourceCategory[] = ['logo', 'reference', 'font'];
 
 export interface Briefing {
   id: number;
@@ -436,6 +470,51 @@ export interface ClientDetail extends ClientSummary {
   shoots: Shoot[];
   batches: BatchSummary[];
   activity: Activity[];
+  /**
+   * the client's brand kit, for everyone who may see the client (editors included): null when nobody has made one
+   */
+  brand: ClientBrand | null;
+  /**
+   * the client's current winners (picked options of briefs not cancelled, anyone's), newest first, at most 8, for the
+   * Brand kit panel: every one for managers; for a thumbnail designer only when they have or had a brief for this
+   * client (else empty: the pictures wouldn't open for them), with `standout` only on their own, as beside a brief.
+   * Left out for writers and video editors
+   */
+  recentWinners?: ThumbnailWin[];
+}
+
+/** One brand font as the kit shows it: with its file, when it names a resource that's still there. */
+export interface ClientBrandFont extends BrandFont {
+  /** the font file to download (`${fileUrl(id)}?download=1`): the live resource `resourceId` names; null without one, or once it's removed */
+  file: { id: number; name: string; size: number } | null;
+}
+
+/**
+ * A client's brand kit (client_brand): GET /api/clients/:id `brand`, the brief's `look.brand`, and what
+ * PATCH /api/clients/:id/brand answers with. Colours keep their order (the swatches), hex in capitals.
+ */
+export interface ClientBrand extends BrandKitFields {
+  clientId: number;
+  fonts: ClientBrandFont[];
+  updatedByName: string | null;
+  updatedAt: string;
+}
+
+/**
+ * PATCH /api/clients/:id/brand (managers): only the fields the manager changed (brandChanges in shared/workflow.ts);
+ * the server compares each with the kept kit too, and logs only what changed. The client must exist and not be
+ * archived (404 / 409). Answers with the ClientBrand.
+ * - colours: at most BRAND_LIMITS.colours, each hex #RRGGBB (HEX) and a name of 1 to BRAND_LIMITS.name characters
+ *   (400 with fields.colours)
+ * - fonts: at most BRAND_LIMITS.fonts, each a name of 1 to BRAND_LIMITS.name characters, an optional https link
+ *   (isHttpsUrl) and an optional resourceId: a live resource of this client (400 with fields.fonts)
+ * - dos, donts: at most BRAND_LIMITS.notes characters each; empty or null clears it
+ */
+export interface ClientBrandPatch {
+  colours?: BrandColour[];
+  fonts?: BrandFont[];
+  dos?: string | null;
+  donts?: string | null;
 }
 
 export interface Notification {
@@ -1525,6 +1604,8 @@ export interface ThumbnailLook {
   clientName: string;
   brandVoice: string | null;
   guidance: string | null;
+  /** the client's brand kit (the workbench's Brand drawer), null when it has none */
+  brand: ClientBrand | null;
   /** the client's resources that are pictures (isPictureMime(fileMime)), newest first, shown as images */
   images: Resource[];
   /** the rest of its resources (links and other files), for Open */
@@ -1706,4 +1787,92 @@ export interface ThumbnailSecondLook extends SecondLookResult {
   optionId: number;
   /** when it was asked */
   createdAt: string;
+}
+
+// ── Thumbnail Studio: reference boards (a designer's own, private) ───────
+// GET /api/thumbnail-refs, POST /api/thumbnail-refs, PATCH and DELETE /api/thumbnail-refs/:id: thumbnail designers
+// only (requireUser, then isThumbnailDesigner; 403 for anyone else, managers included), and only their own refs (another
+// designer's is 404). Rules: the reference boards section of shared/workflow.ts.
+
+/** One picture on a designer's reference board. Only its owner ever gets it. */
+export interface ThumbnailRef {
+  id: number;
+  /** the client board it's on; null for General */
+  clientId: number | null;
+  clientName: string | null;
+  /** an image they uploaded, a winner they may see, or one of a client's image resources */
+  source: ThumbRefSource;
+  /** the picture to show, `fileUrl(fileId)`: the upload itself, the winner's image or the resource's file */
+  fileId: number;
+  url: string;
+  /** the stored file's type (an upload's is read from its own bytes, as an option's is) */
+  mime: string;
+  /** a winner's size, from its option; null for uploads and resources (the tile takes the picture's own shape as it loads) */
+  width: number | null;
+  height: number | null;
+  /** the designer's note on it, at most REF_CAPTION_MAX characters */
+  caption: string | null;
+  /** source winner: the picked option, its brief and who made it */
+  winner: { optionId: number; briefId: number; title: string; letter: OptionLetter; madeByName: string; pickedAt: string } | null;
+  /** source resource: the client resource it shows */
+  resource: { id: number; title: string; category: ResourceCategory } | null;
+  createdAt: string;
+}
+
+/**
+ * GET /api/thumbnail-refs: the designer's refs, newest first. `?clientId=<id>` narrows it to that client's board,
+ * `?clientId=general` (GENERAL_BOARD) to the general one; left out, every board. Only refs whose picture they may still
+ * open are listed (a winner that's no longer picked, or a resource since removed, drops out).
+ */
+export interface ThumbnailRefBoard {
+  refs: ThumbnailRef[];
+  /** their live refs on every board, whatever the filter: what MAX_REFS counts */
+  total: number;
+  /** MAX_REFS */
+  max: number;
+}
+
+/**
+ * POST /api/thumbnail-refs as JSON: a ref of a picture already on the site, exactly one of `optionId` and
+ * `resourceId` (400 otherwise). Answers with the new ThumbnailRef; a designer with MAX_REFS live refs gets a 409.
+ * An image of their own is the same route as multipart instead: one `file` (PNG, JPEG or WebP, read from its own bytes
+ * like an option's; anything else is a 400) with the text fields `caption` and `clientId` (empty or left out: General).
+ */
+export interface ThumbnailRefInput {
+  /** a current winner they may see: picked, on a brief not cancelled, for a client they have or had a brief for (or one of their own picks) */
+  optionId?: number;
+  /** a live resource whose file is a picture (isPictureMime) */
+  resourceId?: number;
+  /** the board: a client, or null for General. Left out: the winner's or the resource's client */
+  clientId?: number | null;
+  /** at most REF_CAPTION_MAX characters; empty is none */
+  caption?: string | null;
+}
+
+/** PATCH /api/thumbnail-refs/:id: only the fields changed; answers with the ThumbnailRef. DELETE takes it off the board (`{ ok: true }`). */
+export interface ThumbnailRefPatch {
+  caption?: string | null;
+  /** move it to a client's board, or to General (null) */
+  clientId?: number | null;
+}
+
+// ── Thumbnail Studio: AI brief ideas (managers) ──────────────────────────
+
+/**
+ * POST /api/thumbnails/suggest (requireManager; offered only when Bootstrap.briefIdeas): three directions for a new
+ * brief, from the client's look and its last picked briefs. Nothing is saved. Without the AI it's 503
+ * `not_configured`; one ask at a time and 30 an hour per person (429); a refusal or an answer that can't be used is 422.
+ */
+export interface ThumbnailSuggestInput {
+  /** a client that exists and isn't archived */
+  clientId: number;
+  /** a shoot of that client */
+  shootId?: number | null;
+  /** the video's working title, 1 to 200 characters */
+  title: string;
+}
+
+/** What POST /api/thumbnails/suggest answers: exactly THUMB_IDEA_COUNT ideas, each tidied (tidyThumbIdeas). "Use this" fills "what it should show" (show) and "words on the image" (words). */
+export interface ThumbnailSuggestions {
+  ideas: ThumbIdea[];
 }

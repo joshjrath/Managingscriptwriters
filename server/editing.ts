@@ -37,8 +37,8 @@ import { loadEditorRows } from './control/editors';
 import { isISODate, isValidTimeZone, makeClock, onOrAfterDay, type ISODate } from '../shared/dates';
 import { cityLabel, onShift } from '../shared/cities';
 import {
-  compressRanges, compressTitles, hasNoScripts, isApproved, isEditor, isFocusStale, isManager, isNotMatched, isOnPlate, isRawTitle, isVideoEditor, kindsSql, needsCheck,
-  NON_VIDEO_EDITOR_KINDS, ROLE_LABEL, TIMELINER_STEP_LABEL, titleNumber, videoState, type Role, type ScriptStatus, type TimelinerStatusGroup, type VideoState,
+  compressRanges, compressTitles, hasNoScripts, isApproved, isEditor, isFocusStale, isManager, isNotMatched, isOnPlate, isRawTitle, isVideoEditor, isVideoEditorKind,
+  kindsSql, needsCheck, NON_VIDEO_EDITOR_KINDS, ROLE_LABEL, TIMELINER_STEP_LABEL, titleNumber, videoState, type Role, type ScriptStatus, type TimelinerStatusGroup, type VideoState,
 } from '../shared/workflow';
 import { fmtWorked } from '../shared/format';
 import type {
@@ -1039,7 +1039,7 @@ interface Loaded {
   brands: Map<string, string>;
   /** Timeliner brand id → its editors there (IS_BRAND_EDITOR): only to name the client's editor, never whose a video is */
   brandEditors: Map<string, string[]>;
-  /** Settings → Editors: editors who don't sign in, with where they are and their hours */
+  /** Settings → Editors: video editors who don't sign in (isVideoEditorKind), with where they are and their hours */
   offSite: { id: number; name: string; city: string; timezone: string; workHours: [number, number] }[];
   focus: Map<number, FocusRow>;
   done: DoneRow[];
@@ -1124,7 +1124,8 @@ async function loadEditing(ctx: Ctx): Promise<Loaded> {
     members: new Map(members.map((m) => [m.id, { name: m.name, email: m.email, role: m.role, active: m.active !== false }])),
     brands: new Map((await db.query<{ id: string; name: string }>(`select id, name from timeliner_names where kind = 'brand'`)).map((b) => [b.id, b.name])),
     brandEditors,
-    offSite: (await loadEditorRows(db)).map((r) => ({
+    // only video editors: an entry kept as a thumbnail designer is never a Timeliner editor to give site access
+    offSite: (await loadEditorRows(db)).filter((r) => isVideoEditorKind(r.editor_kind)).map((r) => ({
       id: Number(r.id), name: r.name, city: cityLabel({ name: r.city, country: r.country }), timezone: r.timezone, workHours: [Number(r.work_start), Number(r.work_end)] as [number, number],
     })),
     focus: new Map((await db.query<FocusRow>(`select user_id, task_id, state, since, worked_seconds, paused_at from editor_focus`)).map((f) => [Number(f.user_id), f])),

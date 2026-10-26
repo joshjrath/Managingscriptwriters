@@ -15,7 +15,7 @@ import { Empty, ErrorState, Loading, Panel } from '../components/ui';
 
 type BriefingLink = { briefingId: number; briefingTitle: string; clientId: number; clientName: string; kind: 'recording' | 'document'; url: string; callDate: string | null };
 
-const ICON: Record<ResourceCategory, typeof Link2> = { folder: FolderOpen, example: FileText, asset: Image, recording: PlayCircle, document: FileText, other: Link2 };
+const ICON: Record<ResourceCategory, typeof Link2> = { folder: FolderOpen, example: FileText, asset: Image, recording: PlayCircle, document: FileText, other: Link2, logo: Image, reference: Image, font: FileText };
 
 export function ResourcesPage() {
   const displayTz = useDisplayTz();
@@ -40,7 +40,7 @@ export function ResourcesPage() {
   const count = (res.data?.resources.length ?? 0) + (res.data?.briefingLinks.length ?? 0);
   return (
     <>
-      <PageHeader title="Resources" sub="Folders, examples, assets, recordings and documents — each linked to the client, briefing or batch it belongs to." />
+      <PageHeader title="Resources" sub="Folders, examples, assets, logos, references, fonts, recordings and documents — each linked to the client, briefing or batch it belongs to." />
       <div className="filters" role="search">
         <input className="input search" type="search" placeholder="Search titles, clients, batches, file names" value={text} onChange={(e) => setText(e.target.value)} aria-label="Search resources" />
         <select className="select" value={clientId} onChange={(e) => set('clientId', e.target.value)} aria-label="Client"><option value="">All clients</option>{clients.filter((c) => c.status !== 'archived').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>

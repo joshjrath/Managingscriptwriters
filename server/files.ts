@@ -109,16 +109,19 @@ export const THUMB_WINNER = (b: string) =>
  * to read after the brief moves to someone else); and the current winner of every brief not cancelled for a
  * client they have or had a brief for, whoever made it. Never another designer's tray or unpicked options, not
  * even the rounds sent on a brief before it was given to them (owner's rule: only picked ones are shared).
+ * Also the images they uploaded to their own reference boards, while the ref is on a board (thumbnail_refs, which
+ * nobody else's rule names, so nobody else can open them).
  */
 export function DESIGNER_FILES(me: string): string {
   if (!/^\$\d+$/.test(me)) throw new Error('DESIGNER_FILES takes a bound parameter like $2');
-  return `exists (select 1 from thumbnail_variants dv join thumbnail_rounds dr on dr.id = dv.round_id join thumbnail_briefs tb on tb.id = dr.brief_id
+  return `(exists (select 1 from thumbnail_variants dv join thumbnail_rounds dr on dr.id = dv.round_id join thumbnail_briefs tb on tb.id = dr.brief_id
       where dv.file_id = f.id and dv.removed_at is null and (
             (tb.designer_id = ${me} and dr.sent_at is null)
          or (dr.created_by = ${me} and dr.sent_at is not null)
          or (tb.cancelled_at is null and dv.id = ${THUMB_WINNER('tb')} and exists (
                select 1 from thumbnail_briefs mb where mb.client_id = tb.client_id
-                  and (mb.designer_id = ${me} or exists (select 1 from thumbnail_rounds mr where mr.brief_id = mb.id and mr.created_by = ${me}))))))`;
+                  and (mb.designer_id = ${me} or exists (select 1 from thumbnail_rounds mr where mr.brief_id = mb.id and mr.created_by = ${me}))))))
+    or exists (select 1 from thumbnail_refs dref where dref.file_id = f.id and dref.user_id = ${me} and dref.removed_at is null))`;
 }
 
 /** The stored files (`f`) a manager may open as option images: live options in rounds that were sent. Never a designer's unsent tray. */

@@ -35,6 +35,8 @@ export const ONLY_FOR: Record<string, Audience[]> = {
   '2026-10-09-editors-match-timeliner-assignees': ['managers', 'editors'],
   '2026-10-25-thumbnail-notes-on-image': ['managers', 'designers'], '2026-10-25-thumbnail-standouts': ['managers', 'designers'],
   '2026-10-25-thumbnail-compare-keys': ['managers', 'designers'], '2026-10-25-thumbnail-second-look': ['managers', 'designers'],
+  '2026-10-25-thumbnail-brand-drawer': ['managers', 'designers'], '2026-10-25-thumbnail-references': ['managers', 'designers'],
+  '2026-10-25-thumbnail-brief-ideas': ['managers', 'designers'], '2026-10-25-editors-kind': ['managers'],
 };
 /** Behind-the-scenes updates (hosting, setup, speed): folded away by default. */
 export const TECHNICAL = new Set(['2026-09-29-memory', '2026-09-28-setup-fixes', '2026-09-28-render']);
@@ -48,6 +50,64 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-25-client-brand-kit',
+    date: '2026-10-25',
+    title: 'Clients: a brand kit on every client’s page',
+    summary: 'Each client’s page now has a Brand kit: their colours, fonts, do’s and don’ts, logos and references in one place, for everyone who works on the client.',
+    changes: [
+      { tag: 'new', text: 'The Brand kit sits between Batches and Resources on the client’s page. Tap a colour to copy its code. It shows how well the darkest and lightest colours read together (say 4.4:1, with “Reads as text” or “Low for small text”), each font with a link to get it or its file to download, and the client’s do’s and don’ts.' },
+      { tag: 'new', text: 'Resources have three new types: Logo, Reference and Font. Logos and references show in the kit as pictures, and font files as downloads. The client’s Resources list groups them under their own headings.' },
+      { tag: 'new', text: 'Managers edit the kit in place: up to 12 colours (a colour picker, a name and the code, in any order), up to 6 fonts (a name, a secure https link, a font file from the client’s resources, or both) and the do’s and don’ts. Only what you changed is saved, and the client’s history says what changed.' },
+      { tag: 'new', text: 'Pick colours from logo: choose one of the client’s logos and your browser finds up to 6 of its main colours, leaving out white, black and see-through areas. Keep the ones you want, name them and save. Without a logo yet, the button opens Add a resource, set to Logo.' },
+      { tag: 'improved', text: 'Managers and thumbnail designers also see the client’s recent picked thumbnails in the kit; a designer sees them once they’ve had a brief for that client.' },
+    ],
+  },
+  {
+    id: '2026-10-25-thumbnail-brand-drawer',
+    date: '2026-10-25',
+    title: 'Thumbnails: the client’s brand kit beside the brief',
+    summary: 'On a thumbnail brief, the Brand button (or the B key) opens the client’s brand kit beside the option you’re working on.',
+    changes: [
+      { tag: 'new', text: 'Brand, next to the brief’s tabs, opens a panel on the right with the client’s colours (tap one to copy its code), fonts, do’s and don’ts, logos and references, while the option stays in view. On a computer B opens and closes it (never while you’re typing), and Esc closes it.' },
+      { tag: 'new', text: 'The client’s look on the brief shows their colours as a row of dots, with a Brand kit button. Designers also see their own references for that client under the kit, with a link to the whole board.' },
+      { tag: 'improved', text: 'The AI second look reads the brand kit too: the colours by name and code, and the do’s and don’ts.' },
+    ],
+  },
+  {
+    id: '2026-10-25-thumbnail-references',
+    date: '2026-10-25',
+    title: 'Thumbnails: reference boards for designers',
+    summary: 'Thumbnail designers have a private References page: a board of pictures to work from for each client, and a General one.',
+    changes: [
+      { tag: 'new', text: 'References is in the designer’s menu under Studio, and at the top of the Studio. Drop pictures anywhere on the page, paste a screenshot (⌘V or Ctrl+V) or choose them: PNG, JPG or WebP. Each sits at its own shape with a caption you edit where it is. Tap one to see it large, and ← → move between them.' },
+      { tag: 'new', text: 'Add a winner puts a picked thumbnail on a board: one of yours, or another designer’s for a client you’ve had a brief for. From client material adds one of a client’s logos, references or other pictures.' },
+      { tag: 'new', text: 'Switch between All, General and each client’s board; new pictures go on the board you’re looking at. Move a picture to another board, or take it off. Your boards hold up to 300 pictures.' },
+      { tag: 'improved', text: 'Only you see your boards: managers, other designers, writers and video editors can’t see them or open the pictures you upload to them. A picture you take off no longer opens, and a winner that’s no longer the pick drops off the board.' },
+    ],
+  },
+  {
+    id: '2026-10-25-thumbnail-brief-ideas',
+    date: '2026-10-25',
+    title: 'Thumbnails: AI ideas for a brief',
+    summary: 'In New thumbnail, managers can ask Claude for three directions for the video once the client and the title are in.',
+    changes: [
+      { tag: 'new', text: 'Suggest ideas gives three different directions, each with what the thumbnail should show, the words on the image (at most four, and never the title again) and why it works. Use this fills in What it should show and Words on the image; change them as you like, or Undo. It’s in Edit too, while a brief is open.' },
+      { tag: 'new', text: 'Claude reads the client’s brand voice and guidance, the brand kit’s do’s and don’ts, the shoot if you chose one, and the last 10 thumbnails picked for the client (their titles, what they showed and their words). The ideas themselves are never saved: only the brief you save is.' },
+      { tag: 'improved', text: 'It needs the AI key on the server (ANTHROPIC_API_KEY, the one Paste notes uses); without it the button doesn’t show. One at a time, up to 30 an hour, and it’s off while an Admin is viewing the site as someone.' },
+    ],
+  },
+  {
+    id: '2026-10-25-editors-kind',
+    date: '2026-10-25',
+    title: 'Settings → Editors: video editor or thumbnail designer',
+    summary: 'People kept in Settings → Editors (who don’t sign in) now have a kind, like editors on the team.',
+    changes: [
+      { tag: 'new', text: 'Adding or editing an entry, choose Video editor or Thumbnail designer; each entry’s line says which. An entry nobody has set counts as a video editor, as before.' },
+      { tag: 'improved', text: 'Give site access starts the new sign-in with that kind, so a thumbnail designer gets their Studio straight away.' },
+      { tag: 'improved', text: 'The Editors tab and the Timeliner rules count only video editors, so an entry kept as a thumbnail designer is never offered there to be given site access.' },
+    ],
+  },
   {
     id: '2026-10-25-thumbnail-notes-on-image',
     date: '2026-10-25',

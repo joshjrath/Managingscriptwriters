@@ -3,14 +3,16 @@
 // an option's frame (OptionSlot, which takes the pins over its picture and a pin list or second look under its
 // actions, plus the empty and not-yet-added slots), Preview in the wild (every option at the sizes people meet it
 // in a feed, on a plain light or dark feed), a decision in a few words and its chip (a Standout's in yellow), the
-// round film strip with its compare, the brief card and the client's look. Everything is built on ui.tsx and the
-// .studio / .thumb styles in app.css. Pins live in ThumbPins.tsx, Compare and Lights down in ThumbCompare.tsx, the
-// keys in ThumbKeys.tsx and the second look in SecondLook.tsx.
+// round film strip with its compare, the brief card and the client's look (with its colours; the whole brand kit is
+// BrandKit.tsx, in the brief's Brand drawer), and the page-wide drop and paste (usePageDrop, which the reference
+// boards use too). Everything is built on ui.tsx and the .studio / .thumb styles in app.css. Pins live in
+// ThumbPins.tsx, Compare and Lights down in ThumbCompare.tsx, the keys in ThumbKeys.tsx and the second look in
+// SecondLook.tsx.
 
 import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import {
-  AlertTriangle, Check, ChevronDown, Columns2, Contrast, ExternalLink, Eye, Frame, Glasses, ImagePlus, Loader2, Moon, RotateCcw, Smartphone, Sun, Trophy, Upload,
+  AlertTriangle, Check, ChevronDown, Columns2, Contrast, ExternalLink, Eye, Frame, Glasses, ImagePlus, Loader2, Moon, Palette, RotateCcw, Smartphone, Sun, Trophy, Upload,
 } from 'lucide-react';
 import {
   isOpenThumb, MAX_OPTIONS, OPTION_LETTERS, THUMB_MIMES, THUMB_STATE_COLOR, THUMB_STATE_LABEL, thumbSpecChecks, type ThumbState,
@@ -134,16 +136,14 @@ export function readPicture(file: File): Promise<Picture> {
 export interface DropZoneHandle { open: () => void }
 
 /**
- * Takes images three ways: dropped anywhere on the page (a full-screen hint shows while dragging), pasted (⌘V or
- * Ctrl+V, straight from Photoshop or Figma), or chosen with the picker, which is all a phone offers. Every image
- * goes to `onFiles`, which decides; `blocked` says why nothing more can be added right now.
+ * Images dropped anywhere on the page or pasted (⌘V or Ctrl+V, straight from Photoshop or Figma) go to `onFiles`;
+ * `over` is true while files are being dragged over the page, for a full-screen hint. A paste with no image in it
+ * (text into a box) is left alone. Used by the tray's drop zone and the reference boards.
  */
-export const DropZone = forwardRef<DropZoneHandle, { onFiles: (files: File[]) => void; next: string | null; blocked?: string | null }>(function DropZone({ onFiles, next, blocked }, ref) {
-  const input = useRef<HTMLInputElement>(null);
+export function usePageDrop(onFiles: (files: File[]) => void): boolean {
   const [over, setOver] = useState(false);
   const take = useRef(onFiles);
   useEffect(() => { take.current = onFiles; });
-  useImperativeHandle(ref, () => ({ open: () => input.current?.click() }), []);
   useEffect(() => {
     let depth = 0;
     const files = (e: DragEvent) => !!e.dataTransfer && Array.from(e.dataTransfer.types).includes('Files');
@@ -177,6 +177,18 @@ export const DropZone = forwardRef<DropZoneHandle, { onFiles: (files: File[]) =>
       window.removeEventListener('paste', paste);
     };
   }, []);
+  return over;
+}
+
+/**
+ * Takes images three ways: dropped anywhere on the page (a full-screen hint shows while dragging), pasted (⌘V or
+ * Ctrl+V, straight from Photoshop or Figma), or chosen with the picker, which is all a phone offers. Every image
+ * goes to `onFiles`, which decides; `blocked` says why nothing more can be added right now.
+ */
+export const DropZone = forwardRef<DropZoneHandle, { onFiles: (files: File[]) => void; next: string | null; blocked?: string | null }>(function DropZone({ onFiles, next, blocked }, ref) {
+  const input = useRef<HTMLInputElement>(null);
+  const over = usePageDrop(onFiles);
+  useImperativeHandle(ref, () => ({ open: () => input.current?.click() }), []);
   return (
     <div className={`dz${blocked ? ' off' : ''}`}>
       <span className="dz-ic" aria-hidden><ImagePlus /></span>
@@ -562,13 +574,21 @@ export function BriefCard({ brief, today, tools }: { brief: ThumbnailBrief; toda
   );
 }
 
-/** The client's brand voice and guidance, with their logos and reference images as pictures and other resources as links. */
-export function ClientLook({ look }: { look: ThumbnailLook }) {
+/**
+ * The client's brand voice and guidance, their colours as a strip of swatches (the whole kit is in the Brand drawer,
+ * `onBrand`), with their logos and reference images as pictures and other resources as links.
+ */
+export function ClientLook({ look, onBrand }: { look: ThumbnailLook; onBrand?: () => void }) {
   const [open, setOpen] = useState(() => typeof window === 'undefined' || !window.matchMedia('(max-width: 760px)').matches);
   const bid = useId();
   const pics = look.images.filter((r) => r.fileId != null);
-  const empty = !look.brandVoice && !look.guidance && !pics.length && !look.resources.length;
-  const what = [pics.length && plural(pics.length, 'picture'), look.brandVoice && 'brand voice', look.guidance && 'guidance', look.resources.length && plural(look.resources.length, 'link')].filter(Boolean).join(' · ');
+  const colours = look.brand?.colours ?? [];
+  const fonts = look.brand?.fonts ?? [];
+  const empty = !look.brandVoice && !look.guidance && !pics.length && !look.resources.length && !colours.length && !fonts.length;
+  const what = [
+    colours.length && plural(colours.length, 'colour'), pics.length && plural(pics.length, 'picture'), look.brandVoice && 'brand voice', look.guidance && 'guidance',
+    look.resources.length && plural(look.resources.length, 'link'),
+  ].filter(Boolean).join(' · ');
   return (
     <section className="panel tb-look">
       <button type="button" className="tb-look-head" aria-expanded={open} aria-controls={bid} onClick={() => setOpen((v) => !v)}>
@@ -577,13 +597,28 @@ export function ClientLook({ look }: { look: ThumbnailLook }) {
       </button>
       {open && (
         <div id={bid} className="tb-look-body">
-          {empty && <p className="muted">No brand voice, guidance or pictures saved for {look.clientName} yet. Managers add them on the client’s page.</p>}
+          {empty && <p className="muted">No brand voice, guidance, colours or pictures saved for {look.clientName} yet. Managers add them on the client’s page.</p>}
+          {(colours.length > 0 || (fonts.length > 0 && onBrand)) && (
+            <div className="tb-look-kit">
+              {colours.length > 0 && (
+                <ul className="bk-dots" aria-label={`${look.clientName}’s colours`}>
+                  {colours.map((c, i) => (
+                    <li key={`${c.hex}-${i}`} title={`${c.name} · ${c.hex}`}>
+                      <span className="bk-dot" style={{ background: c.hex }} aria-hidden />
+                      <span className="sr-only">{c.name}, {c.hex}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {onBrand && <Button variant="sm ghost" icon={<Palette aria-hidden />} onClick={onBrand} title="The brand kit, beside the work (B)">Brand kit</Button>}
+            </div>
+          )}
           {pics.length > 0 && (
             <ul className="tb-pics">
               {pics.map((r) => (
                 <li key={r.id}>
                   <a className="tb-pic" href={fileUrl(r.fileId!)} target="_blank" rel="noopener noreferrer" aria-label={`${r.title} (opens full size in a new tab)`}>
-                    <Thumb src={fileUrl(r.fileId!)} alt={r.title} fit="contain" />
+                    <Thumb src={fileUrl(r.fileId!)} alt={r.title} fit="contain" className={r.category === 'logo' ? 'checker' : undefined} />
                     <span className="tb-pic-t">{r.title}</span>
                   </a>
                 </li>

@@ -1,9 +1,9 @@
 // Loaders that turn rows into the API shapes in shared/types.
 
 import type { Db } from './db';
-import type { Activity, Briefing, Deliverable, Delivery, Resource, RevisionRequest, Script, Shoot } from '../shared/types';
+import type { Activity, Briefing, ClientBrand, Deliverable, Delivery, Resource, RevisionRequest, Script, Shoot } from '../shared/types';
 import type { ISODate } from '../shared/dates';
-import { compressRanges, documentState, type ScriptStatus } from '../shared/workflow';
+import { compressRanges, documentState, type BrandKitFields, type ScriptStatus } from '../shared/workflow';
 
 const inList = (ids: number[], params: unknown[]) =>
   ids.map((id) => { params.push(id); return `$${params.length}`; }).join(',');
@@ -174,6 +174,51 @@ export async function loadResources(db: Db, where: { clientId?: number; batchId?
     createdById: r.created_by, createdByName: r.created_by_name, createdAt: r.created_at,
     ...(r.attached ? { attached: true } : {}),
   }));
+}
+
+// ── a client's brand kit ─────────────────────────────────────────────────
+
+/** jsonb as either engine returns it (pg and PGlite parse it; a string is parsed here), as a list. */
+const jsonList = (v: unknown): unknown[] => {
+  const parsed: unknown = typeof v === 'string' ? JSON.parse(v) : v;
+  return Array.isArray(parsed) ? parsed : [];
+};
+const text = (v: unknown) => (typeof v === 'string' ? v : '');
+
+/** A kit's colours and fonts as kept (client_brand), read defensively: anything odd in the jsonb is left out. */
+export function brandLists(colours: unknown, fonts: unknown): Pick<BrandKitFields, 'colours' | 'fonts'> {
+  return {
+    colours: jsonList(colours)
+      .filter((c): c is Record<string, unknown> => !!c && typeof c === 'object')
+      .map((c) => ({ name: text(c.name), hex: text(c.hex) }))
+      .filter((c) => c.name && c.hex),
+    fonts: jsonList(fonts)
+      .filter((f): f is Record<string, unknown> => !!f && typeof f === 'object')
+      .map((f) => ({ name: text(f.name), url: text(f.url) || null, resourceId: typeof f.resourceId === 'number' && f.resourceId > 0 ? f.resourceId : null }))
+      .filter((f) => f.name),
+  };
+}
+
+/**
+ * A client's brand kit (client_brand) as everyone who may see the client reads it, or null when nobody has made one.
+ * A font's file is the live resource of this client its resourceId names (null once that's removed).
+ */
+export async function loadClientBrand(db: Db, clientId: number): Promise<ClientBrand | null> {
+  const row = await db.one<{ colours: unknown; fonts: unknown; dos: string | null; donts: string | null; updated_by_name: string | null; updated_at: string }>(
+    `select b.colours, b.fonts, b.dos, b.donts, u.name as updated_by_name, b.updated_at
+       from client_brand b left join users u on u.id = b.updated_by where b.client_id = $1`, [clientId],
+  );
+  if (!row) return null;
+  const { colours, fonts } = brandLists(row.colours, row.fonts);
+  const ids = [...new Set(fonts.map((f) => f.resourceId).filter((id): id is number => id != null))];
+  const files = new Map((ids.length ? await db.query<{ id: number; file_id: number; filename: string; size: number }>(
+    `select r.id, f.id as file_id, f.filename, f.size from resources r join files f on f.id = r.file_id
+      where r.id = any($1::bigint[]) and r.client_id = $2 and r.removed_at is null`, [ids, clientId],
+  ) : []).map((r) => [Number(r.id), { id: Number(r.file_id), name: r.filename, size: Number(r.size) }]));
+  return {
+    clientId, colours, dos: row.dos, donts: row.donts, updatedByName: row.updated_by_name, updatedAt: row.updated_at,
+    fonts: fonts.map((f) => ({ ...f, file: f.resourceId != null ? files.get(f.resourceId) ?? null : null })),
+  };
 }
 
 // ── briefings ────────────────────────────────────────────────────────────

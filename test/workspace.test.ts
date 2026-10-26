@@ -2,14 +2,19 @@
 // the long scenario in api.test.ts: recalculating deadlines when the rules
 // change, archiving a batch, and seeding the demo workspace.
 
+import { inflateSync } from 'node:zlib';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../server/app';
 import { openDb, type Db } from '../server/db';
 import type { Ctx } from '../server/core';
 import { DEMO_PASSWORD, seedDemo } from '../server/seed-demo';
-import type { BatchDetail, Counts, Moment, StudioPayload, ThumbnailBoard, ThumbnailBriefDetail } from '../shared/types';
-import { SECOND_LOOK_CHECKS, thumbSpecIssues } from '../shared/workflow';
+import {
+  fileUrl, type BatchDetail, type Bootstrap, type ClientDetail, type ClientSummary, type Counts, type Moment, type StudioPayload, type ThumbnailBoard,
+  type ThumbnailBriefDetail, type ThumbnailRefBoard,
+} from '../shared/types';
+import { brandContrast, MAX_REFS, SECOND_LOOK_CHECKS, thumbSpecIssues } from '../shared/workflow';
+import { dominantColours } from '../shared/palettes';
 import { freshDb } from './db';
 
 const NOW = new Date('2026-09-28T16:00:00Z'); // Monday noon in New York
@@ -145,4 +150,109 @@ describe('the demo workspace', () => {
       await demo.close();
     }
   });
+
+  it('keeps two clients’ brand kits with their logos, and Ana’s reference boards private to her', async () => {
+    const demo = await openDb({ memory: true });
+    const demoApp = await buildApp({ db: demo, now: () => NOW, secureCookies: false, allowSetup: false, uploadLimitBytes: 1024 * 1024 });
+    try {
+      expect(await seedDemo(demo, NOW)).toBe(true);
+      const signIn = async (email: string) => String((await demoApp.inject({
+        method: 'POST', url: '/api/auth/login', headers: { 'x-scale-media': '1', 'content-type': 'application/json' }, payload: JSON.stringify({ email, password: DEMO_PASSWORD }),
+      })).headers['set-cookie']).split(';')[0];
+      const get = async (url: string, cookie: string) => {
+        const r = await demoApp.inject({ method: 'GET', url, headers: { cookie } });
+        return { status: r.statusCode, raw: r.rawPayload, json: () => JSON.parse(r.body) };
+      };
+      const [ana, josh, sarah] = [await signIn('ana@scalemedia.demo'), await signIn('josh@scalemedia.demo'), await signIn('sarah@scalemedia.demo')];
+      const clients = ((await get('/api/clients', josh)).json() as { clients: ClientSummary[] }).clients;
+      const idOf = (name: string) => clients.find((c) => c.name === name)!.id;
+
+      // Acme's kit, as a writer reads it: colours in order with hex in capitals, a font to get, do's and don'ts
+      const acme = (await get(`/api/clients/${idOf('Acme Outdoor Co.')}`, sarah)).json() as ClientDetail;
+      expect(acme.brand?.colours.map((c) => [c.name, c.hex])).toEqual([['Trail green', '#2F5D50'], ['Ember', '#E8743B'], ['Bone', '#F3EDE2'], ['Charcoal', '#23262B']]);
+      expect(acme.brand?.fonts).toEqual([{ name: 'Bricolage Grotesque', url: 'https://fonts.google.com/specimen/Bricolage+Grotesque', resourceId: null, file: null }]);
+      expect([!!acme.brand?.dos, !!acme.brand?.donts, acme.brand?.updatedByName]).toEqual([true, true, 'Josh Rath']);
+      expect(brandContrast(acme.brand!.colours)).toMatchObject({ dark: '#23262B', light: '#F3EDE2', readable: true });
+      expect('recentWinners' in acme).toBe(false);
+      const northwind = (await get(`/api/clients/${idOf('Northwind Coffee Roasters')}`, josh)).json() as ClientDetail;
+      expect(northwind.brand?.colours.map((c) => c.name)).toEqual(['Roast', 'Crema', 'Oat', 'Leaf']);
+      for (const c of clients.filter((x) => x.id !== acme.id && x.id !== northwind.id)) {
+        expect(((await get(`/api/clients/${c.id}`, josh)).json() as ClientDetail).brand).toBeNull();
+      }
+
+      // each has a logo resource (a PNG, which a writer may open), and "Pick colours from logo" finds the kit's own
+      // colours in it: the browser runs dominantColours on the canvas's pixels; here the PNG is decoded by hand
+      for (const c of [acme, northwind]) {
+        const logos = c.resources.filter((r) => r.category === 'logo');
+        expect(logos.map((r) => [r.kind, r.fileMime])).toEqual([['file', 'image/png']]);
+        const file = await get(fileUrl(logos[0].fileId!), sarah);
+        expect(file.status).toBe(200);
+        const found = dominantColours(pngPixels(file.raw));
+        expect(found).toHaveLength(3);
+        expect(found.filter((hex) => c.brand!.colours.some((k) => k.hex === hex))).toEqual(found);
+      }
+
+      // Ana sees the kit with the client's winners, and beside her brief; the AI ideas are off without a key
+      const anaAcme = (await get(`/api/clients/${acme.id}`, ana)).json() as ClientDetail;
+      expect(anaAcme.brand?.colours).toHaveLength(4);
+      expect(anaAcme.recentWinners?.map((w) => [w.title, w.standout])).toEqual([['The jacket that folds into itself', true], ['Autumn in one bag', false]]);
+      const studio = (await get('/api/studio', ana)).json() as StudioPayload;
+      const jacket = studio.wins.find((w) => w.title === 'The jacket that folds into itself')!;
+      const brief = (await get(`/api/thumbnails/${jacket.briefId}`, ana)).json() as ThumbnailBriefDetail;
+      expect(brief.look.brand?.colours.map((c) => c.name)).toEqual(['Trail green', 'Ember', 'Bone', 'Charcoal']);
+      expect(brief.look.images.map((r) => r.title)).toContain('Acme logo');
+      expect(((await get('/api/bootstrap', josh)).json() as Bootstrap).briefIdeas).toBe(false);
+
+      // her boards: Acme's logo, her first Acme winner and an upload of her own on General, newest first
+      const refs = (await get('/api/thumbnail-refs', ana)).json() as ThumbnailRefBoard;
+      expect([refs.total, refs.max]).toEqual([3, MAX_REFS]);
+      expect(refs.refs.map((r) => [r.source, r.clientName, r.mime])).toEqual([
+        ['resource', 'Acme Outdoor Co.', 'image/png'], ['winner', 'Acme Outdoor Co.', 'image/png'], ['upload', null, 'image/png'],
+      ]);
+      expect(refs.refs[1].winner).toMatchObject({ title: 'Autumn in one bag', letter: 'A', madeByName: 'Ana Torres' });
+      expect(refs.refs[0].resource).toMatchObject({ title: 'Acme logo', category: 'logo' });
+      expect(((await get('/api/thumbnail-refs?clientId=general', ana)).json() as ThumbnailRefBoard).refs.map((r) => r.source)).toEqual(['upload']);
+      expect(((await get(`/api/thumbnail-refs?clientId=${acme.id}`, ana)).json() as ThumbnailRefBoard).refs.map((r) => r.source)).toEqual(['resource', 'winner']);
+      // the picture she uploaded opens only for her, and managers have no boards
+      const upload = refs.refs[2];
+      expect([(await get(upload.url, ana)).status, (await get(upload.url, josh)).status, (await get(upload.url, sarah)).status]).toEqual([200, 404, 404]);
+      expect([(await get('/api/thumbnail-refs', josh)).status, (await get('/api/thumbnail-refs', sarah)).status]).toEqual([403, 403]);
+    } finally {
+      await demoApp.close();
+      await demo.close();
+    }
+  });
 });
+
+/** A PNG's pixels (8-bit RGBA, as the demo's logos are), the way a canvas's getImageData() gives them. */
+function pngPixels(png: Buffer): Uint8Array {
+  let [at, w, h] = [8, 0, 0];
+  const idat: Buffer[] = [];
+  while (at < png.length) {
+    const len = png.readUInt32BE(at);
+    const type = png.toString('latin1', at + 4, at + 8);
+    const data = png.subarray(at + 8, at + 8 + len);
+    if (type === 'IHDR') {
+      [w, h] = [data.readUInt32BE(0), data.readUInt32BE(4)];
+      if (data[8] !== 8 || data[9] !== 6) throw new Error('not an 8-bit RGBA PNG');
+    }
+    if (type === 'IDAT') idat.push(data);
+    at += 12 + len;
+  }
+  const raw = inflateSync(Buffer.concat(idat));
+  const [bpp, stride] = [4, w * 4];
+  const out = new Uint8Array(stride * h);
+  for (let y = 0; y < h; y++) {
+    const filter = raw[y * (stride + 1)];
+    for (let x = 0; x < stride; x++) {
+      const a = x >= bpp ? out[y * stride + x - bpp] : 0;
+      const b = y > 0 ? out[(y - 1) * stride + x] : 0;
+      const c = x >= bpp && y > 0 ? out[(y - 1) * stride + x - bpp] : 0;
+      const p = a + b - c;
+      const paeth = Math.abs(p - a) <= Math.abs(p - b) && Math.abs(p - a) <= Math.abs(p - c) ? a : Math.abs(p - b) <= Math.abs(p - c) ? b : c;
+      const guess = [0, a, b, (a + b) >> 1, paeth][filter];
+      out[y * stride + x] = (raw[y * (stride + 1) + 1 + x] + guess) & 0xff;
+    }
+  }
+  return out;
+}

@@ -10,13 +10,14 @@ import { AlertTriangle, Archive, ArrowRight, ArchiveRestore, Building2, Camera, 
 import { api, useSave, type ApiError } from '../api';
 import { confetti } from '../fx';
 import { SOFT } from '../motion';
-import type { Briefing, ClientDetail, ClientSummary } from '../../../shared/types';
+import type { Briefing, ClientDetail, ClientSummary, ResourceCategory } from '../../../shared/types';
 import { fmtDate, fmtRange, fmtStamp, plural } from '../../../shared/format';
 import { nowInZone } from '../../../shared/dates';
 import { PageHeader, useBoot, useNewWork, useDisplayTz } from '../components/Shell';
 import { BatchItem } from '../components/BatchBits';
 import { Button, Chip, DateTile, Dialog, Empty, ErrorState, ExtLink, Field, FormError, inputProps, Loading, NotFound, Panel, Seg, Term, useFieldId, useToast } from '../components/ui';
 import { RescheduleDialog, ResourceDialog, ResourceRow } from './BatchDetail';
+import { BrandKit, hasBrandKit } from '../components/BrandKit';
 
 export function ClientsPage() {
   const { me } = useBoot();
@@ -158,7 +159,7 @@ export function ClientPage() {
   const q = useQuery({ queryKey: ['client', Number(id)], queryFn: () => api<ClientDetail>(`/api/clients/${id}`), enabled: !bad });
   const [edit, setEdit] = useState(false);
   const [brief, setBrief] = useState<Briefing | 'new' | null>(null);
-  const [res, setRes] = useState<{ briefingId?: number } | null>(null);
+  const [res, setRes] = useState<{ briefingId?: number; category?: ResourceCategory } | null>(null);
   const [resched, setResched] = useState<{ id: number; start: string; end: string | null } | null>(null);
   const [tab, setTab] = useState<'active' | 'done'>('active');
   const archive = useSave((archived: boolean) => api(`/api/clients/${id}/archive`, { body: { archived } }), { onSuccess: (_o, a) => toast(a ? 'Client archived' : 'Client restored') });
@@ -177,6 +178,9 @@ export function ClientPage() {
   const upcoming = c.shoots.filter((s) => (s.endDate ?? s.startDate) >= today && !s.cancelledAt);
   const past = c.shoots.filter((s) => (s.endDate ?? s.startDate) < today);
   const byCat = (cat: string) => c.resources.filter((r) => r.category === cat);
+  // managers always (to set one up); everyone else once there's something in it
+  const winners = c.recentWinners ?? [];
+  const showKit = manager || hasBrandKit(c.brand, c.resources) || winners.length > 0;
   return (
     <>
       <PageHeader title={c.name} crumbs={<Link to="/clients">Clients</Link>}
@@ -236,6 +240,10 @@ export function ClientPage() {
               <div className="rows">{(tab === 'active' ? active : done).map((b) => <BatchItem key={b.id} b={b} ring />)}</div>
             )}
           </Panel>}
+          {showKit && (
+            <BrandKit clientId={c.id} clientName={c.name} brand={c.brand ?? null} resources={c.resources} winners={winners}
+              editable={manager && c.status !== 'archived'} onAddResource={manager ? (category) => setRes({ category }) : undefined} />
+          )}
           <Panel title="Resources" tools={manager ? <Button variant="sm" icon={<Link2 aria-hidden />} onClick={() => setRes({})}>Add</Button> : undefined}>
             {c.briefings.length > 0 && (
               <div className="stack s2" style={{ marginBottom: c.resources.length ? 18 : 0 }}>
@@ -258,9 +266,9 @@ export function ClientPage() {
             )}
             {!c.resources.length ? (!c.briefings.length && <Empty boxed title="No folders, examples, assets or call recordings yet" />) : (
               <div className="stack s4">
-                {(['folder', 'example', 'asset', 'document', 'recording', 'other'] as const).filter((k) => byCat(k).length).map((k) => (
+                {(['folder', 'example', 'asset', 'logo', 'reference', 'font', 'document', 'recording', 'other'] as const).filter((k) => byCat(k).length).map((k) => (
                   <div key={k} className="stack s2">
-                    <div className="section-title">{{ folder: 'Folders', example: 'Examples', asset: 'Assets', document: 'Documents', recording: 'Recordings', other: 'Other' }[k]}</div>
+                    <div className="section-title">{RESOURCE_GROUP[k]}</div>
                     {byCat(k).map((r) => <ResourceRow key={r.id} r={r} onRemove={manager || r.createdById === me.id ? () => remove.mutate(r.id) : undefined} />)}
                   </div>
                 ))}
@@ -278,11 +286,16 @@ export function ClientPage() {
       </div>
       {manager && edit && <EditClientDialog c={c} open onClose={() => setEdit(false)} managers={users.filter((u) => isManager(u.role) && u.active)} />}
       {manager && brief && <BriefingDialog clientId={c.id} briefing={brief === 'new' ? null : brief} batches={c.batches.filter((b) => !b.archivedAt)} onClose={() => setBrief(null)} />}
-      <ResourceDialog open={!!res} onClose={() => setRes(null)} clientId={c.id} briefingId={res?.briefingId} />
+      <ResourceDialog open={!!res} onClose={() => setRes(null)} clientId={c.id} briefingId={res?.briefingId} category={res?.category} />
       {resched && <RescheduleDialog shootId={resched.id} start={resched.start} end={resched.end} onClose={() => setResched(null)} />}
     </>
   );
 }
+
+/** A client's resources, grouped under these headings (logos, references and font files also show in the Brand kit). */
+const RESOURCE_GROUP: Record<ResourceCategory, string> = {
+  folder: 'Folders', example: 'Examples', asset: 'Assets', logo: 'Logos', reference: 'References', font: 'Font files', document: 'Documents', recording: 'Recordings', other: 'Other',
+};
 
 function EditClientDialog({ c, open, onClose, managers }: { c: ClientDetail; open: boolean; onClose: () => void; managers: { id: number; name: string }[] }) {
   const toast = useToast();

@@ -12,20 +12,27 @@ import { requireAdmin } from '../auth';
 import { HttpError, notFound, parse, zs } from '../http';
 import { cityLabel, findCity, shiftOf, zoneFor } from '../../shared/cities';
 import { isValidTimeZone } from '../../shared/dates';
+import { EDITOR_KIND_LABEL, EDITOR_KINDS, type EditorKind } from '../../shared/workflow';
 import type { Editor } from '../../shared/types';
 
 interface EditorRow {
   id: number; name: string; city: string; city_code: string; country: string; lat: number; lon: number;
   timezone: string; work_start: number; work_end: number;
+  /** what they do (null: not set, which reads as a video editor: isVideoEditorKind) */
+  editor_kind: EditorKind | null;
 }
 
 export async function loadEditorRows(db: Db): Promise<EditorRow[]> {
   return db.query<EditorRow>(
-    `select id, name, city, city_code, country, lat, lon, timezone, work_start, work_end from editors where removed_at is null order by name`,
+    `select id, name, city, city_code, country, lat, lon, timezone, work_start, work_end, editor_kind from editors where removed_at is null order by name`,
   );
 }
 
-const toEditor = (r: EditorRow): Editor => ({ id: r.id, name: r.name, city: cityLabel({ name: r.city, country: r.country }), timezone: r.timezone, workHours: [r.work_start, r.work_end] });
+const toEditor = (r: EditorRow): Editor => ({
+  id: r.id, name: r.name, city: cityLabel({ name: r.city, country: r.country }), timezone: r.timezone, workHours: [r.work_start, r.work_end],
+  editorKind: r.editor_kind ?? null,
+});
+const kindWords = (k: EditorKind | null) => (k ? ` as a ${EDITOR_KIND_LABEL[k].toLowerCase()}` : '');
 
 export function registerEditorRoutes(app: FastifyInstance, ctx: Ctx) {
   const { db } = ctx;
@@ -36,6 +43,8 @@ export function registerEditorRoutes(app: FastifyInstance, ctx: Ctx) {
     timezone: z.string().trim().refine(isValidTimeZone, 'Pick a time zone from the list').optional(),
     workStart: z.coerce.number().int().min(0).max(23).default(9),
     workEnd: z.coerce.number().int().min(0).max(47).default(18),
+    /** what they do; null is not set (a video editor). Left out: kept on an edit, not set on a new entry */
+    editorKind: z.enum(EDITOR_KINDS, 'Choose what they do').nullable().optional(),
   });
   /** The city, time zone and hours as columns; the end of a shift that passes midnight is stored past 24. */
   const place = (v: z.infer<typeof input>, current?: EditorRow | null) => {
@@ -54,11 +63,12 @@ export function registerEditorRoutes(app: FastifyInstance, ctx: Ctx) {
   app.post('/api/editors', async (req) => {
     const me = requireAdmin(req, 'Only admins can manage editors');
     const v = parse(input, req.body);
+    const kind = v.editorKind ?? null;
     const row = await db.one<{ id: number }>(
-      `insert into editors (name, city, city_code, country, lat, lon, timezone, work_start, work_end, created_by)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) returning id`, [v.name, ...place(v), me.id],
+      `insert into editors (name, city, city_code, country, lat, lon, timezone, work_start, work_end, created_by, editor_kind)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) returning id`, [v.name, ...place(v), me.id, kind],
     );
-    await logActivity(db, { actor: me, action: 'editor.created', entityType: 'editor', entityId: row!.id, summary: `Added editor ${v.name} (${v.city.split(',')[0]})` });
+    await logActivity(db, { actor: me, action: 'editor.created', entityType: 'editor', entityId: row!.id, summary: `Added editor ${v.name} (${v.city.split(',')[0]})${kindWords(kind)}` });
     return list();
   });
 
@@ -68,12 +78,18 @@ export function registerEditorRoutes(app: FastifyInstance, ctx: Ctx) {
     const v = parse(input, req.body);
     const current = await db.one<EditorRow>(`select * from editors where id = $1 and removed_at is null`, [id]);
     if (!current) throw notFound('Editor');
+    // the form sends every field: the kind changes only when it differs from the one kept (left out: kept)
+    const kind = v.editorKind === undefined ? current.editor_kind ?? null : v.editorKind;
+    const kindChanged = kind !== (current.editor_kind ?? null);
     const rows = await db.query(
-      `update editors set name = $2, city = $3, city_code = $4, country = $5, lat = $6, lon = $7, timezone = $8, work_start = $9, work_end = $10, updated_at = now()
-        where id = $1 and removed_at is null returning id`, [id, v.name, ...place(v, current)],
+      `update editors set name = $2, city = $3, city_code = $4, country = $5, lat = $6, lon = $7, timezone = $8, work_start = $9, work_end = $10, editor_kind = $11, updated_at = now()
+        where id = $1 and removed_at is null returning id`, [id, v.name, ...place(v, current), kind],
     );
     if (!rows.length) throw notFound('Editor');
-    await logActivity(db, { actor: me, action: 'editor.updated', entityType: 'editor', entityId: id, summary: `Updated editor ${v.name}` });
+    await logActivity(db, {
+      actor: me, action: 'editor.updated', entityType: 'editor', entityId: id,
+      summary: `Updated editor ${v.name}${kindChanged ? (kind ? `: now a ${EDITOR_KIND_LABEL[kind].toLowerCase()}` : ': what they do not set') : ''}`,
+    });
     return list();
   });
 

@@ -1,6 +1,6 @@
 // The brief page's keys (client/src/components/ThumbKeys.tsx), as a pure rule: which key asks for what. 1–6 only ever
-// ask to pick (the page opens the confirm, never decides), and only in a manager's review; a held key repeats only
-// the arrows.
+// ask to pick (the page opens the confirm, never decides), and only in a manager's review; B opens the Brand drawer
+// for everyone; a held key repeats only the arrows.
 
 import { describe, expect, it } from 'vitest';
 import { THUMB_KEYS, thumbKeyAction } from '../client/src/components/ThumbKeys';
@@ -31,5 +31,12 @@ describe('the brief page’s keys', () => {
 
   it('lists the pick keys as managers’ only', () => {
     expect(THUMB_KEYS.filter((k) => k.managers).map((k) => k.keys)).toEqual([`1–${MAX_OPTIONS}`]);
+  });
+
+  it('opens and closes the Brand drawer with B, either case, for everyone', () => {
+    expect([press('b'), press('B'), press('b', true)]).toEqual([{ kind: 'brand' }, { kind: 'brand' }, { kind: 'brand' }]);
+    expect(press('b', false, true)).toBeNull();
+    expect(THUMB_KEYS.find((k) => k.keys === 'B')).toMatchObject({ what: 'Brand kit drawer' });
+    expect(THUMB_KEYS.find((k) => k.keys === 'B')?.managers).toBeFalsy();
   });
 });

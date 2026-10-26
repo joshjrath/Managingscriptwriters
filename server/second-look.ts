@@ -1,8 +1,9 @@
 // A thumbnail designer's AI second look: Claude gives one of their own options a quick, private critique, judged at
 // the sizes viewers meet it, against the brief and the client's look (with up to three of the client's picked
-// thumbnails as references). It's advice: it never stops a round being sent. One is kept per option, since an
-// option's image never changes, so asking again returns the kept one without asking Claude; only its maker ever sees
-// it (it rides on that option in the brief's payload for them: present() in server/thumbnails.ts).
+// thumbnails as references, and its brand kit's colours, do's and don'ts as text). It's advice: it never stops a round
+// being sent. One is kept per option, since an option's image never changes, so asking again returns the kept one
+// without asking Claude; only its maker ever sees it (it rides on that option in the brief's payload for them:
+// present() in server/thumbnails.ts).
 //
 // Only when the server has an ANTHROPIC_API_KEY (ctx.thumbCritic; tests pass a stand-in). Each person can ask for one
 // at a time and 30 an hour, as with Paste notes. An Admin viewing the site as a designer neither sees nor asks for one.
@@ -17,6 +18,7 @@ import type { CritiqueImage, Ctx, ThumbCritic, ThumbCritiqueInput } from './core
 import { requireUser } from './auth';
 import { conflict, HttpError, notFound, parse, zs } from './http';
 import { DESIGNER_FILES } from './files';
+import { loadClientBrand } from './records';
 import { loadWins, requireDesigner, secondLookOf } from './thumbnails';
 import {
   SECOND_LOOK_CHECKS, SECOND_LOOK_LIMITS, SECOND_LOOK_MAX_BYTES, SECOND_LOOK_STATUSES, secondLookRefusal, tidySecondLook,
@@ -48,7 +50,7 @@ Judge it the way viewers meet it: small, in a phone feed, about 120 to 360 pixel
 - words: the words on the image. Fewer is better; they must stay legible small and shouldn't repeat the video's title.
 - contrast: contrast and separation between the subject, the words and the background.
 - brief_fit: does it show what the brief asks for?
-- brand_fit: does it fit the client's look (their brand voice and guidance) and the references, which are thumbnails picked for this client before? With no references or guidance, judge it on the brief alone.
+- brand_fit: does it fit the client's look (their brand voice and guidance, and their brand colours, do's and don'ts when given) and the references, which are thumbnails picked for this client before? With no references or guidance, judge it on the brief alone.
 
 For each check give a status (strong, ok or watch) and a short note. Then up to three suggestions: concrete changes the designer can make in the design file (move, enlarge, cut, recolour, crop, relight), the most useful first; none when it's ready.
 
@@ -62,6 +64,8 @@ How to write:
 function contextText(input: ThumbCritiqueInput): string {
   const given = (v: string | null) => v?.trim() || 'not given';
   const refs = input.references.length;
+  // the client's brand kit, when it has one: its colours by name and code, and its do's and don'ts
+  const brand = input.client.brand;
   return [
     'The brief:',
     `- Video title: ${input.brief.title}`,
@@ -71,6 +75,11 @@ function contextText(input: ThumbCritiqueInput): string {
     `The client: ${input.client.name}`,
     `- Brand voice: ${given(input.client.brandVoice)}`,
     `- Guidance: ${given(input.client.guidance)}`,
+    ...(brand ? [
+      `- Brand colours: ${brand.colours.length ? brand.colours.map((c) => `${c.name} ${c.hex}`).join(', ') : 'not given'}`,
+      `- Do: ${given(brand.dos)}`,
+      `- Don’t: ${given(brand.donts)}`,
+    ] : []),
     '',
     refs ? `The references: ${refs === 1 ? 'one thumbnail' : `${refs} thumbnails`} picked for this client before, newest first.` : 'No references: nothing has been picked for this client yet.',
   ].join('\n');
@@ -209,11 +218,14 @@ export function registerSecondLookRoutes(app: FastifyInstance, ctx: Ctx) {
         references.push({ mime: w.option.mime, base64: data });
         budget -= need;
       }
+      // the client's brand kit as text, when it says anything (colours, do's or don'ts)
+      const kit = await loadClientBrand(ctx.db, o.client_id);
+      const brand = kit && (kit.colours.length || kit.dos || kit.donts) ? { colours: kit.colours, dos: kit.dos, donts: kit.donts } : null;
       allowLook(me.id);
       const raw = await critic.critique({
         option: { mime: o.mime, base64: option }, references,
         brief: { title: o.title, brief: o.brief, onImage: o.on_image },
-        client: { name: o.client_name, brandVoice: o.brand_voice, guidance: o.guidance },
+        client: { name: o.client_name, brandVoice: o.brand_voice, guidance: o.guidance, ...(brand ? { brand } : {}) },
       });
       const result = tidySecondLook(raw);
       if (!result) throw new HttpError(502, 'The second look came back in a form that couldn’t be used, so nothing was kept. Try again in a moment.');
