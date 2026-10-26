@@ -8,7 +8,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bell, Building2, CalendarDays, Clapperboard, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
-  Circle, Eye, Globe2, Home, Images, Library, Palette, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
+  BookOpen, Circle, Eye, Globe2, Home, Images, Library, Palette, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
 } from 'lucide-react';
 import { LayoutGroup, m } from 'framer-motion';
 import { api, queryClient, useSave } from '../api';
@@ -154,9 +154,10 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
   ];
-  // thumbnail designers: their Studio (briefs, rounds and wins), then what video editors have too
+  // thumbnail designers: their Studio (briefs, rounds and wins), their portfolio and references, then what video editors have too
   const designerItems = [
-    { to: '/studio', label: 'Studio', icon: <Palette />, count: counts.myThumbnails || undefined, not: '/studio/refs' },
+    { to: '/studio', label: 'Studio', icon: <Palette />, count: counts.myThumbnails || undefined, not: ['/studio/refs', '/studio/portfolio'] },
+    { to: '/studio/portfolio', label: 'Portfolio', icon: <BookOpen /> },
     { to: '/studio/refs', label: 'References', icon: <Images /> },
     { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
@@ -173,7 +174,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
   ];
-  const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; fresh?: boolean; show?: boolean; not?: string }[] = isThumbnailDesigner(me) ? designerItems : isEditor(me.role) ? editorItems : !manager ? writerItems : [
+  const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; fresh?: boolean; show?: boolean; not?: string[] }[] = isThumbnailDesigner(me) ? designerItems : isEditor(me.role) ? editorItems : !manager ? writerItems : [
     { to: '/overview', label: 'Overview', icon: <LayoutDashboard />, count: counts.attention || undefined, hot: counts.attention > 0 },
     { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 },
     { to: '/production', label: 'Production', icon: <Columns3 /> },
@@ -250,11 +251,11 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
 
 /**
  * A sidebar link; the highlight glides between links as you move around. It's lit on its page and the pages under it,
- * except under `not` (the Studio's References has its own item).
+ * except under `not` (the Studio's Portfolio and References have their own items).
  */
-function NavItem({ to, icon, label, collapsed, not, children }: { to: string; icon: ReactNode; label: string; collapsed?: boolean; not?: string; children?: ReactNode }) {
+function NavItem({ to, icon, label, collapsed, not, children }: { to: string; icon: ReactNode; label: string; collapsed?: boolean; not?: string[]; children?: ReactNode }) {
   const { pathname } = useLocation();
-  const away = !!not && (pathname === not || pathname.startsWith(`${not}/`));
+  const away = !!not?.some((n) => pathname === n || pathname.startsWith(`${n}/`));
   return (
     <NavLink to={to} className={({ isActive }) => (isActive && !away ? 'active' : '')} aria-current={away ? false : undefined} title={collapsed ? label : undefined}>
       {({ isActive }) => (
@@ -431,9 +432,10 @@ function SearchBox() {
 
 // ── notifications ────────────────────────────────────────────────────────
 
-// thumbnails keep the same meanings: a new brief like an assignment, a round sent like a review request, picked like an approval, changes like revisions
+// thumbnails keep the same meanings: a new brief like an assignment, a round sent like a review request, picked like an approval, changes like revisions,
+// and a pick that went live like a delivery
 const THUMB_NOTE_COLOR: Record<ThumbnailNotification, string> = {
-  thumbnail_new: 'var(--cyan)', thumbnail_sent: 'var(--lavender)', thumbnail_picked: 'var(--mint)', thumbnail_changes: 'var(--pink)',
+  thumbnail_new: 'var(--cyan)', thumbnail_sent: 'var(--lavender)', thumbnail_picked: 'var(--mint)', thumbnail_changes: 'var(--pink)', thumbnail_live: 'var(--mint)',
 };
 const NOTE_COLOR: Record<string, string> = {
   overdue: 'var(--red)', blocker: 'var(--red)', deadline: 'var(--yellow)', deadline_change: 'var(--yellow)', review_request: 'var(--lavender)',
@@ -468,7 +470,7 @@ export function NotificationsButton({ className = '' }: { className?: string }) 
           </div>
           {q.isLoading && <div className="empty">Loading…</div>}
           {q.isError && <div className="empty">Couldn’t load notifications.</div>}
-          {q.data && !q.data.notifications.length && <div className="empty"><b>You’re all caught up</b><span>{designerBell ? 'You’ll hear here when you’re given a thumbnail brief, and when a manager picks an option or asks for changes.' : editorBell ? 'You’ll hear here when a shoot’s scripts are all final, or a shoot moves.' : 'Assignments, reviews, deadline changes and deliveries show up here.'}</span></div>}
+          {q.data && !q.data.notifications.length && <div className="empty"><b>You’re all caught up</b><span>{designerBell ? 'You’ll hear here when you’re given a thumbnail brief, when a manager picks an option or asks for changes, and when a pick goes live.' : editorBell ? 'You’ll hear here when a shoot’s scripts are all final, or a shoot moves.' : 'Assignments, reviews, deadline changes and deliveries show up here.'}</span></div>}
           {q.data?.notifications.map((n) => (
             <button key={n.id} className={`notif${n.readAt ? ' read' : ''}`} style={{ ['--c' as string]: NOTE_COLOR[n.type] ?? 'var(--cyan)' }}
               onClick={() => { if (!n.readAt) read.mutate({ ids: [n.id] }); setOpen(false); if (n.link) nav(n.link); }}>

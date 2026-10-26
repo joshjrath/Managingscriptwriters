@@ -20,6 +20,7 @@ export function audienceOf(p: KindOf): Audience {
 
 /** Updates that only matter to some people (Admins count as managers). */
 export const ONLY_FOR: Record<string, Audience[]> = {
+  '2026-10-26-thumbnail-portfolio': ['managers', 'designers'], '2026-10-26-thumbnail-went-live': ['managers', 'designers'],
   '2026-10-25-editors-add-from-timeliner': ['managers'], '2026-10-25-thumbnails-always-in-menu': ['managers'], '2026-10-25-thumbnail-studio': ['managers', 'designers'],
   '2026-10-07-calendar-shoots-match': ['managers'], '2026-10-07-editors': ['managers', 'editors'], '2026-10-07-calendar-shoots': ['managers'],
   '2026-10-07-calendar-embed': ['managers'], '2026-10-02-fill-missing-deadlines': ['managers'], '2026-10-02-drafts-from-final': ['managers'],
@@ -50,6 +51,32 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-26-thumbnail-portfolio',
+    date: '2026-10-26',
+    title: 'Thumbnails: a portfolio for every designer',
+    summary: 'Thumbnail designers have a new Portfolio: every thumbnail of theirs that was picked, how it got there, where it went live, and a few private figures on how their picks are going.',
+    changes: [
+      { tag: 'new', text: 'Portfolio is in the designer’s menu under Studio, and on the Studio’s Wall of wins. Each of your thumbnails that’s the pick now is a card, newest first. Filter the wall by client, or by the month it was picked.' },
+      { tag: 'new', text: 'Turn a card over (click it, or press Enter) for how it came about: each round sent, how many options it had, the changes asked with the manager’s note on your rounds, who picked it, and where and when it went live, with the Test & Compare winner when a manager recorded one. Esc turns it back. With Animations off, the card fades over instead of turning.' },
+      { tag: 'new', text: 'Beside the wall, your last 6 months: your picks month by month as small bars (press one to see that month’s wins, for every client), how many of them came from a brief’s first round, your Standouts, and what the notes pinned on your rounds are usually about (Text, Contrast and so on). It’s all counted from your picks and notes: no points, levels or rankings, and nobody is compared with anyone else.' },
+      { tag: 'improved', text: 'Only you and the managers see your portfolio. Managers open a designer’s from the Team page or the Thumbnails page, read-only. How many picks came from the first round is only on the portfolio, never on the front of your Studio.' },
+      { tag: 'improved', text: 'Walls of thumbnails load faster: once your browser has a thumbnail’s picture, it keeps it for a day instead of asking again after five minutes. Signing out makes it forget them, so the next person on a shared computer can’t see them.' },
+    ],
+  },
+  {
+    id: '2026-10-26-thumbnail-went-live',
+    date: '2026-10-26',
+    title: 'Thumbnails: mark a pick live, and link its Timeliner video',
+    summary: 'Managers can now record where and when a picked thumbnail went live, and which option won YouTube’s Test & Compare. The designer is told, and the win gets a Live badge.',
+    changes: [
+      { tag: 'new', text: 'On a picked thumbnail, Mark live asks for the video’s link (starting with https://), the day it went live (today to start with), which of the options sent on the brief won Test & Compare if you ran one, and a short note. Open it again to change anything (only what you change is saved, so two managers never undo each other), or choose Not live after all to take it back. It only records it: nothing is posted anywhere.' },
+      { tag: 'new', text: 'The designer who made the picked option is told once for each pick, with a link to that card in their portfolio (taking the mark back takes the message back if they haven’t read it). The win gets a small Live badge on their Wall of wins that opens the video in a new tab, and the picked brief shows where it went live.' },
+      { tag: 'new', text: 'New thumbnail and Edit have an optional Timeliner video: the client’s videos from the site’s copy of Timeliner that are still open or were posted in the last 90 days, newest first. Picking one fills in an empty title (pick another video and the title follows, unless you typed your own), and the brief then shows the video’s step in Timeliner with Open in Timeliner. Only managers see it.' },
+      { tag: 'new', text: 'When a linked video reaches Posted in Timeliner and its thumbnail is picked but not marked live, the Thumbnails page asks “Posted in Timeliner — mark it live?”, with Mark it live right there. Every picked thumbnail under Picked or cancelled lately has Mark live too.' },
+      { tag: 'improved', text: 'Deciding again on a thumbnail that was marked live, by picking another option or asking for changes, takes the mark back, so a later pick never shows an old link. Picking the same option again keeps it.' },
+    ],
+  },
   {
     id: '2026-10-25-client-brand-kit',
     date: '2026-10-25',

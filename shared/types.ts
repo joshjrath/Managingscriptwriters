@@ -1,10 +1,10 @@
 // Shapes returned by the API. The server builds these; the client renders them.
 
-import type { Clock, DayMode, ISODate } from './dates';
+import type { Clock, DayMode, ISODate, YearMonth } from './dates';
 import type { WorkspaceTheme } from './palettes';
 import type {
-  BrandColour, BrandFont, BrandKitFields, DocumentState, EditorKind, Milestone, OptionLetter, Progress, Role, ScriptStatus, SecondLookResult, Stage,
-  ThumbAction, ThumbIdea, ThumbMime, ThumbMomentKind, ThumbPinTag, ThumbRefSource, ThumbState, VideoState,
+  BrandColour, BrandFont, BrandKitFields, DocumentState, EditorKind, Milestone, OptionLetter, PortfolioGrowth, Progress, Role, RoundStory, ScriptStatus,
+  SecondLookResult, Stage, ThumbAction, ThumbIdea, ThumbMime, ThumbMomentKind, ThumbPinTag, ThumbRefSource, ThumbState, TimelinerStatusGroup, VideoState,
 } from './workflow';
 
 /** Every change request carries `x-scale-media: 1`; a page can't send it cross-site without a CORS preflight, which the server never grants. */
@@ -1441,8 +1441,13 @@ export type FocusAction = 'start' | 'pause' | 'resume' | 'done';
 // wording: the Thumbnail Studio sections of shared/workflow.ts.
 
 /** Notification types the thumbnail routes send (each has a colour in Shell.tsx). */
-export const THUMBNAIL_NOTIFICATIONS = ['thumbnail_new', 'thumbnail_sent', 'thumbnail_picked', 'thumbnail_changes'] as const;
+export const THUMBNAIL_NOTIFICATIONS = ['thumbnail_new', 'thumbnail_sent', 'thumbnail_picked', 'thumbnail_changes', 'thumbnail_live'] as const;
 export type ThumbnailNotification = (typeof THUMBNAIL_NOTIFICATIONS)[number];
+/**
+ * A picked thumbnail was marked live (POST /api/thumbnails/:id/published), told once per pick to the picked option's
+ * maker (dedupe key thumbLiveKey(briefId, optionId), link portfolioPath({ card: optionId })).
+ */
+export const THUMBNAIL_LIVE_NOTIFICATION = 'thumbnail_live' satisfies ThumbnailNotification;
 
 /** A stored file's address, for an <img> (`${url}?download=1` downloads the original at full quality). */
 export const fileUrl = (fileId: number) => `/api/files/${fileId}`;
@@ -1596,6 +1601,16 @@ export interface ThumbnailBrief {
    * only) the tray's first; null shows the title card
    */
   cover: ThumbnailOption | null;
+  /**
+   * where and when it went live, as a manager marked it (POST /api/thumbnails/:id/published): only while it's picked
+   * and marked, else null. Null too for a designer the brief was taken from whose round isn't the newest, who reads
+   * nothing of the brief since
+   */
+  live: ThumbnailLive | null;
+  /** managers only: the Timeliner video it's for (its task id), as linked in New thumbnail or Edit; left out for designers */
+  timelinerTaskId?: string | null;
+  /** managers only: that video as the site's copy of Timeliner has it now; null when no video is linked; left out for designers */
+  video?: ThumbnailVideoLink | null;
 }
 
 /** The client's look, shown beside a brief. */
@@ -1626,6 +1641,8 @@ export interface ThumbnailWin {
   reason: string | null;
   /** the manager marked the pick Standout */
   standout: boolean;
+  /** it went live (the Studio's small Live badge, linking to `url` in a new tab when there is one); null when not marked */
+  live: ThumbnailLiveBadge | null;
 }
 
 /** One brief in full: GET /api/thumbnails/:id, and what every change to one brief answers with. */
@@ -1646,6 +1663,8 @@ export interface ThumbnailBriefDetail extends ThumbnailBrief {
     decide: boolean;
     /** edit, reassign, cancel or reopen: a manager */
     edit: boolean;
+    /** mark it live, change or take back the mark (POST /api/thumbnails/:id/published): a manager, while it's picked */
+    markLive: boolean;
   };
   look: ThumbnailLook;
   /**
@@ -1714,7 +1733,17 @@ export interface ThumbnailBoard {
   briefs: ThumbnailBrief[];
   /** every active thumbnail designer (offered in New thumbnail), with their load */
   designers: ThumbnailDesignerLoad[];
-  counts: { toReview: number; changes: number; withDesigners: number; pickedThisWeek: number; needsDesigner: number };
+  counts: {
+    toReview: number; changes: number; withDesigners: number; pickedThisWeek: number; needsDesigner: number;
+    /** toMarkLive.length */
+    toMarkLive: number;
+  };
+  /**
+   * "Posted in Timeliner — mark it live?": picked briefs (whenever they were picked, ?clientId= and ?designerId=
+   * narrowing them like the rest) not marked live whose linked video is Posted in the copy of Timeliner
+   * (asksToMarkLive), newest pick first. Worked out on load, nothing stored
+   */
+  toMarkLive: ThumbnailBrief[];
 }
 
 /** POST /api/thumbnails: a new brief. */
@@ -1729,6 +1758,12 @@ export interface ThumbnailBriefInput {
   dueOn?: ISODate | null;
   /** an active thumbnail designer, or null for "Needs a designer" */
   designerId?: number | null;
+  /**
+   * the Timeliner video it's for: a `taskId` from GET /api/thumbnails/timeliner-videos for this client (400
+   * fields.timelinerTaskId otherwise), or null for none. Picking one fills an empty title with the video's title, in
+   * the form
+   */
+  timelinerTaskId?: string | null;
 }
 
 /** PATCH /api/thumbnails/:id: only the fields the manager changed. */
@@ -1739,6 +1774,12 @@ export interface ThumbnailBriefPatch {
   optionsWanted?: number;
   dueOn?: ISODate | null;
   designerId?: number | null;
+  /**
+   * link a Timeliner video of this brief's client (a `taskId` from GET /api/thumbnails/timeliner-videos; 400
+   * fields.timelinerTaskId otherwise), or null to unlink. A link kept from before may stay after the copy loses that
+   * video; only a change is checked
+   */
+  timelinerTaskId?: string | null;
   /** true cancels it, false reopens it */
   cancelled?: boolean;
 }
@@ -1875,4 +1916,150 @@ export interface ThumbnailSuggestInput {
 /** What POST /api/thumbnails/suggest answers: exactly THUMB_IDEA_COUNT ideas, each tidied (tidyThumbIdeas). "Use this" fills "what it should show" (show) and "words on the image" (words). */
 export interface ThumbnailSuggestions {
   ideas: ThumbIdea[];
+}
+
+// ── Thumbnail Studio: went live (managers) ────────────────────────────────
+// POST /api/thumbnails/:id/published marks a picked thumbnail live; GET /api/thumbnails/timeliner-videos lists the
+// client's videos from the site's copy of Timeliner for New thumbnail's and Edit's "Timeliner video" picker. Both are
+// requireManager and on no editor's list. Rules: the went-live section of shared/workflow.ts.
+
+/** YouTube Test & Compare's winner among the brief's sent options, when a manager recorded one. */
+export interface ThumbnailTestWinner {
+  optionId: number;
+  letter: OptionLetter;
+  roundNumber: number;
+  /** the same option as the pick */
+  isPick: boolean;
+  /**
+   * its picture (fileUrl) when the viewer may open it: always for managers; for a designer only their own option or
+   * the pick (another designer's unpicked option stays private), else null and only the letter shows
+   */
+  url: string | null;
+}
+
+/** Where and when a picked thumbnail went live, as a manager marked it. */
+export interface ThumbnailLive {
+  /** the video's page (https, at most LIVE_LIMITS.url), when the manager gave it */
+  url: string | null;
+  /** the day it went live */
+  publishedOn: ISODate;
+  /** who marked it last, and when */
+  publishedById: number | null;
+  publishedByName: string | null;
+  publishedAt: string | null;
+  testWinner: ThumbnailTestWinner | null;
+  /** the manager's note on the test, at most LIVE_LIMITS.note */
+  testNote: string | null;
+}
+
+/** What a win carries for the Studio's Live badge. */
+export type ThumbnailLiveBadge = Pick<ThumbnailLive, 'url' | 'publishedOn'>;
+
+/**
+ * POST /api/thumbnails/:id/published (requireManager): answers with the ThumbnailBriefDetail. 404 for an unknown
+ * brief; 409 `not_picked` unless it's picked now. In db.tx with the brief row locked (for update). Only the keys sent
+ * change: each one left out keeps what's kept (mergeLive), so the dialog sends only what the manager changed
+ * (liveChanges). Field problems of the mark that leaves are 400 with `fields` (liveProblems: url, publishedOn,
+ * testNote; and testWinnerOptionId when a new one isn't a live option of one of this brief's sent rounds). A mark left
+ * with every field empty (clearsLive; every key sent as null does it) is taken back. Marking it tells the picked
+ * option's maker once per pick (THUMBNAIL_LIVE_NOTIFICATION, dedupe key thumbLiveKey, thumbnailDecisionId the pick's
+ * decision, so deciding again on that round takes it back while unread, as it does a pick's notifications); taking the
+ * mark back deletes it while it's unread. Logged as activity (`thumbnail.live`, `thumbnail.unlive`), only when
+ * something changed.
+ */
+export interface ThumbnailLiveInput {
+  /** https, at most LIVE_LIMITS.url; empty or null for none */
+  url?: string | null;
+  /** the day it went live (the dialog starts at today in the workspace's time zone); a new mark needs it; null only when clearing */
+  publishedOn?: ISODate | null;
+  /** a live option of one of this brief's sent rounds (never a tray's), or null */
+  testWinnerOptionId?: number | null;
+  /** at most LIVE_LIMITS.note; empty or null for none */
+  testNote?: string | null;
+}
+
+/** The Timeliner video a brief is for, as the site's copy of Timeliner has it now (managers only). */
+export interface ThumbnailVideoLink {
+  taskId: string;
+  /** its title in Timeliner; null when the copy no longer has the video */
+  title: string | null;
+  /** its step in the team's words (the exact step name when known, else TIMELINER_STEP_LABEL); null when the copy no longer has it */
+  step: string | null;
+  statusGroup: TimelinerStatusGroup | null;
+  /** Posted in Timeliner (isPostedVideo) */
+  posted: boolean;
+  /** "Open in Timeliner": timelinerVideoUrl(taskId) */
+  url: string;
+}
+
+/** One video New thumbnail's "Timeliner video" picker offers. Titles only: scripts have no titles. */
+export interface TimelinerVideoChoice {
+  taskId: string;
+  /** its title in Timeliner */
+  title: string;
+  /** its step in the team's words (the exact step name when known, else TIMELINER_STEP_LABEL) */
+  step: string;
+  statusGroup: TimelinerStatusGroup;
+  /** Posted in Timeliner */
+  posted: boolean;
+  /** when it was made in Timeliner */
+  createdAt: string | null;
+  /** a brief that isn't cancelled already names this video (the picker says so; it can still be picked); null when none */
+  briefId: number | null;
+}
+
+/**
+ * GET /api/thumbnails/timeliner-videos?clientId= (requireManager; clientId is required, 400 fields.clientId; an
+ * unknown client is 404): the client's videos in the site's copy of Timeliner (timeliner_tasks matched to that
+ * client) that offersTimelinerVideo takes, newest made first. Never a scripts PDF or document task.
+ */
+export interface TimelinerVideoChoices {
+  videos: TimelinerVideoChoice[];
+  /** when the copy of Timeliner was last read completely (null: never, or Timeliner isn't connected), so an empty list can say why */
+  syncedAt: string | null;
+}
+
+// ── Thumbnail Studio: a designer's portfolio (private growth) ─────────────
+
+/**
+ * GET /api/studio/portfolio's query: requireUser, then 403 (before anything is parsed) unless the caller is a
+ * thumbnail designer or a manager. A designer always gets their own, from the session (a `userId` is ignored); a
+ * manager names an active thumbnail designer (404 otherwise, as GET /api/studio). Bad filters are 400 with `fields`.
+ */
+export interface PortfolioQuery {
+  /** managers: whose portfolio */
+  userId?: number;
+  /** only that client's wins */
+  clientId?: number;
+  /** only wins picked in that month (YYYY-MM, isYearMonth; the workspace's time zone) */
+  month?: YearMonth;
+}
+
+/** One win on the portfolio wall: a current winner they made (of a brief not cancelled), with how it came about. */
+export interface PortfolioCard extends ThumbnailWin {
+  /** the picture on its front: the winning option's image (fileUrl) */
+  coverUrl: string;
+  /** the back of the card: the rounds, changes asked, and whether it was the first round (roundStory) */
+  story: RoundStory;
+  /** where and when it went live, with the Test & Compare winner when recorded; null when not marked */
+  live: ThumbnailLive | null;
+}
+
+/** A designer's portfolio and private growth: GET /api/studio/portfolio. */
+export interface PortfolioPayload {
+  designer: { id: number; name: string };
+  /** a manager looking at a designer's portfolio */
+  readOnly: boolean;
+  /** the filters applied */
+  filter: { clientId: number | null; month: YearMonth | null };
+  /** every client they have a win for, whatever the filters (the client filter), most wins first */
+  clients: { id: number; name: string; wins: number }[];
+  /** every month they have a win in, whatever the filters (the month filter), newest first */
+  months: { month: YearMonth; wins: number }[];
+  /** their wins matching the filters, newest pick first */
+  cards: PortfolioCard[];
+  /** all their wins, whatever the filters */
+  total: number;
+  /** the last GROWTH_MONTHS months, whatever the filters (portfolioGrowth); never shown on the Studio's hero */
+  growth: PortfolioGrowth;
 }

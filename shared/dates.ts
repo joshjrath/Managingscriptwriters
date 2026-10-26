@@ -75,6 +75,28 @@ export function addMonths(date: ISODate, n: number): ISODate {
   return fromUTC(new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + n, 1)));
 }
 
+/** A calendar month, "YYYY-MM" (a thumbnail portfolio's month filter, and its picks per month). */
+export type YearMonth = string;
+
+/** A real month in a sane range ("2026-10"), as a month filter takes it: "2026-1", "2026-13" and "0026-10" aren't. */
+export function isYearMonth(value: unknown): value is YearMonth {
+  return typeof value === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(value) && value >= '1900-01' && value <= '2999-12';
+}
+
+/** The month the moment `at` (an ISO timestamp) falls in, in the time zone `tz`; null when it can't be read. */
+export function monthOf(at: string | null | undefined, tz: string): YearMonth | null {
+  const t = at ? Date.parse(at) : NaN;
+  if (Number.isNaN(t)) return null;
+  return nowInZone(tz, new Date(t)).date.slice(0, 7);
+}
+
+/** The `n` months up to and including `today`'s, oldest first: lastMonths('2026-10-26', 3) is 2026-08, 2026-09, 2026-10. */
+export function lastMonths(today: ISODate, n: number): YearMonth[] {
+  const count = Math.max(0, Math.floor(n));
+  const first = startOfMonth(today);
+  return Array.from({ length: count }, (_, i) => addMonths(first, i - count + 1).slice(0, 7));
+}
+
 export function eachDay(from: ISODate, to: ISODate): ISODate[] {
   const out: ISODate[] = [];
   for (let d = from; d <= to; d = addDays(d, 1)) out.push(d);

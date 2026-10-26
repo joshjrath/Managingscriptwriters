@@ -10,10 +10,10 @@ import { openDb, type Db } from '../server/db';
 import type { Ctx } from '../server/core';
 import { DEMO_PASSWORD, seedDemo } from '../server/seed-demo';
 import {
-  fileUrl, type BatchDetail, type Bootstrap, type ClientDetail, type ClientSummary, type Counts, type Moment, type StudioPayload, type ThumbnailBoard,
-  type ThumbnailBriefDetail, type ThumbnailRefBoard,
+  fileUrl, type BatchDetail, type Bootstrap, type ClientDetail, type ClientSummary, type Counts, type Moment, type Notification, type PortfolioPayload,
+  type StudioPayload, type ThumbnailBoard, type ThumbnailBriefDetail, type ThumbnailRefBoard,
 } from '../shared/types';
-import { brandContrast, MAX_REFS, SECOND_LOOK_CHECKS, thumbSpecIssues } from '../shared/workflow';
+import { brandContrast, MAX_REFS, portfolioPath, SECOND_LOOK_CHECKS, thumbSpecIssues } from '../shared/workflow';
 import { dominantColours } from '../shared/palettes';
 import { freshDb } from './db';
 
@@ -217,6 +217,81 @@ describe('the demo workspace', () => {
       const upload = refs.refs[2];
       expect([(await get(upload.url, ana)).status, (await get(upload.url, josh)).status, (await get(upload.url, sarah)).status]).toEqual([200, 404, 404]);
       expect([(await get('/api/thumbnail-refs', josh)).status, (await get('/api/thumbnail-refs', sarah)).status]).toEqual([403, 403]);
+    } finally {
+      await demoApp.close();
+      await demo.close();
+    }
+  });
+
+  it('marks one of Ana’s wins live, and shows her portfolio and private growth to her and the managers only', async () => {
+    const demo = await openDb({ memory: true });
+    const demoApp = await buildApp({ db: demo, now: () => NOW, secureCookies: false, allowSetup: false, uploadLimitBytes: 1024 * 1024 });
+    try {
+      expect(await seedDemo(demo, NOW)).toBe(true);
+      const signIn = async (email: string) => String((await demoApp.inject({
+        method: 'POST', url: '/api/auth/login', headers: { 'x-scale-media': '1', 'content-type': 'application/json' }, payload: JSON.stringify({ email, password: DEMO_PASSWORD }),
+      })).headers['set-cookie']).split(';')[0];
+      const get = async (url: string, cookie: string) => {
+        const r = await demoApp.inject({ method: 'GET', url, headers: { cookie } });
+        return { status: r.statusCode, cache: String(r.headers['cache-control'] ?? ''), json: () => JSON.parse(r.body) };
+      };
+      const [ana, josh, sarah] = [await signIn('ana@scalemedia.demo'), await signIn('josh@scalemedia.demo'), await signIn('sarah@scalemedia.demo')];
+      const liveOn = '2026-09-20'; // two days after the pick, eight before NOW
+
+      // the Studio's wall: the bag went live (its badge links to the video), the jacket isn't marked yet
+      const studio = (await get('/api/studio', ana)).json() as StudioPayload;
+      expect(studio.wins.map((w) => [w.title, w.live])).toEqual([
+        ['The jacket that folds into itself', null], ['Autumn in one bag', { url: 'https://www.youtube.com/watch?v=dmAutumnBag', publishedOn: liveOn }],
+      ]);
+      const bag = studio.wins.find((w) => w.title === 'Autumn in one bag')!;
+      // its picture is kept by the browser for a day, as every option's is
+      expect((await get(bag.option.url, ana)).cache).toBe('private, max-age=86400, immutable');
+
+      // her portfolio: both wins, newest pick first, each with its round story; the bag with where it went live and
+      // the Test & Compare winner (her own option, the pick, so its picture shows)
+      const mine = (await get('/api/studio/portfolio', ana)).json() as PortfolioPayload;
+      expect([mine.designer.name, mine.readOnly, mine.total, mine.filter]).toEqual(['Ana Torres', false, 2, { clientId: null, month: null }]);
+      expect(mine.cards.map((c) => [c.title, c.option.letter, c.coverUrl === c.option.url, c.story.firstRound, c.story.changesAsked])).toEqual([
+        ['The jacket that folds into itself', 'B', true, false, 1], ['Autumn in one bag', 'A', true, true, 0],
+      ]);
+      expect(mine.cards[0].story.rounds.map((s) => [s.number, s.mine, s.options, s.outcome, s.note])).toEqual([
+        [1, true, 3, 'changes', 'Keep B’s face, but make the words bigger and cut them to three.'], [2, true, 2, 'picked', 'Two words read best small.'],
+      ]);
+      const card = mine.cards[1];
+      expect(card.live).toMatchObject({ url: 'https://www.youtube.com/watch?v=dmAutumnBag', publishedOn: liveOn, publishedByName: 'Josh Rath' });
+      expect(card.live?.testWinner).toEqual({ optionId: bag.option.id, letter: 'A', roundNumber: 1, isPick: true, url: bag.option.url });
+      expect(card.live?.testNote).toMatch(/watching longer/);
+      expect(mine.cards[0].live).toBeNull();
+      // growth over the last six months (September 2026 back to April): both picks this month, one from the first round,
+      // the jacket's standout, and the tags of the notes pinned on the harvest box's round 1
+      expect(mine.growth.months.map((m) => [m.month, m.picks])).toEqual([
+        ['2026-04', 0], ['2026-05', 0], ['2026-06', 0], ['2026-07', 0], ['2026-08', 0], ['2026-09', 2],
+      ]);
+      expect(mine.growth).toMatchObject({ picks: 2, firstRoundPicks: 1, firstRoundRate: 50, standouts: 1, notes: 3 });
+      expect(mine.growth.themes).toEqual([{ tag: 'text', count: 1 }, { tag: 'contrast', count: 1 }, { tag: 'composition', count: 1 }]);
+      expect([mine.clients.map((c) => [c.name, c.wins]), mine.months]).toEqual([[['Acme Outdoor Co.', 2]], [{ month: '2026-09', wins: 2 }]]);
+      // a filter narrows only the wall; a bad one is refused
+      const august = (await get('/api/studio/portfolio?month=2026-08', ana)).json() as PortfolioPayload;
+      expect([august.cards.length, august.total, august.growth.picks]).toEqual([0, 2, 2]);
+      expect((await get(`/api/studio/portfolio?clientId=${bag.clientId}&month=2026-09`, ana)).json().cards).toHaveLength(2);
+      expect((await get('/api/studio/portfolio?month=2026-13', ana)).status).toBe(400);
+      // she was told once when it went live, a while ago, with a link to that card
+      const notes = ((await get('/api/notifications', ana)).json() as { notifications: Notification[] }).notifications;
+      expect(notes.filter((n) => n.type === 'thumbnail_live').map((n) => [n.title, n.link, !!n.readAt])).toEqual([
+        ['Your thumbnail for “Autumn in one bag” went live', portfolioPath({ card: bag.option.id }), true],
+      ]);
+
+      // a manager opens it read-only by naming her (else 404), sees the mark on the brief and may change it; a writer
+      // gets no portfolio. The demo has no copy of Timeliner: no video to link, and nothing to mark live on the board
+      expect((await get('/api/studio/portfolio', josh)).status).toBe(404);
+      const theirs = (await get(`/api/studio/portfolio?userId=${mine.designer.id}`, josh)).json() as PortfolioPayload;
+      expect([theirs.readOnly, theirs.cards.map((c) => c.option.id), theirs.growth]).toEqual([true, mine.cards.map((c) => c.option.id), mine.growth]);
+      expect((await get('/api/studio/portfolio', sarah)).status).toBe(403);
+      const brief = (await get(`/api/thumbnails/${bag.briefId}`, josh)).json() as ThumbnailBriefDetail;
+      expect([brief.can.markLive, brief.live?.publishedOn, brief.live?.testWinner?.letter, brief.timelinerTaskId, brief.video]).toEqual([true, liveOn, 'A', null, null]);
+      const board = (await get('/api/thumbnails', josh)).json() as ThumbnailBoard;
+      expect([board.toMarkLive, board.counts.toMarkLive]).toEqual([[], 0]);
+      expect((await get(`/api/thumbnails/timeliner-videos?clientId=${bag.clientId}`, josh)).json()).toEqual({ videos: [], syncedAt: null });
     } finally {
       await demoApp.close();
       await demo.close();

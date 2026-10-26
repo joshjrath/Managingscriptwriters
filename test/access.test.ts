@@ -89,6 +89,8 @@ const ACCESS: Record<string, Access> = {
   // Thumbnail Studio: thumbnail designers (their own briefs only) and, for the two reads, managers; writers and video
   // editors are refused (test/thumbnails.test.ts covers whose brief and file is whose)
   'GET /api/studio': 'user',
+  // a designer's portfolio and private growth: their own, or a manager's look at one (test/thumbnail-phase4.test.ts)
+  'GET /api/studio/portfolio': 'user',
   'GET /api/thumbnails/:id': 'user',
   'POST /api/thumbnails/:id/options': 'user',
   'DELETE /api/thumbnail-options/:id': 'user',
@@ -134,6 +136,9 @@ const ACCESS: Record<string, Access> = {
   'POST /api/thumbnails': 'manager',
   'PATCH /api/thumbnails/:id': 'manager',
   'POST /api/thumbnails/:id/decision': 'manager',
+  // marking a picked thumbnail live, and New thumbnail's "Timeliner video" picker (from the site's copy of Timeliner)
+  'POST /api/thumbnails/:id/published': 'manager',
+  'GET /api/thumbnails/timeliner-videos': 'manager',
   // AI brief ideas in New thumbnail (nothing is saved)
   'POST /api/thumbnails/suggest': 'manager',
 
@@ -293,7 +298,7 @@ describe('editors, by kind', () => {
   it('gives thumbnail designers their Studio, and nobody else but managers (who only read it)', async () => {
     const studio = allowed('thumbnail').filter((r) => !allowed('short_form').includes(r));
     expect(studio).toEqual([
-      'DELETE /api/thumbnail-options/:id', 'DELETE /api/thumbnail-refs/:id', 'GET /api/studio', 'GET /api/thumbnail-refs', 'GET /api/thumbnails/:id',
+      'DELETE /api/thumbnail-options/:id', 'DELETE /api/thumbnail-refs/:id', 'GET /api/studio', 'GET /api/studio/portfolio', 'GET /api/thumbnail-refs', 'GET /api/thumbnails/:id',
       'PATCH /api/thumbnail-refs/:id', 'POST /api/thumbnail-options/:id/second-look', 'POST /api/thumbnail-refs', 'POST /api/thumbnails/:id/options',
       'POST /api/thumbnails/:id/send',
     ]);
@@ -311,6 +316,7 @@ describe('editors, by kind', () => {
     expect(let_in).toEqual([]);
     // a designer reaches them (brief 1 doesn't exist, so it's not found rather than refused)
     expect(await call('GET', '/api/studio', editors.thumbnail)).toBe(200);
+    expect(await call('GET', '/api/studio/portfolio', editors.thumbnail)).toBe(200);
     expect(await call('GET', '/api/thumbnails/1', editors.thumbnail)).toBe(404);
     expect(await call('POST', '/api/thumbnail-options/1/second-look', editors.thumbnail)).toBe(404);
     // a reference board is the designer's own: managers don't read it either

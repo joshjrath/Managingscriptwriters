@@ -128,6 +128,18 @@ export function DESIGNER_FILES(me: string): string {
 export const SENT_OPTION_FILES = `exists (select 1 from thumbnail_variants sv join thumbnail_rounds sr on sr.id = sv.round_id
       where sv.file_id = f.id and sv.removed_at is null and sr.sent_at is not null)`;
 
+/**
+ * SQL: stored file `f` is a thumbnail picture, an option's image or one uploaded to a reference board, whose file id
+ * is that upload for good (an image never changes; a new one is a new file). GET /api/files/:id lets the browser keep
+ * these for a day (THUMB_FILE_CACHE), so a wall of them doesn't fetch every picture again; every other file keeps
+ * FILE_CACHE. Only who may open a file decides whether it's sent at all.
+ */
+export const THUMB_PICTURE = `(exists (select 1 from thumbnail_variants cv where cv.file_id = f.id) or exists (select 1 from thumbnail_refs cr where cr.file_id = f.id))`;
+/** How long a browser keeps a thumbnail picture (THUMB_PICTURE): a day, never asking again in that time. */
+export const THUMB_FILE_CACHE = 'private, max-age=86400, immutable';
+/** How long a browser keeps any other stored file. */
+export const FILE_CACHE = 'private, max-age=300';
+
 /** Saves an upload into the files table, piece by piece. Run it inside the caller's transaction. */
 export async function storeFile(t: Db, me: Me, file: UploadedFile): Promise<number> {
   const safeName = storedFileName(file.filename);

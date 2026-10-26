@@ -25,6 +25,7 @@ import { WritersPage } from './pages/Writers';
 import { EditorsPage } from './pages/Editors';
 import { EditorHome } from './pages/EditorHome';
 import { StudioPage } from './pages/Studio';
+import { StudioPortfolioPage } from './pages/StudioPortfolio';
 import { StudioRefsPage } from './pages/StudioRefs';
 import { ThumbBriefPage } from './pages/ThumbBrief';
 import { ThumbnailsPage } from './pages/Thumbnails';
@@ -85,6 +86,8 @@ function Gate() {
         <Route path="/editor" element={isVideoEditor(me) || isManager(role) ? <EditorHome /> : <Navigate to={home} replace />} />
         <Route path="/studio" element={studio(<StudioPage />)} />
         <Route path="/studio/briefs/:id" element={studio(<ThumbBriefPage />)} />
+        {/* a designer's portfolio and private growth: their own, or (managers, read-only) any designer's with ?userId= */}
+        <Route path="/studio/portfolio" element={studio(<StudioPortfolioPage />)} />
         {/* a designer's own reference boards: nobody else has any (managers included) */}
         <Route path="/studio/refs" element={isThumbnailDesigner(me) ? <StudioRefsPage /> : <Navigate to={isManager(role) ? '/studio' : home} replace />} />
         <Route path="/thumbnails" element={managers(<ThumbnailsPage />)} />

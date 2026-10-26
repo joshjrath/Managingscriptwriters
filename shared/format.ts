@@ -11,6 +11,8 @@ const F = {
   long: fmt({ weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }),
   dow: fmt({ weekday: 'short' }),
   month: fmt({ month: 'long', year: 'numeric' }),
+  monthShort: fmt({ month: 'short' }),
+  monthShortYear: fmt({ month: 'short', year: 'numeric' }),
 };
 
 const d = (iso: ISODate) => new Date(iso + 'T00:00:00Z');
@@ -27,6 +29,16 @@ export const fmtWeekday = (iso: ISODate) => F.weekday.format(d(iso));
 export const fmtLong = (iso: ISODate) => F.long.format(d(iso));
 export const fmtDow = (iso: ISODate) => F.dow.format(d(iso));
 export const fmtMonth = (iso: ISODate) => F.month.format(d(iso));
+/**
+ * A "YYYY-MM" month (YearMonth in shared/dates.ts): "October 2026", or short, "Oct" ("Oct 2025" when its year isn't
+ * `today`'s): a portfolio's month filter and the bars of its picks per month.
+ */
+export function fmtYearMonth(ym: string, opts: { short?: boolean; today?: ISODate } = {}): string {
+  const first = d(`${ym}-01`);
+  if (Number.isNaN(first.getTime())) return ym;
+  if (!opts.short) return F.month.format(first);
+  return opts.today && opts.today.slice(0, 4) !== ym.slice(0, 4) ? F.monthShortYear.format(first) : F.monthShort.format(first);
+}
 
 /** "Oct 12–13, 2026" / "Oct 30 – Nov 2, 2026" / "Oct 13, 2026" */
 export function fmtRange(start: ISODate, end?: ISODate | null): string {

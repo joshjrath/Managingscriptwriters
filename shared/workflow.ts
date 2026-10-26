@@ -6,7 +6,7 @@
 //   delivered   = delivered to Timeliner (writer-confirmed)
 // A script returned for revisions is not draft-ready until it is resubmitted.
 
-import { dueState, describeDue, type Clock, type ISODate } from './dates';
+import { dueState, describeDue, isISODate, lastMonths, monthOf, type Clock, type ISODate, type YearMonth } from './dates';
 import { fmtBytes } from './format';
 import { contrastRatio, MIN_ACCENT_CONTRAST, normalizeHex, relativeLuminance } from './palettes';
 
@@ -982,4 +982,318 @@ export function tidyThumbIdeas(raw: unknown, title: string): ThumbIdea[] | null 
     out.push({ show, words: imageWords(i.words, title), why: clipText(i.why, L.why) });
   }
   return out.length === THUMB_IDEA_COUNT ? out : null;
+}
+
+// ── Thumbnail Studio: went live, the portfolio and private growth ───────
+// A manager marks a picked thumbnail live (POST /api/thumbnails/:id/published): the video's link and the day, and
+// YouTube Test & Compare's winner among the brief's sent options when they ran one. A brief can name the Timeliner
+// video it's for (from the site's copy of Timeliner, managers only). A designer's portfolio (GET /api/studio/portfolio)
+// is every current winner they made, each with its round story, and private growth figures worked out from rows: no
+// points, levels, streaks or rankings, and never one designer against another.
+
+/** The longest went-live link and Test & Compare note. */
+export const LIVE_LIMITS = { url: 500, note: 300 } as const;
+
+/**
+ * A went-live mark, or the part of one POST /api/thumbnails/:id/published is sent (ThumbnailLiveInput in
+ * shared/types.ts): a key left out is left as it is (mergeLive).
+ */
+export interface LiveFields {
+  url?: string | null;
+  publishedOn?: ISODate | null;
+  testWinnerOptionId?: number | null;
+  testNote?: string | null;
+}
+
+const liveText = (v: string | null | undefined) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+
+/** A mark as it's kept: the link and note trimmed (empty is none), and every field there (null when left out). */
+export function tidyLive(f: LiveFields): Required<LiveFields> {
+  return { url: liveText(f.url), publishedOn: liveText(f.publishedOn), testWinnerOptionId: f.testWinnerOptionId ?? null, testNote: liveText(f.testNote) };
+}
+
+/** Every field empty: a mark left like this is taken back. */
+export function clearsLive(f: LiveFields): boolean {
+  const t = tidyLive(f);
+  return t.url == null && t.publishedOn == null && t.testWinnerOptionId == null && t.testNote == null;
+}
+
+const LIVE_KEYS = ['url', 'publishedOn', 'testWinnerOptionId', 'testNote'] as const;
+
+/**
+ * The mark a POST /api/thumbnails/:id/published leaves, tidied: each key it was sent replaces the kept one, and each
+ * key left out keeps it, so two managers changing different fields never undo each other. Sending every key empty
+ * (or emptying the last ones set) leaves nothing, and the mark is taken back (clearsLive).
+ */
+export function mergeLive(kept: LiveFields | null, sent: LiveFields): Required<LiveFields> {
+  const k = tidyLive(kept ?? {});
+  const s = tidyLive(sent);
+  return {
+    url: sent.url !== undefined ? s.url : k.url,
+    publishedOn: sent.publishedOn !== undefined ? s.publishedOn : k.publishedOn,
+    testWinnerOptionId: sent.testWinnerOptionId !== undefined ? s.testWinnerOptionId : k.testWinnerOptionId,
+    testNote: sent.testNote !== undefined ? s.testNote : k.testNote,
+  };
+}
+
+/**
+ * What the Went live dialog sends: only the fields that differ (tidied) from the mark it opened on, as an edit form
+ * does (none kept: every field that has something in it).
+ */
+export function liveChanges(base: LiveFields | null, next: LiveFields): LiveFields {
+  const b = tidyLive(base ?? {});
+  const n = tidyLive(next);
+  const out: LiveFields = {};
+  for (const k of LIVE_KEYS) if (n[k] !== b[k]) Object.assign(out, { [k]: n[k] });
+  return out;
+}
+
+/**
+ * What's wrong with a went-live mark, field by field, so the dialog and the route say the same (none: `{}`): the
+ * link is optional but https (isHttpsUrl) and at most LIVE_LIMITS.url characters; anything marked needs the day it
+ * went live, as the database checks (thumbnail_briefs_published_check), so only clearing every field leaves it out;
+ * the note is at most LIVE_LIMITS.note. Whether the Test & Compare winner is one of the brief's sent options is the
+ * route's question.
+ */
+export function liveProblems(f: LiveFields): { url?: string; publishedOn?: string; testNote?: string } {
+  const t = tidyLive(f);
+  const out: { url?: string; publishedOn?: string; testNote?: string } = {};
+  if (t.url != null && t.url.length > LIVE_LIMITS.url) out.url = `Keep the link to ${LIVE_LIMITS.url} characters`;
+  else if (t.url != null && !isHttpsUrl(t.url)) out.url = 'Use the video’s link, starting with https://';
+  if (t.publishedOn != null && !isISODate(t.publishedOn)) out.publishedOn = 'Use a valid date';
+  else if (t.publishedOn == null && !clearsLive(t)) out.publishedOn = 'Add the day it went live';
+  if (t.testNote != null && t.testNote.length > LIVE_LIMITS.note) out.testNote = `Keep the note to ${LIVE_LIMITS.note} characters`;
+  return out;
+}
+
+/**
+ * The went-live notification's key (notifications.dedupe_key, unique per person): one per pick, a brief's picked
+ * option, so marking it again or changing its link never tells the option's maker twice, while a different option
+ * picked later and marked live is news of its own. Taking the mark back deletes it while it's unread, as a decision
+ * taken back does, so marking it live again tells them afresh.
+ */
+export const thumbLiveKey = (briefId: number, optionId: number) => `thumbnail_live:${briefId}:${optionId}`;
+
+/** A designer's portfolio: their own (no `userId`), or a manager's look at one designer's; `card` opens on one win (its option id). */
+export function portfolioPath(p: { userId?: number | null; card?: number | null } = {}): string {
+  const q = new URLSearchParams();
+  if (p.userId) q.set('userId', String(p.userId));
+  if (p.card) q.set('card', String(p.card));
+  const s = q.toString();
+  return `/studio/portfolio${s ? `?${s}` : ''}`;
+}
+
+/** How long a video Posted in Timeliner is still offered as the video a new thumbnail is for. */
+export const TIMELINER_VIDEO_DAYS = 90;
+
+/** Posted in Timeliner (its step group): the video is out. */
+export const isPostedVideo = (statusGroup: string | null | undefined) => statusGroup === 'posted';
+
+/**
+ * Whether New thumbnail's (and Edit's) "Timeliner video" picker offers a video from the site's copy of Timeliner: a
+ * titled video, never a raw camera clip (isRawTitle), that's still open (any step before Posted, Approved included) or
+ * was Posted in the last TIMELINER_VIDEO_DAYS days (when it moved there, else when the task last changed). Which
+ * client's videos is the route's question (the copy's match, timeliner_tasks.client_id).
+ */
+export function offersTimelinerVideo(v: { title: string; statusGroup: string; movedAt: string | null; updatedAt: string | null }, now: Date): boolean {
+  if (isRawTitle(v.title)) return false;
+  if (!isPostedVideo(v.statusGroup)) return true;
+  const at = Date.parse(v.movedAt ?? v.updatedAt ?? '');
+  return !Number.isNaN(at) && now.getTime() - at <= TIMELINER_VIDEO_DAYS * 86_400_000;
+}
+
+/**
+ * The managers' board's gentle "Posted in Timeliner — mark it live?": a picked brief not marked live whose linked
+ * video is Posted in the copy of Timeliner. Worked out on every load, never stored.
+ */
+export const asksToMarkLive = (b: { state: ThumbState; live?: unknown }, video: { statusGroup: string | null } | null | undefined): boolean =>
+  b.state === 'picked' && !b.live && isPostedVideo(video?.statusGroup);
+
+/**
+ * New thumbnail's (and Edit's) title once the "Timeliner video" picker changes: picking a video fills an empty title,
+ * and a title the picker filled (`filled`, the one it last put there) that nobody has typed over follows the link, so
+ * it becomes the new video's, or empty when no video (or another client's) is linked now. A typed title stays.
+ */
+export function titleForVideo(title: string, filled: string | null, video: { title: string } | null): string {
+  const followsLink = filled != null && title === filled;
+  if (video) return !title.trim() || followsLink ? video.title : title;
+  return followsLink ? '' : title;
+}
+
+/** How many months the portfolio's growth figures cover, this one included (the workspace's time zone). */
+export const GROWTH_MONTHS = 6;
+
+/** A decision as the portfolio reads it (a ThumbnailDecision fits). */
+export interface StoryDecision {
+  id: number;
+  action: ThumbAction;
+  optionId: number | null;
+  note: string | null;
+  createdAt: string;
+  standout: boolean;
+  pins?: readonly { tag: ThumbPinTag | null }[];
+}
+/** A round as the portfolio reads it (a ThumbnailRound fits): unsent ones are skipped. */
+export interface StoryRound {
+  id: number;
+  number: number;
+  sentAt: string | null;
+  createdById: number;
+  options: readonly { id: number; uploadedById: number }[];
+  decisions: readonly StoryDecision[];
+}
+/** A brief as the portfolio reads it: every round as its rows have it, never as one viewer is shown them. */
+export interface StoryBrief {
+  cancelledAt: string | null;
+  rounds: readonly StoryRound[];
+}
+
+const stamp = (s: string) => { const t = Date.parse(s); return Number.isNaN(t) ? -Infinity : t; };
+
+/** A round's decision that counts, whatever order they come in: its newest (the higher id on a tie), as the SQL orders them. */
+export function roundDecision<D extends { id: number; createdAt: string }>(decisions: readonly D[]): D | null {
+  let best: D | null = null;
+  for (const d of decisions) {
+    if (!best || stamp(d.createdAt) > stamp(best.createdAt) || (stamp(d.createdAt) === stamp(best.createdAt) && d.id > best.id)) best = d;
+  }
+  return best;
+}
+
+/**
+ * A brief's current winner, worked out as THUMB_WINNER does in SQL: not cancelled, and its newest sent round's
+ * decision that counts is a pick of one of that round's options. `firstRound`: that round is the first sent on the
+ * brief (pickCelebration's bigger one). Null when it has none.
+ */
+export function briefWin(b: StoryBrief): { round: StoryRound; decision: StoryDecision; option: { id: number; uploadedById: number }; firstRound: boolean } | null {
+  if (b.cancelledAt) return null;
+  const sent = b.rounds.filter((r) => r.sentAt).sort((x, y) => x.number - y.number);
+  const round = sent[sent.length - 1];
+  if (!round) return null;
+  const decision = roundDecision(round.decisions);
+  if (!decision || decision.action !== 'pick' || decision.optionId == null) return null;
+  const option = round.options.find((o) => o.id === decision.optionId);
+  return option ? { round, decision, option, firstRound: sent[0].id === round.id } : null;
+}
+
+/** One round of a win's story (the back of its portfolio card), oldest first. */
+export interface RoundStep {
+  number: number;
+  /** sent by the designer whose portfolio it is (false: whoever had the brief before them) */
+  mine: boolean;
+  /** how many options it was sent with */
+  options: number;
+  /** its decision that counts: changes asked, the pick, or none (a newer round went before anyone decided) */
+  outcome: 'changes' | 'picked' | 'none';
+  /** on their own rounds only: the note asking for changes, or the pick's reason */
+  note: string | null;
+}
+
+/** How a win came about: the portfolio card's round story. */
+export interface RoundStory {
+  /** every round sent on the brief, oldest first, ending with the one picked */
+  rounds: RoundStep[];
+  /** rounds whose decision that counts asked for changes (a round decided again counts by its newest decision) */
+  changesAsked: number;
+  /** picked from the brief's first round sent */
+  firstRound: boolean;
+}
+
+/**
+ * The round story of a brief's current winner, for the portfolio of `designerId`, from its rows; null when it has no
+ * winner. Notes are kept only on their own rounds: a manager's words on someone else's round stay with that round.
+ */
+export function roundStory(b: StoryBrief, designerId: number): RoundStory | null {
+  const win = briefWin(b);
+  if (!win) return null;
+  const rounds = b.rounds.filter((r) => r.sentAt).sort((x, y) => x.number - y.number).map((r): RoundStep => {
+    const d = roundDecision(r.decisions);
+    const mine = r.createdById === designerId;
+    return { number: r.number, mine, options: r.options.length, outcome: !d ? 'none' : d.action === 'pick' ? 'picked' : 'changes', note: mine ? d?.note ?? null : null };
+  });
+  return { rounds, changesAsked: rounds.filter((s) => s.outcome === 'changes').length, firstRound: win.firstRound };
+}
+
+/**
+ * A designer's private growth figures, all worked out from rows over the GROWTH_MONTHS months up to this one (the
+ * workspace's time zone). Only for them and the managers; never on the Studio's hero, never ranked or compared.
+ */
+export interface PortfolioGrowth {
+  /** each of those months, oldest first, with how many of their options were picked in it (current winners, by when the pick was made) */
+  months: { month: YearMonth; picks: number }[];
+  /** their picks in those months */
+  picks: number;
+  /** of those, the ones picked from the brief's first round sent */
+  firstRoundPicks: number;
+  /** pct(firstRoundPicks, picks): a whole percentage, rounded down; null when there were no picks */
+  firstRoundRate: number | null;
+  /** of those picks, the ones a manager marked Standout */
+  standouts: number;
+  /**
+   * what managers' notes on the image were about: the tags on the pins of the decision that counts on each round they
+   * sent, decided in those months, most first (then in THUMB_PIN_TAGS order). Untagged pins aren't a theme
+   */
+  themes: { tag: ThumbPinTag; count: number }[];
+  /** every pin those decisions carry, tagged or not */
+  notes: number;
+}
+
+/**
+ * Works out a designer's growth figures from every brief they made an option for or sent a round on (any others are
+ * ignored): picks are current winners they made (briefWin), so deciding again on a picked round, or a newer round,
+ * takes one away; a cancelled brief counts for nothing, its notes included; a round's notes are its decision that
+ * counts (currentPins), so deciding again replaces them.
+ */
+export function portfolioGrowth(briefs: readonly StoryBrief[], designerId: number, clock: Pick<Clock, 'today' | 'timezone'>): PortfolioGrowth {
+  const months = lastMonths(clock.today, GROWTH_MONTHS);
+  const perMonth = new Map(months.map((m) => [m, 0]));
+  let picks = 0;
+  let firstRoundPicks = 0;
+  let standouts = 0;
+  let notes = 0;
+  const tags = new Map<ThumbPinTag, number>();
+  for (const b of briefs) {
+    if (b.cancelledAt) continue;
+    const win = briefWin(b);
+    const month = win && win.option.uploadedById === designerId ? monthOf(win.decision.createdAt, clock.timezone) : null;
+    if (win && month && perMonth.has(month)) {
+      perMonth.set(month, perMonth.get(month)! + 1);
+      picks++;
+      if (win.firstRound) firstRoundPicks++;
+      if (win.decision.standout) standouts++;
+    }
+    for (const r of b.rounds) {
+      if (!r.sentAt || r.createdById !== designerId) continue;
+      const d = roundDecision(r.decisions);
+      const decided = d ? monthOf(d.createdAt, clock.timezone) : null;
+      if (!d || !decided || !perMonth.has(decided)) continue;
+      for (const p of d.pins ?? []) {
+        notes++;
+        if (p.tag) tags.set(p.tag, (tags.get(p.tag) ?? 0) + 1);
+      }
+    }
+  }
+  const themes = [...tags.entries()]
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((a, b) => b.count - a.count || THUMB_PIN_TAGS.indexOf(a.tag) - THUMB_PIN_TAGS.indexOf(b.tag));
+  return {
+    months: months.map((month) => ({ month, picks: perMonth.get(month) ?? 0 })),
+    picks, firstRoundPicks, firstRoundRate: picks ? pct(firstRoundPicks, picks) : null, standouts, themes, notes,
+  };
+}
+
+/**
+ * The portfolio wall's client filter: buttons for two or three clients whose names fit one (a phone's panel holds
+ * them), a list for more or for a long name, and none for a single client.
+ */
+export function clientFilterControl(clients: readonly { name: string }[]): 'buttons' | 'list' | null {
+  if (clients.length < 2) return null;
+  return clients.length <= 3 && clients.every((c) => c.name.length <= 24) ? 'buttons' : 'list';
+}
+
+/**
+ * What a growth bar does to the wall's filters when pressed: its month shows that month's wins, every client's, since
+ * the bars count every client (so the client filter goes); pressing the month shown again shows every win.
+ */
+export function barFilter(shown: { month: string }, month: YearMonth): { month: string; clientId?: string } {
+  return shown.month === month ? { month: '' } : { month, clientId: '' };
 }

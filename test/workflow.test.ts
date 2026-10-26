@@ -685,3 +685,250 @@ describe('AI brief ideas', () => {
     expect(tidyThumbIdeas([idea('A'), idea('B'), idea('C')], 'T')).toBeNull();
   });
 });
+
+describe('a thumbnail that went live', () => {
+  it('takes an https link, a day and a short note, and clearing is every field empty', async () => {
+    const { liveProblems, clearsLive, tidyLive, LIVE_LIMITS } = await import('../shared/workflow');
+    expect(LIVE_LIMITS).toEqual({ url: 500, note: 300 });
+    expect(liveProblems({ url: 'https://youtu.be/abc123', publishedOn: '2026-10-26', testWinnerOptionId: 4, testNote: 'B won the test' })).toEqual({});
+    // the link is optional; the day isn't
+    expect(liveProblems({ publishedOn: '2026-10-26' })).toEqual({});
+    expect(liveProblems({ url: 'https://youtu.be/abc123', publishedOn: null }).publishedOn).toMatch(/day it went live/);
+    expect(liveProblems({ publishedOn: null, testWinnerOptionId: 4 }).publishedOn).toBeTruthy();
+    expect(liveProblems({ publishedOn: null, testNote: 'B won' }).publishedOn).toBeTruthy();
+    expect(liveProblems({ publishedOn: '2026-02-30' }).publishedOn).toMatch(/valid date/);
+    // https only, with a host, and not too long
+    for (const url of ['http://youtu.be/abc123', 'youtu.be/abc123', 'javascript:alert(1)', 'https://', 'ftp://x.test/v']) {
+      expect(liveProblems({ url, publishedOn: '2026-10-26' }).url, url).toMatch(/https:\/\//);
+    }
+    expect(liveProblems({ url: `https://youtu.be/${'a'.repeat(LIVE_LIMITS.url)}`, publishedOn: '2026-10-26' }).url).toMatch(/500/);
+    expect(liveProblems({ url: `https://youtu.be/${'a'.repeat(LIVE_LIMITS.url - 17)}`, publishedOn: '2026-10-26' }).url).toBeUndefined();
+    expect(liveProblems({ publishedOn: '2026-10-26', testNote: 'x'.repeat(301) }).testNote).toMatch(/300/);
+    expect(liveProblems({ publishedOn: '2026-10-26', testNote: 'x'.repeat(300) })).toEqual({});
+    // clearing: all empty (spaces are empty), and that's no problem at all
+    expect(clearsLive({ url: null, publishedOn: null, testWinnerOptionId: null, testNote: null })).toBe(true);
+    expect(clearsLive({ url: '  ', publishedOn: null, testNote: '' })).toBe(true);
+    expect(liveProblems({ url: '', publishedOn: null, testWinnerOptionId: null, testNote: ' ' })).toEqual({});
+    expect(clearsLive({ publishedOn: null, testWinnerOptionId: 4 })).toBe(false);
+    expect(tidyLive({ url: '  https://youtu.be/abc  ', publishedOn: '2026-10-26', testNote: '  ' })).toEqual({ url: 'https://youtu.be/abc', publishedOn: '2026-10-26', testWinnerOptionId: null, testNote: null });
+  });
+
+  it('changes only the fields sent, so an edit never undoes another manager’s', async () => {
+    const { mergeLive, liveChanges, clearsLive } = await import('../shared/workflow');
+    const kept = { url: 'https://youtu.be/u2', publishedOn: '2026-10-20', testWinnerOptionId: 4, testNote: 'B won' };
+    // a key left out keeps what's kept; one sent replaces it (tidied: spaces are empty)
+    expect(mergeLive(kept, { publishedOn: '2026-10-21' })).toEqual({ ...kept, publishedOn: '2026-10-21' });
+    expect(mergeLive(kept, { testNote: '  A won after all ' })).toEqual({ ...kept, testNote: 'A won after all' });
+    expect(mergeLive(kept, { url: null, testWinnerOptionId: null })).toEqual({ url: null, publishedOn: '2026-10-20', testWinnerOptionId: null, testNote: 'B won' });
+    expect(mergeLive(kept, {})).toEqual(kept);
+    // nothing kept yet: only what's sent
+    expect(mergeLive(null, { publishedOn: '2026-10-26' })).toEqual({ url: null, publishedOn: '2026-10-26', testWinnerOptionId: null, testNote: null });
+    // every key sent empty leaves nothing: taken back
+    expect(clearsLive(mergeLive(kept, { url: null, publishedOn: null, testWinnerOptionId: null, testNote: '' }))).toBe(true);
+    expect(clearsLive(mergeLive(kept, { publishedOn: null }))).toBe(false);
+    // the dialog sends what differs from the mark it opened on, and a new mark everything filled in
+    expect(liveChanges(kept, { ...kept, testNote: 'B won ' })).toEqual({});
+    expect(liveChanges(kept, { ...kept, url: '', testNote: 'C won' })).toEqual({ url: null, testNote: 'C won' });
+    expect(liveChanges(null, { url: '', publishedOn: '2026-10-26', testWinnerOptionId: null, testNote: null })).toEqual({ publishedOn: '2026-10-26' });
+  });
+
+  it('tells the maker once per pick, on their portfolio card', async () => {
+    const { thumbLiveKey, portfolioPath } = await import('../shared/workflow');
+    expect(thumbLiveKey(42, 7)).toBe('thumbnail_live:42:7');
+    // another brief, or another option of the same brief picked later, is news of its own
+    expect(thumbLiveKey(4, 27)).not.toBe(thumbLiveKey(42, 7));
+    expect(thumbLiveKey(42, 8)).not.toBe(thumbLiveKey(42, 7));
+    expect(portfolioPath()).toBe('/studio/portfolio');
+    expect(portfolioPath({ card: 17 })).toBe('/studio/portfolio?card=17');
+    expect(portfolioPath({ userId: 5 })).toBe('/studio/portfolio?userId=5');
+    expect(portfolioPath({ userId: 5, card: 17 })).toBe('/studio/portfolio?userId=5&card=17');
+    expect(portfolioPath({ userId: null, card: null })).toBe('/studio/portfolio');
+  });
+
+  it('offers a client’s titled videos that are open or were posted in the last 90 days', async () => {
+    const { offersTimelinerVideo, TIMELINER_VIDEO_DAYS } = await import('../shared/workflow');
+    const now = new Date('2026-10-26T15:00:00Z');
+    const v = (title: string, statusGroup: string, movedAt: string | null = null, updatedAt: string | null = null) => ({ title, statusGroup, movedAt, updatedAt });
+    expect(TIMELINER_VIDEO_DAYS).toBe(90);
+    expect(offersTimelinerVideo(v('Organic 05', 'toDo'), now)).toBe(true);
+    expect(offersTimelinerVideo(v('Organic 05', 'clientApproval'), now)).toBe(true);
+    // approved but not posted yet is still open: it's about to go out
+    expect(offersTimelinerVideo(v('Organic 05', 'approved', '2026-01-02T00:00:00Z'), now)).toBe(true);
+    expect(offersTimelinerVideo(v('Organic 05', 'posted', '2026-08-01T00:00:00Z'), now)).toBe(true);
+    expect(offersTimelinerVideo(v('Organic 05', 'posted', '2026-07-01T00:00:00Z'), now)).toBe(false);
+    // when it moved there, else when the task last changed; neither known: not offered
+    expect(offersTimelinerVideo(v('Organic 05', 'posted', null, '2026-10-20T00:00:00Z'), now)).toBe(true);
+    expect(offersTimelinerVideo(v('Organic 05', 'posted', '2026-07-01T00:00:00Z', '2026-10-20T00:00:00Z'), now)).toBe(false);
+    expect(offersTimelinerVideo(v('Organic 05', 'posted'), now)).toBe(false);
+    // a raw camera clip is never what a thumbnail is for
+    expect(offersTimelinerVideo(v('C0045.MP4', 'toDo'), now)).toBe(false);
+    expect(offersTimelinerVideo(v('IMG_1234', 'posted', '2026-10-20T00:00:00Z'), now)).toBe(false);
+  });
+
+  it('asks to mark a picked brief live once its video is Posted in Timeliner, and never after', async () => {
+    const { asksToMarkLive, isPostedVideo } = await import('../shared/workflow');
+    const posted = { statusGroup: 'posted' };
+    expect(isPostedVideo('posted')).toBe(true);
+    expect([isPostedVideo('approved'), isPostedVideo(null), isPostedVideo(undefined)]).toEqual([false, false, false]);
+    expect(asksToMarkLive({ state: 'picked', live: null }, posted)).toBe(true);
+    expect(asksToMarkLive({ state: 'picked' }, posted)).toBe(true);
+    expect(asksToMarkLive({ state: 'picked', live: { publishedOn: '2026-10-26' } }, posted)).toBe(false);
+    expect(asksToMarkLive({ state: 'picked', live: null }, { statusGroup: 'approved' })).toBe(false);
+    expect(asksToMarkLive({ state: 'picked', live: null }, { statusGroup: null })).toBe(false);
+    expect(asksToMarkLive({ state: 'picked', live: null }, null)).toBe(false);
+    for (const state of ['to_design', 'drafting', 'in_review', 'changes', 'cancelled'] as const) expect(asksToMarkLive({ state, live: null }, posted)).toBe(false);
+  });
+
+  it('keeps the title a Timeliner video filled in with the video picked, and never one typed', async () => {
+    const { titleForVideo } = await import('../shared/workflow');
+    const rain = { title: 'Rain shell field test' };
+    const boots = { title: 'Boots that last ten winters' };
+    // an empty title takes the video's
+    expect(titleForVideo('', null, rain)).toBe('Rain shell field test');
+    expect(titleForVideo('  ', null, rain)).toBe('Rain shell field test');
+    // the wrong video picked first: the title it filled follows the new pick, or goes with the link
+    expect(titleForVideo('Rain shell field test', 'Rain shell field test', boots)).toBe('Boots that last ten winters');
+    expect(titleForVideo('Rain shell field test', 'Rain shell field test', null)).toBe('');
+    // a title typed (or typed over) stays whatever is picked
+    expect(titleForVideo('Rain shell, day 3', 'Rain shell field test', boots)).toBe('Rain shell, day 3');
+    expect(titleForVideo('My own title', null, boots)).toBe('My own title');
+    expect(titleForVideo('My own title', null, null)).toBe('My own title');
+  });
+});
+
+describe('a designer’s portfolio and private growth', () => {
+  type Tag = 'text' | 'faces' | 'contrast' | 'composition' | 'brand' | 'crop' | 'other' | null;
+  const D = 7;
+  const E = 8;
+  let ids = 100;
+  const decision = (action: 'pick' | 'changes', createdAt: string, o: { optionId?: number; note?: string; standout?: boolean; tags?: Tag[]; id?: number } = {}) => ({
+    id: o.id ?? ++ids, action, optionId: o.optionId ?? null, note: o.note ?? (action === 'changes' ? 'Make the face bigger' : null), createdAt,
+    standout: !!o.standout, pins: (o.tags ?? []).map((tag) => ({ tag })),
+  });
+  type Dec = ReturnType<typeof decision>;
+  const round = (id: number, number: number, by: number, decisions: Dec[], o: { sent?: boolean; options?: number[] } = {}) => ({
+    id, number, sentAt: o.sent === false ? null : '2026-01-01T00:00:00Z', createdById: by,
+    options: (o.options ?? [id * 10 + 1, id * 10 + 2]).map((oid) => ({ id: oid, uploadedById: by })), decisions,
+  });
+  type Round = ReturnType<typeof round>;
+  const brief = (rounds: Round[], cancelledAt: string | null = null) => ({ cancelledAt, rounds });
+  const clock = { today: '2026-10-26', timezone: 'America/New_York' };
+
+  it('finds a brief’s winner as the database does: the newest decision on the newest sent round', async () => {
+    const { briefWin, roundDecision } = await import('../shared/workflow');
+    const pick = decision('pick', '2026-10-05T15:00:00Z', { optionId: 11 });
+    const again = decision('changes', '2026-10-06T15:00:00Z');
+    // whatever order the decisions come in; on the same moment, the later id
+    expect(roundDecision([again, pick])?.id).toBe(again.id);
+    expect(roundDecision([pick, again])?.id).toBe(again.id);
+    const tie = [decision('changes', '2026-10-05T15:00:00Z', { id: 900 }), decision('pick', '2026-10-05T15:00:00Z', { id: 901, optionId: 11 })];
+    expect(roundDecision(tie)?.id).toBe(901);
+    expect(roundDecision([])).toBeNull();
+    expect(briefWin(brief([round(1, 1, D, [pick])]))).toMatchObject({ option: { id: 11, uploadedById: D }, firstRound: true });
+    // deciding again with changes takes the win away
+    expect(briefWin(brief([round(1, 1, D, [pick, again])]))).toBeNull();
+    // a pick on a round a newer one superseded doesn't count, and neither does an unsent tray
+    expect(briefWin(brief([round(1, 1, D, [pick]), round(2, 2, D, [])]))).toBeNull();
+    expect(briefWin(brief([round(1, 1, D, [pick]), round(2, 2, D, [], { sent: false })]))?.option.id).toBe(11);
+    // a cancelled brief has no winner; nor does a pick of an option no longer in the round
+    expect(briefWin(brief([round(1, 1, D, [pick])], '2026-10-07T00:00:00Z'))).toBeNull();
+    expect(briefWin(brief([round(1, 1, D, [decision('pick', '2026-10-05T15:00:00Z', { optionId: 99 })])]))).toBeNull();
+  });
+
+  it('tells the round story: rounds, changes asked and whether the first round won', async () => {
+    const { roundStory } = await import('../shared/workflow');
+    const b = brief([
+      round(1, 1, E, [decision('changes', '2026-09-01T15:00:00Z', { note: 'Not this direction' })], { options: [11, 12, 13] }),
+      round(2, 2, D, [decision('changes', '2026-09-03T15:00:00Z', { note: 'Brighter' }), decision('pick', '2026-09-02T15:00:00Z', { optionId: 21 })]),
+      round(3, 3, D, []),
+      round(4, 4, D, [decision('pick', '2026-09-10T15:00:00Z', { optionId: 41, note: 'The face reads small' })]),
+    ]);
+    expect(roundStory(b, D)).toEqual({
+      rounds: [
+        // someone else's round: its options counted, its note left with it
+        { number: 1, mine: false, options: 3, outcome: 'changes', note: null },
+        // decided again: its newest decision counts
+        { number: 2, mine: true, options: 2, outcome: 'changes', note: 'Brighter' },
+        // a newer round went before anyone decided
+        { number: 3, mine: true, options: 2, outcome: 'none', note: null },
+        { number: 4, mine: true, options: 2, outcome: 'picked', note: 'The face reads small' },
+      ],
+      changesAsked: 2,
+      firstRound: false,
+    });
+    expect(roundStory(brief([round(1, 1, D, [decision('pick', '2026-09-10T15:00:00Z', { optionId: 11 })])]), D)?.firstRound).toBe(true);
+    expect(roundStory(brief([round(1, 1, D, [decision('changes', '2026-09-10T15:00:00Z')])]), D)).toBeNull();
+  });
+
+  it('counts picks per month, the first-round rate, standouts and note themes, from rows', async () => {
+    const { portfolioGrowth, GROWTH_MONTHS } = await import('../shared/workflow');
+    expect(GROWTH_MONTHS).toBe(6);
+    const october = round(1, 1, D, [decision('pick', '2026-10-05T15:00:00Z', { optionId: 11, standout: true, tags: ['text', 'text', 'faces'] })]);
+    const briefs = [
+      // picked from the first round, a standout, with three notes
+      brief([october]),
+      // changes with two notes (one untagged), then picked from round 2
+      brief([
+        round(2, 1, D, [decision('changes', '2026-09-10T15:00:00Z', { tags: ['contrast', null] })]),
+        round(3, 2, D, [decision('pick', '2026-09-20T15:00:00Z', { optionId: 31 })]),
+      ]),
+      // picked before the window: 11pm on Apr 30 in New York (May 1 in UTC)
+      brief([round(4, 1, D, [decision('pick', '2026-05-01T03:00:00Z', { optionId: 41, standout: true, tags: ['brand'] })])]),
+      // another designer's win and notes: not theirs
+      brief([round(5, 1, E, [decision('pick', '2026-10-01T15:00:00Z', { optionId: 51, standout: true, tags: ['crop'] })])]),
+      // their tray, unsent: nothing
+      brief([round(6, 1, D, [], { sent: false })]),
+    ];
+    const g = portfolioGrowth(briefs, D, clock);
+    expect(g.months).toEqual([
+      { month: '2026-05', picks: 0 }, { month: '2026-06', picks: 0 }, { month: '2026-07', picks: 0 },
+      { month: '2026-08', picks: 0 }, { month: '2026-09', picks: 1 }, { month: '2026-10', picks: 1 },
+    ]);
+    expect(g).toMatchObject({ picks: 2, firstRoundPicks: 1, firstRoundRate: 50, standouts: 1, notes: 5 });
+    // most first, then in the tags' own order
+    expect(g.themes).toEqual([{ tag: 'text', count: 2 }, { tag: 'faces', count: 1 }, { tag: 'contrast', count: 1 }]);
+  });
+
+  it('recomputes after a superseding decision and a cancel', async () => {
+    const { portfolioGrowth } = await import('../shared/workflow');
+    const pick = decision('pick', '2026-10-05T15:00:00Z', { optionId: 11, standout: true, tags: ['text', 'text', 'faces'] });
+    const other = brief([round(2, 1, D, [decision('pick', '2026-09-20T15:00:00Z', { optionId: 21, tags: ['contrast'] })])]);
+    const before = portfolioGrowth([brief([round(1, 1, D, [pick])]), other], D, clock);
+    expect(before).toMatchObject({ picks: 2, firstRoundPicks: 2, firstRoundRate: 100, standouts: 1, notes: 4 });
+    // the manager decides again on that round: changes, with one note. The pick, its standout and its notes go
+    const again = decision('changes', '2026-10-06T15:00:00Z', { tags: ['crop'] });
+    const superseded = portfolioGrowth([brief([round(1, 1, D, [pick, again])]), other], D, clock);
+    expect(superseded).toMatchObject({ picks: 1, firstRoundPicks: 1, firstRoundRate: 100, standouts: 0, notes: 2 });
+    expect(superseded.months.find((m) => m.month === '2026-10')?.picks).toBe(0);
+    expect(superseded.themes).toEqual([{ tag: 'contrast', count: 1 }, { tag: 'crop', count: 1 }]);
+    // then the brief is cancelled: it counts for nothing, its notes included
+    const cancelled = portfolioGrowth([brief([round(1, 1, D, [pick, again])], '2026-10-07T12:00:00Z'), other], D, clock);
+    expect(cancelled).toMatchObject({ picks: 1, standouts: 0, notes: 1, themes: [{ tag: 'contrast', count: 1 }] });
+    // nothing left: no rate rather than 0%
+    expect(portfolioGrowth([], D, clock)).toMatchObject({ picks: 0, firstRoundPicks: 0, firstRoundRate: null, standouts: 0, themes: [], notes: 0 });
+    expect(portfolioGrowth([], D, clock).months).toHaveLength(6);
+  });
+
+  it('filters the wall by client with buttons only while every name fits one', async () => {
+    const { clientFilterControl } = await import('../shared/workflow');
+    const c = (...names: string[]) => names.map((name) => ({ name }));
+    expect(clientFilterControl(c())).toBeNull();
+    expect(clientFilterControl(c('Acme'))).toBeNull();
+    expect(clientFilterControl(c('Acme', 'Brightline Dental Group'))).toBe('buttons');
+    expect(clientFilterControl(c('Acme', 'Brightline', 'Globex'))).toBe('buttons');
+    // a fourth client, or one long name (it would run off a phone's panel): the list
+    expect(clientFilterControl(c('Acme', 'Brightline', 'Globex', 'Initech'))).toBe('list');
+    expect(clientFilterControl(c('Acme', 'The Greater Riverside Community Credit Union & Financial Services Cooperative'))).toBe('list');
+    expect(clientFilterControl(c('Acme', 'x'.repeat(24)))).toBe('buttons');
+    expect(clientFilterControl(c('Acme', 'x'.repeat(25)))).toBe('list');
+  });
+
+  it('shows a growth bar’s month on the wall for every client, since the bars count them all', async () => {
+    const { barFilter } = await import('../shared/workflow');
+    // filtered to one client: the bar's month shows every client's picks of that month
+    expect(barFilter({ month: '' }, '2026-09')).toEqual({ month: '2026-09', clientId: '' });
+    expect(barFilter({ month: '2026-10' }, '2026-09')).toEqual({ month: '2026-09', clientId: '' });
+    // the month shown pressed again: every win, the client filter as it is
+    expect(barFilter({ month: '2026-09' }, '2026-09')).toEqual({ month: '' });
+  });
+});

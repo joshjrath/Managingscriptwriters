@@ -130,3 +130,36 @@ describe('final delivery from a drafts date', () => {
     expect(finalFromDraft('2026-10-08', { ...DEFAULT_RULES, dayMode: 'business' }).date).toBe('2026-10-12');
   });
 });
+
+describe('months, for a thumbnail portfolio', () => {
+  it('takes only a real month as a filter', async () => {
+    const { isYearMonth } = await import('../shared/dates');
+    expect(['2026-10', '2026-01', '1999-12'].map(isYearMonth)).toEqual([true, true, true]);
+    expect(['2026-1', '2026-13', '2026-00', '0026-10', '2026-10-01', '', 202610, null].map(isYearMonth)).toEqual([false, false, false, false, false, false, false, false]);
+  });
+
+  it('puts a moment in its month in the workspace’s time zone', async () => {
+    const { monthOf } = await import('../shared/dates');
+    // 11pm on Oct 31 in New York is already Nov 1 in UTC
+    expect(monthOf('2026-11-01T03:00:00.000Z', 'America/New_York')).toBe('2026-10');
+    expect(monthOf('2026-11-01T03:00:00.000Z', 'UTC')).toBe('2026-11');
+    expect(monthOf('not a time', 'UTC')).toBeNull();
+    expect(monthOf(null, 'UTC')).toBeNull();
+  });
+
+  it('lists the last months up to this one, oldest first, across a new year', async () => {
+    const { lastMonths } = await import('../shared/dates');
+    expect(lastMonths('2026-10-26', 6)).toEqual(['2026-05', '2026-06', '2026-07', '2026-08', '2026-09', '2026-10']);
+    expect(lastMonths('2027-02-28', 3)).toEqual(['2026-12', '2027-01', '2027-02']);
+    expect(lastMonths('2026-03-31', 1)).toEqual(['2026-03']);
+    expect(lastMonths('2026-03-31', 0)).toEqual([]);
+  });
+
+  it('names a month in full, or short with the year only when it isn’t this one', async () => {
+    const { fmtYearMonth } = await import('../shared/format');
+    expect(fmtYearMonth('2026-10')).toBe('October 2026');
+    expect(fmtYearMonth('2026-10', { short: true, today: '2026-10-26' })).toBe('Oct');
+    expect(fmtYearMonth('2025-12', { short: true, today: '2026-01-04' })).toBe('Dec 2025');
+    expect(fmtYearMonth('nonsense')).toBe('nonsense');
+  });
+});

@@ -17,8 +17,9 @@ import { recordThumbMoment } from './moments';
 import { insertShoot } from './routes/shoots';
 import { insertBriefing } from './routes/clients';
 import { addDays } from '../shared/dates';
-import type { Me } from '../shared/types';
-import { OPTION_LETTERS, thumbBriefPath, tidySecondLook, type BrandKitFields, type ThumbAction, type ThumbPinTag } from '../shared/workflow';
+import { fmtDate } from '../shared/format';
+import { THUMBNAIL_LIVE_NOTIFICATION, type Me } from '../shared/types';
+import { OPTION_LETTERS, portfolioPath, thumbBriefPath, thumbLiveKey, tidySecondLook, type BrandKitFields, type ThumbAction, type ThumbPinTag } from '../shared/workflow';
 import { findCity } from '../shared/cities';
 
 export const DEMO_PASSWORD = 'scalemedia-demo';
@@ -226,9 +227,11 @@ async function seed(db: Db, now: Date): Promise<boolean> {
     await db.query(`insert into clients (name, status, owner_id, description, created_by) values ($1, 'prospect', $2, $3, $2)`, [name, ids.josh, desc]);
   }
 
-  // 12 · Thumbnail Studio · Ana, a thumbnail designer, with a pick from last week, one just picked after changes (a
-  // standout, with its celebration waiting for her), changes asked with notes pinned on the image, a round waiting on
-  // review, an option in her private tray (with a second look kept on it), one to start, and one needing a designer
+  // 12 · Thumbnail Studio · Ana, a thumbnail designer, with a pick from last week (marked live, with its Test & Compare
+  // winner), one just picked after changes (a standout, with its celebration waiting for her), changes asked with notes
+  // pinned on the image, a round waiting on review, an option in her private tray (with a second look kept on it), one
+  // to start, and one needing a designer. The demo has no copy of Timeliner, so no brief names a Timeliner video and the
+  // board's "Posted in Timeliner — mark it live?" stays empty
   const ana = (await db.one<{ id: number }>(
     `insert into users (email, name, role, editor_kind, password_hash) values ('ana@scalemedia.demo', 'Ana Torres', 'editor', 'thumbnail', $1) returning id`, [hash],
   ))!.id;
@@ -284,7 +287,13 @@ async function seed(db: Db, now: Date): Promise<boolean> {
     { from: C.salmon, to: C.plum, subject: C.ink, words: C.yellow, note: 'The pack as the hero, big and warm.' },
     { from: C.cyan, to: C.navy, subject: C.cream, words: C.white, left: true },
   ], { at: 12 * 24, sent: 11 * 24 });
-  await thumbDecision(bagR1.id, 'pick', 10 * 24, { optionId: bagR1.options[0], note: 'The bag reads from across the room.' });
+  const bagPick = await thumbDecision(bagR1.id, 'pick', 10 * 24, { optionId: bagR1.options[0], note: 'The bag reads from across the room.' });
+  // it went live two days later, and YouTube's Test & Compare against B agreed with the pick
+  const bagLive = { on: d(-8), at: ago(8 * 24 - 2) };
+  await db.query(
+    `update thumbnail_briefs set published_url = $2, published_on = $3, published_by = $4, published_at = $5, test_winner_variant_id = $6, test_note = $7 where id = $1`,
+    [bag, 'https://www.youtube.com/watch?v=dmAutumnBag', bagLive.on, ids.josh, bagLive.at, bagR1.options[0], 'Ran A against B for two weeks: A kept people watching longer, mostly on phones.'],
+  );
 
   const jacket = await thumbBrief(acme, 'The jacket that folds into itself', {
     at: 4 * 24, due: -1, brief: 'Founder holding the jacket folded into its own pocket, surprised face.', onImage: 'FITS IN A POCKET',
@@ -364,6 +373,12 @@ async function seed(db: Db, now: Date): Promise<boolean> {
     type: 'thumbnail_picked', title: 'Option B picked · The jacket that folds into itself', body: 'Josh Rath picked option B of round 2 and marked it Standout: “Two words read best small.”',
     link: toAna(jacket), thumbnailDecisionId: jacketPick,
   });
+  // told once when the bag went live (read since, so it sits in her history at the day it happened)
+  await notify(db, [ana], {
+    type: THUMBNAIL_LIVE_NOTIFICATION, title: 'Your thumbnail for “Autumn in one bag” went live', body: `Josh Rath marked it live on ${fmtDate(bagLive.on)}.`,
+    link: portfolioPath({ card: bagR1.options[0] }), dedupeKey: thumbLiveKey(bag, bagR1.options[0]), thumbnailDecisionId: bagPick,
+  });
+  await db.query(`update notifications set created_at = $3, read_at = $3 where user_id = $1 and dedupe_key = $2`, [ana, thumbLiveKey(bag, bagR1.options[0]), bagLive.at]);
   await notify(db, await managerIds(db), {
     type: 'thumbnail_sent', title: 'Round 1 to review · Same-week appointments, really', body: 'Ana Torres sent round 1 of “Same-week appointments, really”: 3 options. “C is the safe one, A the bold one.”',
     link: thumbBriefPath(josh, sameWeek),
