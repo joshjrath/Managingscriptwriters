@@ -137,8 +137,9 @@ export function WentLiveDialog({ brief, onClose }: { brief: ThumbnailBriefDetail
   const changed = !base || Object.keys(changes()).length > 0;
   const backing = save.isPending && save.variables === TAKE_BACK;
   const send = (body: ThumbnailLiveInput) => save.mutate(body, {
-    // it isn't picked any more (decided again elsewhere): say so; the page refreshes to it (useSave refetches on a 409)
-    onError: (e) => { if (e.status === 409) { toast(e.message, 'error'); onClose(); } },
+    // it isn't picked any more (decided again elsewhere): say so; the page refreshes to it (useSave refetches on a 409).
+    // A link to a YouTube video already on another thumbnail (409 youtube_taken) stays open, said beside the link
+    onError: (e) => { if (e.status === 409 && e.code !== 'youtube_taken') { toast(e.message, 'error'); onClose(); } },
   });
   const submit = () => {
     // the whole form is the mark it leaves: checked as the route checks it

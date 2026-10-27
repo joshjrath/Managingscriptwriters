@@ -18,6 +18,7 @@ import { claudeShootEstimator } from './shoot-estimator';
 import { claudeNotesReader } from './notes-import';
 import { claudeThumbCritic } from './second-look';
 import { claudeBriefHelper } from './brief-ideas';
+import { youtubeReader } from './youtube';
 import type { Ctx } from './core';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -54,6 +55,8 @@ async function main() {
     thumbCritic: config.anthropicApiKey ? claudeThumbCritic() : null,
     // and suggests directions for a new thumbnail brief
     briefHelper: config.anthropicApiKey ? claudeBriefHelper() : null,
+    // Add past thumbnails reads YouTube itself, with or without YOUTUBE_API_KEY (the key only gives a surer publish date)
+    youtube: youtubeReader({ apiKey: config.youtubeApiKey }),
     remindersEnabled: config.remindersEnabled,
     calendarAllowPrivate: config.calendarAllowPrivate,
     // the editors' videos are read from Timeliner, and a script document uploaded there marks its batch delivered

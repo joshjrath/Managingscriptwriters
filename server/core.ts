@@ -28,6 +28,12 @@ export interface Ctx {
   thumbCritic?: ThumbCritic | null;
   /** suggests three directions for a new thumbnail brief (Claude); absent when no API key is configured */
   briefHelper?: BriefHelper | null;
+  /**
+   * reads YouTube for past thumbnails (a video's title, channel, publish date and thumbnail), with or without
+   * YOUTUBE_API_KEY; tests pass a stand-in, so they never touch the network. Absent: the YouTube routes are 503
+   * `not_configured`
+   */
+  youtube?: YoutubeReader | null;
   /** fetches a document to count: a Google Doc or Drive link, or Timeliner's download link (tests pass a stand-in) */
   fetchDoc?: typeof fetch;
   /** reads a synced calendar's iCal link (tests pass a stand-in) */
@@ -96,6 +102,60 @@ export interface BriefIdeasInput {
  */
 export interface BriefHelper {
   suggest(input: BriefIdeasInput): Promise<{ ideas: ThumbIdea[] }>;
+}
+
+/** A YouTube video as its own pages (or the YouTube Data API, with YOUTUBE_API_KEY) describe it. */
+export interface YoutubeVideo {
+  ok: true;
+  videoId: string;
+  /** its title on YouTube, trimmed (never empty: a video with none is a YoutubeProblem) */
+  title: string;
+  /** the channel's name (oEmbed's author_name, or the API's channelTitle), or null */
+  channel: string | null;
+  /** the channel's page, through youtubeChannelUrl (so only ever https://www.youtube.com/…), or null */
+  channelUrl: string | null;
+  /**
+   * when it went live, as YouTube wrote it (the API's publishedAt, or the watch page's datePublished, publishDate or
+   * uploadDate: a day or a timestamp); null when it didn't say. The routes make it the workspace's day with dayOf
+   */
+  publishedAt: string | null;
+}
+
+/** One of YouTube's pictures of a video, as it was served. */
+export interface YoutubePicture {
+  ok: true;
+  /**
+   * its bytes: at most YOUTUBE_IMPORT_LIMITS.pictureBytes (for a 'preview', previewBytes), since a bigger answer is a
+   * YoutubeProblem, never cut short. Its type and size are read from these alone (imageInfoOf in server/images.ts)
+   */
+  data: Buffer;
+  /** the Content-Type YouTube sent: for logs and tests only, never trusted, stored or served */
+  contentType: string | null;
+  /** which of YouTube's pictures it is */
+  name: 'maxresdefault' | 'sddefault' | 'hqdefault';
+}
+
+/** A read of YouTube that didn't work, in plain words for that row (YOUTUBE_PROBLEMS). It never carries the API key. */
+export interface YoutubeProblem {
+  ok: false;
+  problem: string;
+}
+
+/**
+ * Reads YouTube for "Add past thumbnails" (POST /api/thumbnails/youtube/lookup and /import). It never fetches a pasted
+ * link: every address is built from a video id (youtubeVideoId) on YouTube's fixed hosts (www.youtube.com, i.ytimg.com,
+ * www.googleapis.com), each request with a 10-second timeout, a size cap and no redirect followed to another host.
+ * Every failure is answered as a YoutubeProblem rather than thrown, so one video YouTube can't read never fails the
+ * others, and the API key never reaches an answer, a log or an error.
+ */
+export interface YoutubeReader {
+  /** the video's title, channel and publish date */
+  video(videoId: string): Promise<YoutubeVideo | YoutubeProblem>;
+  /**
+   * its thumbnail: 'best' is the first of maxresdefault, sddefault and hqdefault that answers 200 with a picture (the
+   * import's), 'preview' is hqdefault alone (the lookup's small preview)
+   */
+  picture(videoId: string, size: 'best' | 'preview'): Promise<YoutubePicture | YoutubeProblem>;
 }
 
 // ── settings ─────────────────────────────────────────────────────────────

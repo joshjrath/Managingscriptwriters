@@ -15,6 +15,9 @@
 //   Timeliner video it's for, with its step.
 // - A designer the brief was taken from reads the rounds they sent.
 // Everyone who sees the pick sees where it went live, once a manager has marked it.
+// A past thumbnail added from YouTube (d.imported) is a brief already picked and live with one round made only to
+// hold it: it reads "Added from YouTube", with "Watch on YouTube", where its round story would be (the pick, the round
+// strip, the brief card), and nothing else about it changes.
 // Everyone gets Compare (this round's option against the last round's, side by side or with a swipe), Preview in
 // the wild (every option at feed sizes, beside the client's recent winners), Lights down (one option alone on black,
 // full screen), the Brand drawer (the client's brand kit beside the work, with a designer's own references for that
@@ -51,6 +54,7 @@ import { BriefDialog, CancelBriefDialog, useReopenBrief } from './Thumbnails';
 import { BrandKit } from '../components/BrandKit';
 import { LiveSummary, WentLiveDialog } from '../components/ThumbLive';
 import { BriefRefs } from './StudioRefs';
+import { AddedFromYoutube, ImportedRounds } from '../components/ThumbImport';
 
 export function ThumbBriefPage() {
   const { id } = useParams();
@@ -186,14 +190,19 @@ function Workbench({ d }: { d: ThumbnailBriefDetail }) {
     </>
   ) : d.winner ? <a className="btn mint pill" href={`${d.winner.url}?download=1`} download={d.winner.fileName}><Download aria-hidden />Download {d.winner.letter}</a> : null;
 
-  const workLabel = designer ? (isOpenThumb(d.state) ? `Round ${d.nextRound} · your tray` : 'Your rounds') : latest ? `Round ${latest.number}` : 'Options';
+  const workLabel = d.imported ? 'From YouTube' : designer ? (isOpenThumb(d.state) ? `Round ${d.nextRound} · your tray` : 'Your rounds') : latest ? `Round ${latest.number}` : 'Options';
   const currentId = keyed && view === 'work' ? stage[at]?.id ?? null : null;
   const paneLabel = view === 'work' ? workLabel : view === 'compare' ? 'Compare' : 'Preview in the wild';
   return (
     // a manager's review puts the round first whenever the columns stack: it's what they came to decide on
     <div className={`studio tb${manager ? ' review' : ''}${brand ? ' brand-open' : ''}`}>
       <PageHeader title={d.title} crumbs={crumbs} hideNewWork
-        sub={<span className="row-flex s2"><StateChip brief={d} /><DueTag dueOn={d.dueOn} today={clock.today} state={d.state} />{d.roundsSent > 0 && <span className="muted">{plural(d.roundsSent, 'round')} sent</span>}</span>}>
+        sub={(
+          <span className="row-flex s2">
+            <StateChip brief={d} /><DueTag dueOn={d.dueOn} today={clock.today} state={d.state} />
+            {d.imported ? <span className="muted">Added from YouTube</span> : d.roundsSent > 0 && <span className="muted">{plural(d.roundsSent, 'round')} sent</span>}
+          </span>
+        )}>
         {tools}
       </PageHeader>
 
@@ -255,7 +264,9 @@ function Workbench({ d }: { d: ThumbnailBriefDetail }) {
         </section>
       </div>
 
-      <RoundStrip rounds={d.rounds} tray={designer ? d.tray : null} title={d.title} nextRound={d.nextRound} now={now} />
+      {d.imported
+        ? <ImportedRounds imported={d.imported} maker={d.winner?.uploadedByName ?? d.designerName} now={now} />
+        : <RoundStrip rounds={d.rounds} tray={designer ? d.tray : null} title={d.title} nextRound={d.nextRound} now={now} />}
 
       {ask && latest && <DecideDialog d={d} round={latest} ask={ask} again={!!latest.decisions[0]} pins={pins} onClose={() => setAsk(null)} />}
       {lights && stage.length > 0 && <LightsDown options={stage} index={at} onIndex={setCur} title={d.title} squint={squint} grey={grey} onClose={() => setLights(false)} />}
@@ -345,6 +356,26 @@ function TopNote({ d, now, currentId, onReopen, reopening, onMarkLive }: {
     const mine = d.winner.uploadedById === me.id;
     const tail = d.viewer !== 'designer' ? (d.live ? '' : ' · download it at full quality and post it yourself') : mine ? ' · it’s on your wall of wins' : ` · it’s on ${d.winner.uploadedByName}’s wall of wins`;
     const notes = marksOn(dec?.pins, d.winner.id);
+    const yt = d.imported ?? null;
+    // a past thumbnail: where it came from instead of a pick that never happened on the site (its went-live line keeps
+    // only the day when its link is the video's own, which "Watch on YouTube" already opens)
+    if (yt) {
+      const live = d.live && d.live.url === yt.url ? { ...d.live, url: null } : d.live;
+      return (
+        <div className="tb-picked">
+          <div className="tb-picked-pic">
+            <Thumb src={d.winner.url} alt={optionAlt(d.winner, d.title)} eager />
+          </div>
+          <div className="tb-picked-txt">
+            <span className="eh-badge"><Sparkles aria-hidden />Picked and live</span>
+            <b>{mine ? 'Your thumbnail' : `${d.winner.uploadedByName}’s thumbnail`}</b>
+            <AddedFromYoutube imported={yt} className="on-accent" />
+            <span className="tb-picked-by">{yt.importedByName ?? 'A manager'} added it {fmtAgo(yt.importedAt, now)}{tail}</span>
+            <LiveSummary live={live} title={d.title} className="on-accent" />
+          </div>
+        </div>
+      );
+    }
     return (
       <div className={`tb-picked${dec?.standout ? ' standout' : ''}`}>
         <div className="tb-picked-pic">
@@ -503,6 +534,22 @@ function Tray({ d, t, now, currentId, onFiles, onPreview }: { d: ThumbnailBriefD
   });
   const options = d.tray?.options ?? [];
   const open = isOpenThumb(d.state);
+  // a past thumbnail from YouTube: its picture, with its checks and Preview, as the managers see it
+  if (d.imported && d.winner && d.state === 'picked') {
+    const w = d.winner;
+    return (
+      <div className="tb-review">
+        <div className="tb-round-head">
+          <b>From YouTube</b>
+          <span className="muted">{w.uploadedById === me.id ? 'Your thumbnail: it’s on your wall of wins' : `${w.uploadedByName}’s thumbnail`}. Nothing to send: it was out on YouTube first.</span>
+        </div>
+        <div className="tb-sbs c1">
+          <OptionSlot option={w} title={d.title} fit="contain" eager current={w.id === currentId}
+            actions={<Button variant="sm ghost" icon={<Eye aria-hidden />} onClick={() => onPreview(String(w.id))} aria-label={`Preview option ${w.letter} in the wild`}>Preview</Button>} />
+        </div>
+      </div>
+    );
+  }
   if (!open) {
     const done = d.winner?.uploadedById === me.id ? 'The picked option is on your wall of wins. Every round you sent is below.' : 'An option was picked, so nothing more is needed on it. Its rounds are below.';
     return <Empty boxed icon={<ImageIcon />} title={d.state === 'picked' ? 'This one’s done' : 'This brief was cancelled'}>{d.state === 'picked' ? done : 'Nothing more can be sent on it. Its rounds stay below.'}</Empty>;
@@ -667,8 +714,11 @@ function Review({ d, round, pins, now, currentId, onAsk, onPreview }: {
   return (
     <div className="tb-review">
       <div className="tb-round-head">
-        <b>Round {round.number}</b>
-        <span className="muted">{round.createdByName} sent {plural(round.options.length, 'option')} {round.sentAt ? fmtAgo(round.sentAt, now) : ''}</span>
+        {/* a past thumbnail's one round was made only to hold it: nobody sent it */}
+        <b>{d.imported ? 'From YouTube' : `Round ${round.number}`}</b>
+        <span className="muted">{d.imported
+          ? `${round.createdByName}’s thumbnail, added by ${d.imported.importedByName ?? 'a manager'} ${fmtAgo(d.imported.importedAt, now)}`
+          : `${round.createdByName} sent ${plural(round.options.length, 'option')} ${round.sentAt ? fmtAgo(round.sentAt, now) : ''}`}</span>
         {(canPin || total > 0) && (
           <div className="tb-round-tools">
             {total > 0 && <HideNotes hidden={hide} onToggle={() => setHide((v) => !v)} />}
@@ -698,7 +748,7 @@ function Review({ d, round, pins, now, currentId, onAsk, onPreview }: {
         </p>
       )}
       {round.note && <blockquote className="tb-quote">{round.note}<span>{round.createdByName}</span></blockquote>}
-      {dec && (
+      {dec && !(d.imported && dec.action === 'pick' && !round.decisions[1]) && (
         <div className={`tb-decided ${dec.action}${dec.standout ? ' standout' : ''}`}>
           {dec.action === 'pick' ? (dec.standout ? <Trophy aria-hidden /> : <Check aria-hidden />) : <RotateCcw aria-hidden />}
           <span>

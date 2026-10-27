@@ -163,3 +163,38 @@ describe('months, for a thumbnail portfolio', () => {
     expect(fmtYearMonth('nonsense')).toBe('nonsense');
   });
 });
+
+describe('days and wall-clock times, for past thumbnails from YouTube', () => {
+  it('puts YouTube’s publish date on the workspace’s day', async () => {
+    const { dayOf } = await import('../shared/dates');
+    // a plain date is that day, never moved by a zone
+    expect(dayOf('2026-10-20', 'America/New_York')).toBe('2026-10-20');
+    expect(dayOf(' 2026-10-20 ', 'Pacific/Auckland')).toBe('2026-10-20');
+    // an instant falls on its day in the zone: 3am UTC on the 20th is still the 19th in New York
+    expect(dayOf('2026-10-20T03:00:00Z', 'America/New_York')).toBe('2026-10-19');
+    expect(dayOf('2026-10-20T03:00:00Z', 'Asia/Kolkata')).toBe('2026-10-20');
+    expect(dayOf('2026-10-20T15:00:03.000Z', 'America/New_York')).toBe('2026-10-20');
+    // the watch page's own offsets
+    expect(dayOf('2026-10-20T08:00:03-07:00', 'America/New_York')).toBe('2026-10-20');
+    expect(dayOf('2026-10-20T23:30:00-07:00', 'America/New_York')).toBe('2026-10-21');
+    expect(dayOf('2026-10-20T23:30:00-0700', 'America/New_York')).toBe('2026-10-21');
+    // a time with no zone is the day it's written on
+    expect(dayOf('2026-10-20T23:30:00', 'Asia/Kolkata')).toBe('2026-10-20');
+    for (const bad of ['Oct 20, 2026', '2026-02-30', '2026-13-01T00:00:00Z', '20261020', 'not a date', '', null, undefined]) {
+      expect(dayOf(bad, 'UTC'), String(bad)).toBeNull();
+    }
+  });
+
+  it('finds the moment a wall clock reads a time on a day, across daylight saving', async () => {
+    const { atWallTime, nowInZone } = await import('../shared/dates');
+    expect(atWallTime('2026-10-20', 12 * 60, 'America/New_York')).toBe('2026-10-20T16:00:00.000Z');
+    expect(atWallTime('2026-10-20', 12 * 60, 'UTC')).toBe('2026-10-20T12:00:00.000Z');
+    // the days the clocks change in New York: noon is EDT after spring forward, EST after fall back
+    expect(atWallTime('2026-03-08', 12 * 60, 'America/New_York')).toBe('2026-03-08T16:00:00.000Z');
+    expect(atWallTime('2026-11-01', 12 * 60, 'America/New_York')).toBe('2026-11-01T17:00:00.000Z');
+    expect(atWallTime('2026-10-20', 9 * 60 + 15, 'Asia/Kolkata')).toBe('2026-10-20T03:45:00.000Z');
+    // and back again
+    expect(nowInZone('Pacific/Auckland', new Date(atWallTime('2026-10-01', 12 * 60, 'Pacific/Auckland')))).toEqual({ date: '2026-10-01', minutes: 720 });
+    expect(() => atWallTime('2026-02-30', 720, 'UTC')).toThrow();
+  });
+});

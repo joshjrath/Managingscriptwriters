@@ -3,7 +3,8 @@
 // an option's frame (OptionSlot, which takes the pins over its picture and a pin list or second look under its
 // actions, plus the empty and not-yet-added slots), Preview in the wild (every option at the sizes people meet it
 // in a feed, on a plain light or dark feed), a decision in a few words and its chip (a Standout's in yellow), the
-// round film strip with its compare, the brief card (with, for managers, the Timeliner video it's for: VideoFact) and
+// round film strip with its compare, the brief card (with, for managers, the Timeliner video it's for: VideoFact; a
+// past thumbnail added from YouTube shows its channel, the day it went live and who added it instead of a brief) and
 // the client's look (with its colours; the whole brand kit is BrandKit.tsx, in the brief's Brand drawer), and the
 // page-wide drop and paste (usePageDrop, which the reference boards use too). Went live is ThumbLive.tsx. Everything is built on ui.tsx and the .studio / .thumb styles in app.css. Pins live in
 // ThumbPins.tsx, Compare and Lights down in ThumbCompare.tsx, the keys in ThumbKeys.tsx and the second look in
@@ -555,25 +556,49 @@ export function RoundStrip({ rounds, tray, title, nextRound, now }: { rounds: Th
 
 // ── the brief and the client's look ─────────────────────────────────────
 
-/** What the manager asked for: the video's title, client, shoot, what to show, words for the image, how many options, when. */
+/**
+ * What the manager asked for: the video's title, client, shoot, what to show, words for the image, how many options,
+ * when. A past thumbnail added from YouTube had no brief: its card says where it came from instead (its channel, the day
+ * it went live, who made it and who added it).
+ */
 export function BriefCard({ brief, today, tools }: { brief: ThumbnailBrief; today: ISODate; tools?: ReactNode }) {
   const hid = useId();
   const letters = OPTION_LETTERS.slice(0, Math.min(MAX_OPTIONS, Math.max(1, brief.optionsWanted))).join(' ');
+  const yt = brief.imported ?? null;
   return (
     <section className="panel tb-brief" aria-labelledby={hid}>
       <div className="tb-brief-top"><StateChip brief={brief} /><DueTag dueOn={brief.dueOn} today={today} state={brief.state} /></div>
       <div className="tb-kicker">{brief.clientName}{brief.shootDate ? ` · shoot ${fmtDate(brief.shootDate, today)}` : ''}</div>
       <h2 id={hid} className="tb-title">{brief.title}</h2>
-      <dl className="tb-facts">
-        <div className="wide"><dt>What it should show</dt><dd className="pre">{brief.brief ?? <span className="dim">Nothing written: go from the title and the client’s look.</span>}</dd></div>
-        <div className="wide"><dt>Words on the image</dt><dd>{brief.onImage ? <span className="tb-words">{brief.onImage}</span> : <span className="dim">None suggested</span>}</dd></div>
-        <div><dt>Options wanted</dt><dd>{brief.optionsWanted} <span className="dim">({letters})</span></dd></div>
-        <div><dt>Due</dt><dd>{brief.dueOn ? fmtLong(brief.dueOn) : <span className="dim">No date</span>}</dd></div>
-        <div><dt>Designer</dt><dd>{brief.needsDesigner ? <span className="dim">Needs a designer</span> : brief.designerName}</dd></div>
-        <div><dt>From</dt><dd>{brief.createdByName}</dd></div>
-        {/* managers only (designers never get the key), and only once one is linked: Edit's picker says how */}
-        {brief.video && <div className="wide"><dt>Timeliner video</dt><dd><VideoFact video={brief.video} /></dd></div>}
-      </dl>
+      {yt ? (
+        <dl className="tb-facts">
+          <div className="wide">
+            <dt>From the YouTube channel</dt>
+            <dd className="tb-yt">
+              {yt.channel
+                ? yt.channelUrl
+                  ? <a className="link" href={yt.channelUrl} target="_blank" rel="noopener noreferrer">{yt.channel}<span className="sr-only"> on YouTube (opens in a new tab)</span></a>
+                  : <span>{yt.channel}</span>
+                : <span className="dim">Channel not known</span>}
+            </dd>
+          </div>
+          <div><dt>Went live</dt><dd>{brief.live ? fmtLong(brief.live.publishedOn) : <span className="dim">Not marked</span>}</dd></div>
+          <div><dt>Made by</dt><dd>{brief.winner?.uploadedByName ?? brief.designerName ?? <span className="dim">Not known</span>}</dd></div>
+          <div className="wide"><dt>Added by</dt><dd>{yt.importedByName ?? 'A manager'} <span className="dim">· no brief was written: it was out on YouTube first</span></dd></div>
+          {brief.video && <div className="wide"><dt>Timeliner video</dt><dd><VideoFact video={brief.video} /></dd></div>}
+        </dl>
+      ) : (
+        <dl className="tb-facts">
+          <div className="wide"><dt>What it should show</dt><dd className="pre">{brief.brief ?? <span className="dim">Nothing written: go from the title and the client’s look.</span>}</dd></div>
+          <div className="wide"><dt>Words on the image</dt><dd>{brief.onImage ? <span className="tb-words">{brief.onImage}</span> : <span className="dim">None suggested</span>}</dd></div>
+          <div><dt>Options wanted</dt><dd>{brief.optionsWanted} <span className="dim">({letters})</span></dd></div>
+          <div><dt>Due</dt><dd>{brief.dueOn ? fmtLong(brief.dueOn) : <span className="dim">No date</span>}</dd></div>
+          <div><dt>Designer</dt><dd>{brief.needsDesigner ? <span className="dim">Needs a designer</span> : brief.designerName}</dd></div>
+          <div><dt>From</dt><dd>{brief.createdByName}</dd></div>
+          {/* managers only (designers never get the key), and only once one is linked: Edit's picker says how */}
+          {brief.video && <div className="wide"><dt>Timeliner video</dt><dd><VideoFact video={brief.video} /></dd></div>}
+        </dl>
+      )}
       {tools}
     </section>
   );
@@ -677,10 +702,11 @@ export function BriefTile({ brief, to, today, foot, eager, designer }: { brief: 
   const who = designer ? (brief.needsDesigner ? 'needs a designer' : brief.designerName) : null;
   return (
     <article className={`bt ${brief.state}`}>
-      <Link to={to} className="bt-link" aria-label={`${brief.title}, ${brief.clientName}: ${stateWords(brief)}${brief.live ? ', live' : ''}${due ? `, ${due.text.toLowerCase()}` : ''}${who ? `, ${who}` : ''}`}>
+      <Link to={to} className="bt-link" aria-label={`${brief.title}, ${brief.clientName}: ${stateWords(brief)}${brief.imported ? ', added from YouTube' : brief.live ? ', live' : ''}${due ? `, ${due.text.toLowerCase()}` : ''}${who ? `, ${who}` : ''}`}>
         <BriefThumb brief={brief} eager={eager}>
           <span className="thumb-tl"><StateChip brief={brief} /></span>
-          {brief.roundsSent > 0 && <span className="thumb-tr thumb-pill" aria-hidden>R{brief.roundsSent}</span>}
+          {/* a past thumbnail from YouTube had no rounds: its one round only holds it */}
+          {brief.roundsSent > 0 && !brief.imported && <span className="thumb-tr thumb-pill" aria-hidden>R{brief.roundsSent}</span>}
         </BriefThumb>
         <span className="bt-body">
           <b className="bt-title">{brief.title}</b>

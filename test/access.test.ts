@@ -141,6 +141,10 @@ const ACCESS: Record<string, Access> = {
   'GET /api/thumbnails/timeliner-videos': 'manager',
   // AI brief ideas in New thumbnail (nothing is saved)
   'POST /api/thumbnails/suggest': 'manager',
+  // Add past thumbnails: reading pasted YouTube links (nothing is stored) and adding them to a designer's wall as
+  // picked, live briefs; on no editor's list (test/thumbnail-youtube.test.ts)
+  'POST /api/thumbnails/youtube/lookup': 'manager',
+  'POST /api/thumbnails/youtube/import': 'manager',
 
   'GET /api/audit': 'admin',
   'PUT /api/settings/theme': 'admin',

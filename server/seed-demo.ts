@@ -12,14 +12,15 @@ import { clockFor, loadSettings, managerIds, notify, type Ctx } from './core';
 import { applyScriptAction, insertBatch } from './routes/batches';
 import { sendDocument } from './submissions';
 import { bufferFile, storeFile } from './files';
-import { imageInfoOf } from './images';
+import { asImageUpload, imageInfoOf } from './images';
 import { recordThumbMoment } from './moments';
 import { insertShoot } from './routes/shoots';
 import { insertBriefing } from './routes/clients';
+import { addPastThumbnail, tellImported } from './youtube';
 import { addDays } from '../shared/dates';
 import { fmtDate } from '../shared/format';
 import { THUMBNAIL_LIVE_NOTIFICATION, type Me } from '../shared/types';
-import { OPTION_LETTERS, portfolioPath, thumbBriefPath, thumbLiveKey, tidySecondLook, type BrandKitFields, type ThumbAction, type ThumbPinTag } from '../shared/workflow';
+import { OPTION_LETTERS, portfolioPath, thumbBriefPath, thumbImportKey, thumbLiveKey, tidySecondLook, type BrandKitFields, type ThumbAction, type ThumbPinTag } from '../shared/workflow';
 import { findCity } from '../shared/cities';
 
 export const DEMO_PASSWORD = 'scalemedia-demo';
@@ -230,7 +231,7 @@ async function seed(db: Db, now: Date): Promise<boolean> {
   // 12 · Thumbnail Studio · Ana, a thumbnail designer, with a pick from last week (marked live, with its Test & Compare
   // winner), one just picked after changes (a standout, with its celebration waiting for her), changes asked with notes
   // pinned on the image, a round waiting on review, an option in her private tray (with a second look kept on it), one
-  // to start, and one needing a designer. The demo has no copy of Timeliner, so no brief names a Timeliner video and the
+  // to start, one needing a designer, and two of her older Northwind thumbnails added from YouTube. The demo has no copy of Timeliner, so no brief names a Timeliner video and the
   // board's "Posted in Timeliner — mark it live?" stays empty
   const ana = (await db.one<{ id: number }>(
     `insert into users (email, name, role, editor_kind, password_hash) values ('ana@scalemedia.demo', 'Ana Torres', 'editor', 'thumbnail', $1) returning id`, [hash],
@@ -291,8 +292,9 @@ async function seed(db: Db, now: Date): Promise<boolean> {
   // it went live two days later, and YouTube's Test & Compare against B agreed with the pick
   const bagLive = { on: d(-8), at: ago(8 * 24 - 2) };
   await db.query(
-    `update thumbnail_briefs set published_url = $2, published_on = $3, published_by = $4, published_at = $5, test_winner_variant_id = $6, test_note = $7 where id = $1`,
-    [bag, 'https://www.youtube.com/watch?v=dmAutumnBag', bagLive.on, ids.josh, bagLive.at, bagR1.options[0], 'Ran A against B for two weeks: A kept people watching longer, mostly on phones.'],
+    `update thumbnail_briefs set published_url = $2, published_on = $3, published_by = $4, published_at = $5, test_winner_variant_id = $6, test_note = $7,
+            youtube_video_id = $8 where id = $1`,
+    [bag, 'https://www.youtube.com/watch?v=dmAutumnBag', bagLive.on, ids.josh, bagLive.at, bagR1.options[0], 'Ran A against B for two weeks: A kept people watching longer, mostly on phones.', 'dmAutumnBag'],
   );
 
   const jacket = await thumbBrief(acme, 'The jacket that folds into itself', {
@@ -361,6 +363,32 @@ async function seed(db: Db, now: Date): Promise<boolean> {
     at: 2, due: 6, shootId: k.shootId, brief: 'Dana mid-lift, looking straight at the camera. Bright studio, not gym-dark.', onImage: 'DAY 1 vs DAY 90',
   });
   await thumbBrief(harbor, 'Riverside in 60 seconds', { at: 20, due: 8, noDesigner: true, brief: 'The riverfront at golden hour, a front door in the foreground.', onImage: 'WOULD YOU LIVE HERE?' });
+
+  // Northwind: two of Ana's thumbnails from before the site, added from YouTube yesterday (Add past thumbnails): picked
+  // and live on the day each went up, on her wall and in her portfolio, from a channel named like the client. The video
+  // ids are made up but well-formed, so "Watch on YouTube" leads nowhere real
+  const past: { videoId: string; title: string; day: number; look: DemoLook }[] = [
+    { videoId: 'dmRoastDay1', title: 'A day at the roastery', day: -41, look: { from: C.latte, to: C.forest, subject: C.cream, words: C.yellow } },
+    { videoId: 'dmFarmTrip2', title: 'We went to the farm in Huila', day: -76, look: { from: C.mint, to: C.coffee, subject: C.cream, words: C.white, left: true } },
+  ];
+  const fromYoutube: { briefId: number; title: string }[] = [];
+  for (const p of past) {
+    const data = demoThumb(p.look);
+    const info = (await imageInfoOf(data))!;
+    fromYoutube.push({
+      title: p.title,
+      briefId: await addPastThumbnail(db, josh, { id: ana, name: 'Ana Torres' }, {
+        videoId: p.videoId, clientId: northwind, title: p.title, publishedOn: d(p.day), channel: 'Northwind Coffee Roasters',
+        channelUrl: 'https://www.youtube.com/@northwindcoffee', upload: asImageUpload(bufferFile(p.title, info.mime, data), info), info,
+      }, settings.timezone),
+    });
+  }
+  await db.query(`update thumbnail_briefs set created_at = $2, updated_at = $2, imported_at = $2, published_at = $2 where id = any($1::bigint[])`,
+    [fromYoutube.map((b) => b.briefId), ago(26)]);
+  // and the history says so at the same time
+  await db.query(`update activity set created_at = $2 where action = 'thumbnail.imported' and entity_id = any($1::bigint[])`, [fromYoutube.map((b) => b.briefId), ago(26)]);
+  await tellImported(db, josh, ana, fromYoutube);
+  await db.query(`update notifications set created_at = $3 where user_id = $1 and dedupe_key = $2`, [ana, thumbImportKey(fromYoutube.map((b) => b.briefId)), ago(26)]);
 
   // what Ana and the managers were told
   const toAna = (briefId: number) => thumbBriefPath(anaMe, briefId);

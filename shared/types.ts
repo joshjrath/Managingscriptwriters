@@ -4,7 +4,8 @@ import type { Clock, DayMode, ISODate, YearMonth } from './dates';
 import type { WorkspaceTheme } from './palettes';
 import type {
   BrandColour, BrandFont, BrandKitFields, DocumentState, EditorKind, Milestone, OptionLetter, PortfolioGrowth, Progress, Role, RoundStory, ScriptStatus,
-  SecondLookResult, Stage, ThumbAction, ThumbIdea, ThumbMime, ThumbMomentKind, ThumbPinTag, ThumbRefSource, ThumbState, TimelinerStatusGroup, VideoState,
+  SecondLookResult, Stage, ThumbAction, ThumbIdea, ThumbImportSource, ThumbMime, ThumbMomentKind, ThumbPinTag, ThumbRefSource, ThumbState, TimelinerStatusGroup,
+  VideoState,
 } from './workflow';
 
 /** Every change request carries `x-scale-media: 1`; a page can't send it cross-site without a CORS preflight, which the server never grants. */
@@ -1611,6 +1612,12 @@ export interface ThumbnailBrief {
   timelinerTaskId?: string | null;
   /** managers only: that video as the site's copy of Timeliner has it now; null when no video is linked; left out for designers */
   video?: ThumbnailVideoLink | null;
+  /**
+   * a past thumbnail a manager added from YouTube (POST /api/thumbnails/youtube/import): where it came from, for
+   * everyone who sees the brief. Its page reads "Added from YouTube" where the round story would be, with "Watch on
+   * YouTube". Null (or left out) on a brief made on the site
+   */
+  imported?: ThumbnailImported | null;
 }
 
 /** The client's look, shown beside a brief. */
@@ -1643,6 +1650,8 @@ export interface ThumbnailWin {
   standout: boolean;
   /** it went live (the Studio's small Live badge, linking to `url` in a new tab when there is one); null when not marked */
   live: ThumbnailLiveBadge | null;
+  /** a past thumbnail added from YouTube ("Added from YouTube", with "Watch on YouTube"); null (or left out) for one made on the site */
+  imported?: ThumbnailImportBadge | null;
 }
 
 /** One brief in full: GET /api/thumbnails/:id, and what every change to one brief answers with. */
@@ -1780,7 +1789,10 @@ export interface ThumbnailBriefPatch {
    * video; only a change is checked
    */
   timelinerTaskId?: string | null;
-  /** true cancels it, false reopens it */
+  /**
+   * true cancels it (409 `picked` once an option is picked), false reopens it (409 `youtube_taken`, naming the other
+   * brief, when its YouTube video is on another brief that isn't cancelled now: thumbnail_briefs_youtube_key)
+   */
   cancelled?: boolean;
 }
 
@@ -1965,7 +1977,10 @@ export type ThumbnailLiveBadge = Pick<ThumbnailLive, 'url' | 'publishedOn'>;
  * option's maker once per pick (THUMBNAIL_LIVE_NOTIFICATION, dedupe key thumbLiveKey, thumbnailDecisionId the pick's
  * decision, so deciding again on that round takes it back while unread, as it does a pick's notifications); taking the
  * mark back deletes it while it's unread. Logged as activity (`thumbnail.live`, `thumbnail.unlive`), only when
- * something changed.
+ * something changed. A new link keeps its YouTube video's id with the brief (youtubeVideoId; null for any other link,
+ * or when the mark is taken back), except on a past thumbnail added from YouTube, which keeps the video it came from;
+ * a video already on another brief that isn't cancelled is 409 `youtube_taken` with `fields.url` naming that brief
+ * (thumbnail_briefs_youtube_key decides when two writes race).
  */
 export interface ThumbnailLiveInput {
   /** https, at most LIVE_LIMITS.url; empty or null for none */
@@ -2062,4 +2077,141 @@ export interface PortfolioPayload {
   total: number;
   /** the last GROWTH_MONTHS months, whatever the filters (portfolioGrowth); never shown on the Studio's hero */
   growth: PortfolioGrowth;
+}
+
+// ── Thumbnail Studio: past thumbnails from YouTube (managers) ─────────────
+// "Add past thumbnails" on the managers' board: POST /api/thumbnails/youtube/lookup reads pasted YouTube links
+// (nothing is stored), and POST /api/thumbnails/youtube/import adds them to one designer's wall as briefs already
+// picked and live. Both are requireManager and on no editor's list. The server never fetches a pasted link: it reads
+// the video id from it (youtubeVideoId) and reads YouTube itself (ctx.youtube, a YoutubeReader in server/core.ts).
+// Rules and wording: the past-thumbnails section of shared/workflow.ts.
+
+/** Where a past thumbnail came from: on a brief added from YouTube (ThumbnailBrief.imported). */
+export interface ThumbnailImported {
+  from: ThumbImportSource;
+  /** thumbnail_briefs.youtube_video_id */
+  videoId: string;
+  /** "Watch on YouTube" (a new tab, rel="noopener noreferrer"): youtubeWatchUrl(videoId), also kept as its went-live link */
+  url: string;
+  /** the channel's name, as YouTube gave it when it was added */
+  channel: string | null;
+  /** the channel's page (youtubeChannelUrl: only ever https://www.youtube.com/…), or null */
+  channelUrl: string | null;
+  /** when it was added, and by whom (thumbnail_briefs.imported_at, imported_by) */
+  importedAt: string;
+  importedById: number | null;
+  importedByName: string | null;
+}
+
+/** What a win carries of where it came from (the Studio's Wall of wins and the portfolio's cards). */
+export type ThumbnailImportBadge = Pick<ThumbnailImported, 'from' | 'url'>;
+
+/**
+ * The quiet notification an import sends its designer, once per import (dedupe key thumbImportKey(the briefs it
+ * added), link portfolioPath()): "Josh added 3 past thumbnails to your wall". A pick's type, and so its colour: they're
+ * picks on their wall. It names no decision (thumbnail_decision_id null), and no celebration or went-live message is
+ * recorded for an import.
+ */
+export const THUMBNAIL_IMPORTED_NOTIFICATION = 'thumbnail_picked' satisfies ThumbnailNotification;
+
+/**
+ * POST /api/thumbnails/youtube/lookup (requireManager): the links as pasted, 1 to YOUTUBE_IMPORT_LIMITS.links of them,
+ * each at most YOUTUBE_IMPORT_LIMITS.url characters (400 `fields.urls` otherwise). Answers with a
+ * YoutubeLookupResult. Nothing is stored. While an Admin views as someone it's refused like every other change.
+ */
+export interface YoutubeLookupInput {
+  urls: string[];
+}
+
+/** A link that can be added: the video as YouTube describes it. */
+export interface YoutubeLookupFound {
+  /** the link as pasted, trimmed */
+  input: string;
+  ok: true;
+  videoId: string;
+  /** youtubeWatchUrl(videoId) */
+  url: string;
+  /** the video's title on YouTube: the brief's title */
+  title: string;
+  channel: string | null;
+  /** youtubeChannelUrl, or null */
+  channelUrl: string | null;
+  /**
+   * the day it went live, in the workspace's time zone (dayOf in shared/dates.ts); null when YouTube didn't say, and
+   * the dialog asks for it (importDayProblem)
+   */
+  publishedOn: ISODate | null;
+  /**
+   * a small preview of its thumbnail: a data: URL of YouTube's hqdefault picture (the page's CSP allows only its own
+   * images and data: URLs), whose type was read from its own bytes, never YouTube's word; at most
+   * YOUTUBE_IMPORT_LIMITS.previewBytes before encoding. Null when it couldn't be read (the row can still be added: the
+   * import reads YouTube's biggest picture again)
+   */
+  picture: string | null;
+  /** suggestImportClient: a client that isn't archived, or null (the manager picks one) */
+  suggestedClientId: number | null;
+}
+
+/** A link that can't be added, and why in plain words (YOUTUBE_PROBLEMS, youtubeAlreadyOnSite). It's left out of the import. */
+export interface YoutubeLookupProblem {
+  /** the link as pasted, trimmed */
+  input: string;
+  ok: false;
+  problem: string;
+  /** when the link is a video: its id, page and (once YouTube answered) title */
+  videoId?: string;
+  url?: string;
+  title?: string;
+  /** the video is already on a brief that isn't cancelled: that brief, to link to (thumbBriefPath) */
+  existing?: { briefId: number; title: string };
+}
+
+export type YoutubeLookupRow = YoutubeLookupFound | YoutubeLookupProblem;
+
+/**
+ * What POST /api/thumbnails/youtube/lookup answers: one row per video, in the order pasted (youtubeLookupRows: a link
+ * repeated, or another link to the same video, is one row; blank lines are dropped). One link YouTube can't read never
+ * fails the others.
+ */
+export interface YoutubeLookupResult {
+  rows: YoutubeLookupRow[];
+}
+
+/** One past thumbnail to add, from a usable lookup row. */
+export interface YoutubeImportItem {
+  /** the row's videoId (isYoutubeVideoId; 400 otherwise); each video once (400 `fields.items`, YOUTUBE_PROBLEMS.twice) */
+  videoId: string;
+  /** a client that exists and isn't archived (400 `fields["items.<i>.clientId"]` otherwise) */
+  clientId: number;
+  /** the day it went live: importDayProblem, as the dialog checks it (400 `fields["items.<i>.publishedOn"]` otherwise) */
+  publishedOn: ISODate;
+  /** the brief's title when the manager changed YouTube's (1 to 200 characters); left out, YouTube's title as read again */
+  title?: string;
+}
+
+/**
+ * POST /api/thumbnails/youtube/import (requireManager): adds 1 to YOUTUBE_IMPORT_LIMITS.links past thumbnails to one
+ * designer's wall. Answers with a YoutubeImportResult. The designer must be an active thumbnail designer (400
+ * `fields.designerId`, as New thumbnail). The server reads YouTube again for each (never a picture from the browser),
+ * sniffs and stores its biggest thumbnail as the designer's option, and makes each brief, its round, option and pick in
+ * a db.tx of its own. A video already on a brief that isn't cancelled is skipped with that brief named (the unique
+ * index thumbnail_briefs_youtube_key decides when two imports race), as is one YouTube can't read now. Each added
+ * brief is logged as activity; the designer is told once (THUMBNAIL_IMPORTED_NOTIFICATION).
+ */
+export interface YoutubeImportInput {
+  /** who made these: an active thumbnail designer */
+  designerId: number;
+  items: YoutubeImportItem[];
+}
+
+/** What POST /api/thumbnails/youtube/import answers: the briefs it made, in the order sent, and the videos it didn't add, and why. */
+export interface YoutubeImportResult {
+  added: { briefId: number; videoId: string; title: string }[];
+  skipped: {
+    videoId: string;
+    /** in plain words (YOUTUBE_PROBLEMS, youtubeAlreadyOnSite) */
+    problem: string;
+    /** the brief that already has this video, when that's why */
+    existing?: { briefId: number; title: string };
+  }[];
 }

@@ -23,6 +23,11 @@ export interface Config {
   anthropicApiKey: string | undefined;
   /** Timeliner's workspace API key (tlsk_…): with it, a script document uploaded in Timeliner marks its batch delivered */
   timelinerApiKey: string | undefined;
+  /**
+   * the YouTube Data API v3 key (optional): with it, Add past thumbnails reads a video's publish date (and title and
+   * channel) from the API; without it, from the video's own page, best effort. Never sent to the browser or logged
+   */
+  youtubeApiKey: string | undefined;
   /** where Timeliner's API lives (tests and staging point it elsewhere) */
   timelinerApiUrl: string;
   /** the site's public https address, for the webhook Timeliner calls (PUBLIC_URL, or the one Render sets) */
@@ -108,6 +113,7 @@ export function loadConfig(
     uploadLimitBytes: number('UPLOAD_LIMIT_MB', 25, 1, 100, { clamp: true }) * 1024 * 1024,
     anthropicApiKey: set(env.ANTHROPIC_API_KEY),
     timelinerApiKey: set(env.TIMELINER_API_KEY),
+    youtubeApiKey: set(env.YOUTUBE_API_KEY),
     timelinerApiUrl: (set(env.TIMELINER_API_URL) ?? 'https://timeliner.io').replace(/\/+$/, ''),
     publicUrl: (set(env.PUBLIC_URL) ?? set(env.RENDER_EXTERNAL_URL))?.replace(/\/+$/, ''),
     timelinerSyncEnabled: flag('TIMELINER_SYNC', true),

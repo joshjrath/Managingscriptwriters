@@ -10,12 +10,13 @@
 // the wall, every client's: barFilter), the first-round pick rate as a plain sentence (only ever here, never on the
 // Studio's hero), standouts, and what managers' notes are usually about as tag chips. No points, levels, streaks or
 // rankings, and never one designer against another. A manager opens a designer's with ?userId= (read-only); without
-// one they pick a designer.
+// one they pick a designer. A past thumbnail a manager added from YouTube (story.importedFrom) has no rounds: its card
+// reads "Added from YouTube", with "Watch on YouTube", and it counts in its month's picks but not in the first-round rate.
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { ArrowRight, Download, Images, Info, Rotate3d, RotateCcw, Sparkles, Tag, Trophy, Undo2 } from 'lucide-react';
+import { ArrowRight, Download, Images, Import, Info, Rotate3d, RotateCcw, Sparkles, Tag, Trophy, Undo2 } from 'lucide-react';
 import { api, qs, type ApiError } from '../api';
 import type { PortfolioCard, PortfolioPayload } from '../../../shared/types';
 import {
@@ -28,6 +29,7 @@ import { PageHeader, useBoot, useDisplayTz } from '../components/Shell';
 import { Button, Chip, Empty, ErrorState, Loading, Panel, Seg, Thumb } from '../components/ui';
 import { optionAlt } from '../components/ThumbBits';
 import { LiveBadge, LiveLine, TestWinnerLine } from '../components/ThumbLive';
+import { AddedFromYoutube } from '../components/ThumbImport';
 import { motionAllowed, useMotionAllowed } from '../motion';
 import { PickDesigner } from './Studio';
 
@@ -212,6 +214,7 @@ const OUTCOME: Record<RoundStep['outcome'], string> = { changes: 'changes asked'
 
 /** On the front, a few words of how it came about. */
 function peekWords(s: RoundStory): string {
+  if (s.importedFrom) return 'Added from YouTube';
   const last = s.rounds[s.rounds.length - 1];
   if (s.firstRound || !last) return 'Picked from the first round';
   return s.changesAsked ? `Round ${last.number}, after ${plural(s.changesAsked, 'round')} of changes` : `Picked in round ${last.number}`;
@@ -260,6 +263,9 @@ function FlipCard({ c, i, turned, target, readOnly, turnMode, onTurn }: {
     requestAnimationFrame(() => (on ? back : front).current?.focus({ preventScroll: true }));
   };
   const picked = day(c.pickedAt);
+  const yt = c.story.importedFrom ? c.imported ?? null : null;
+  // "Watch on YouTube" already opens the video's own page: its went-live line keeps only the day then
+  const live = c.live && yt && c.live.url === yt.url ? { ...c.live, url: null } : c.live;
   return (
     <li ref={card} className={`pf-card${turned ? ' turned' : ''}${target ? ' target' : ''}${c.standout ? ' standout' : ''}`} style={{ ['--i' as string]: Math.min(i, 14) }} data-card={c.option.id}>
       <div className="pf-flip" data-mode={turnMode ? 'turn' : 'fade'}>
@@ -272,9 +278,9 @@ function FlipCard({ c, i, turned, target, readOnly, turnMode, onTurn }: {
             <b>{c.title}</b>
             <span>{c.clientName} · {picked}</span>
           </span>
-          <span className={`pf-peek${c.story.firstRound ? ' first' : ''}`}>{c.story.firstRound ? <Sparkles aria-hidden /> : <RotateCcw aria-hidden />}{peekWords(c.story)}</span>
+          <span className={`pf-peek${c.story.firstRound ? ' first' : ''}`}><StoryIcon story={c.story} />{peekWords(c.story)}</span>
           <button ref={front} type="button" className="pf-turn" aria-controls={backId} onClick={() => flip(true)}
-            aria-label={`${c.title}, ${c.clientName}: option ${c.option.letter}, picked ${picked}${c.standout ? ', a standout' : ''}${c.live ? ', live' : ''}. Turn over for how it came about`} />
+            aria-label={`${c.title}, ${c.clientName}: ${yt ? `added from YouTube, live ${picked}` : `option ${c.option.letter}, picked ${picked}`}${c.standout ? ', a standout' : ''}${c.live && !yt ? ', live' : ''}. Turn over for how it came about`} />
           {/* over the picture's corner, beside the button: a link can't sit inside one */}
           {c.live && <span className="pf-over"><LiveBadge live={c.live} /></span>}
         </div>
@@ -287,13 +293,14 @@ function FlipCard({ c, i, turned, target, readOnly, turnMode, onTurn }: {
             </span>
             <button ref={back} type="button" className="icon-btn sm pf-back-btn" onClick={() => flip(false)} aria-label={`Turn “${c.title}” back to the picture`} title="Turn back (Esc)"><Undo2 aria-hidden /></button>
           </div>
+          {yt && <AddedFromYoutube imported={yt} compact className="pf-yt" />}
           <Story story={c.story} readOnly={readOnly} />
           <p className="pf-who">
             {c.standout && <Chip color="yellow" icon={<Trophy aria-hidden />}>Standout</Chip>}
-            <span>{c.pickedByName} picked it · {picked}</span>
+            <span>{yt ? `${c.pickedByName} added it to ${readOnly ? 'their' : 'your'} wall` : `${c.pickedByName} picked it · ${picked}`}</span>
           </p>
-          {c.live
-            ? <><LiveLine live={c.live} /><TestWinnerLine winner={c.live.testWinner} note={c.live.testNote} title={c.title} /></>
+          {live
+            ? <><LiveLine live={live} /><TestWinnerLine winner={live.testWinner} note={live.testNote} title={c.title} /></>
             : <p className="pf-notlive">Not marked live yet.</p>}
           <div className="pf-back-acts">
             <Link className="btn sm ghost" to={thumbBriefPath(me, c.briefId)}>Open brief<ArrowRight aria-hidden /></Link>
@@ -305,11 +312,26 @@ function FlipCard({ c, i, turned, target, readOnly, turnMode, onTurn }: {
   );
 }
 
-/** The rounds, oldest first: Round 1 · 3 options · changes asked, “the note” → Round 2 · 2 options · picked. */
+/** The icon beside a story's few words: first round, more rounds, or added from YouTube. */
+function StoryIcon({ story }: { story: RoundStory }) {
+  return story.importedFrom ? <Import aria-hidden /> : story.firstRound ? <Sparkles aria-hidden /> : <RotateCcw aria-hidden />;
+}
+
+/**
+ * The rounds, oldest first: Round 1 · 3 options · changes asked, “the note” → Round 2 · 2 options · picked. A past
+ * thumbnail added from YouTube has none to tell: it was out there before it came to the site.
+ */
 function Story({ story, readOnly }: { story: RoundStory; readOnly: boolean }) {
+  if (story.importedFrom) {
+    return (
+      <div className="pf-story">
+        <p className="pf-story-yt">It went live on YouTube before it came to the site, so there are no rounds or notes to show.</p>
+      </div>
+    );
+  }
   return (
     <div className="pf-story">
-      <span className={`pf-story-lead${story.firstRound ? ' first' : ''}`}>{story.firstRound ? <Sparkles aria-hidden /> : <RotateCcw aria-hidden />}{peekWords(story)}</span>
+      <span className={`pf-story-lead${story.firstRound ? ' first' : ''}`}><StoryIcon story={story} />{peekWords(story)}</span>
       <ol className="pf-steps">
         {story.rounds.map((s) => (
           <li key={s.number} className={`pf-step ${s.outcome}${s.mine ? '' : ' theirs'}`}>
@@ -338,10 +360,18 @@ function Growth({ g, readOnly, first, month, onMonth }: { g: PortfolioGrowth; re
   const your = readOnly ? 'their' : 'your';
   const tagged = g.themes.reduce((n, t) => n + t.count, 0);
   const themesId = useId();
-  const rate = g.firstRoundRate == null ? `No picks in the last ${GROWTH_MONTHS} months yet.`
-    : g.firstRoundPicks === g.picks ? `${g.picks === 1 ? `${readOnly ? 'Their' : 'Your'} 1 pick` : `All ${g.picks} of ${your} picks`} came from the brief’s first round.`
-    : g.firstRoundPicks === 0 ? `None of ${your} ${plural(g.picks, 'pick')} came from the brief’s first round: each took another round.`
-    : `${g.firstRoundPicks} of ${your} ${plural(g.picks, 'pick')} came from the brief’s first round: ${g.firstRoundRate}%.`;
+  const Your = readOnly ? 'Their' : 'Your';
+  // out of the picks that had rounds (roundPicks): a past thumbnail added from YouTube had none, so it's left out
+  const imports = g.importedPicks
+    ? ` ${g.importedPicks === 1 ? 'The 1 added from YouTube isn’t' : `The ${g.importedPicks} added from YouTube aren’t`} counted: ${g.importedPicks === 1 ? 'it' : 'they'} had no rounds.`
+    : '';
+  const rate = g.firstRoundRate == null
+    ? g.importedPicks
+      ? `${g.importedPicks === 1 ? `${Your} 1 pick` : `All ${g.importedPicks} of ${your} picks`} in that time ${g.importedPicks === 1 ? 'was' : 'were'} added from YouTube, so there’s no first-round rate yet.`
+      : `No picks in the last ${GROWTH_MONTHS} months yet.`
+    : (g.firstRoundPicks === g.roundPicks ? `${g.roundPicks === 1 ? `${Your} 1 pick` : `All ${g.roundPicks} of ${your} picks`} came from the brief’s first round.`
+      : g.firstRoundPicks === 0 ? `None of ${your} ${plural(g.roundPicks, 'pick')} came from the brief’s first round: each took another round.`
+      : `${g.firstRoundPicks} of ${your} ${plural(g.roundPicks, 'pick')} came from the brief’s first round: ${g.firstRoundRate}%.`) + imports;
   const standouts = g.standouts ? `${plural(g.standouts, 'standout')}: ${g.standouts === 1 ? 'a pick' : 'picks'} a manager marked as one of the best.` : 'No picks marked Standout in that time.';
   return (
     <Panel title={readOnly ? `${first}’s last ${GROWTH_MONTHS} months` : `Your last ${GROWTH_MONTHS} months`} className="pf-growth"
