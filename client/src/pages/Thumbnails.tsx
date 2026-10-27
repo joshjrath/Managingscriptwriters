@@ -15,13 +15,14 @@
 // it filled follows the link: titleForVideo). When that video is Posted and the pick isn't marked live, the board asks gently
 // ("Posted in Timeliner — mark it live?"), worked out on load, and Mark it live opens the Went live dialog
 // (ThumbLive.tsx) right there; every picked brief in "Picked or cancelled lately" has Mark live too. Each designer's
-// group links to their Studio and their portfolio.
+// group links to their Studio and their portfolio. "Add past thumbnails" (YoutubeImportDialog in ThumbImport.tsx) adds
+// thumbnails already out on YouTube to a designer's wall, picked and live, from their links.
 
 import { useId, useRef, useState, type ReactNode } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  ArrowRight, Ban, BookOpen, Check, CircleAlert, ClipboardCheck, ExternalLink, Image as ImageIcon, Inbox, Lightbulb, Palette, Pencil, Plus, Radio, RotateCcw, Sparkles, Trophy, Undo2, UserPlus, Users,
+  ArrowRight, Ban, BookOpen, Check, CircleAlert, ClipboardCheck, ExternalLink, Image as ImageIcon, Import, Inbox, Lightbulb, Palette, Pencil, Plus, Radio, RotateCcw, Sparkles, Trophy, Undo2, UserPlus, Users,
 } from 'lucide-react';
 import { api, qs, useSave, type ApiError } from '../api';
 import type {
@@ -38,6 +39,7 @@ import { Avatar, Button, Chip, Dialog, Empty, ErrorState, Field, FormError, inpu
 import { KpiCard } from '../components/StatCards';
 import { BriefThumb, BriefTile, DueTag, optionAlt, VideoFact } from '../components/ThumbBits';
 import { WentLiveDialog } from '../components/ThumbLive';
+import { YoutubeImportDialog } from '../components/ThumbImport';
 import { useNow } from '../components/EditingBits';
 
 const boardPath = (clientId: string, designerId: string) => `/api/thumbnails${qs({ clientId, designerId })}`;
@@ -51,6 +53,7 @@ export function ThumbnailsPage() {
   const q = useQuery({ queryKey: ['thumbnails', clientId, designerId], queryFn: () => api<ThumbnailBoard>(boardPath(clientId, designerId)), refetchInterval: 60_000 });
   const [dialog, setDialog] = useState<null | { brief: ThumbnailBrief | null; focus?: 'designer' }>(null);
   const [cancelling, setCancelling] = useState<ThumbnailBrief | null>(null);
+  const [importing, setImporting] = useState(false);
   const live = useMarkLive();
   const reopen = useReopenBrief();
   const set = (k: string, v: string) => { const p = new URLSearchParams(params); if (v) p.set(k, v); else p.delete(k); setParams(p, { replace: true }); };
@@ -89,6 +92,10 @@ export function ThumbnailsPage() {
   return (
     <div className="studio tn">
       <PageHeader title="Thumbnails" sub="Hand out thumbnail briefs, review the rounds designers send, and download the winners." hideNewWork>
+        {/* the board's designers (who can be given them) come with it */}
+        <Button variant="pill lg" icon={<Import aria-hidden />} disabled={!b} onClick={() => setImporting(true)} title="Add thumbnails already out on YouTube to a designer’s wall, from their links">
+          Add past thumbnails
+        </Button>
         <Button variant="primary pill lg" icon={<Plus aria-hidden />} onClick={() => setDialog({ brief: null })}>New thumbnail</Button>
       </PageHeader>
       {q.isLoading && <Loading height={420} />}
@@ -176,6 +183,7 @@ export function ThumbnailsPage() {
       {dialog && <BriefDialog brief={dialog.brief} focus={dialog.focus} designers={b?.designers} onClose={() => setDialog(null)} />}
       {cancelling && <CancelBriefDialog brief={cancelling} onClose={() => setCancelling(null)} />}
       {live.brief && <WentLiveDialog brief={live.brief} onClose={live.close} />}
+      {importing && b && <YoutubeImportDialog designers={b.designers} designerId={designerId ? Number(designerId) : null} onClose={() => setImporting(false)} />}
     </div>
   );
 }
@@ -285,12 +293,13 @@ function ClientSelect({ value, onChange, id, invalid, disabled, autoFocus }: { v
 
 // ── New thumbnail / Edit ─────────────────────────────────────────────────
 
-/** Reopens a cancelled brief. */
+/** Reopens a cancelled brief; when it can't be (its YouTube video is on another brief now: 409 youtube_taken), a toast says why. */
 export function useReopenBrief() {
   const toast = useToast();
-  return useSave((id: number) => api<ThumbnailBriefDetail>(`/api/thumbnails/${id}`, { method: 'PATCH', body: { cancelled: false } satisfies ThumbnailBriefPatch }), {
+  const save = useSave((id: number) => api<ThumbnailBriefDetail>(`/api/thumbnails/${id}`, { method: 'PATCH', body: { cancelled: false } satisfies ThumbnailBriefPatch }), {
     onSuccess: (out) => toast(`${out.title} is open again`),
   });
+  return { ...save, mutate: (id: number) => save.mutate(id, { onError: (e) => toast(e.message, 'error') }) };
 }
 
 /**

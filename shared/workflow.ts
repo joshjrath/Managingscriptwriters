@@ -6,7 +6,7 @@
 //   delivered   = delivered to Timeliner (writer-confirmed)
 // A script returned for revisions is not draft-ready until it is resubmitted.
 
-import { dueState, describeDue, isISODate, lastMonths, monthOf, type Clock, type ISODate, type YearMonth } from './dates';
+import { atWallTime, dueState, describeDue, isISODate, lastMonths, monthOf, type Clock, type ISODate, type YearMonth } from './dates';
 import { fmtBytes } from './format';
 import { contrastRatio, MIN_ACCENT_CONTRAST, normalizeHex, relativeLuminance } from './palettes';
 
@@ -1146,6 +1146,12 @@ export interface StoryRound {
 export interface StoryBrief {
   cancelledAt: string | null;
   rounds: readonly StoryRound[];
+  /**
+   * a past thumbnail a manager added from YouTube (thumbnail_briefs.imported_from): picked and live, with one round
+   * made up only to hold it, so it has no round story and stays out of the first-round pick rate. Null or left out on
+   * a brief made on the site
+   */
+  importedFrom?: ThumbImportSource | null;
 }
 
 const stamp = (s: string) => { const t = Date.parse(s); return Number.isNaN(t) ? -Infinity : t; };
@@ -1190,21 +1196,25 @@ export interface RoundStep {
 
 /** How a win came about: the portfolio card's round story. */
 export interface RoundStory {
-  /** every round sent on the brief, oldest first, ending with the one picked */
+  /** every round sent on the brief, oldest first, ending with the one picked (none for a past thumbnail added from YouTube) */
   rounds: RoundStep[];
   /** rounds whose decision that counts asked for changes (a round decided again counts by its newest decision) */
   changesAsked: number;
-  /** picked from the brief's first round sent */
+  /** picked from the brief's first round sent (never for one added from YouTube: it had no real rounds) */
   firstRound: boolean;
+  /** only on a past thumbnail added from YouTube: the story reads "Added from YouTube" instead of inventing rounds */
+  importedFrom?: ThumbImportSource;
 }
 
 /**
  * The round story of a brief's current winner, for the portfolio of `designerId`, from its rows; null when it has no
- * winner. Notes are kept only on their own rounds: a manager's words on someone else's round stay with that round.
+ * winner. Notes are kept only on their own rounds: a manager's words on someone else's round stay with that round. A
+ * past thumbnail added from YouTube has no rounds to tell: its story is only where it came from.
  */
 export function roundStory(b: StoryBrief, designerId: number): RoundStory | null {
   const win = briefWin(b);
   if (!win) return null;
+  if (b.importedFrom) return { rounds: [], changesAsked: 0, firstRound: false, importedFrom: b.importedFrom };
   const rounds = b.rounds.filter((r) => r.sentAt).sort((x, y) => x.number - y.number).map((r): RoundStep => {
     const d = roundDecision(r.decisions);
     const mine = r.createdById === designerId;
@@ -1220,11 +1230,15 @@ export function roundStory(b: StoryBrief, designerId: number): RoundStory | null
 export interface PortfolioGrowth {
   /** each of those months, oldest first, with how many of their options were picked in it (current winners, by when the pick was made) */
   months: { month: YearMonth; picks: number }[];
-  /** their picks in those months */
+  /** their picks in those months (past thumbnails added from YouTube included, by the day they went live) */
   picks: number;
-  /** of those, the ones picked from the brief's first round sent */
+  /** of those, the past thumbnails added from YouTube: they had no real rounds, so the first-round rate leaves them out */
+  importedPicks: number;
+  /** picks - importedPicks: the picks the first-round rate is out of */
+  roundPicks: number;
+  /** of roundPicks, the ones picked from the brief's first round sent */
   firstRoundPicks: number;
-  /** pct(firstRoundPicks, picks): a whole percentage, rounded down; null when there were no picks */
+  /** pct(firstRoundPicks, roundPicks): a whole percentage, rounded down; null when there were no such picks */
   firstRoundRate: number | null;
   /** of those picks, the ones a manager marked Standout */
   standouts: number;
@@ -1241,12 +1255,15 @@ export interface PortfolioGrowth {
  * Works out a designer's growth figures from every brief they made an option for or sent a round on (any others are
  * ignored): picks are current winners they made (briefWin), so deciding again on a picked round, or a newer round,
  * takes one away; a cancelled brief counts for nothing, its notes included; a round's notes are its decision that
- * counts (currentPins), so deciding again replaces them.
+ * counts (currentPins), so deciding again replaces them. A past thumbnail added from YouTube is a pick in the month it
+ * went live (its pick is dated then: importedRoundAt) but is left out of the first-round rate, since it had no real
+ * rounds.
  */
 export function portfolioGrowth(briefs: readonly StoryBrief[], designerId: number, clock: Pick<Clock, 'today' | 'timezone'>): PortfolioGrowth {
   const months = lastMonths(clock.today, GROWTH_MONTHS);
   const perMonth = new Map(months.map((m) => [m, 0]));
   let picks = 0;
+  let importedPicks = 0;
   let firstRoundPicks = 0;
   let standouts = 0;
   let notes = 0;
@@ -1258,7 +1275,8 @@ export function portfolioGrowth(briefs: readonly StoryBrief[], designerId: numbe
     if (win && month && perMonth.has(month)) {
       perMonth.set(month, perMonth.get(month)! + 1);
       picks++;
-      if (win.firstRound) firstRoundPicks++;
+      if (b.importedFrom) importedPicks++;
+      else if (win.firstRound) firstRoundPicks++;
       if (win.decision.standout) standouts++;
     }
     for (const r of b.rounds) {
@@ -1275,9 +1293,10 @@ export function portfolioGrowth(briefs: readonly StoryBrief[], designerId: numbe
   const themes = [...tags.entries()]
     .map(([tag, count]) => ({ tag, count }))
     .sort((a, b) => b.count - a.count || THUMB_PIN_TAGS.indexOf(a.tag) - THUMB_PIN_TAGS.indexOf(b.tag));
+  const roundPicks = picks - importedPicks;
   return {
     months: months.map((month) => ({ month, picks: perMonth.get(month) ?? 0 })),
-    picks, firstRoundPicks, firstRoundRate: picks ? pct(firstRoundPicks, picks) : null, standouts, themes, notes,
+    picks, importedPicks, roundPicks, firstRoundPicks, firstRoundRate: roundPicks ? pct(firstRoundPicks, roundPicks) : null, standouts, themes, notes,
   };
 }
 
@@ -1296,4 +1315,196 @@ export function clientFilterControl(clients: readonly { name: string }[]): 'butt
  */
 export function barFilter(shown: { month: string }, month: YearMonth): { month: string; clientId?: string } {
   return shown.month === month ? { month: '' } : { month, clientId: '' };
+}
+
+// ── Thumbnail Studio: past thumbnails from YouTube ──────────────────────
+// A manager adds thumbnails already out on YouTube to a designer's wall: POST /api/thumbnails/youtube/lookup reads the
+// pasted links (nothing is stored), then POST /api/thumbnails/youtube/import makes each a brief that's already picked
+// and live: one round (1, sent and picked at noon on the day it went live in the workspace's time zone:
+// importedRoundAt), one option (A, the designer's) and the pick. The server never fetches a pasted link: it reads the
+// video's id from it (youtubeVideoId) and builds its own addresses on YouTube's fixed hosts from that.
+
+/** Where a past thumbnail came from (thumbnail_briefs.imported_from, checked by thumbnail_briefs_imported_from_check). */
+export const THUMB_IMPORT_SOURCES = ['youtube'] as const;
+export type ThumbImportSource = (typeof THUMB_IMPORT_SOURCES)[number];
+
+/**
+ * How many links one Look up (and one import) takes, the longest link read, the most a thumbnail's picture may weigh
+ * (a bigger one is refused, never cut short), and the most a lookup's preview may (a bigger one is left out).
+ */
+export const YOUTUBE_IMPORT_LIMITS = { links: 20, url: 500, pictureBytes: 5 * 1024 * 1024, previewBytes: 512 * 1024 } as const;
+
+/** The day YouTube's first video went up: no thumbnail went live there before it. */
+export const YOUTUBE_FIRST_DAY: ISODate = '2005-04-23';
+
+/** Why a row of the lookup (or an item of the import) can't be used, in the words the dialog shows. */
+export const YOUTUBE_PROBLEMS = {
+  notLink: 'This isn’t a link to a YouTube video',
+  notFound: 'YouTube can’t find this video',
+  private: 'This video is private or can’t be shown off YouTube',
+  unreachable: 'YouTube didn’t answer. Try again in a minute',
+  noPicture: 'YouTube has no thumbnail for this video',
+  notPicture: 'YouTube’s thumbnail for this video isn’t a PNG, JPEG or WebP picture',
+  tooBig: `YouTube’s thumbnail for this video is over ${YOUTUBE_IMPORT_LIMITS.pictureBytes / (1024 * 1024)} MB`,
+  twice: 'This video is in the list twice',
+} as const;
+
+/** A row whose video is already on a brief that isn't cancelled (thumbnail_briefs_youtube_key): it's named and linked. */
+export const youtubeAlreadyOnSite = (title: string) => `Already on the site as “${title}”`;
+
+const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
+/** the hosts a YouTube video link may be on (youtu.be aside): exactly these, never one that only starts or ends like them */
+const YOUTUBE_HOSTS = new Set(['youtube.com', 'www.youtube.com', 'm.youtube.com']);
+/** /shorts/<id>, /live/<id> and /embed/<id> */
+const YOUTUBE_ID_PATHS = new Set(['shorts', 'live', 'embed']);
+
+/** A YouTube video id: 11 letters, digits, '-' or '_'. */
+export const isYoutubeVideoId = (v: unknown): v is string => typeof v === 'string' && YOUTUBE_ID.test(v);
+
+/**
+ * The video id in a YouTube link, or null for anything else: youtube.com, www.youtube.com or m.youtube.com with
+ * /watch?v=<id>, /shorts/<id>, /live/<id> or /embed/<id>, and youtu.be/<id>, over https or http, with or without the
+ * scheme, any other query parameters (t, si, list…) and a trailing slash. Never another host, however alike
+ * ("youtube.com.evil.test", "youtu.be.evil"), a link with a user name, a port or another scheme ("javascript:"), nor an
+ * id that isn't exactly isYoutubeVideoId. Migration 43 reads thumbnail_briefs.published_url with this (server/backfill.ts):
+ * copy it there before changing what it accepts.
+ */
+export function youtubeVideoId(text: string | null | undefined): string | null {
+  if (typeof text !== 'string') return null;
+  const raw = text.trim();
+  if (!raw || raw.length > YOUTUBE_IMPORT_LIMITS.url) return null;
+  // a link pasted without its scheme ("youtu.be/…", "www.youtube.com/watch?v=…")
+  const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(raw) ? raw : `https://${raw.replace(/^\/+/, '')}`;
+  let u: URL;
+  try {
+    u = new URL(withScheme);
+  } catch {
+    return null;
+  }
+  if ((u.protocol !== 'https:' && u.protocol !== 'http:') || u.username || u.password || u.port) return null;
+  const host = u.hostname.toLowerCase();
+  const parts = u.pathname.split('/').filter(Boolean);
+  let id: string | null = null;
+  if (host === 'youtu.be') id = parts.length === 1 ? parts[0] : null;
+  else if (YOUTUBE_HOSTS.has(host)) {
+    const first = parts[0]?.toLowerCase();
+    if (parts.length === 1 && first === 'watch') id = u.searchParams.get('v');
+    else if (parts.length === 2 && first && YOUTUBE_ID_PATHS.has(first)) id = parts[1];
+  }
+  return isYoutubeVideoId(id) ? id : null;
+}
+
+/** A video's own page, the one address a past thumbnail keeps (published_url) and "Watch on YouTube" opens. */
+export const youtubeWatchUrl = (videoId: string) => `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`;
+
+/**
+ * A channel's page as YouTube names it (oEmbed's author_url, or /channel/<id> from its API), kept only when it's on
+ * youtube.com over https: written as https://www.youtube.com/<path>, without a query, a fragment or a trailing slash.
+ * Null for anything else, so a stored channel link only ever opens YouTube.
+ */
+export function youtubeChannelUrl(url: string | null | undefined): string | null {
+  if (typeof url !== 'string' || !url.trim() || url.length > YOUTUBE_IMPORT_LIMITS.url) return null;
+  let u: URL;
+  try {
+    u = new URL(url.trim());
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'https:' || u.username || u.password || u.port || !YOUTUBE_HOSTS.has(u.hostname.toLowerCase())) return null;
+  const path = u.pathname.replace(/\/+$/, '');
+  const parts = path.split('/').filter(Boolean);
+  if (!parts.length || parts.length > 3) return null;
+  return `https://www.youtube.com/${parts.join('/')}`;
+}
+
+/** A channel's page as imports are compared by it (youtubeChannelUrl, any case); null when it isn't one. */
+export const youtubeChannelKey = (url: string | null | undefined): string | null => youtubeChannelUrl(url)?.toLowerCase() ?? null;
+
+/** The links in what was pasted into Add past thumbnails: one per line (or between spaces), trimmed, blanks dropped. */
+export const pastedLinks = (text: string): string[] => text.split(/\s+/).map((s) => s.trim()).filter(Boolean);
+
+/**
+ * The rows a lookup's links become, in the order pasted: one per video (its first link; a repeat is left out), and a
+ * link that isn't a video once per its text (trimmed; blanks dropped), with its id null.
+ */
+export function youtubeLookupRows(urls: readonly string[]): { input: string; videoId: string | null }[] {
+  const seen = new Set<string>();
+  const out: { input: string; videoId: string | null }[] = [];
+  for (const u of urls) {
+    const input = typeof u === 'string' ? u.trim() : '';
+    if (!input) continue;
+    const videoId = youtubeVideoId(input);
+    const key = videoId ? `v:${videoId}` : `t:${input}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ input, videoId });
+  }
+  return out;
+}
+
+/**
+ * A name as the site compares people's and clients' names: any case, any spacing, any accents ("José  Ortiz" and
+ * "jose ortiz" are the same).
+ */
+export const looseNameKey = (name: string) => name.normalize('NFKD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/\s+/g, '');
+
+/**
+ * The client Add past thumbnails suggests for a video (the manager can change it; a client is never made): the client
+ * of the newest earlier import from the same channel (by its page, youtubeChannelKey; on the same moment, the higher
+ * brief id), else the one client whose name is the channel's (looseNameKey; two such clients suggest neither), else
+ * none. Only `clients` can be suggested: pass those a past thumbnail may go to (every one that isn't archived).
+ */
+export function suggestImportClient(
+  video: { channel: string | null; channelUrl: string | null },
+  earlier: readonly { briefId: number; channelUrl: string | null; clientId: number; importedAt: string }[],
+  clients: readonly { id: number; name: string }[],
+): number | null {
+  const offered = new Set(clients.map((c) => c.id));
+  const key = youtubeChannelKey(video.channelUrl);
+  if (key) {
+    let best: (typeof earlier)[number] | null = null;
+    for (const e of earlier) {
+      if (!offered.has(e.clientId) || youtubeChannelKey(e.channelUrl) !== key) continue;
+      const newer = !best || stamp(e.importedAt) > stamp(best.importedAt) || (stamp(e.importedAt) === stamp(best.importedAt) && e.briefId > best.briefId);
+      if (newer) best = e;
+    }
+    if (best) return best.clientId;
+  }
+  const name = video.channel ? looseNameKey(video.channel) : '';
+  if (!name) return null;
+  const named = clients.filter((c) => looseNameKey(c.name) === name);
+  return named.length === 1 ? named[0].id : null;
+}
+
+/**
+ * What's wrong with the day a past thumbnail went live, so the dialog and the import route say the same (none: null):
+ * it's needed, a real date, on or after YOUTUBE_FIRST_DAY, and not after `today` (the workspace's).
+ */
+export function importDayProblem(day: string | null | undefined, today: ISODate): string | null {
+  const d = typeof day === 'string' ? day.trim() : '';
+  if (!d) return 'Add the day it went live';
+  if (!isISODate(d)) return 'Use a valid date';
+  if (d < YOUTUBE_FIRST_DAY) return 'That’s before YouTube began';
+  if (d > today) return 'That day hasn’t come yet';
+  return null;
+}
+
+/** When, past midnight in the workspace's time zone, a past thumbnail's round was sent and picked: noon on the day it went live. */
+export const IMPORT_MINUTES = 12 * 60;
+
+/**
+ * The moment a past thumbnail's round is sent and its pick made (thumbnail_rounds.sent_at, thumbnail_decisions.created_at):
+ * noon on the day it went live in the workspace's time zone, so it's a pick of that day and month (portfolioGrowth,
+ * the Studio's counts) wherever the team is.
+ */
+export const importedRoundAt = (publishedOn: ISODate, tz: string): string => atWallTime(publishedOn, IMPORT_MINUTES, tz);
+
+/**
+ * The quiet notification an import sends the designer (notifications.dedupe_key, unique per person): one per import,
+ * named by the lowest id of the briefs it added, so sending the same import again (whose videos are all skipped, as
+ * already on the site) never tells them twice. `briefIds` is never empty: an import that added nothing tells nobody.
+ */
+export function thumbImportKey(briefIds: readonly number[]): string {
+  if (!briefIds.length) throw new Error('thumbImportKey needs the briefs an import added');
+  return `thumbnail_import:${Math.min(...briefIds)}`;
 }

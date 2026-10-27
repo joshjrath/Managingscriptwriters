@@ -909,6 +909,31 @@ describe('a designer’s portfolio and private growth', () => {
     expect(portfolioGrowth([], D, clock).months).toHaveLength(6);
   });
 
+  it('counts a past thumbnail added from YouTube as a pick of the month it went live, never in the first-round rate', async () => {
+    const { portfolioGrowth, roundStory, importedRoundAt } = await import('../shared/workflow');
+    // one round made up to hold it, sent and picked at noon on the day it went live (Sep 15, New York)
+    const at = importedRoundAt('2026-09-15', clock.timezone);
+    const imported = { ...brief([round(7, 1, D, [decision('pick', at, { optionId: 71 })], { options: [71] })]), importedFrom: 'youtube' as const };
+    const made = brief([round(8, 1, D, [decision('pick', '2026-10-05T15:00:00Z', { optionId: 81 })])]);
+    const g = portfolioGrowth([imported, made], D, clock);
+    expect(g).toMatchObject({ picks: 2, importedPicks: 1, roundPicks: 1, firstRoundPicks: 1, firstRoundRate: 100 });
+    expect(g.months.filter((m) => m.picks)).toEqual([{ month: '2026-09', picks: 1 }, { month: '2026-10', picks: 1 }]);
+    // alone it's a pick, with no first-round rate to give (not 100%)
+    expect(portfolioGrowth([imported], D, clock)).toMatchObject({ picks: 1, importedPicks: 1, roundPicks: 0, firstRoundPicks: 0, firstRoundRate: null });
+    // the same rows made on the site would be a first-round pick
+    expect(portfolioGrowth([{ ...imported, importedFrom: null }], D, clock)).toMatchObject({ importedPicks: 0, roundPicks: 1, firstRoundPicks: 1, firstRoundRate: 100 });
+    // with a site-made pick from round 2 beside it: 0 of 1, not 1 of 2
+    const second = brief([round(9, 1, D, [decision('changes', '2026-10-01T15:00:00Z')]), round(10, 2, D, [decision('pick', '2026-10-02T15:00:00Z', { optionId: 101 })])]);
+    expect(portfolioGrowth([imported, second], D, clock)).toMatchObject({ picks: 2, importedPicks: 1, roundPicks: 1, firstRoundPicks: 0, firstRoundRate: 0 });
+    // its story is where it came from, not an invented round
+    expect(roundStory(imported, D)).toEqual({ rounds: [], changesAsked: 0, firstRound: false, importedFrom: 'youtube' });
+    expect(roundStory({ ...imported, importedFrom: null }, D)?.rounds).toHaveLength(1);
+    // asked to change after all, it's no win: no story, no pick
+    const undone = { ...brief([round(7, 1, D, [decision('pick', at, { optionId: 71 }), decision('changes', '2026-10-20T15:00:00Z')], { options: [71] })]), importedFrom: 'youtube' as const };
+    expect(roundStory(undone, D)).toBeNull();
+    expect(portfolioGrowth([undone], D, clock)).toMatchObject({ picks: 0, importedPicks: 0 });
+  });
+
   it('filters the wall by client with buttons only while every name fits one', async () => {
     const { clientFilterControl } = await import('../shared/workflow');
     const c = (...names: string[]) => names.map((name) => ({ name }));
@@ -930,5 +955,166 @@ describe('a designer’s portfolio and private growth', () => {
     expect(barFilter({ month: '2026-10' }, '2026-09')).toEqual({ month: '2026-09', clientId: '' });
     // the month shown pressed again: every win, the client filter as it is
     expect(barFilter({ month: '2026-09' }, '2026-09')).toEqual({ month: '' });
+  });
+});
+
+describe('past thumbnails from YouTube', () => {
+  const ID = 'dQw4w9WgXcQ';
+
+  it('reads the video id from every shape of YouTube link', async () => {
+    const { youtubeVideoId } = await import('../shared/workflow');
+    for (const link of [
+      `https://www.youtube.com/watch?v=${ID}`,
+      `https://youtube.com/watch?v=${ID}&t=42s&list=PL0123456789`,
+      `https://m.youtube.com/watch?feature=share&v=${ID}`,
+      `http://www.youtube.com/watch?v=${ID}`,
+      `HTTPS://WWW.YOUTUBE.COM/watch?v=${ID}`,
+      `https://www.youtube.com/watch/?v=${ID}#t=30`,
+      `www.youtube.com/watch?v=${ID}`,
+      `youtube.com/shorts/${ID}?si=AbCdEf`,
+      `https://www.youtube.com/shorts/${ID}/`,
+      `https://www.youtube.com/live/${ID}?feature=shared`,
+      `https://www.youtube.com/embed/${ID}?start=10`,
+      `https://youtu.be/${ID}`,
+      `youtu.be/${ID}?si=xyz&t=5`,
+      `//youtu.be/${ID}`,
+      `  https://youtu.be/${ID}/  `,
+    ]) expect(youtubeVideoId(link), link).toBe(ID);
+    // '-' and '_' are part of an id
+    expect(youtubeVideoId('https://youtu.be/a-b_c-d_e-F')).toBe('a-b_c-d_e-F');
+  });
+
+  it('reads nothing from other hosts, other schemes or ids that aren’t ids', async () => {
+    const { youtubeVideoId, YOUTUBE_IMPORT_LIMITS } = await import('../shared/workflow');
+    for (const link of [
+      // hosts that only look like YouTube's
+      `https://youtube.com.evil.test/watch?v=${ID}`,
+      `https://www.youtube.com.evil.test/watch?v=${ID}`,
+      `https://youtu.be.evil/${ID}`,
+      `https://notyoutube.com/watch?v=${ID}`,
+      `https://evil.test/youtu.be/${ID}`,
+      `https://evil.test/?u=https://www.youtube.com/watch?v=${ID}`,
+      `https://www.youtube.com@evil.test/watch?v=${ID}`,
+      `https://evil.test#@youtube.com/watch?v=${ID}`,
+      `https://www.youtube.com./watch?v=${ID}`,
+      `https://music.youtube.com/watch?v=${ID}`,
+      `https://www.youtube-nocookie.com/embed/${ID}`,
+      // a user name or a port on the right host
+      `https://user:pw@www.youtube.com/watch?v=${ID}`,
+      `https://www.youtube.com:8443/watch?v=${ID}`,
+      // other schemes
+      `javascript:alert(1)//youtube.com/watch?v=${ID}`,
+      `data:text/html,youtu.be/${ID}`,
+      `ftp://youtube.com/watch?v=${ID}`,
+      // ids that aren't 11 of A–Z, a–z, 0–9, '-' and '_'
+      `https://www.youtube.com/watch?v=${ID.slice(0, 10)}`,
+      `https://www.youtube.com/watch?v=${ID}Q`,
+      'https://www.youtube.com/watch?v=dQw4w9WgX%3CQ',
+      'https://youtu.be/dQw4w9WgX$Q',
+      'https://youtu.be/dQw4w9WgX%20',
+      // pages that aren't one video
+      'https://www.youtube.com/watch?list=PL0123456789',
+      'https://www.youtube.com/@SomeChannel',
+      `https://www.youtube.com/shorts/${ID}/more`,
+      `https://www.youtube.com/v/${ID}`,
+      'https://youtu.be/',
+      // a bare id is not a link
+      ID,
+      '', '   ', 'not a link',
+      `https://www.youtube.com/watch?v=${ID}&x=${'a'.repeat(YOUTUBE_IMPORT_LIMITS.url)}`,
+    ]) expect(youtubeVideoId(link), link).toBeNull();
+    expect(youtubeVideoId(null)).toBeNull();
+    expect(youtubeVideoId(undefined)).toBeNull();
+  });
+
+  it('builds the video’s own page from its id, and keeps a channel page only on youtube.com', async () => {
+    const { youtubeWatchUrl, youtubeChannelUrl, youtubeChannelKey, youtubeVideoId, isYoutubeVideoId } = await import('../shared/workflow');
+    expect(youtubeWatchUrl(ID)).toBe(`https://www.youtube.com/watch?v=${ID}`);
+    expect(youtubeVideoId(youtubeWatchUrl(ID))).toBe(ID);
+    expect(isYoutubeVideoId(ID)).toBe(true);
+    expect(isYoutubeVideoId(`${ID} `)).toBe(false);
+    expect(isYoutubeVideoId(42)).toBe(false);
+    expect(youtubeChannelUrl('https://www.youtube.com/@AcmeCo')).toBe('https://www.youtube.com/@AcmeCo');
+    expect(youtubeChannelUrl(' https://youtube.com/@AcmeCo/ ')).toBe('https://www.youtube.com/@AcmeCo');
+    expect(youtubeChannelUrl('https://m.youtube.com/channel/UC0123456789?view=1#top')).toBe('https://www.youtube.com/channel/UC0123456789');
+    for (const bad of ['http://www.youtube.com/@AcmeCo', 'https://evil.test/@AcmeCo', 'https://www.youtube.com.evil.test/@AcmeCo', 'javascript:alert(1)', 'https://www.youtube.com/', 'https://www.youtube.com/a/b/c/d', '', null]) {
+      expect(youtubeChannelUrl(bad), String(bad)).toBeNull();
+    }
+    // the same channel, however it was written
+    expect(youtubeChannelKey('https://www.youtube.com/@AcmeCo')).toBe(youtubeChannelKey('https://youtube.com/@acmeco/'));
+    expect(youtubeChannelKey('https://evil.test/@AcmeCo')).toBeNull();
+  });
+
+  it('turns a paste into one row per video, in the order pasted', async () => {
+    const { pastedLinks, youtubeLookupRows, YOUTUBE_IMPORT_LIMITS, YOUTUBE_PROBLEMS } = await import('../shared/workflow');
+    expect(YOUTUBE_IMPORT_LIMITS).toMatchObject({ links: 20, url: 500, pictureBytes: 5 * 1024 * 1024 });
+    expect(YOUTUBE_PROBLEMS.tooBig).toBe('YouTube’s thumbnail for this video is over 5 MB');
+    expect(pastedLinks(`https://youtu.be/${ID}\n\n  https://youtu.be/a-b_c-d_e-F \r\nnot-a-link  other`)).toEqual([`https://youtu.be/${ID}`, 'https://youtu.be/a-b_c-d_e-F', 'not-a-link', 'other']);
+    expect(youtubeLookupRows([
+      `https://youtu.be/${ID}`,
+      // the same video by another link, and the same link again
+      ` https://www.youtube.com/watch?v=${ID}&t=5 `,
+      `https://youtu.be/${ID}`,
+      'not a link', ' not a link', '', '  ',
+      'https://youtu.be/a-b_c-d_e-F',
+    ])).toEqual([
+      { input: `https://youtu.be/${ID}`, videoId: ID },
+      { input: 'not a link', videoId: null },
+      { input: 'https://youtu.be/a-b_c-d_e-F', videoId: 'a-b_c-d_e-F' },
+    ]);
+  });
+
+  it('suggests the client of the channel’s last import, else the client named like the channel, else none', async () => {
+    const { suggestImportClient, looseNameKey } = await import('../shared/workflow');
+    expect(looseNameKey(' José  ORTIZ ')).toBe(looseNameKey('jose ortiz'));
+    const clients = [{ id: 1, name: 'Acme Co' }, { id: 2, name: 'José Ortiz' }, { id: 3, name: 'Brightline' }];
+    const channel = { channel: 'Brightline', channelUrl: 'https://www.youtube.com/@bright' };
+    const earlier = (clientId: number, importedAt: string, briefId: number, channelUrl = 'https://youtube.com/@Bright/') => ({ briefId, channelUrl, clientId, importedAt });
+    // an earlier import from this channel beats a name that matches another client
+    expect(suggestImportClient(channel, [earlier(1, '2026-10-01T12:00:00Z', 5)], clients)).toBe(1);
+    // the newest of them; on the same moment, the later brief
+    expect(suggestImportClient(channel, [earlier(1, '2026-10-01T12:00:00Z', 5), earlier(2, '2026-10-05T12:00:00Z', 6)], clients)).toBe(2);
+    expect(suggestImportClient(channel, [earlier(2, '2026-10-05T12:00:00Z', 9), earlier(1, '2026-10-05T12:00:00Z', 7)], clients)).toBe(2);
+    // another channel's imports don't count, nor one whose client isn't offered (archived): then the name decides
+    expect(suggestImportClient(channel, [earlier(1, '2026-10-01T12:00:00Z', 5, 'https://www.youtube.com/@other')], clients)).toBe(3);
+    expect(suggestImportClient(channel, [earlier(9, '2026-10-01T12:00:00Z', 5)], clients)).toBe(3);
+    // by name: any case, spacing and accents
+    expect(suggestImportClient({ channel: 'jose  ORTIZ', channelUrl: null }, [], clients)).toBe(2);
+    // two clients by that name, or none: the manager picks
+    expect(suggestImportClient({ channel: 'Acme Co', channelUrl: null }, [], [...clients, { id: 4, name: 'ACME  co' }])).toBeNull();
+    expect(suggestImportClient({ channel: 'Globex', channelUrl: 'https://www.youtube.com/@globex' }, [], clients)).toBeNull();
+    expect(suggestImportClient({ channel: null, channelUrl: null }, [], clients)).toBeNull();
+  });
+
+  it('needs the day it went live: a real date, once YouTube began, and not after today', async () => {
+    const { importDayProblem, YOUTUBE_FIRST_DAY } = await import('../shared/workflow');
+    const today = '2026-10-26';
+    expect(importDayProblem(undefined, today)).toBe('Add the day it went live');
+    expect(importDayProblem('  ', today)).toBe('Add the day it went live');
+    expect(importDayProblem('2026-02-30', today)).toBe('Use a valid date');
+    expect(importDayProblem('Oct 20', today)).toBe('Use a valid date');
+    expect(importDayProblem('2005-04-22', today)).toBe('That’s before YouTube began');
+    expect(importDayProblem(YOUTUBE_FIRST_DAY, today)).toBeNull();
+    expect(importDayProblem('2026-10-27', today)).toBe('That day hasn’t come yet');
+    expect(importDayProblem('2026-10-26', today)).toBeNull();
+  });
+
+  it('dates a past thumbnail’s round and pick at noon on the day it went live, in the workspace’s time zone', async () => {
+    const { importedRoundAt } = await import('../shared/workflow');
+    const { monthOf } = await import('../shared/dates');
+    expect(importedRoundAt('2026-10-20', 'America/New_York')).toBe('2026-10-20T16:00:00.000Z');
+    expect(importedRoundAt('2026-12-01', 'America/New_York')).toBe('2026-12-01T17:00:00.000Z');
+    expect(importedRoundAt('2026-10-20', 'Asia/Kolkata')).toBe('2026-10-20T06:30:00.000Z');
+    // noon on Oct 1 in Auckland is still Sep 30 in UTC, but it's an October pick there
+    const nz = importedRoundAt('2026-10-01', 'Pacific/Auckland');
+    expect(nz).toBe('2026-09-30T23:00:00.000Z');
+    expect(monthOf(nz, 'Pacific/Auckland')).toBe('2026-10');
+  });
+
+  it('tells the designer once per import', async () => {
+    const { thumbImportKey } = await import('../shared/workflow');
+    expect(thumbImportKey([12, 9, 30])).toBe('thumbnail_import:9');
+    expect(thumbImportKey([9])).toBe(thumbImportKey([30, 9]));
+    expect(() => thumbImportKey([])).toThrow();
   });
 });

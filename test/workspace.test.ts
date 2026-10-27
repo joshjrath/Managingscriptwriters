@@ -116,7 +116,11 @@ describe('the demo workspace', () => {
       expect(studio.board.map((b) => [b.title, b.state])).toEqual([
         ['What’s in the harvest box', 'changes'], ['What the night serum actually does', 'drafting'], ['Meet coach Dana', 'to_design'], ['Same-week appointments, really', 'in_review'],
       ]);
-      expect(studio.wins.map((w) => [w.title, w.option.letter])).toEqual([['The jacket that folds into itself', 'B'], ['Autumn in one bag', 'A']]);
+      // newest pick first: the two added from YouTube were picked on the days they went live, in August and July
+      expect(studio.wins.map((w) => [w.title, w.option.letter, w.imported?.url ?? null])).toEqual([
+        ['The jacket that folds into itself', 'B', null], ['Autumn in one bag', 'A', null],
+        ['A day at the roastery', 'A', 'https://www.youtube.com/watch?v=dmRoastDay1'], ['We went to the farm in Huila', 'A', 'https://www.youtube.com/watch?v=dmFarmTrip2'],
+      ]);
       expect(studio.counts).toMatchObject({ waitingOnReview: 1, onPlate: 3 });
       expect(((await get('/api/counts', ana)).json() as Counts).myThumbnails).toBe(3);
 
@@ -242,18 +246,23 @@ describe('the demo workspace', () => {
       const studio = (await get('/api/studio', ana)).json() as StudioPayload;
       expect(studio.wins.map((w) => [w.title, w.live])).toEqual([
         ['The jacket that folds into itself', null], ['Autumn in one bag', { url: 'https://www.youtube.com/watch?v=dmAutumnBag', publishedOn: liveOn }],
+        // her two older Northwind thumbnails, added from YouTube: live on the day each went up
+        ['A day at the roastery', { url: 'https://www.youtube.com/watch?v=dmRoastDay1', publishedOn: '2026-08-18' }],
+        ['We went to the farm in Huila', { url: 'https://www.youtube.com/watch?v=dmFarmTrip2', publishedOn: '2026-07-14' }],
       ]);
       const bag = studio.wins.find((w) => w.title === 'Autumn in one bag')!;
       // its picture is kept by the browser for a day, as every option's is
       expect((await get(bag.option.url, ana)).cache).toBe('private, max-age=86400, immutable');
 
-      // her portfolio: both wins, newest pick first, each with its round story; the bag with where it went live and
-      // the Test & Compare winner (her own option, the pick, so its picture shows)
+      // her portfolio: every win, newest pick first, each with its round story (the two from YouTube say so instead);
+      // the bag with where it went live and the Test & Compare winner (her own option, the pick, so its picture shows)
       const mine = (await get('/api/studio/portfolio', ana)).json() as PortfolioPayload;
-      expect([mine.designer.name, mine.readOnly, mine.total, mine.filter]).toEqual(['Ana Torres', false, 2, { clientId: null, month: null }]);
-      expect(mine.cards.map((c) => [c.title, c.option.letter, c.coverUrl === c.option.url, c.story.firstRound, c.story.changesAsked])).toEqual([
-        ['The jacket that folds into itself', 'B', true, false, 1], ['Autumn in one bag', 'A', true, true, 0],
+      expect([mine.designer.name, mine.readOnly, mine.total, mine.filter]).toEqual(['Ana Torres', false, 4, { clientId: null, month: null }]);
+      expect(mine.cards.map((c) => [c.title, c.option.letter, c.coverUrl === c.option.url, c.story.firstRound, c.story.changesAsked, c.story.importedFrom ?? null])).toEqual([
+        ['The jacket that folds into itself', 'B', true, false, 1, null], ['Autumn in one bag', 'A', true, true, 0, null],
+        ['A day at the roastery', 'A', true, false, 0, 'youtube'], ['We went to the farm in Huila', 'A', true, false, 0, 'youtube'],
       ]);
+      expect([mine.cards[2].story.rounds, mine.cards[2].imported]).toEqual([[], { from: 'youtube', url: 'https://www.youtube.com/watch?v=dmRoastDay1' }]);
       expect(mine.cards[0].story.rounds.map((s) => [s.number, s.mine, s.options, s.outcome, s.note])).toEqual([
         [1, true, 3, 'changes', 'Keep B’s face, but make the words bigger and cut them to three.'], [2, true, 2, 'picked', 'Two words read best small.'],
       ]);
@@ -262,23 +271,30 @@ describe('the demo workspace', () => {
       expect(card.live?.testWinner).toEqual({ optionId: bag.option.id, letter: 'A', roundNumber: 1, isPick: true, url: bag.option.url });
       expect(card.live?.testNote).toMatch(/watching longer/);
       expect(mine.cards[0].live).toBeNull();
-      // growth over the last six months (September 2026 back to April): both picks this month, one from the first round,
-      // the jacket's standout, and the tags of the notes pinned on the harvest box's round 1
+      // growth over the last six months (September 2026 back to April): both site picks this month, one from the first
+      // round (the two from YouTube count in their months, but not in the first-round rate), the jacket's standout, and
+      // the tags of the notes pinned on the harvest box's round 1
       expect(mine.growth.months.map((m) => [m.month, m.picks])).toEqual([
-        ['2026-04', 0], ['2026-05', 0], ['2026-06', 0], ['2026-07', 0], ['2026-08', 0], ['2026-09', 2],
+        ['2026-04', 0], ['2026-05', 0], ['2026-06', 0], ['2026-07', 1], ['2026-08', 1], ['2026-09', 2],
       ]);
-      expect(mine.growth).toMatchObject({ picks: 2, firstRoundPicks: 1, firstRoundRate: 50, standouts: 1, notes: 3 });
+      expect(mine.growth).toMatchObject({ picks: 4, importedPicks: 2, roundPicks: 2, firstRoundPicks: 1, firstRoundRate: 50, standouts: 1, notes: 3 });
       expect(mine.growth.themes).toEqual([{ tag: 'text', count: 1 }, { tag: 'contrast', count: 1 }, { tag: 'composition', count: 1 }]);
-      expect([mine.clients.map((c) => [c.name, c.wins]), mine.months]).toEqual([[['Acme Outdoor Co.', 2]], [{ month: '2026-09', wins: 2 }]]);
+      expect([mine.clients.map((c) => [c.name, c.wins]), mine.months]).toEqual([
+        [['Acme Outdoor Co.', 2], ['Northwind Coffee Roasters', 2]], [{ month: '2026-09', wins: 2 }, { month: '2026-08', wins: 1 }, { month: '2026-07', wins: 1 }],
+      ]);
       // a filter narrows only the wall; a bad one is refused
       const august = (await get('/api/studio/portfolio?month=2026-08', ana)).json() as PortfolioPayload;
-      expect([august.cards.length, august.total, august.growth.picks]).toEqual([0, 2, 2]);
+      expect([august.cards.map((c) => c.title), august.total, august.growth.picks]).toEqual([['A day at the roastery'], 4, 4]);
       expect((await get(`/api/studio/portfolio?clientId=${bag.clientId}&month=2026-09`, ana)).json().cards).toHaveLength(2);
       expect((await get('/api/studio/portfolio?month=2026-13', ana)).status).toBe(400);
       // she was told once when it went live, a while ago, with a link to that card
       const notes = ((await get('/api/notifications', ana)).json() as { notifications: Notification[] }).notifications;
       expect(notes.filter((n) => n.type === 'thumbnail_live').map((n) => [n.title, n.link, !!n.readAt])).toEqual([
         ['Your thumbnail for “Autumn in one bag” went live', portfolioPath({ card: bag.option.id }), true],
+      ]);
+      // and once, quietly, when the two from YouTube went on her wall (no celebration: the jacket's is her only one)
+      expect(notes.filter((n) => n.link === portfolioPath()).map((n) => [n.type, n.title, n.body, !!n.readAt])).toEqual([
+        ['thumbnail_picked', 'Josh Rath added 2 past thumbnails to your wall', 'From YouTube: “A day at the roastery”, “We went to the farm in Huila”.', false],
       ]);
 
       // a manager opens it read-only by naming her (else 404), sees the mark on the brief and may change it; a writer

@@ -21,6 +21,11 @@
 // Timeliner: GET /api/thumbnails/timeliner-videos, managers only), and the managers' board asks to mark it live once
 // that video is Posted. A designer's portfolio (GET /api/studio/portfolio) is every current winner they made, each
 // with its round story, and private growth figures worked out from the rows (portfolioGrowth in shared/workflow.ts).
+//
+// Past thumbnails from YouTube (server/youtube.ts): a manager adds a video's thumbnail to a designer's wall as a brief
+// already picked and live (imported_from 'youtube'). It's an ordinary brief from then on, with one round, one option and
+// the pick; only its round story ("Added from YouTube") and the first-round pick rate tell it apart. A video is on at
+// most one brief that isn't cancelled (thumbnail_briefs_youtube_key), which the went-live mark keeps too.
 
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
@@ -39,14 +44,16 @@ import {
   asksToMarkLive, briefOrder, clearsLive, DEFAULT_OPTIONS, isDesignerTurn, isManager, isOpenThumb, isPictureMime, isPostedVideo, isThumbnailDesigner,
   JUST_PICKED_MS, liveProblems, MAX_OPTIONS, MAX_PINS, mergeLive, nextBrief, nextLetter, offersTimelinerVideo, PIN_NOTE_MAX, portfolioGrowth, portfolioPath, roundStory,
   THUMB_ACTIONS, THUMB_PIN_TAGS, thumbBriefPath, thumbLiveKey, thumbnailState, tidySecondLook, TIMELINER_STATUS_GROUPS, TIMELINER_STEP_LABEL,
-  timelinerVideoUrl,
-  type EditorKind, type OptionLetter, type Role, type StoryBrief, type ThumbAction, type ThumbMime, type ThumbPinTag, type TimelinerStatusGroup,
+  timelinerVideoUrl, youtubeVideoId, youtubeWatchUrl,
+  type EditorKind, type OptionLetter, type Role, type StoryBrief, type ThumbAction, type ThumbImportSource, type ThumbMime, type ThumbPinTag,
+  type TimelinerStatusGroup,
 } from '../shared/workflow';
 import {
   fileUrl, THUMBNAIL_LIVE_NOTIFICATION,
   type Counts, type Me, type PortfolioCard, type PortfolioPayload, type StudioHero, type StudioPayload, type ThumbnailBoard, type ThumbnailBrief,
-  type ThumbnailBriefDetail, type ThumbnailDecision, type ThumbnailDesignerLoad, type ThumbnailLive, type ThumbnailOption, type ThumbnailPin,
-  type ThumbnailRound, type ThumbnailSecondLook, type ThumbnailVideoLink, type ThumbnailWin, type TimelinerVideoChoice, type TimelinerVideoChoices,
+  type ThumbnailBriefDetail, type ThumbnailDecision, type ThumbnailDesignerLoad, type ThumbnailImported, type ThumbnailLive, type ThumbnailOption,
+  type ThumbnailPin, type ThumbnailRound, type ThumbnailSecondLook, type ThumbnailVideoLink, type ThumbnailWin, type TimelinerVideoChoice,
+  type TimelinerVideoChoices,
 } from '../shared/types';
 
 /** How long a picked or cancelled brief stays on the managers' board. */
@@ -77,13 +84,15 @@ const BRIEF_SELECT = `
          b.due_on, b.designer_id, d.name as designer_name, d.role as designer_role, d.editor_kind as designer_kind, d.active as designer_active,
          d.removed_at as designer_removed_at, b.created_by, cu.name as created_by_name, b.created_at, b.updated_at, b.cancelled_at,
          b.published_url, b.published_on, b.published_by, pu.name as published_by_name, b.published_at, b.test_winner_variant_id, b.test_note,
-         b.timeliner_task_id, tt.title as video_title, tt.status_group as video_status_group, tt.step_label as video_step_label
+         b.timeliner_task_id, tt.title as video_title, tt.status_group as video_status_group, tt.step_label as video_step_label,
+         b.imported_from, b.imported_at, b.imported_by, iu.name as imported_by_name, b.youtube_video_id, b.youtube_channel, b.youtube_channel_url
     from thumbnail_briefs b
     join clients c on c.id = b.client_id
     join users cu on cu.id = b.created_by
     left join shoots s on s.id = b.shoot_id
     left join users d on d.id = b.designer_id
     left join users pu on pu.id = b.published_by
+    left join users iu on iu.id = b.imported_by
     left join timeliner_tasks tt on tt.id = b.timeliner_task_id`;
 
 const OPTION_COLUMNS = `v.id, v.round_id, r.brief_id, r.number as round_number, v.letter, v.file_id, f.filename as file_name, v.mime, v.width, v.height,
@@ -100,6 +109,10 @@ interface BriefRow {
   test_winner_variant_id: number | null; test_note: string | null;
   /** the Timeliner video it's for, and that video in the copy now (null when the copy has lost it) */
   timeliner_task_id: string | null; video_title: string | null; video_status_group: string | null; video_step_label: string | null;
+  /** a past thumbnail added from YouTube: where from, when and by whom (null on a brief made on the site) */
+  imported_from: ThumbImportSource | null; imported_at: string | null; imported_by: number | null; imported_by_name: string | null;
+  /** the YouTube video it's for: an import's, or the went-live link's (thumbnail_briefs_youtube_key: one live brief per video) */
+  youtube_video_id: string | null; youtube_channel: string | null; youtube_channel_url: string | null;
 }
 
 interface OptionRow {
@@ -143,7 +156,7 @@ interface BriefWhere {
   designerId?: number;
   /** only open briefs (not picked or cancelled) */
   open?: boolean;
-  /** the board: open briefs, and those picked or cancelled since this time */
+  /** the board: open briefs, and those picked, cancelled or added from YouTube since this time */
   since?: string;
 }
 
@@ -160,7 +173,8 @@ async function loadBriefs(db: Db, where: BriefWhere): Promise<Loaded[]> {
   if (where.since) {
     params.push(where.since);
     const p = `$${params.length}::timestamptz`;
-    cond.push(`((b.cancelled_at is null and (${THUMB_WINNER('b')} is null or ${DECIDED_AT('b')} >= ${p})) or b.cancelled_at >= ${p})`);
+    // a past thumbnail added from YouTube is picked on the day it went live, so it's on the board while it's newly added
+    cond.push(`((b.cancelled_at is null and (${THUMB_WINNER('b')} is null or ${DECIDED_AT('b')} >= ${p} or b.imported_at >= ${p})) or b.cancelled_at >= ${p})`);
   }
   const rows = await db.query<BriefRow>(`${BRIEF_SELECT} ${cond.length ? `where ${cond.join(' and ')}` : ''} order by b.id`, params);
   if (!rows.length) return [];
@@ -284,6 +298,16 @@ const isStatusGroup = (g: string | null | undefined): g is TimelinerStatusGroup 
 const videoStep = (stepLabel: string | null, group: string): string =>
   stepLabel ?? TIMELINER_STEP_LABEL[isStatusGroup(group) ? group : 'toDo'];
 
+/** Where a past thumbnail added from YouTube came from (everyone who sees the brief); null for one made on the site. */
+function importedOf(r: BriefRow): ThumbnailImported | null {
+  if (!r.imported_from || !r.youtube_video_id) return null;
+  return {
+    from: r.imported_from, videoId: r.youtube_video_id, url: youtubeWatchUrl(r.youtube_video_id), channel: r.youtube_channel,
+    channelUrl: r.youtube_channel_url, importedAt: r.imported_at ?? r.created_at, importedById: r.imported_by == null ? null : Number(r.imported_by),
+    importedByName: r.imported_by_name,
+  };
+}
+
 /** The Timeliner video a brief is for, as the copy has it now (managers only); null when it names none. */
 function videoOf(r: BriefRow): ThumbnailVideoLink | null {
   if (!r.timeliner_task_id) return null;
@@ -334,6 +358,8 @@ function present(l: Loaded, view: View): { brief: ThumbnailBrief; rounds: Thumbn
     winner: l.winner, cover: l.winner ?? [...rounds].reverse().find((x) => x.options.length)?.options[0] ?? tray?.options[0] ?? null,
     // a designer it was taken from reads nothing of the brief since their round, the mark included
     live: past && !theirsIsNewest ? null : liveOf(l, maker),
+    // a past thumbnail added from YouTube says so wherever a round story would be
+    imported: importedOf(r),
     // the Timeliner video it's for is the managers' (designers never get the keys)
     ...(maker == null ? { timelinerTaskId: r.timeliner_task_id, video: videoOf(r) } : {}),
   };
@@ -350,11 +376,11 @@ export async function loadWins(db: Db, where: { madeBy?: number; clientId?: numb
   if (where.madeBy) { params.push(where.madeBy); by = `and v.uploaded_by = $${params.length}`; }
   const rows = await db.query<OptionRow & {
     title: string; client_id: number; client_name: string; picked_at: string; picked_by_name: string; reason: string | null; standout: boolean;
-    published_url: string | null; published_on: ISODate | null;
+    published_url: string | null; published_on: ISODate | null; imported_from: ThumbImportSource | null; youtube_video_id: string | null;
   }>(
     `with w as (select b.id as brief_id, ${THUMB_WINNER('b')} as variant_id from thumbnail_briefs b where ${cond.join(' and ')})
      select ${OPTION_COLUMNS}, tb.title, tb.client_id, c.name as client_name, pk.created_at as picked_at, pk.picked_by_name, pk.note as reason, pk.standout,
-            tb.published_url, tb.published_on
+            tb.published_url, tb.published_on, tb.imported_from, tb.youtube_video_id
        from w
        join thumbnail_variants v on v.id = w.variant_id
        join thumbnail_rounds r on r.id = v.round_id
@@ -373,6 +399,8 @@ export async function loadWins(db: Db, where: { madeBy?: number; clientId?: numb
     pickedAt: r.picked_at, pickedByName: r.picked_by_name, reason: r.reason, standout: !!r.standout,
     // a winner is picked, so its brief's mark is current (the Studio's Live badge)
     live: r.published_on ? { url: r.published_url, publishedOn: r.published_on } : null,
+    // a past thumbnail added from YouTube ("Added from YouTube", with "Watch on YouTube")
+    imported: r.imported_from && r.youtube_video_id ? { from: r.imported_from, url: youtubeWatchUrl(r.youtube_video_id) } : null,
   }));
 }
 
@@ -458,14 +486,14 @@ const dayOf = (clock: Clock, at: string) => nowInZone(clock.timezone, new Date(a
 const dueThisWeek = (b: ThumbnailBrief, clock: Clock) => isOpenThumb(b.state) && !!b.dueOn && b.dueOn <= endOfWeek(clock);
 
 /** An active thumbnail designer, or null. */
-async function activeDesigner(db: Db, id: number): Promise<{ id: number; name: string } | null> {
+export async function activeDesigner(db: Db, id: number): Promise<{ id: number; name: string } | null> {
   const u = await db.one<{ id: number; name: string; role: Role; editor_kind: EditorKind | null; active: boolean; removed_at: string | null }>(
     `select id, name, role, editor_kind, active, removed_at from users where id = $1`, [id],
   );
   return u && u.active && !u.removed_at && isThumbnailDesigner({ role: u.role, editorKind: u.editor_kind }) ? { id: u.id, name: u.name } : null;
 }
 
-const chooseDesigner = () => new HttpError(400, 'Choose a thumbnail designer', { designerId: 'Choose a thumbnail designer' });
+export const chooseDesigner = () => new HttpError(400, 'Choose a thumbnail designer', { designerId: 'Choose a thumbnail designer' });
 
 /** Only a thumbnail designer may work on options (managers decide; nobody else has a Studio). */
 export function requireDesigner(me: Me): void {
@@ -542,19 +570,55 @@ async function briefIdsOf(db: Db, designerId: number): Promise<number[]> {
 }
 
 /** A brief's rows as the portfolio's rules read them (roundStory, portfolioGrowth): every round, never one viewer's share. */
-const storyOf = (l: Loaded): StoryBrief => ({ cancelledAt: l.row.cancelled_at, rounds: l.rounds });
+const storyOf = (l: Loaded): StoryBrief => ({ cancelledAt: l.row.cancelled_at, rounds: l.rounds, importedFrom: l.row.imported_from });
 
 /**
- * Takes a brief's went-live mark back: every field null, and what the maker of `optionId` (the pick it was marked on:
- * a mark is always the current pick's) was told about it, while unread.
+ * Takes a brief's went-live mark back: every field null (its YouTube video too, which came from the link, unless it's
+ * a past thumbnail added from YouTube: that keeps the video it came from), and what the maker of `optionId` (the pick
+ * it was marked on: a mark is always the current pick's) was told about it, while unread.
  */
 async function takeBackLive(t: Db, briefId: number, optionId: number): Promise<void> {
   await t.query(
-    `update thumbnail_briefs set published_url = null, published_on = null, published_by = null, published_at = null, test_winner_variant_id = null, test_note = null
+    `update thumbnail_briefs set published_url = null, published_on = null, published_by = null, published_at = null, test_winner_variant_id = null, test_note = null,
+            youtube_video_id = case when imported_from is null then null else youtube_video_id end
       where id = $1`, [briefId],
   );
   await t.query(`delete from notifications where dedupe_key = $1 and read_at is null`, [thumbLiveKey(briefId, optionId)]);
 }
+
+/** The briefs not cancelled that are for these YouTube videos (thumbnail_briefs_youtube_key: at most one each), by video id. */
+export async function liveYoutubeBriefs(db: Db, videoIds: readonly string[], exceptBriefId?: number): Promise<Map<string, { briefId: number; title: string }>> {
+  if (!videoIds.length) return new Map();
+  const rows = await db.query<{ id: number; title: string; youtube_video_id: string }>(
+    `select id, title, youtube_video_id from thumbnail_briefs where youtube_video_id = any($1::text[]) and cancelled_at is null and id <> $2`,
+    [[...videoIds], exceptBriefId ?? 0],
+  );
+  return new Map(rows.map((r) => [r.youtube_video_id, { briefId: Number(r.id), title: r.title }]));
+}
+
+/** A write that ran into thumbnail_briefs_youtube_key: another brief not cancelled has that video (two writes racing). */
+export function isYoutubeKeyClash(err: unknown): boolean {
+  const e = err as { code?: unknown; constraint?: unknown; message?: unknown } | null;
+  return !!e && e.code === '23505'
+    && (e.constraint === 'thumbnail_briefs_youtube_key' || (typeof e.message === 'string' && e.message.includes('thumbnail_briefs_youtube_key')));
+}
+
+/** The went-live link is to a YouTube video already on another brief: 409, naming it beside the link. */
+function youtubeTaken(other: { title: string } | undefined): HttpError {
+  const msg = other
+    ? `That video is already on the site as “${other.title}”. A YouTube video can be on one thumbnail.`
+    : 'That video is already on another thumbnail on the site. A YouTube video can be on one thumbnail.';
+  return new HttpError(409, msg, { url: msg }, 'youtube_taken');
+}
+
+/** Reopening a cancelled brief whose YouTube video is on another brief that isn't cancelled now: 409, naming it. */
+function reopenTaken(other: { title: string } | undefined): HttpError {
+  return conflict(
+    `Its YouTube video is on ${other ? `“${other.title}”` : 'another thumbnail'} now, so this one can’t be reopened. A YouTube video can be on one thumbnail.`,
+    'youtube_taken',
+  );
+}
+
 const createSchema = z.object({ clientId: zs.id, shootId: zs.id.nullable().optional(), ...briefFields, optionsWanted: briefFields.optionsWanted.optional() });
 const ON_THE_IMAGE = 'Put the note on the image';
 /** A note on one spot of an option, sent with a decision (x and y from 0 to 1 across and down the picture: pinAt). */
@@ -599,8 +663,10 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
     const board = shown.map((s) => s.brief).sort(briefOrder);
     const allWins = await loadWins(db, { madeBy: designer.id });
     const wins = allWins.slice(0, WALL_SIZE);
-    // the newest pick of the last 12 hours, whatever the hero is: the Studio shows it on top (as EditorHome's Done card)
-    const justPicked = wins[0] && ctx.now().getTime() - new Date(wins[0].pickedAt).getTime() < JUST_PICKED_MS ? wins[0] : null;
+    // the newest pick of the last 12 hours, whatever the hero is: the Studio shows it on top (as EditorHome's Done card).
+    // Only a pick made on the site: a past thumbnail added from YouTube is quiet (it was picked long ago)
+    const newest = allWins.find((w) => !w.imported);
+    const justPicked = newest && ctx.now().getTime() - new Date(newest.pickedAt).getTime() < JUST_PICKED_MS ? newest : null;
 
     let hero: StudioHero = { kind: 'clear' };
     const changes = board.find((b) => b.state === 'changes');
@@ -798,8 +864,10 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
     await db.tx(async (t) => {
       const b = await t.one<LockedBrief & {
         brief: string | null; on_image: string | null; options_wanted: number; due_on: ISODate | null; client_name: string; timeliner_task_id: string | null;
+        youtube_video_id: string | null;
       }>(
-        `select b.id, b.client_id, b.title, b.brief, b.on_image, b.options_wanted, b.due_on, b.designer_id, b.cancelled_at, c.name as client_name, b.timeliner_task_id
+        `select b.id, b.client_id, b.title, b.brief, b.on_image, b.options_wanted, b.due_on, b.designer_id, b.cancelled_at, c.name as client_name, b.timeliner_task_id,
+                b.youtube_video_id
            from thumbnail_briefs b join clients c on c.id = b.client_id where b.id = $1 for update of b`, [id],
       );
       if (!b) throw notFound('Thumbnail brief');
@@ -848,12 +916,24 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
         const w = await t.one<{ winner: number | null }>(`select ${THUMB_WINNER('b')} as winner from thumbnail_briefs b where b.id = $1`, [id]);
         if (w?.winner) throw conflict('An option has already been picked for this brief, so it can’t be cancelled. Ask for changes first if it needs another round.', 'picked');
       }
+      // a cancelled brief kept its YouTube video, which may be on another brief since (one video, one live brief)
+      const reopening = cancel === false ? b.youtube_video_id : null;
+      if (reopening) {
+        const other = (await liveYoutubeBriefs(t, [reopening], id)).get(reopening);
+        if (other) throw reopenTaken(other);
+      }
       if (cancel !== undefined) changes.push(cancel ? 'cancelled' : 'reopened');
       if (!changes.length) return;
       const params: unknown[] = [id];
       const assign = set.map(([col, v]) => { params.push(v); return `${col} = $${params.length}`; });
       if (cancel !== undefined) assign.push(`cancelled_at = ${cancel ? 'now()' : 'null'}`);
-      await t.query(`update thumbnail_briefs set ${[...assign, 'updated_at = now()'].join(', ')} where id = $1`, params);
+      try {
+        await t.query(`update thumbnail_briefs set ${[...assign, 'updated_at = now()'].join(', ')} where id = $1`, params);
+      } catch (err) {
+        // added to another brief a moment ago: thumbnail_briefs_youtube_key decided
+        if (reopening && isYoutubeKeyClash(err)) throw reopenTaken(undefined);
+        throw err;
+      }
       const title = input.title ?? b.title;
       await logActivity(t, {
         actor: me, entityType: 'thumbnail', entityId: id, clientId: b.client_id,
@@ -1096,18 +1176,34 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
   // Marks a picked thumbnail live, changes the mark, or takes it back (every field left empty). Only the keys sent
   // change (mergeLive), so two managers changing different fields never undo each other. The picked option's maker is
   // told once per pick (de-duplicated by thumbLiveKey; taking the mark back takes that back while it's unread, and so
-  // does a later decision on the round, through the pick's decision id). Logged only when something changed.
+  // does a later decision on the round, through the pick's decision id). Logged only when something changed. A new
+  // link to a YouTube video keeps that video's id with the brief (youtubeVideoId), so a video is on one live brief:
+  // one already on another is 409 `youtube_taken`, naming it (thumbnail_briefs_youtube_key decides when two race).
   app.post('/api/thumbnails/:id/published', async (req): Promise<ThumbnailBriefDetail> => {
     const me = requireManager(req);
     const { id } = parse(idParams, req.params);
     const input = parse(liveSchema, req.body);
+    // the YouTube video a new link is to, to name the brief that has it when two writes race for it
+    const asked: { videoId: string | null } = { videoId: null };
+    try {
+      await markLive(me, id, input, asked);
+    } catch (err) {
+      const videoId = asked.videoId;
+      if (!videoId || !isYoutubeKeyClash(err)) throw err;
+      throw youtubeTaken((await liveYoutubeBriefs(db, [videoId], id)).get(videoId));
+    }
+    return detail(req, me, id);
+  });
+
+  async function markLive(me: Me, id: number, input: z.infer<typeof liveSchema>, asked: { videoId: string | null }): Promise<void> {
     await db.tx(async (t) => {
       const b = await lockBrief(t, id);
       if (!b) throw notFound('Thumbnail brief');
       const cur = await t.one<{
         winner: number | null; decision_id: number | null; published_url: string | null; published_on: ISODate | null; test_winner_variant_id: number | null; test_note: string | null;
+        imported_from: ThumbImportSource | null;
       }>(
-        `select ${THUMB_WINNER('b')} as winner, ${DECIDED_ID('b')} as decision_id, b.published_url, b.published_on, b.test_winner_variant_id, b.test_note
+        `select ${THUMB_WINNER('b')} as winner, ${DECIDED_ID('b')} as decision_id, b.published_url, b.published_on, b.test_winner_variant_id, b.test_note, b.imported_from
            from thumbnail_briefs b where b.id = $1`, [id],
       );
       if (b.cancelled_at || cur?.winner == null) {
@@ -1146,10 +1242,20 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
         cur.test_note !== mark.testNote && (mark.testNote ? 'the note' : 'no note'),
       ].filter((x): x is string => !!x);
       if (!changed.length) return;
+      // a new link: the YouTube video it's to (null for any other link), on no other live brief. A past thumbnail added
+      // from YouTube keeps the video it came from, whatever its link says
+      const newVideo = !cur.imported_from && cur.published_url !== mark.url;
+      const videoId = newVideo ? youtubeVideoId(mark.url) : null;
+      if (videoId) {
+        asked.videoId = videoId;
+        const other = (await liveYoutubeBriefs(t, [videoId], id)).get(videoId);
+        if (other) throw youtubeTaken(other);
+      }
       await t.query(
         `update thumbnail_briefs set published_url = $2, published_on = $3, published_by = $4, published_at = now(), test_winner_variant_id = $5, test_note = $6
+                ${newVideo ? ', youtube_video_id = $7' : ''}
           where id = $1`,
-        [id, mark.url, mark.publishedOn, me.id, mark.testWinnerOptionId, mark.testNote],
+        [id, mark.url, mark.publishedOn, me.id, mark.testWinnerOptionId, mark.testNote, ...(newVideo ? [videoId] : [])],
       );
       await logActivity(t, {
         actor: me, action: 'thumbnail.live', entityType: 'thumbnail', entityId: id, clientId: b.client_id,
@@ -1167,6 +1273,5 @@ export function registerThumbnailRoutes(app: FastifyInstance, ctx: Ctx) {
         }, me.id);
       }
     });
-    return detail(req, me, id);
-  });
+  }
 }

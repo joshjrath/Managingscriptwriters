@@ -10,7 +10,7 @@
 //   nullable columns, indexes), and backfill in a separate function migration.
 
 import type { Db } from './db';
-import { fillMissingDeadlines, linkDeliveredPdfs, rereadNeedsReview } from './backfill';
+import { fillMissingDeadlines, fillYoutubeVideoIds, linkDeliveredPdfs, rereadNeedsReview } from './backfill';
 
 export type Migration = string | ((t: Db) => Promise<void>);
 
@@ -926,4 +926,25 @@ alter table thumbnail_briefs add column test_note text;
 alter table thumbnail_briefs add constraint thumbnail_briefs_published_check check (published_on is not null or num_nonnulls(published_url, test_winner_variant_id, test_note) = 0);
 create index thumbnail_briefs_timeliner_idx on thumbnail_briefs (timeliner_task_id) where timeliner_task_id is not null;
 `,
+  // 43 · Thumbnail Studio: past thumbnails from YouTube. A manager can add a thumbnail that's already out on YouTube to a
+  // designer's wall, as a brief already picked and live. The brief remembers where it came from (imported_from: null,
+  // or 'youtube'), when and by whom, and the video's id and channel (its name and page, so the next video from that
+  // channel can suggest the same client). A video is on at most one brief that isn't cancelled
+  // (thumbnail_briefs_youtube_key), so first a brief already marked live with a YouTube link takes its video's id
+  // (fillYoutubeVideoIds in backfill.ts: of two live briefs linking one video, the later stays without it). A function,
+  // so the columns, that fill and then the index run in this order in the one transaction. Every column is nullable
+  // and only added; nothing is dropped.
+  async (t) => {
+    for (const stmt of [
+      `alter table thumbnail_briefs add column imported_from text`,
+      `alter table thumbnail_briefs add column imported_at timestamptz`,
+      `alter table thumbnail_briefs add column imported_by bigint references users(id)`,
+      `alter table thumbnail_briefs add column youtube_video_id text`,
+      `alter table thumbnail_briefs add column youtube_channel text`,
+      `alter table thumbnail_briefs add column youtube_channel_url text`,
+      `alter table thumbnail_briefs add constraint thumbnail_briefs_imported_from_check check (imported_from is null or imported_from in ('youtube'))`,
+    ]) await t.query(stmt);
+    await fillYoutubeVideoIds(t);
+    await t.query(`create unique index thumbnail_briefs_youtube_key on thumbnail_briefs (youtube_video_id) where cancelled_at is null`);
+  },
 ];

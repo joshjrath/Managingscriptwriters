@@ -241,6 +241,46 @@ export function onOrAfterDay(at: string | null | undefined, day: ISODate, tz: st
   return nowInZone(tz, new Date(t)).date >= day;
 }
 
+/** A date with a time: its day, then the zone it was written in ('Z', '+05:30', '-0700'), when it says. */
+const STAMP_RE = /^(\d{4}-\d{2}-\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(Z|[+-]\d{2}:?\d{2})?$/i;
+
+/**
+ * The day a moment falls on in the time zone `tz`: '2026-10-20T03:00:00Z' is Oct 19 in New York. A plain date
+ * ('2026-10-20') is that day as it is, never moved by a zone, and a time written without a zone is the day it's
+ * written on. Null for anything else (only these shapes are read, since engines parse looser text differently). It's
+ * how YouTube's publish date (an instant from its API, a day or an instant from a video's page) becomes the workspace's.
+ */
+export function dayOf(at: string | null | undefined, tz: string): ISODate | null {
+  if (typeof at !== 'string') return null;
+  const s = at.trim();
+  const m = STAMP_RE.exec(s);
+  if (!m) return isISODate(s) ? s : null;
+  if (!isISODate(m[1])) return null;
+  if (!m[2]) return m[1];
+  // '-0700' written as '-07:00', the form every engine reads
+  const t = Date.parse(/[+-]\d{4}$/.test(s) ? `${s.slice(0, -2)}:${s.slice(-2)}` : s);
+  if (Number.isNaN(t)) return null;
+  const day = nowInZone(tz, new Date(t)).date;
+  return isISODate(day) ? day : null;
+}
+
+/**
+ * The moment the wall clock in `tz` reads `minutes` past midnight on `day`, as an ISO timestamp: noon (720) on
+ * 2026-10-20 in New York is '2026-10-20T16:00:00.000Z'. Two passes settle a day the clocks change on.
+ */
+export function atWallTime(day: ISODate, minutes: number, tz: string): string {
+  if (!isISODate(day)) throw new Error(`Invalid date: ${day}`);
+  const wall = toUTC(day).getTime() + minutes * 60_000;
+  // how far the zone's wall clock is ahead of UTC at `at`
+  const offset = (at: number) => {
+    const z = nowInZone(tz, new Date(at));
+    return toUTC(z.date).getTime() + z.minutes * 60_000 - at;
+  };
+  let at = wall - offset(wall);
+  at = wall - offset(at);
+  return new Date(at).toISOString();
+}
+
 export function parseCutoff(cutoff: string): number {
   const m = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(cutoff);
   if (!m) throw new Error(`Invalid cutoff: ${cutoff}`);

@@ -6,7 +6,8 @@
 // "Your best this month" (a sideways strip of the picks marked Standout this month, hidden when there are none), the
 // Wall of wins (every pick, newest first, filtered by client, standouts marked; a new win flips in with a glint and a
 // few sparks the first time it's seen, when animations are on), a few numbers counted from rows, and to-dos. No
-// timers, points or streaks. A win marked live has a small Live badge, linking to the video in a new tab. The
+// timers, points or streaks. A win marked live has a small Live badge, linking to the video in a new tab; a past
+// thumbnail a manager added from YouTube says so instead, with "Watch on YouTube". The
 // designer's References (their private boards) are a tap away in the header, and their Portfolio (every win with how
 // it came about, and private growth figures: StudioPortfolio.tsx) from the Wall of wins. The first-round pick rate is
 // only ever on the portfolio, never here.
@@ -28,6 +29,7 @@ import { KpiCard } from '../components/StatCards';
 import { TodoPanel } from '../components/Todos';
 import { BriefThumb, BriefTile, optionAlt, StateChip, toneFor } from '../components/ThumbBits';
 import { LiveBadge } from '../components/ThumbLive';
+import { AddedFromYoutube } from '../components/ThumbImport';
 import { allMarks, HideNotes, marksOn, PinList, PinnedThumb } from '../components/ThumbPins';
 import { useNow } from '../components/EditingBits';
 import { NoDesigners } from './Thumbnails';
@@ -168,7 +170,7 @@ function PickedCard({ win, readOnly, now }: { win: ThumbnailWin; readOnly: boole
       <div className="st-hero-body">
         <span className="row-flex s2"><span className="eh-badge"><Sparkles aria-hidden />Just picked</span>{win.standout && <span className="eh-badge standout"><Trophy aria-hidden />Standout</span>}</span>
         <h2 className="st-just-title">{win.title}</h2>
-        <p className="st-hero-sub">{win.clientName} · {win.pickedByName} picked option {win.option.letter} · {fmtAgo(win.pickedAt, now)}</p>
+        <p className="st-hero-sub">{win.clientName} · {pickedWords(win)} · {fmtAgo(win.pickedAt, now)}</p>
         {win.reason && <blockquote className="st-hero-quote">{win.reason}</blockquote>}
         <div className="eh-actions">
           <a className="btn eh-btn dark" href="#st-wall" onClick={(e) => { e.preventDefault(); toWall(); }}>
@@ -180,6 +182,9 @@ function PickedCard({ win, readOnly, now }: { win: ThumbnailWin; readOnly: boole
     </section>
   );
 }
+
+/** "Josh picked option B", or for a past thumbnail "Josh added it from YouTube". */
+const pickedWords = (win: ThumbnailWin) => (win.imported ? `${win.pickedByName} added it from YouTube` : `${win.pickedByName} picked option ${win.option.letter}`);
 
 /** "Due tomorrow, Fri, Oct 9" for an open brief, else nothing. */
 function DueLine({ brief }: { brief: ThumbnailBrief }) {
@@ -284,7 +289,7 @@ function PickedHero({ brief, win, readOnly, now }: { brief: ThumbnailBrief; win:
         <span className="row-flex s2"><span className="eh-badge"><Sparkles aria-hidden />Just picked</span>{win.standout && <span className="eh-badge standout"><Trophy aria-hidden />Standout</span>}</span>
         <div className="st-kicker">{win.clientName}</div>
         <h2 className={`st-hero-title${win.title.length > 40 ? ' long' : ''}`}>{win.title}</h2>
-        <p className="st-hero-sub">{win.pickedByName} picked option {win.option.letter} · {fmtAgo(win.pickedAt, now)}</p>
+        <p className="st-hero-sub">{pickedWords(win)} · {fmtAgo(win.pickedAt, now)}</p>
         {win.reason && <blockquote className="st-hero-quote">{win.reason}</blockquote>}
         <div className="eh-actions">
           <a className="btn eh-btn dark" href="#st-wall" onClick={(e) => { e.preventDefault(); toWall(); }}>
@@ -471,7 +476,8 @@ function WallOfWins({ wins, readOnly, designerId, name }: { wins: ThumbnailWin[]
               const isNew = fresh.has(w.option.id);
               return (
                 <li key={w.option.id} className={`win${isNew ? ' fresh' : ''}${w.standout ? ' standout' : ''}`} style={{ ['--i' as string]: Math.min(i, 14) }} data-win={w.option.id}>
-                  <Link to={thumbBriefPath(me, w.briefId)} className="win-link" aria-label={`${w.title}, ${w.clientName}: option ${w.option.letter}, picked ${day(w.pickedAt)}${w.standout ? ', a standout' : ''}${w.live ? ', live' : ''}${isNew ? ' (new)' : ''}`}>
+                  <Link to={thumbBriefPath(me, w.briefId)} className="win-link"
+                    aria-label={`${w.title}, ${w.clientName}: ${w.imported ? `added from YouTube, live ${day(w.pickedAt)}` : `option ${w.option.letter}, picked ${day(w.pickedAt)}`}${w.standout ? ', a standout' : ''}${w.live && !w.imported ? ', live' : ''}${isNew ? ' (new)' : ''}`}>
                     <Thumb src={w.option.url} alt={optionAlt(w.option, w.title)} eager={i < 6}>
                       {isNew && allowed && <span className="dt-glint" aria-hidden />}
                       {w.standout && <span className="thumb-tl"><Chip color="yellow" icon={<Trophy aria-hidden />}>Standout</Chip></span>}
@@ -479,8 +485,9 @@ function WallOfWins({ wins, readOnly, designerId, name }: { wins: ThumbnailWin[]
                     </Thumb>
                     <span className="win-cap"><b>{w.title}</b><span>{w.clientName} · {day(w.pickedAt)}</span></span>
                   </Link>
-                  {/* beside the link, over the picture's corner: a link can't sit inside another */}
-                  {w.live && <span className="win-over"><LiveBadge live={w.live} /></span>}
+                  {/* beside the link, over the picture's corner: a link can't sit inside another. A past thumbnail's
+                      "Watch on YouTube" is under it instead (the same video: one link to it is enough) */}
+                  {w.imported ? <AddedFromYoutube imported={w.imported} compact className="win-yt" /> : w.live && <span className="win-over"><LiveBadge live={w.live} /></span>}
                 </li>
               );
             })}

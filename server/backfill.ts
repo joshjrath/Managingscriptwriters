@@ -10,6 +10,7 @@
 import type { Db } from './db';
 import { computeDeadlines, draftFromFinal, finalFromDraft, type DeadlineRules, type ISODate } from '../shared/dates';
 import { fmtDate } from '../shared/format';
+import { youtubeVideoId } from '../shared/workflow';
 import { nameKey } from './matching';
 
 /**
@@ -94,4 +95,32 @@ export async function linkDeliveredPdfs(t: Db): Promise<void> {
  */
 export async function rereadNeedsReview(t: Db): Promise<void> {
   await t.query(`update timeliner_tasks set history_group = null where status_group = 'inProgress'`);
+}
+
+/**
+ * Migration 43: a brief marked live with a YouTube link before past thumbnails could be added from YouTube keeps that
+ * video's id (youtubeVideoId, the parser the went-live route uses too), so the same video can't be added again. Where
+ * two briefs that aren't cancelled link the same video, the one made first keeps it and the later one is left without
+ * it (logged), so the unique index on live briefs' videos (thumbnail_briefs_youtube_key) can be created after this.
+ * Cancelled briefs keep theirs, since that index leaves them out.
+ */
+export async function fillYoutubeVideoIds(t: Db): Promise<void> {
+  const rows = await t.query<{ id: number; published_url: string; cancelled: boolean }>(
+    `select id, published_url, cancelled_at is not null as cancelled from thumbnail_briefs
+      where published_url is not null and youtube_video_id is null order by created_at, id`,
+  );
+  const kept = new Map<string, number>();
+  for (const r of rows) {
+    const videoId = youtubeVideoId(r.published_url);
+    if (!videoId) continue;
+    if (!r.cancelled) {
+      const first = kept.get(videoId);
+      if (first != null) {
+        console.warn(`migration 43: thumbnail brief ${r.id} links the same YouTube video (${videoId}) as brief ${first}, which keeps it; brief ${r.id} is left without its video id`);
+        continue;
+      }
+      kept.set(videoId, r.id);
+    }
+    await t.query(`update thumbnail_briefs set youtube_video_id = $2 where id = $1`, [r.id, videoId]);
+  }
 }

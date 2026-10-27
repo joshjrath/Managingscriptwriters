@@ -20,6 +20,7 @@ export function audienceOf(p: KindOf): Audience {
 
 /** Updates that only matter to some people (Admins count as managers). */
 export const ONLY_FOR: Record<string, Audience[]> = {
+  '2026-10-26-thumbnails-from-youtube': ['managers', 'designers'],
   '2026-10-26-thumbnail-portfolio': ['managers', 'designers'], '2026-10-26-thumbnail-went-live': ['managers', 'designers'],
   '2026-10-25-editors-add-from-timeliner': ['managers'], '2026-10-25-thumbnails-always-in-menu': ['managers'], '2026-10-25-thumbnail-studio': ['managers', 'designers'],
   '2026-10-07-calendar-shoots-match': ['managers'], '2026-10-07-editors': ['managers', 'editors'], '2026-10-07-calendar-shoots': ['managers'],
@@ -51,6 +52,19 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-26-thumbnails-from-youtube',
+    date: '2026-10-26',
+    title: 'Thumbnails: add past thumbnails from YouTube',
+    summary: 'Managers can paste links to videos already on YouTube and put their thumbnails on a designer’s wall as picked and live. The picture, title, channel and day it went live all come from YouTube.',
+    changes: [
+      { tag: 'new', text: 'On the Thumbnails page, Add past thumbnails takes up to 20 YouTube links, one per line (watch pages, Shorts and youtu.be links all work). Look up shows each video’s thumbnail, title, channel and the day it went live, as YouTube has them. Nothing is saved until you add them.' },
+      { tag: 'new', text: 'Each video needs a client, and one is suggested: the client an earlier video from the same channel went to, or the client with the channel’s name. When YouTube doesn’t give the day it went live, type it in. You can change a title, or untick a video to leave it out. A link that can’t be used says why (not a YouTube video, not found, or private), and a video that’s already on the site links to its thumbnail.' },
+      { tag: 'new', text: 'Choose who made them (only thumbnail designers are offered) and press Add. Each one becomes a picked, live thumbnail on that designer’s Wall of wins and in their portfolio, dated the day it went live. They get one message listing what was added, with no celebration. A YouTube video can only be on one thumbnail, so one that’s already there is left out and named.' },
+      { tag: 'new', text: 'For designers: a thumbnail added from YouTube reads “Added from YouTube” with Watch on YouTube (it opens in a new tab) on its page, on the Wall of wins and in the portfolio, where its rounds would be. It counts in your picks for the month it went live, but not in how many of your picks came from the first round, since it had no rounds.' },
+      { tag: 'improved', text: 'One YouTube video is never on two thumbnails: Mark live won’t take a link to a video that’s already on another thumbnail (it names that thumbnail beside the link), and a cancelled thumbnail can’t be reopened while its video is on another one.' },
+    ],
+  },
   {
     id: '2026-10-26-thumbnail-portfolio',
     date: '2026-10-26',
