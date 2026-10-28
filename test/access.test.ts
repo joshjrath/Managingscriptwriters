@@ -145,6 +145,14 @@ const ACCESS: Record<string, Access> = {
   // picked, live briefs; on no editor's list (test/thumbnail-youtube.test.ts)
   'POST /api/thumbnails/youtube/lookup': 'manager',
   'POST /api/thumbnails/youtube/import': 'manager',
+  // content roadmaps: everyone reads them and ticks their own deliverables (the route checks it's theirs); managers
+  // upload a PDF, move a role and remove one (test/roadmaps.test.ts)
+  'GET /api/roadmaps': 'user',
+  'GET /api/roadmaps/:id': 'user',
+  'POST /api/roadmap-tasks/:id/done': 'user',
+  'POST /api/roadmaps/import': 'manager',
+  'PATCH /api/roadmaps/:id/roles/:key': 'manager',
+  'DELETE /api/roadmaps/:id': 'manager',
 
   'GET /api/audit': 'admin',
   'PUT /api/settings/theme': 'admin',
@@ -278,15 +286,15 @@ describe('route access', () => {
 describe('editors, by kind', () => {
   const allowed = (kind: EditorKind) => Object.entries(editorRoutesFor(kind)).flatMap(([method, set]) => [...set].map((r) => `${method} ${r}`)).sort();
 
-  it('gives video editors exactly what editors had before kinds', () => {
+  it('gives video editors exactly what editors had before kinds, and the content roadmaps', () => {
     expect(allowed('short_form')).toEqual([
       'GET /api/auth/status', 'GET /api/bootstrap', 'GET /api/counts', 'GET /api/moments', 'GET /api/notifications',
       'GET /api/calendar', 'GET /api/script-bank', 'GET /api/files/:id', 'GET /api/shoot-readiness', 'GET /api/search',
       'GET /api/clients', 'GET /api/clients/:id', 'GET /api/resources',
-      'GET /api/todos', 'GET /api/editing/me', 'GET /api/editing/script-pdf/:batchId',
+      'GET /api/todos', 'GET /api/editing/me', 'GET /api/editing/script-pdf/:batchId', 'GET /api/roadmaps', 'GET /api/roadmaps/:id',
       'POST /api/auth/login', 'POST /api/auth/logout', 'POST /api/me/password', 'POST /api/me/timezone', 'POST /api/me/whats-new',
       'POST /api/moments/seen', 'POST /api/notifications/read',
-      'POST /api/todos', 'POST /api/editing/focus',
+      'POST /api/todos', 'POST /api/editing/focus', 'POST /api/roadmap-tasks/:id/done',
       'PATCH /api/todos/:id',
       'DELETE /api/todos/:id',
     ].sort());

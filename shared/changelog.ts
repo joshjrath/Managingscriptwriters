@@ -53,6 +53,19 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-10-28-content-roadmap',
+    date: '2026-10-28',
+    title: 'Content: the long-form roadmap, read from a PDF',
+    summary: 'A new Content tab, near the top of everyone’s menu, lays out the month’s long-form uploads: each video, every deadline, and who owns each step. Managers upload the roadmap PDF and it’s read for them.',
+    changes: [
+      { tag: 'new', text: 'Content shows the month at a glance: a countdown to the next upload and how much is done, the lineup of videos (each with its publish day, its words for the thumbnail and how far along it is: brief, script, film, edit, thumbnail, publish), and what’s yours to do next.' },
+      { tag: 'new', text: 'The schedule has three views: a timeline with every deliverable on its day, By week (the production calendar from the PDF, a column per video), and a list by day. Tap any deliverable for its time, owner and status. Tap a video for its brief: the idea, why people would watch, what happens in it, the thumbnail and what to do before filming.' },
+      { tag: 'new', text: 'Managers: Upload roadmap takes the month’s PDF. Every video, deadline and owner is read from it and laid out as the schedule, and each role is given to someone on the team: the person the PDF names (like Josh), else the writer, thumbnail designer or video editor with the least on. Change anyone under Who’s on it; their deliverables move with them, and they’re told. You can mark everything dated before today as done when you upload part-way through a month.' },
+      { tag: 'new', text: 'Tick a deliverable done when it’s finished. Only the person on it, or a manager, can.' },
+      { tag: 'new', text: 'Roadmap deliverables show on the Calendar as Content roadmap, and publish days stand out. Writers see their own and every publish day; tap one to open it on the Content tab.' },
+    ],
+  },
+  {
     id: '2026-10-26-thumbnails-from-youtube',
     date: '2026-10-26',
     title: 'Thumbnails: add past thumbnails from YouTube',

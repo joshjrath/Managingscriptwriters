@@ -15,6 +15,7 @@ import { plural } from '../../shared/format';
 import { sessionMode } from '../recording';
 import { loadShootForecasts } from '../forecast';
 import { thumbnailCounts } from '../thumbnails';
+import { roadmapEvents } from '../roadmaps';
 import type {
   AttentionItem, AttentionKind, BatchSummary, Bootstrap, CalendarEvent, Counts, Dashboard, DueCategory, DueDay, Me,
   MyWork, ReviewQueue, ShootReadiness, WriterLoad,
@@ -181,7 +182,9 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     return {
       me, mode: sessionMode(req), notesImport: !!ctx.notesReader, secondLook: !!ctx.thumbCritic && !req.viewingAs,
       // AI brief ideas in New thumbnail, for managers; off while an Admin views as someone, as the route is (it would use their limits)
-      briefIdeas: !!ctx.briefHelper && !req.viewingAs, uploadLimitMb: Math.round(ctx.uploadLimitBytes / 1024 / 1024), whatsNewSeen: seen?.whats_new_seen ?? null,
+      briefIdeas: !!ctx.briefHelper && !req.viewingAs,
+      // reading a content roadmap's PDF, for managers; off while an Admin views as someone, as the route is
+      roadmapImport: !!ctx.roadmapReader && !req.viewingAs, uploadLimitMb: Math.round(ctx.uploadLimitBytes / 1024 / 1024), whatsNewSeen: seen?.whats_new_seen ?? null,
       timezone: { mine: seen?.timezone ?? null, confirmed: !!seen?.timezone_confirmed_at },
       // still on the temporary password someone gave them: ask for their own
       mustChangePassword: !!seen?.temp && !sessionMode(req)?.viewingAs,
@@ -347,8 +350,10 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
       }
     }
     events.push(...(await syncedEvents(me, q.from, q.to, clock.today)));
+    // the content roadmaps' deliverables (with a writer chosen, theirs and every publish day)
+    events.push(...(await roadmapEvents(db, q.from, q.to, ctx.now(), { assigneeId: q.writerId, clientId: q.clientId })));
     // editors plan around shoots and when scripts are final, not the writing in between
-    if (isEditor(me.role)) return { events: events.filter((e) => e.type === 'shoot' || e.type === 'final' || e.type === 'external'), clock };
+    if (isEditor(me.role)) return { events: events.filter((e) => e.type === 'shoot' || e.type === 'final' || e.type === 'external' || e.type === 'content'), clock };
     return { events, clock };
   });
 

@@ -1,6 +1,6 @@
 // What an editor's sign-in may do, by kind (shared/workflow.ts: one job per person).
 // Every editor reads the calendar, finished scripts, clients and resources, and
-// uses to-dos (BASE). Video editors also see their own videos from Timeliner
+// uses to-dos, and reads the content roadmaps, marking their own deliverables done (BASE). Video editors also see their own videos from Timeliner
 // (opening the shoot's scripts PDF for a video of theirs), saying which one
 // they're on; thumbnail designers get their Studio: their briefs, uploading
 // options to their tray, sending a round, an AI second look on an option
@@ -21,12 +21,12 @@ const BASE: Routes = {
     '/api/auth/status', '/api/bootstrap', '/api/counts', '/api/moments', '/api/notifications',
     '/api/calendar', '/api/script-bank', '/api/files/:id', '/api/shoot-readiness', '/api/search',
     '/api/clients', '/api/clients/:id', '/api/resources',
-    '/api/todos',
+    '/api/todos', '/api/roadmaps', '/api/roadmaps/:id',
   ],
   POST: [
     '/api/auth/login', '/api/auth/logout', '/api/me/password', '/api/me/timezone', '/api/me/whats-new',
     '/api/moments/seen', '/api/notifications/read',
-    '/api/todos',
+    '/api/todos', '/api/roadmap-tasks/:id/done',
   ],
   PATCH: ['/api/todos/:id'],
   DELETE: ['/api/todos/:id'],

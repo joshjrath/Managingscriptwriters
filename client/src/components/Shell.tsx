@@ -7,7 +7,7 @@ import { homePath, isAdmin, isEditor, isManager, isThumbnailDesigner, isVideoEdi
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Bell, Building2, CalendarDays, Clapperboard, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
+  Bell, Building2, CalendarDays, Clapperboard, Film, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
   BookOpen, Circle, Eye, Globe2, Home, Images, Library, Palette, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
 } from 'lucide-react';
 import { LayoutGroup, m } from 'framer-motion';
@@ -149,6 +149,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
   // editors get a focused site: what's coming up, finished scripts, and the client material they cut from
   const editorItems = [
     { to: '/editor', label: 'Home', icon: <Home /> },
+    { to: '/content', label: 'Content', icon: <Film /> },
     { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
@@ -159,6 +160,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/studio', label: 'Studio', icon: <Palette />, count: counts.myThumbnails || undefined, not: ['/studio/refs', '/studio/portfolio'] },
     { to: '/studio/portfolio', label: 'Portfolio', icon: <BookOpen /> },
     { to: '/studio/refs', label: 'References', icon: <Images /> },
+    { to: '/content', label: 'Content', icon: <Film /> },
     { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
@@ -167,6 +169,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
   // writers: their own work first, then their Overview and the Production board, then where to find things
   const writerItems = [
     { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 },
+    { to: '/content', label: 'Content', icon: <Film /> },
     { to: '/overview', label: 'Overview', icon: <LayoutDashboard /> },
     { to: '/production', label: 'Production', icon: <Columns3 /> },
     { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },
@@ -176,6 +179,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
   ];
   const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; fresh?: boolean; show?: boolean; not?: string[] }[] = isThumbnailDesigner(me) ? designerItems : isEditor(me.role) ? editorItems : !manager ? writerItems : [
     { to: '/overview', label: 'Overview', icon: <LayoutDashboard />, count: counts.attention || undefined, hot: counts.attention > 0 },
+    { to: '/content', label: 'Content', icon: <Film /> },
     { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 },
     { to: '/production', label: 'Production', icon: <Columns3 /> },
     { to: '/calendar', label: 'Calendar', icon: <CalendarDays /> },

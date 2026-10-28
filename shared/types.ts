@@ -7,6 +7,7 @@ import type {
   SecondLookResult, Stage, ThumbAction, ThumbIdea, ThumbImportSource, ThumbMime, ThumbMomentKind, ThumbPinTag, ThumbRefSource, ThumbState, TimelinerStatusGroup,
   VideoState,
 } from './workflow';
+import type { RoadmapBeat, RoadmapExtras, RoadmapRole, RoadmapStep } from './roadmap';
 
 /** Every change request carries `x-scale-media: 1`; a page can't send it cross-site without a CORS preflight, which the server never grants. */
 export const CSRF_HEADER = 'x-scale-media';
@@ -208,6 +209,11 @@ export interface Bootstrap {
    * someone (the route answers 403 `viewing_as` then)
    */
   briefIdeas: boolean;
+  /**
+   * reading a roadmap PDF with AI is set up on the server (ANTHROPIC_API_KEY, ctx.roadmapReader): the Content tab offers
+   * Upload roadmap to managers only when this is true, and it's false while an Admin views as someone
+   */
+  roadmapImport: boolean;
   /** the largest file the server accepts, in MB (UPLOAD_LIMIT_MB) */
   uploadLimitMb: number;
   /** the newest What's new entry this person has opened */
@@ -614,7 +620,7 @@ export interface Dashboard {
 
 export interface CalendarEvent {
   id: string;
-  type: 'writing' | 'draft' | 'final' | 'shoot' | 'external' | 'tentative';
+  type: 'writing' | 'draft' | 'final' | 'shoot' | 'external' | 'tentative' | 'content';
   start: ISODate;
   end: ISODate;
   title: string;
@@ -627,6 +633,8 @@ export interface CalendarEvent {
   external?: ExternalEventInfo;
   /** a tentative shoot, or the date its scripts are due (managers only): an estimate, not booked */
   tentative?: { kind: 'shoot' | 'scripts'; forecast: ShootForecast };
+  /** a deliverable on a content roadmap (the Content tab) */
+  content?: { roadmapId: number; taskId: number; step: RoadmapStep; time: string | null; assigneeName: string | null };
 }
 
 export interface ExternalEventInfo {
@@ -2214,4 +2222,30 @@ export interface YoutubeImportResult {
     /** the brief that already has this video, when that's why */
     existing?: { briefId: number; title: string };
   }[];
+}
+
+// ── content roadmaps (the Content tab: server/roadmaps.ts, shared/roadmap.ts) ──
+
+/** A roadmap in the month tabs. Counts are counted from its deliverables. */
+export interface RoadmapListItem {
+  id: number; title: string; month: string; brand: string | null; videos: number; tasks: number; done: number; createdAt: string;
+}
+export interface RoadmapVideo {
+  id: number; position: number; title: string; publishDate: ISODate; publishTime: string | null; tag: string | null; format: string | null;
+  runtime: string | null; idea: string | null; why: string | null; beats: RoadmapBeat[]; thumbnailText: string | null;
+  thumbnailConcept: string | null; prep: string | null;
+}
+export interface RoadmapTask {
+  id: number; videoId: number | null; step: RoadmapStep; title: string; date: ISODate; time: string | null; role: RoadmapRole;
+  /** the person on its role now */
+  assigneeId: number | null;
+  doneAt: string | null; doneByName: string | null;
+}
+export interface RoadmapRoleInfo { key: RoadmapRole; label: string; person: string | null; responsibility: string | null; userId: number | null }
+export interface RoadmapDetail {
+  id: number; title: string; month: string; brand: string | null; summary: string | null; timezone: string; defaultTime: string;
+  extras: RoadmapExtras; sourceName: string | null; createdAt: string; createdByName: string | null;
+  /** now in the roadmap's zone, for working out what's overdue */
+  now: { date: ISODate; minutes: number };
+  roles: RoadmapRoleInfo[]; videos: RoadmapVideo[]; tasks: RoadmapTask[];
 }
