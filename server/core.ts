@@ -4,7 +4,7 @@
 import type { Db } from './db';
 import { makeClock, type Clock, type DeadlineRules, type ISODate } from '../shared/dates';
 import {
-  compressRanges, deriveStage, kindsSql, milestone, nextMilestone, summarize, VIDEO_EDITOR_KINDS,
+  compressRanges, deriveStage, kindsSql, milestone, nextMilestone, summarize, tidyNavOrder, VIDEO_EDITOR_KINDS,
   type BrandColour, type EditorKind, type ScriptLite, type ScriptStatus, type Role, type SecondLookResult, type ThumbIdea, type ThumbMime,
 } from '../shared/workflow';
 import type { WorkspaceTheme } from '../shared/palettes';
@@ -166,6 +166,7 @@ interface SettingsRow {
   org_name: string; timezone: string; cutoff: string; draft_offset_days: number; final_offset_days: number;
   day_mode: 'calendar' | 'business'; working_days: number[] | string; reminder_lead_days: number; plan_reminder_days: number;
   is_demo: boolean; reminders_last_run_at: string | null; theme: WorkspaceTheme | string | null; one_editor_since: ISODate;
+  nav_order: unknown;
 }
 
 /** `remindersEnabled` is the server's, not the workspace's: pages get settings through `settingsFor`, which fills it in. */
@@ -180,6 +181,7 @@ export async function loadSettings(db: Db, remindersEnabled = true): Promise<Set
     isDemo: r.is_demo, remindersLastRunAt: r.reminders_last_run_at, remindersEnabled,
     theme: typeof r.theme === 'string' ? JSON.parse(r.theme) : r.theme ?? null,
     oneEditorSince: r.one_editor_since,
+    navOrder: tidyNavOrder(typeof r.nav_order === 'string' ? JSON.parse(r.nav_order) : r.nav_order),
   };
 }
 

@@ -450,6 +450,42 @@ export function registerBatchRoutes(app: FastifyInstance, ctx: Ctx) {
     return loadBatchDetail(ctx, id, me);
   });
 
+  // Delete a batch for good (managers): its scripts, documents sent, reviews, revision notes, deliveries, counters and
+  // celebrations go with it. Its shoot stays (with no scripts planned), and so do the client's resources and to-dos
+  // (no longer tied to it) and the history, where the activity keeps its lines without the batch and gains one saying
+  // it was deleted. The batch row is locked first, then everything is removed in the order the references need.
+  app.delete('/api/batches/:id', async (req) => {
+    const me = requireManager(req);
+    const { id } = parse(z.object({ id: zs.id }), req.params);
+    const gone = await db.tx(async (t) => {
+      const b = await t.one<{ client_id: number; title: string; client_name: string }>(
+        `select b.client_id, b.title, c.name as client_name from batches b join clients c on c.id = b.client_id where b.id = $1 for update of b`, [id],
+      );
+      if (!b) throw notFound('Batch');
+      const n = await t.one<{ n: number }>(`select count(*)::int as n from scripts where batch_id = $1 and removed_at is null`, [id]);
+      await t.query(`update scripts set delivery_id = null where batch_id = $1`, [id]);
+      await t.query(`update timeliner_events set batch_id = null where batch_id = $1`, [id]);
+      await t.query(`update timeliner_events set delivery_id = null where delivery_id in (select id from deliveries where batch_id = $1)`, [id]);
+      await t.query(`delete from revision_requests where batch_id = $1`, [id]);
+      await t.query(`delete from reviews where batch_id = $1`, [id]);
+      await t.query(`delete from submissions where batch_id = $1`, [id]);
+      await t.query(`delete from deliveries where batch_id = $1`, [id]);
+      await t.query(`delete from moments where batch_id = $1`, [id]);
+      await t.query(`delete from writer_progress where batch_id = $1`, [id]);
+      await t.query(`update todos set batch_id = null where batch_id = $1`, [id]);
+      await t.query(`update resources set batch_id = null where batch_id = $1`, [id]);
+      await t.query(`update activity set batch_id = null where batch_id = $1`, [id]);
+      await t.query(`delete from scripts where batch_id = $1`, [id]);
+      await t.query(`delete from batches where id = $1`, [id]);
+      await logActivity(t, {
+        actor: me, action: 'batch.deleted', entityType: 'batch', entityId: id, clientId: b.client_id,
+        summary: `Deleted the batch “${b.title}” (${plural(Number(n?.n ?? 0), 'script')})`,
+      });
+      return { clientId: Number(b.client_id), title: b.title };
+    });
+    return { ok: true, ...gone };
+  });
+
   // blockers: assigned writers and managers
   app.post('/api/batches/:id/blocker', async (req) => {
     const me = requireUser(req);

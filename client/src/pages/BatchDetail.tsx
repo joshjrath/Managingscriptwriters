@@ -2,7 +2,7 @@
 // progress, deadlines, review notes, delivery records and activity history.
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle, Archive, ArchiveRestore, Ban, CalendarClock, Camera, Check, CheckCheck, ChevronDown, ExternalLink, FileText,
@@ -44,6 +44,7 @@ function BatchView({ b }: { b: BatchDetail }) {
   const [target, setTarget] = useState(false);
   const [resched, setResched] = useState(false);
   const [blocker, setBlocker] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [addRes, setAddRes] = useState(false);
   const archive = useSave((archived: boolean) => api(`/api/batches/${b.id}/archive`, { body: { archived } }), { onSuccess: (_o, a) => toast(a ? 'Batch archived' : 'Batch restored') });
   const reviewed = useSave(() => api(`/api/batches/${b.id}/dates-reviewed`, { body: {} }), { onSuccess: () => toast('Deadlines confirmed') });
@@ -75,6 +76,7 @@ function BatchView({ b }: { b: BatchDetail }) {
         hideNewWork
       >
         {canBlock && !b.blocked && <Button icon={<Flag aria-hidden />} onClick={() => setBlocker(true)}>Flag blocker</Button>}
+        {manager && <Button variant="danger" icon={<Trash2 aria-hidden />} onClick={() => setDeleting(true)}>Delete batch</Button>}
         {manager && <Button icon={<Pencil aria-hidden />} onClick={() => setEdit(true)}>Edit batch</Button>}
       </PageHeader>
 
@@ -230,6 +232,7 @@ function BatchView({ b }: { b: BatchDetail }) {
       {manager && target && <TargetDialog b={b} onClose={() => setTarget(false)} />}
       {manager && resched && b.shootId && <RescheduleDialog shootId={b.shootId} start={b.shootStart!} end={b.shootEnd} onClose={() => setResched(false)} />}
       <BlockerDialog b={b} open={blocker} onClose={() => setBlocker(false)} />
+      {deleting && <DeleteBatchDialog b={b} onClose={() => setDeleting(false)} />}
       <ResourceDialog open={addRes} onClose={() => setAddRes(false)} clientId={b.clientId} batchId={b.id} />
     </>
   );
@@ -1170,6 +1173,40 @@ export function RescheduleDialog({ shootId, start, end, initialStart, initialEnd
             <p className="muted" style={{ fontSize: 13, marginTop: 10 }}>{preview.affectedWriters.length ? `${preview.affectedWriters.join(', ')} will be notified.` : 'No writers to notify.'} The calendar, My work and every batch update straight away, and the change is recorded in each batch’s history.</p>
           </div>
         )}
+      </div>
+    </Dialog>
+  );
+}
+
+/** Delete a batch for good (managers): says what goes with it, offers Archive instead, then takes you to the client. */
+function DeleteBatchDialog({ b, onClose }: { b: BatchDetail; onClose: () => void }) {
+  const toast = useToast();
+  const nav = useNavigate();
+  const qc = useQueryClient();
+  // not useSave: the page would refetch this batch (now gone) before moving on
+  const del = useMutation<{ clientId: number }, ApiError>({
+    mutationFn: () => api(`/api/batches/${b.id}`, { method: 'DELETE' }),
+    onSuccess: (out) => {
+      qc.removeQueries({ queryKey: ['batch', b.id] });
+      nav(`/clients/${out.clientId}`, { replace: true });
+      toast(`Deleted “${b.title}”`);
+      void qc.invalidateQueries();
+    },
+  });
+  const archive = useSave(() => api(`/api/batches/${b.id}/archive`, { body: { archived: true } }), { onSuccess: () => { toast('Batch archived'); onClose(); } });
+  const p = b.progress;
+  const history = p.draftReady + p.delivered > 0;
+  return (
+    <Dialog open onClose={onClose} size="narrow" title="Delete this batch?" sub={b.title}
+      footer={<div className="form-actions">
+        {!b.archivedAt && <Button variant="ghost" icon={<Archive aria-hidden />} busy={archive.isPending} onClick={() => archive.mutate(undefined)} className="left">Archive instead</Button>}
+        <Button variant="ghost" onClick={onClose}>Cancel</Button>
+        <Button variant="danger" icon={<Trash2 aria-hidden />} busy={del.isPending} onClick={() => del.mutate()}>Delete batch</Button>
+      </div>}>
+      <div className="stack s3">
+        <FormError error={del.error ?? archive.error} />
+        <p style={{ fontSize: 14 }}>This removes its {plural(p.total, 'script')}{history ? `, the documents sent for them (${p.draftReady} drafts sent, ${p.delivered} delivered), their reviews and delivery records` : ''} for everyone. It can’t be undone.</p>
+        <p className="muted" style={{ fontSize: 13 }}>{b.shootId ? 'The shoot stays on the calendar, with no scripts planned. ' : ''}Resources and to-dos attached to it stay with the client, and the history keeps a line saying it was deleted. To hide it but keep everything, archive it instead.</p>
       </div>
     </Dialog>
   );

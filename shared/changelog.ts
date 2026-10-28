@@ -20,7 +20,7 @@ export function audienceOf(p: KindOf): Audience {
 
 /** Updates that only matter to some people (Admins count as managers). */
 export const ONLY_FOR: Record<string, Audience[]> = {
-  '2026-10-28-content-roadmap-upload-fix': ['managers'],
+  '2026-10-28-content-roadmap-upload-fix': ['managers'], '2026-10-28-delete-batch': ['managers'],
   '2026-10-26-thumbnails-from-youtube': ['managers', 'designers'],
   '2026-10-26-thumbnail-portfolio': ['managers', 'designers'], '2026-10-26-thumbnail-went-live': ['managers', 'designers'],
   '2026-10-25-editors-add-from-timeliner': ['managers'], '2026-10-25-thumbnails-always-in-menu': ['managers'], '2026-10-25-thumbnail-studio': ['managers', 'designers'],
@@ -53,6 +53,26 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-28-delete-batch',
+    date: '2026-10-28',
+    title: 'Delete a batch',
+    summary: 'Managers can delete a script batch for good, from the button beside Flag blocker.',
+    changes: [
+      { tag: 'new', text: 'Delete batch sits beside Flag blocker on every batch. It asks first, saying what goes with it: its scripts, the documents sent for them, their reviews and delivery records. It can’t be undone, so Archive instead is offered right there.' },
+      { tag: 'new', text: 'The shoot stays on the calendar with no scripts planned, resources and to-dos stay with the client, and the history keeps a line saying the batch was deleted.' },
+    ],
+  },
+  {
+    id: '2026-10-28-arrange-sidebar',
+    date: '2026-10-28',
+    title: 'Arrange the sidebar for everyone',
+    summary: 'The Admin can put the sidebar in any order, and everyone’s sidebar follows it.',
+    changes: [
+      { tag: 'new', text: 'Admins: Arrange sidebar is in your account menu (your name, bottom left). Drag items into order, or move one with its arrows, and save. Each item says who has it. Usual order puts it back.' },
+      { tag: 'improved', text: 'Everyone’s sidebar follows that order for the items they have. A video editor’s Home and a designer’s Studio, Portfolio and References stay at the top.' },
+    ],
+  },
   {
     id: '2026-10-28-content-roadmap-upload-fix',
     date: '2026-10-28',

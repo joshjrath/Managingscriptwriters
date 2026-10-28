@@ -252,6 +252,34 @@ export function homePath(p: KindOf): '/overview' | '/my-work' | '/editor' | '/st
   return '/my-work';
 }
 
+/**
+ * The sidebar items the Admin arranges (Arrange sidebar), in their usual order. Everyone's menu is the items that are
+ * theirs, put in the Admin's order by `applyNavOrder`; a person's own home and pages only they have (an editor's Home,
+ * a designer's Studio, Portfolio and References) aren't on this list, so they keep their places.
+ */
+export const NAV_PATHS = ['/overview', '/content', '/my-work', '/production', '/calendar', '/clients', '/review', '/writers', '/editors', '/thumbnails', '/scripts', '/resources'] as const;
+export type NavPath = (typeof NAV_PATHS)[number];
+
+/** A saved sidebar order as it's kept and read: known items only, each once; null when there's none. */
+export function tidyNavOrder(v: unknown): NavPath[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: NavPath[] = [];
+  for (const p of v) if ((NAV_PATHS as readonly unknown[]).includes(p) && !out.includes(p as NavPath)) out.push(p as NavPath);
+  return out.length ? out : null;
+}
+
+/**
+ * Someone's menu in the Admin's order: the items on the saved order swap into the order it gives them, in the slots
+ * those items had; every other item (a home, or one added since the order was saved) stays where it was.
+ */
+export function applyNavOrder<T extends { to: string }>(items: T[], order: readonly string[] | null | undefined): T[] {
+  if (!order?.length) return items;
+  const rank = new Map(order.map((p, i) => [p, i]));
+  const moved = items.filter((it) => rank.has(it.to)).sort((a, b) => rank.get(a.to)! - rank.get(b.to)!);
+  let k = 0;
+  return items.map((it) => (rank.has(it.to) ? moved[k++] : it));
+}
+
 /** What someone is, in a word or two: "Admin", "Writer", "Video editor", "Thumbnail designer". */
 export function personLabel(p: KindOf): string {
   const kind = editorKindOf(p);

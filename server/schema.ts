@@ -1010,4 +1010,9 @@ create table roadmap_tasks (
 create index roadmap_tasks_roadmap_idx on roadmap_tasks (roadmap_id, due_date);
 create index roadmap_tasks_due_idx on roadmap_tasks (due_date);
 `,
+  // 45 · The sidebar's order, arranged by the Admin for everyone (a list of menu paths; null is each menu's usual
+  // order). Only a nullable column.
+  `
+alter table settings add column nav_order jsonb;
+`,
 ];

@@ -3,12 +3,12 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { homePath, isAdmin, isEditor, isManager, isThumbnailDesigner, isVideoEditor, personLabel } from '../../../shared/workflow';
+import { applyNavOrder, homePath, isAdmin, isEditor, isManager, isThumbnailDesigner, isVideoEditor, NAV_PATHS, personLabel } from '../../../shared/workflow';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   Bell, Building2, CalendarDays, Clapperboard, Film, ClipboardCheck, Columns3, FolderOpen, KeyRound, LayoutDashboard, LogOut, Menu,
-  BookOpen, Circle, Eye, Globe2, Home, Images, Library, Palette, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
+  ArrowUpDown, BookOpen, Circle, Eye, Globe2, Home, Images, Library, Palette, PanelLeftClose, PanelLeftOpen, PenLine, Plus, ScrollText, Search, Settings, Sparkles, Users, Wand2,
 } from 'lucide-react';
 import { LayoutGroup, m } from 'framer-motion';
 import { api, queryClient, useSave } from '../api';
@@ -22,6 +22,7 @@ import { ModeBar, RecordingDialog, RecordingOffDialog, ViewAsDialog } from './Mo
 import { SPRING, setMotionEnabled, useMotionSetting } from '../motion';
 import { LATEST_CHANGE } from '../../../shared/changelog';
 import { openTimezoneDialog, TimezonePrompt } from './TimezonePrompt';
+import { ArrangeNavDialog, type ArrangeItem } from './ArrangeNav';
 
 // ── bootstrap context ────────────────────────────────────────────────────
 
@@ -177,7 +178,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
   ];
-  const items: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; fresh?: boolean; show?: boolean; not?: string[] }[] = isThumbnailDesigner(me) ? designerItems : isEditor(me.role) ? editorItems : !manager ? writerItems : [
+  const own: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; fresh?: boolean; show?: boolean; not?: string[] }[] = isThumbnailDesigner(me) ? designerItems : isEditor(me.role) ? editorItems : !manager ? writerItems : [
     { to: '/overview', label: 'Overview', icon: <LayoutDashboard />, count: counts.attention || undefined, hot: counts.attention > 0 },
     { to: '/content', label: 'Content', icon: <Film /> },
     { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 },
@@ -192,6 +193,16 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
   ];
+  // everyone's menu is in the order the Admin arranged (Arrange sidebar); an editor's Home and a designer's Studio pages keep their places
+  const items = applyNavOrder(own, settings.navOrder);
+  // what the Admin arranges: the items on NAV_PATHS, each saying who has it
+  const whoHas = (to: string) => {
+    const also = [writerItems.some((x) => x.to === to) && 'writers', editorItems.some((x) => x.to === to) && 'video editors', designerItems.some((x) => x.to === to) && 'designers'].filter(Boolean);
+    return also.length === 3 ? 'Everyone' : also.length ? `Managers, ${also.join(', ')}` : 'Managers only';
+  };
+  const arrange: ArrangeItem[] | undefined = isAdmin(me.role)
+    ? items.filter((x) => (NAV_PATHS as readonly string[]).includes(x.to)).map((x) => ({ to: x.to, label: x.label, icon: x.icon, who: whoHas(x.to) }))
+    : undefined;
   return (
     <div className="rail">
       <NavLink to={homePath(me)} className="wordmark" aria-label="SCALE Media home">
@@ -235,7 +246,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
               <NavItem to="/log" icon={<ScrollText />} label="Master log" collapsed={collapsed} />
             </nav>
           )}
-          <UserMenu />
+          <UserMenu arrange={arrange} />
           {onToggle && !mobile && (
             <button className="collapse-btn" onClick={onToggle} aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
               {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
@@ -274,8 +285,9 @@ function NavItem({ to, icon, label, collapsed, not, children }: { to: string; ic
   );
 }
 
-function UserMenu() {
-  const { me, mode } = useBoot();
+function UserMenu({ arrange }: { arrange?: ArrangeItem[] }) {
+  const { me, mode, settings } = useBoot();
+  const [arranging, setArranging] = useState(false);
   const tzNow = useDisplayTz();
   const motionOn = useMotionSetting();
   const [open, setOpen] = useState(false);
@@ -312,11 +324,13 @@ function UserMenu() {
           )}
           {!mode?.viewingAs && !mode?.recording && <button role="menuitem" onClick={() => { setPw(true); setOpen(false); }}><KeyRound />Change password</button>}
           {!mode?.viewingAs && !mode?.recording && <button role="menuitem" onClick={() => { setOpen(false); openTimezoneDialog(); }}><Globe2 />Time zone<span className="menu-hint">{fmtTimeZoneAbbr(tzNow)}</span></button>}
+          {arrange && <button role="menuitem" onClick={() => { setArranging(true); setOpen(false); }}><ArrowUpDown />Arrange sidebar</button>}
           <button role="menuitemcheckbox" aria-checked={motionOn} onClick={() => setMotionEnabled(!motionOn)}><Wand2 />Animations<span className={`switch${motionOn ? ' on' : ''}`} aria-hidden><i /></span></button>
           <button role="menuitem" onClick={logout}><LogOut />Sign out</button>
         </div>
       )}
       <PasswordDialog open={pw} onClose={() => setPw(false)} />
+      {arranging && arrange && <ArrangeNavDialog items={arrange} saved={!!settings.navOrder} onClose={() => setArranging(false)} />}
       {mode && <ViewAsDialog open={viewAs} onClose={() => setViewAs(false)} />}
       {mode && <RecordingDialog open={recording} onClose={() => setRecording(false)} />}
       {mode && <RecordingOffDialog open={recordingOff} onClose={() => setRecordingOff(false)} />}

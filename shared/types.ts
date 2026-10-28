@@ -3,7 +3,7 @@
 import type { Clock, DayMode, ISODate, YearMonth } from './dates';
 import type { WorkspaceTheme } from './palettes';
 import type {
-  BrandColour, BrandFont, BrandKitFields, DocumentState, EditorKind, Milestone, OptionLetter, PortfolioGrowth, Progress, Role, RoundStory, ScriptStatus,
+  BrandColour, BrandFont, BrandKitFields, DocumentState, EditorKind, Milestone, NavPath, OptionLetter, PortfolioGrowth, Progress, Role, RoundStory, ScriptStatus,
   SecondLookResult, Stage, ThumbAction, ThumbIdea, ThumbImportSource, ThumbMime, ThumbMomentKind, ThumbPinTag, ThumbRefSource, ThumbState, TimelinerStatusGroup,
   VideoState,
 } from './workflow';
@@ -101,6 +101,8 @@ export interface Settings {
    * or after it (HQ time) count for the Editors tab's one-editor checks
    */
   oneEditorSince: ISODate;
+  /** the sidebar's order the Admin arranged, for everyone (null = each menu's usual order): `applyNavOrder` */
+  navOrder: NavPath[] | null;
 }
 
 export interface ClientLite {
