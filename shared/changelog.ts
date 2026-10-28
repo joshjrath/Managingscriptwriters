@@ -20,6 +20,7 @@ export function audienceOf(p: KindOf): Audience {
 
 /** Updates that only matter to some people (Admins count as managers). */
 export const ONLY_FOR: Record<string, Audience[]> = {
+  '2026-10-28-content-roadmap-upload-fix': ['managers'],
   '2026-10-26-thumbnails-from-youtube': ['managers', 'designers'],
   '2026-10-26-thumbnail-portfolio': ['managers', 'designers'], '2026-10-26-thumbnail-went-live': ['managers', 'designers'],
   '2026-10-25-editors-add-from-timeliner': ['managers'], '2026-10-25-thumbnails-always-in-menu': ['managers'], '2026-10-25-thumbnail-studio': ['managers', 'designers'],
@@ -52,6 +53,16 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-28-content-roadmap-upload-fix',
+    date: '2026-10-28',
+    title: 'Content: uploading a roadmap PDF works',
+    summary: 'Uploading a roadmap PDF on the Content tab said “Couldn’t read this PDF”. It’s fixed, and if a PDF can’t be read the message now says why.',
+    changes: [
+      { tag: 'fixed', text: 'Upload roadmap reads the PDF again instead of stopping with “Couldn’t read this PDF”. The way the roadmap was asked for was more than the AI service would take; it now asks in a simpler form and reads the same details.' },
+      { tag: 'improved', text: 'When a PDF really can’t be read, the message under it gives the reason.' },
+    ],
+  },
   {
     id: '2026-10-28-content-roadmap',
     date: '2026-10-28',
