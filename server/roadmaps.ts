@@ -39,40 +39,42 @@ export interface RoadmapReader {
 /** Bigger than this isn't read (Claude takes PDFs up to 32 MB a request). */
 export const ROADMAP_MAX_BYTES = 30 * 1024 * 1024;
 
+// No field is nullable: an absent value is an empty string (tidyRoadmap reads "" as none). The API compiles the schema
+// into a grammar, and nullable fields (a union type each) nested in lists make it too complex to compile (a 400).
 const Task = z4.object({
   step: z4.enum(ROADMAP_STEPS).describe('What the deliverable is'),
   title: z4.string().describe('Short name as the team would say it, e.g. "Script draft", "Approve script", "Thumbnail draft", "48-hour check"'),
   date: z4.string().describe('The day it is due, YYYY-MM-DD, with the right year'),
-  time: z4.string().nullable().describe('The time it is due on a 24-hour clock (HH:MM), or null when the document gives the default time'),
+  time: z4.string().describe('The time it is due on a 24-hour clock (HH:MM), or "" when the document gives the default time'),
   role: z4.enum(ROADMAP_ROLES).describe('Who owns it'),
 });
-const RoadmapSchema = z4.object({
+export const ROADMAP_SCHEMA = z4.object({
   title: z4.string().describe('The roadmap’s title'),
   month: z4.string().describe('The month its videos are published, YYYY-MM'),
-  brand: z4.string().nullable().describe('The brand or channel it is for'),
-  summary: z4.string().nullable().describe('One or two sentences: who the uploads are for and the month’s goal'),
+  brand: z4.string().describe('The brand or channel it is for, or ""'),
+  summary: z4.string().describe('One or two sentences: who the uploads are for and the month’s goal'),
   timezone: z4.string().describe('The IANA time zone its times are in, e.g. America/New_York for Eastern'),
   defaultTime: z4.string().describe('The time deadlines are due when none is shown (HH:MM, 24-hour), e.g. 17:00'),
-  standardTimes: z4.string().nullable().describe('The standard times paragraph, as written'),
+  standardTimes: z4.string().describe('The standard times paragraph, as written, or ""'),
   roles: z4.array(z4.object({
     key: z4.enum(ROADMAP_ROLES),
     label: z4.string().describe('The role as the document names it, e.g. "Josh", "Writer", "Host"'),
-    person: z4.string().nullable().describe('A person’s name when the document names one for this role (e.g. "Josh"), else null'),
-    responsibility: z4.string().nullable().describe('What they are responsible for, as written'),
+    person: z4.string().describe('A person’s name when the document names one for this role (e.g. "Josh"), else ""'),
+    responsibility: z4.string().describe('What they are responsible for, as written, or ""'),
   })),
   videos: z4.array(z4.object({
     title: z4.string().describe('The video’s title as in the lineup'),
     publishDate: z4.string().describe('YYYY-MM-DD'),
-    publishTime: z4.string().nullable().describe('HH:MM, 24-hour'),
-    tag: z4.string().nullable().describe('Who it is for in one or two words, e.g. "Lawyers", "Dentists"'),
-    format: z4.string().nullable().describe('What kind of video it is, e.g. "A real choice experiment"'),
-    runtime: z4.string().nullable().describe('e.g. "10–14 min"'),
-    idea: z4.string().nullable(),
-    why: z4.string().nullable().describe('Why viewers would watch'),
+    publishTime: z4.string().describe('HH:MM, 24-hour, or ""'),
+    tag: z4.string().describe('Who it is for in one or two words, e.g. "Lawyers", "Dentists", or ""'),
+    format: z4.string().describe('What kind of video it is, e.g. "A real choice experiment", or ""'),
+    runtime: z4.string().describe('e.g. "10–14 min", or ""'),
+    idea: z4.string().describe('The idea, or ""'),
+    why: z4.string().describe('Why viewers would watch, or ""'),
     beats: z4.array(z4.object({ title: z4.string(), body: z4.string() })).describe('What happens in the video, in order'),
-    thumbnailText: z4.string().nullable().describe('The words on the thumbnail'),
-    thumbnailConcept: z4.string().nullable().describe('What the thumbnail shows'),
-    prep: z4.string().nullable().describe('What to do before filming, and other notes for this video'),
+    thumbnailText: z4.string().describe('The words on the thumbnail, or ""'),
+    thumbnailConcept: z4.string().describe('What the thumbnail shows, or ""'),
+    prep: z4.string().describe('What to do before filming, and other notes for this video, or ""'),
     tasks: z4.array(Task).describe('Every deliverable for this video, from the brief to the performance reviews'),
   })),
   workflow: z4.array(z4.object({ when: z4.string(), what: z4.string() })).describe('The weekly workflow, step by step'),
@@ -92,7 +94,7 @@ For each video, list every deliverable with its due day, time and owner:
 - anything else ("other").
 Split a deliverable that two roles share into one per role (e.g. "Approved script and thumbnail draft" is an approval by the approver and a thumbnail draft by the thumbnail designer).
 
-Roles: "approver" is whoever approves briefs, scripts and releases (often a named person); "writer" researches and writes the scripts; "host" films and appears on camera; "thumbnail" designs thumbnails; "editor" edits the videos; "other" is anyone else. Give each deliverable the role that owns it, using the document's own "who owns each stage" table. Performance reviews, publishing and scheduling belong to the approver unless the document says otherwise. When a deliverable has the document's default time, give null for its time.
+Roles: "approver" is whoever approves briefs, scripts and releases (often a named person); "writer" researches and writes the scripts; "host" films and appears on camera; "thumbnail" designs thumbnails; "editor" edits the videos; "other" is anyone else. Give each deliverable the role that owns it, using the document's own "who owns each stage" table. Performance reviews, publishing and scheduling belong to the approver unless the document says otherwise. When a deliverable has the document's default time, give "" for its time. Give "" for anything else the document doesn't say.
 
 Keep the wording plain and close to the document. Never mention being an AI.`;
 
@@ -111,7 +113,7 @@ export function claudeRoadmapReader(given?: Anthropic): RoadmapReader {
           betas: ['server-side-fallback-2026-07-01'],
           fallbacks: 'default', // if a request is declined, the API retries it on a fallback model
           system: SYSTEM,
-          output_config: { effort: 'medium', format: betaZodOutputFormat(RoadmapSchema) },
+          output_config: { effort: 'medium', format: betaZodOutputFormat(ROADMAP_SCHEMA) },
           messages: [{
             role: 'user',
             content: [
@@ -126,7 +128,7 @@ export function claudeRoadmapReader(given?: Anthropic): RoadmapReader {
         if (err instanceof SDK.AuthenticationError) throw new HttpError(503, 'The AI key on the server isn’t valid. Check ANTHROPIC_API_KEY in your hosting settings.');
         if (err instanceof SDK.NotFoundError || err instanceof SDK.PermissionDeniedError) throw new HttpError(503, 'Reading roadmaps isn’t set up correctly on the server (the model or a feature it needs isn’t available to this key). The server log has the details.');
         if (err instanceof SDK.RateLimitError) throw new HttpError(429, 'Too many documents are being read right now. Try again in a minute.');
-        if (err instanceof SDK.BadRequestError) throw new HttpError(400, `Couldn’t read this PDF: ${err.message}`, { file: 'Couldn’t read this PDF' });
+        if (err instanceof SDK.BadRequestError) throw new HttpError(400, `Couldn’t read this PDF: ${err.message}`, { file: `Couldn’t read this PDF (${err.message})` });
         if (err instanceof SDK.APIError) throw new HttpError(502, 'The AI service didn’t answer. Try again in a moment — nothing was saved.');
         throw err;
       }

@@ -8,7 +8,8 @@ import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../server/app';
 import type { Db } from '../server/db';
 import type { Ctx } from '../server/core';
-import type { RoadmapReader } from '../server/roadmaps';
+import { betaZodOutputFormat } from '@anthropic-ai/sdk/helpers/beta/zod';
+import { ROADMAP_SCHEMA, type RoadmapReader } from '../server/roadmaps';
 import { NOVEMBER_2026_ROADMAP } from '../server/roadmap-sample';
 import { autoAssign, taskState, tidyRoadmap, type AssignCandidate } from '../shared/roadmap';
 import type { CalendarEvent, RoadmapDetail, UserSummary } from '../shared/types';
@@ -49,6 +50,16 @@ describe('tidyRoadmap', () => {
     expect(r.roles.map((x) => x.key)).toEqual(['approver', 'writer', 'other']);
     expect(tidyRoadmap({ videos: [{ title: 'x', publishDate: 'never' }] }, 'UTC')).toBeNull();
     expect(tidyRoadmap(null, 'UTC')).toBeNull();
+  });
+});
+
+describe('what Claude is asked for', () => {
+  it('has no union types (a nullable field is one): nested in lists they make the schema too complex for the API to compile', () => {
+    const json = JSON.stringify(betaZodOutputFormat(ROADMAP_SCHEMA));
+    expect(json.match(/"anyOf"|"type":\[/g) ?? []).toEqual([]);
+    // and tidyRoadmap reads an empty string as nothing given
+    const r = tidyRoadmap({ ...NOVEMBER_2026_ROADMAP, brand: '', videos: [{ ...NOVEMBER_2026_ROADMAP.videos[0], tag: '', publishTime: '', tasks: [] }] }, 'UTC')!;
+    expect([r.brand, r.videos[0].tag, r.videos[0].publishTime]).toEqual([null, null, null]);
   });
 });
 
