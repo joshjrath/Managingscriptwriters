@@ -28,6 +28,8 @@ export interface Ctx {
   thumbCritic?: ThumbCritic | null;
   /** suggests three directions for a new thumbnail brief (Claude); absent when no API key is configured */
   briefHelper?: BriefHelper | null;
+  /** reads a content roadmap PDF (Claude); absent when no API key is configured */
+  roadmapReader?: import('./roadmaps').RoadmapReader | null;
   /**
    * reads YouTube for past thumbnails (a video's title, channel, publish date and thumbnail), with or without
    * YOUTUBE_API_KEY; tests pass a stand-in, so they never touch the network. Absent: the YouTube routes are 503

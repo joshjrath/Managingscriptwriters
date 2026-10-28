@@ -947,4 +947,67 @@ create index thumbnail_briefs_timeliner_idx on thumbnail_briefs (timeliner_task_
     await fillYoutubeVideoIds(t);
     await t.query(`create unique index thumbnail_briefs_youtube_key on thumbnail_briefs (youtube_video_id) where cancelled_at is null`);
   },
+  // 44 · Content roadmaps (the Content tab). A month of long-form uploads read from a PDF by Claude: the roadmap (its
+  // playbook bits, like the weekly workflow and checklists, as jsonb), its roles (one row per kind of job, with the
+  // person on it; a deliverable's owner is its role's person, so changing the person moves all of that role's work),
+  // its videos and each video's deliverables, with their day, time and when they were done. Progress is counted from
+  // the deliverables, never stored. Only new tables.
+  `
+create table roadmaps (
+  id bigint generated always as identity primary key,
+  title text not null,
+  month text not null check (month ~ '^[0-9]{4}-[0-9]{2}$'),
+  brand text,
+  summary text,
+  timezone text not null,
+  default_time text not null default '17:00',
+  extras jsonb not null default '{}'::jsonb,
+  source_name text,
+  created_by bigint references users(id),
+  created_at timestamptz not null default now(),
+  removed_at timestamptz
+);
+create index roadmaps_month_idx on roadmaps (month) where removed_at is null;
+create table roadmap_roles (
+  roadmap_id bigint not null references roadmaps(id),
+  key text not null check (key in ('approver', 'writer', 'host', 'thumbnail', 'editor', 'other')),
+  label text not null,
+  person text,
+  responsibility text,
+  user_id bigint references users(id),
+  primary key (roadmap_id, key)
+);
+create table roadmap_videos (
+  id bigint generated always as identity primary key,
+  roadmap_id bigint not null references roadmaps(id),
+  position int not null,
+  title text not null,
+  publish_date date not null,
+  publish_time text,
+  tag text,
+  format text,
+  runtime text,
+  idea text,
+  why text,
+  beats jsonb not null default '[]'::jsonb,
+  thumbnail_text text,
+  thumbnail_concept text,
+  prep text
+);
+create index roadmap_videos_roadmap_idx on roadmap_videos (roadmap_id, position);
+create table roadmap_tasks (
+  id bigint generated always as identity primary key,
+  roadmap_id bigint not null references roadmaps(id),
+  video_id bigint references roadmap_videos(id),
+  step text not null,
+  title text not null,
+  due_date date not null,
+  due_time text,
+  role text not null check (role in ('approver', 'writer', 'host', 'thumbnail', 'editor', 'other')),
+  done_at timestamptz,
+  done_by bigint references users(id)
+);
+create index roadmap_tasks_roadmap_idx on roadmap_tasks (roadmap_id, due_date);
+create index roadmap_tasks_due_idx on roadmap_tasks (due_date);
+`,
 ];

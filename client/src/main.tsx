@@ -16,6 +16,7 @@ import { Overview } from './pages/Overview';
 import { MyWorkPage } from './pages/MyWork';
 import { Production } from './pages/Production';
 import { CalendarPage } from './pages/Calendar';
+import { ContentPage } from './pages/Content';
 import { ClientPage, ClientsPage } from './pages/Clients';
 import { BatchPage } from './pages/BatchDetail';
 import { ReviewPage } from './pages/Review';
@@ -96,6 +97,9 @@ function Gate() {
         <Route path="/my-work" element={only(<MyWorkPage />)} />
         <Route path="/production" element={only(<Production />)} />
         <Route path="/calendar" element={<CalendarPage />} />
+        {/* the long-form content roadmap: everyone reads it */}
+        <Route path="/content" element={<ContentPage />} />
+        <Route path="/content/:id" element={<ContentPage />} />
         <Route path="/clients" element={<ClientsPage />} />
         <Route path="/clients/:id" element={<ClientPage />} />
         <Route path="/batches/:id" element={only(<BatchPage />)} />

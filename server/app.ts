@@ -36,6 +36,7 @@ import { registerSecondLookRoutes } from './second-look';
 import { registerRefRoutes } from './refs';
 import { registerBriefIdeaRoutes } from './brief-ideas';
 import { registerYoutubeRoutes } from './youtube';
+import { registerRoadmapRoutes } from './roadmaps';
 import { registerUploadCleanup } from './files';
 import type { Db } from './db';
 import { CSRF_HEADER } from '../shared/types';
@@ -135,6 +136,7 @@ export async function buildApp(ctx: Ctx, opts: { staticDir?: string; logger?: bo
   registerRefRoutes(app, ctx);
   registerBriefIdeaRoutes(app, ctx);
   registerYoutubeRoutes(app, ctx);
+  registerRoadmapRoutes(app, ctx);
 
   app.all('/api/*', async () => { throw new HttpError(404, 'Not found'); });
 

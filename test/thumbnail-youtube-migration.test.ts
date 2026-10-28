@@ -15,8 +15,8 @@ const ids = {} as Record<'user' | 'client' | 'first' | 'second' | 'cancelled' | 
 const warned: string[] = [];
 
 beforeAll(async () => {
-  // migration 43 is the 43rd, a function (so its columns, fill and index run in order in one transaction)
-  expect(MIGRATIONS.length).toBe(43);
+  // migration 43 is the 43rd, a function (so its columns, fill and index run in order in one transaction); later ones follow it
+  expect(MIGRATIONS.length).toBeGreaterThanOrEqual(43);
   expect(typeof MIGRATIONS[42]).toBe('function');
   const url = process.env.TEST_DATABASE_URL;
   if (url) {

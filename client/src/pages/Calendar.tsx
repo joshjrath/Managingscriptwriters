@@ -11,7 +11,7 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, m } from 'framer-motion';
-import { AlertTriangle, ArrowRight, CalendarClock, CalendarDays, Camera, Check, ChevronLeft, ChevronRight, FileText, GripVertical, PenLine, Send } from 'lucide-react';
+import { AlertTriangle, ArrowRight, CalendarClock, CalendarDays, Camera, Check, ChevronLeft, ChevronRight, Clapperboard, FileText, GripVertical, PenLine, Rocket, Send } from 'lucide-react';
 import { api, qs } from '../api';
 import type { CalendarEvent } from '../../../shared/types';
 import { addDays, addMonths, diffDays, eachDay, startOfMonth, startOfWeek, type ISODate } from '../../../shared/dates';
@@ -31,6 +31,7 @@ const TYPE = {
   shoot: { label: 'Shoot', icon: Camera, c: 'var(--salmon)' },
   external: { label: 'Google Calendar', icon: CalendarDays, c: 'var(--text-2)' },
   tentative: { label: 'Tentative shoots', icon: CalendarClock, c: 'var(--tentative)' },
+  content: { label: 'Content roadmap', icon: Clapperboard, c: 'var(--pink)' },
 } as const;
 
 /** "10:00 AM" in the viewer's time zone, or null for all-day events. */
@@ -84,7 +85,7 @@ export function CalendarPage() {
   const events = (q.data?.events ?? []).filter((e) => !hidden.has(e.type) && !(e.external?.linkedShootId && !hidden.has('shoot') && shootIds.has(e.external.linkedShootId)));
   const byDay = useMemo(() => {
     const map = new Map<string, CalendarEvent[]>();
-    const order = { shoot: 0, tentative: 0, final: 1, draft: 2, writing: 3, external: 4 };
+    const order = { shoot: 0, tentative: 0, content: 1, final: 1, draft: 2, writing: 3, external: 4 };
     for (const e of events) for (const d of eachDay(e.start > gridStart ? e.start : gridStart, e.end < gridEnd ? e.end : gridEnd)) map.set(d, [...(map.get(d) ?? []), e]);
     for (const list of map.values()) list.sort((a, b) => order[a.type] - order[b.type] || (a.external?.startAt ?? '').localeCompare(b.external?.startAt ?? ''));
     return map;
@@ -100,6 +101,7 @@ export function CalendarPage() {
   const canMove = (e: CalendarEvent) => manager && e.type === 'shoot' && e.shootId != null;
   const open = (e: CalendarEvent) => {
     if (e.external) setSynced(e);
+    else if (e.content) nav(`/content/${e.content.roadmapId}?task=${e.content.taskId}`);
     else if (e.tentative) setTentative(e.tentative);
     else if (editor) { const id = clients.find((c) => c.name === e.clientName)?.id; if (id) nav(`/scripts?clientId=${id}`); }
     else if (canMove(e)) setPicked(e);
@@ -148,7 +150,7 @@ export function CalendarPage() {
       );
     }
     const T = TYPE[e.type];
-    const Icon = e.overdue && e.type !== 'writing' ? AlertTriangle : e.complete && e.type !== 'writing' ? Check : e.tentative?.kind === 'scripts' ? Send : T.icon;
+    const Icon = e.overdue && e.type !== 'writing' ? AlertTriangle : e.complete && e.type !== 'writing' ? Check : e.tentative?.kind === 'scripts' ? Send : e.content?.step === 'publish' ? Rocket : T.icon;
     const showLabel = e.type !== 'writing' || day === e.start || new Date(day + 'T00:00:00Z').getUTCDay() === 1;
     const status = e.overdue ? ' (overdue)' : e.complete ? ' (complete)' : '';
     const k = diffDays(day, e.start);
@@ -157,7 +159,7 @@ export function CalendarPage() {
       // each day of a shoot keeps its identity, so a moved shoot glides to its new days
       <m.div key={`${e.id}:${k}`} className="ev-wrap" layout="position" layoutId={e.type === 'shoot' ? `ev-${e.id}-${k}` : undefined} transition={SOFT}>
         <button
-          className={`ev ${e.type}${showLabel ? '' : ' cont'}${e.overdue ? ' overdue' : ''}${e.complete ? ' done' : ''}${movable ? ' movable' : ''}${drag?.e.id === e.id ? ' dragging' : ''}${e.type === 'shoot' && !e.batchId ? ' unplanned' : ''}`}
+          className={`ev ${e.type}${e.content?.step === 'publish' ? ' publish' : ''}${showLabel ? '' : ' cont'}${e.overdue ? ' overdue' : ''}${e.complete ? ' done' : ''}${movable ? ' movable' : ''}${drag?.e.id === e.id ? ' dragging' : ''}${e.type === 'shoot' && !e.batchId ? ' unplanned' : ''}`}
           onClick={() => open(e)}
           title={`${T.label}: ${e.clientName} · ${e.title}${status}${e.type === 'shoot' && !e.batchId ? ' — no scripts planned yet' : ''}${movable ? ' — drag to another day to move it' : ''}`}
           draggable={movable || undefined}
@@ -166,7 +168,7 @@ export function CalendarPage() {
           aria-label={`${T.label}${status}: ${e.clientName}, ${e.title}${e.type === 'writing' || (e.type === 'shoot' && e.end !== e.start) ? `, ${fmtDate(e.start)} to ${fmtDate(e.end)}` : ''}${movable ? '. Press to change the dates.' : ''}`}
         >
           <Icon aria-hidden />
-          <span>{showLabel ? `${e.type === 'writing' ? 'Writing · ' : ''}${e.clientName}` : ' '}{detail && showLabel && <small className="ev-sub">{e.type === 'writing' ? `until ${fmtDate(e.end)}` : `${T.label} · ${e.title}`}</small>}</span>
+          <span>{showLabel ? (e.content ? e.title : `${e.type === 'writing' ? 'Writing · ' : ''}${e.clientName}`) : ' '}{detail && showLabel && <small className="ev-sub">{e.type === 'writing' ? `until ${fmtDate(e.end)}` : `${T.label} · ${e.title}`}</small>}</span>
           {movable && <GripVertical className="grip" aria-hidden />}
         </button>
       </m.div>
@@ -194,7 +196,7 @@ export function CalendarPage() {
         <select className="select sm" style={{ width: 'auto', maxWidth: 220 }} value={clientId} onChange={(e) => setP('clientId', e.target.value)} aria-label="Client"><option value="">All clients</option>{clients.filter((c) => c.status !== 'archived').map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
       </div>
       <div className="quick cal-quick" role="group" aria-label="Show event types">
-        {(Object.keys(TYPE) as CalendarEvent['type'][]).filter((t) => (!editor || t === 'shoot' || t === 'final' || t === 'external') && (manager || t !== 'tentative')).map((t) => {
+        {(Object.keys(TYPE) as CalendarEvent['type'][]).filter((t) => (!editor || t === 'shoot' || t === 'final' || t === 'external' || t === 'content') && (manager || t !== 'tentative')).map((t) => {
           const T = TYPE[t];
           return (
             <button key={t} aria-pressed={!hidden.has(t)} style={{ ['--c' as string]: T.c }} onClick={() => setHidden((h) => { const n = new Set(h); n.has(t) ? n.delete(t) : n.add(t); return n; })}>

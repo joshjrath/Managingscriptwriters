@@ -17,6 +17,9 @@ import { recordThumbMoment } from './moments';
 import { insertShoot } from './routes/shoots';
 import { insertBriefing } from './routes/clients';
 import { addPastThumbnail, tellImported } from './youtube';
+import { saveRoadmap } from './roadmaps';
+import { NOVEMBER_2026_ROADMAP } from './roadmap-sample';
+import { tidyRoadmap } from '../shared/roadmap';
 import { addDays } from '../shared/dates';
 import { fmtDate } from '../shared/format';
 import { THUMBNAIL_LIVE_NOTIFICATION, type Me } from '../shared/types';
@@ -465,6 +468,9 @@ async function seed(db: Db, now: Date): Promise<boolean> {
 
   // make the first few days of history look like history
   await db.query(`update activity set created_at = created_at - interval '2 days' where action in ('client.created','briefing.created','shoot.created','batch.created')`);
+  // the Content tab: the team's November long-form roadmap, as read from its PDF, with what's past already done
+  await saveRoadmap(db, tidyRoadmap(NOVEMBER_2026_ROADMAP, settings.timezone)!, { me: josh, sourceName: 'Scale_Media_November_2026_Long_Form_Roadmap.pdf', doneBefore: T });
+
   return true;
 }
 
