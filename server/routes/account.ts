@@ -8,7 +8,7 @@ import {
 } from '../auth';
 import { assigneesOf, batchLink, loadSettings, loadUsers, logActivity, notify, rulesOf, settingsFor, type Ctx } from '../core';
 import {
-  compressRanges, EDITOR_KINDS, editorKindOf, isAdmin, isEditor, isManager, isThumbnailDesigner, personLabel, type EditorKind, type KindOf, type Role,
+  compressRanges, EDITOR_KINDS, editorKindOf, isAdmin, isEditor, isManager, isThumbnailDesigner, NAV_PATHS, personLabel, type EditorKind, type KindOf, type Role,
 } from '../../shared/workflow';
 import { auditEvent } from '../audit';
 import { LOCKS, type Db } from '../db';
@@ -438,6 +438,20 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     await db.tx(async (t) => {
       await t.query(`update settings set theme = $1::jsonb, updated_at = now() where id = 1`, [JSON.stringify(theme)]);
       await logActivity(t, { actor: me, action: 'settings.theme', entityType: 'settings', summary: `Changed the colour palette to ${r.palette.name}${r.custom ? ' (customised)' : ''}` });
+    });
+    return { settings: await settingsFor(ctx) };
+  });
+
+  // the sidebar's order, for everyone: each person's menu has the items that are theirs in this order (applyNavOrder);
+  // null puts every menu back in its usual order
+  app.put('/api/settings/nav-order', async (req) => {
+    const me = requireAdmin(req, 'Only the admin can arrange the sidebar');
+    const { order } = parse(z.object({
+      order: z.array(z.enum(NAV_PATHS, { message: 'That isn’t a sidebar item' })).refine((a) => new Set(a).size === a.length, 'Each item can be in the order once').nullable(),
+    }), req.body);
+    await db.tx(async (t) => {
+      await t.query(`update settings set nav_order = $1::jsonb, updated_at = now() where id = 1`, [order?.length ? JSON.stringify(order) : null]);
+      await logActivity(t, { actor: me, action: 'settings.nav_order', entityType: 'settings', summary: order?.length ? 'Arranged the sidebar for everyone' : 'Put the sidebar back in its usual order' });
     });
     return { settings: await settingsFor(ctx) };
   });

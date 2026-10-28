@@ -38,6 +38,7 @@ const ACCESS: Record<string, Access> = {
   'GET /api/bootstrap': 'user',
   'GET /api/shoot-readiness': 'user',
   'POST /api/batches/:id/seen': 'user',
+  'DELETE /api/batches/:id': 'manager',
   'GET /api/calendar-feeds': 'manager',
   'POST /api/calendar-feeds': 'manager',
   'PATCH /api/calendar-feeds/:id': 'manager',
@@ -156,6 +157,7 @@ const ACCESS: Record<string, Access> = {
 
   'GET /api/audit': 'admin',
   'PUT /api/settings/theme': 'admin',
+  'PUT /api/settings/nav-order': 'admin',
   'POST /api/admin/view-as': 'admin',
   'POST /api/admin/view-as/stop': 'admin',
   'POST /api/admin/recording/start': 'admin',
