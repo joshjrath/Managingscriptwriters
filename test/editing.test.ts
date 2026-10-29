@@ -643,7 +643,7 @@ describe('reading Timeliner while it changes', () => {
     expect((await mine(leo)).toEdit.map((v) => v.title)).not.toEqual(expect.arrayContaining(['Organic 21']));
   });
 
-  it('after a read that stops early, removes only what vanished from the stretch it read', async () => {
+  it('after a read that stops early, removes what vanished from the stretch it read, and an older one it looks up', async () => {
     const leos = { assigneeIds: ['m_leo'] };
     tasks = [
       ...tasks,
@@ -657,15 +657,22 @@ describe('reading Timeliner while it changes', () => {
     // both vanish; the next read stops at its page cap, having read back only to videos made on Oct 7
     tasks = tasks.filter((t) => t.id !== 't_new' && t.id !== 't_old');
     endless = true;
+    taskRefused = true;
     try {
+      later(1);
+      expect((await send('POST', '/api/editing/sync', admin, {})).status).toBe(200);
+      expect(await db.one(`select 1 from timeliner_tasks where id = 't_new'`)).toBeUndefined();
+      // older than anything that read reached, and it can't be looked up by itself: it can't tell, so it stays
+      expect(await db.one(`select 1 from timeliner_tasks where id = 't_old'`)).toBeDefined();
+      // looked up by itself, it's gone from Timeliner; one still there stays
+      taskRefused = false;
       later(1);
       expect((await send('POST', '/api/editing/sync', admin, {})).status).toBe(200);
     } finally {
       endless = false;
+      taskRefused = false;
     }
-    expect(await db.one(`select 1 from timeliner_tasks where id = 't_new'`)).toBeUndefined();
-    // older than anything that read reached: it can't tell, so it stays
-    expect(await db.one(`select 1 from timeliner_tasks where id = 't_old'`)).toBeDefined();
+    expect(await db.one(`select 1 from timeliner_tasks where id = 't_old'`)).toBeUndefined();
     expect(await db.one(`select 1 from timeliner_tasks where id = 't_o1'`)).toBeDefined();
   });
 

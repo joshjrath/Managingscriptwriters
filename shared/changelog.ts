@@ -20,6 +20,7 @@ export function audienceOf(p: KindOf): Audience {
 
 /** Updates that only matter to some people (Admins count as managers). */
 export const ONLY_FOR: Record<string, Audience[]> = {
+  '2026-10-29-archived-videos-leave': ['managers', 'editors'],
   '2026-10-29-ask-ai': ['managers'], '2026-10-28-content-roadmap-upload-fix': ['managers'], '2026-10-28-delete-batch': ['managers'],
   '2026-10-26-thumbnails-from-youtube': ['managers', 'designers'],
   '2026-10-26-thumbnail-portfolio': ['managers', 'designers'], '2026-10-26-thumbnail-went-live': ['managers', 'designers'],
@@ -53,6 +54,16 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-29-archived-videos-leave',
+    date: '2026-10-29',
+    title: 'Videos archived in Timeliner leave the editors’ lists',
+    summary: 'A video archived in Timeliner no longer stays on an editor’s page here, even an older one or one whose whole project was archived.',
+    changes: [
+      { tag: 'fixed', text: 'When a project is archived in Timeliner, its videos leave the editors’ lists within an hour (straight away when Timeliner tells the site about a change to one of them), and come back if the project is restored.' },
+      { tag: 'fixed', text: 'Older videos archived in Timeliner leave too. The regular read only reaches the newest videos, so each read now also checks up to 40 older ones by themselves.' },
+    ],
+  },
   {
     id: '2026-10-29-ask-ai',
     date: '2026-10-29',

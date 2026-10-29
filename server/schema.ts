@@ -1020,4 +1020,9 @@ alter table settings add column nav_order jsonb;
   `
 alter table roadmap_tasks add column assignee_id bigint references users(id);
 `,
+  // 47 · A Timeliner project the site last read as archived (or trashed): when it was first seen so. Its videos
+  // leave the editors' lists, and the next read doesn't bring them back. Only a nullable column.
+  `
+alter table timeliner_names add column closed_at timestamptz;
+`,
 ];
