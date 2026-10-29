@@ -106,8 +106,8 @@ export interface TimelinerBrandMember {
 
 /** The parts of Timeliner's REST API this server uses (tests pass a stand-in). */
 export interface TimelinerApi {
-  /** a project with its sub-folders (the level between a project and its tasks), and when each was made */
-  project(id: string): Promise<{ id: string; name: string; nodeId?: string | null; createdAt?: string | null; subFolders?: { id: string; name: string; createdAt?: string | null }[] } | null>;
+  /** a project with its sub-folders (the level between a project and its tasks), when each was made, and whether it's archived (`status`) */
+  project(id: string): Promise<{ id: string; name: string; nodeId?: string | null; createdAt?: string | null; status?: string | null; subFolders?: { id: string; name: string; createdAt?: string | null }[] } | null>;
   brand(id: string): Promise<{ id: string; name: string } | null>;
   task(id: string): Promise<TimelinerTask | null>;
   /** 100 tasks per page, newest first */

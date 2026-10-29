@@ -14,8 +14,11 @@
 // GET /api/editing/script-pdf/:batchId, which fetches a fresh link each time), else the site's document. A
 // read-only key is enough. When the webhook is connected, task messages update one video straight away; a
 // message that changes or removes a video after a read began isn't undone by that read. When Timeliner can't be
-// read, its error is kept for the page and the last copy stays. Scripts PDFs (linked by server/timeliner.ts) are
-// tasks too: a read keeps their step, version and whether they were trashed, and never takes them for videos.
+// read, its error is kept for the page and the last copy stays. A video archived in Timeliner leaves the copy, and
+// so does every video in a project archived there (`timeliner_names.closed_at`) until it's restored; a read stopped
+// by its page cap looks up a few older videos it didn't reach, since Timeliner's list leaves archived ones out.
+// Scripts PDFs (linked by server/timeliner.ts) are tasks too: a read keeps their step, version and whether they
+// were trashed, and never takes them for videos.
 //
 // The site's own layer is what each editor is doing right now: "I'm on this", Pause, Resume and Done. Done
 // tells the managers and never changes Timeliner; the video moves on here when Timeliner has it in review (Needs
@@ -58,6 +61,13 @@ const PROJECT_REFRESH_MS = 3600_000;
 const PROJECTS_PER_READ = 60;
 /** a video's last step move is read when its step changes, at most this many each time */
 const MOVES_PER_READ = 40;
+/**
+ * videos kept from earlier reads that this read didn't reach (older than the newest TASK_PAGES of tasks) are
+ * looked up one by one, this many each time, the longest unchecked first: one archived or trashed since leaves
+ */
+const UNREACHED_PER_READ = 40;
+/** a project Timeliner has put away: its videos are nobody's to edit */
+const CLOSED_PROJECT = new Set(['archived', 'trashed', 'deleted']);
 /** videos nobody has been given are listed when created this recently */
 const NOT_ASSIGNED_DAYS = 60;
 const DAY_MS = 86400_000;
@@ -216,12 +226,13 @@ async function readPages<T>(page: (before: string | null) => Promise<{ data: T[]
 /** Too many calls, or Timeliner out of reach: stop the optional lookups for this read. */
 const stopLooking = (err: unknown) => err instanceof TimelinerError && (err.status === 429 || err.status === 0);
 
-interface NameRow { id: string; kind: 'brand' | 'project' | 'subfolder'; name: string; parent_id: string | null; synced_at: string; created_at: string | null }
-type ProjectRead = { name: string; nodeId: string | null; createdAt: string | null; subFolders: { id: string; name: string; createdAt: string | null }[] } | null;
+interface NameRow { id: string; kind: 'brand' | 'project' | 'subfolder'; name: string; parent_id: string | null; synced_at: string; created_at: string | null; closed_at: string | null }
+/** `closed`: Timeliner has the project archived (or trashed) */
+type ProjectRead = { name: string; nodeId: string | null; createdAt: string | null; closed: boolean; subFolders: { id: string; name: string; createdAt: string | null }[] } | null;
 type Move = { at: string; to: string | null; byId: string | null } | null;
 
 /** A project (or sub-folder) as Timeliner sent it: its name, or null when it has none the site can use. */
-const projectSchema = z.object({ name: z.string().transform((v) => clean(v, 300)).pipe(z.string().min(1)), nodeId: optId(200), createdAt: stamp });
+const projectSchema = z.object({ name: z.string().transform((v) => clean(v, 300)).pipe(z.string().min(1)), nodeId: optId(200), createdAt: stamp, status: text(40) });
 const subFolderSchema = projectSchema.extend({ id: idOf(200) });
 
 /** The projects these videos sit in, open videos' first, unless read in the last hour. A project that can't be read is skipped (and noted). */
@@ -249,7 +260,8 @@ async function readProjects(api: TimelinerApi, tasks: Task[], cached: Map<string
       if (!r.success) { skips.push({ what: 'sub-folder', id: rawId(f) }); return []; }
       return [{ id: r.data.id, name: r.data.name, createdAt: r.data.createdAt ?? null }];
     });
-    out.set(id, { name: read.data.name, nodeId: read.data.nodeId ?? null, createdAt: read.data.createdAt ?? null, subFolders });
+    const closed = !!read.data.status && CLOSED_PROJECT.has(read.data.status.toLowerCase());
+    out.set(id, { name: read.data.name, nodeId: read.data.nodeId ?? null, createdAt: read.data.createdAt ?? null, closed, subFolders });
   }
   return out;
 }
@@ -411,7 +423,14 @@ async function loadPrev(db: Db, ids?: string[]): Promise<Map<string, Prev>> {
 }
 
 async function loadNames(db: Db): Promise<Map<string, NameRow>> {
-  return new Map((await db.query<NameRow>(`select id, kind, name, parent_id, synced_at, created_at from timeliner_names`)).map((r) => [r.id, r]));
+  return new Map((await db.query<NameRow>(`select id, kind, name, parent_id, synced_at, created_at, closed_at from timeliner_names`)).map((r) => [r.id, r]));
+}
+
+/** Whether a video's project is put away in Timeliner: as just read, else (not read, or unreadable) as last read. */
+function inClosedProject(t: Task, read: Map<string, ProjectRead>, cached: Map<string, NameRow>): boolean {
+  if (!t.projectId) return false;
+  const p = read.get(t.projectId);
+  return p ? p.closed : !!cached.get(t.projectId)?.closed_at;
 }
 
 /** One video's row: Timeliner's fields, its step as last read, and when it left the editor's plate. */
@@ -534,17 +553,20 @@ async function write(db: Db, f: Found): Promise<void> {
       });
     }
     const names: unknown[][] = [];
-    for (const b of f.brands ?? []) names.push([b.id, 'brand', b.name, null, at, null]);
+    for (const b of f.brands ?? []) names.push([b.id, 'brand', b.name, null, at, null, null]);
     for (const [id, p] of f.projects) {
       if (!p) continue;
-      names.push([id, 'project', p.name, p.nodeId, at, p.createdAt]);
+      names.push([id, 'project', p.name, p.nodeId, at, p.createdAt, p.closed ? at : null]);
       await t.query(`delete from timeliner_names where kind = 'subfolder' and parent_id = $1`, [id]);
-      for (const s of p.subFolders) names.push([s.id, 'subfolder', s.name, id, at, s.createdAt]);
+      for (const s of p.subFolders) names.push([s.id, 'subfolder', s.name, id, at, s.createdAt, null]);
     }
     const unique = [...new Map(names.map((n) => [n[0], n])).values()];
-    await insertRows(t, 'timeliner_names', ['id', 'kind', 'name', 'parent_id', 'synced_at', 'created_at'], unique, {
+    // a project stays closed from when it was first read so, until a read finds it open again
+    await insertRows(t, 'timeliner_names', ['id', 'kind', 'name', 'parent_id', 'synced_at', 'created_at', 'closed_at'], unique, {
       tail: () => `on conflict (id) do update set kind = excluded.kind, name = excluded.name, parent_id = excluded.parent_id, synced_at = excluded.synced_at,
-                   created_at = coalesce(excluded.created_at, timeliner_names.created_at)`,
+                   created_at = coalesce(excluded.created_at, timeliner_names.created_at),
+                   closed_at = case when excluded.closed_at is null then null else coalesce(timeliner_names.closed_at, excluded.closed_at) end`,
+      casts: { closed_at: '::timestamptz' },
     });
 
     // R1 · linked scripts PDFs: their step, trashed or restored, and a new file whose message never came (a version)
@@ -783,22 +805,47 @@ export async function syncTimeliner(db: Db, api: TimelinerApi, now: Date, log?: 
     const pdfs: PdfSeen[] = [];
     // the oldest video the list reached (it's newest first): a read that stops early covers only what's newer
     let listedFrom: string | null = null;
+    const reached = new Set<string>();
     for (const raw of listed.items) {
       // every field but the id has a safe default: a task without a usable id is all that's skipped
       const t = readTask(raw);
       if (!t) { skips.push({ what: 'task', id: rawId(raw) }); continue; }
+      reached.add(t.id);
       const created = iso(t.createdAt);
       if (created && (!listedFrom || created < listedFrom)) listedFrom = created;
       if (linked.has(t.id)) { pdfs.push(pdfSeen(t)); drop.push(t.id); continue; }
       if (skipReason(t, now)) drop.push(t.id);
       else keep.set(t.id, t);
     }
-    const tasks = [...keep.values()];
+    // videos kept from before that a read stopping at its page cap didn't reach: an older one archived or trashed in
+    // Timeliner since would stay for ever, so a few are looked up each time, the longest unchecked first
+    if (!listed.complete) {
+      const unreached = await db.query<{ id: string }>(
+        `select id from timeliner_tasks where not (id = any($1::text[])) and ($2::timestamptz is null or created_at is null or created_at <= $2)
+          order by synced_at, id limit ${UNREACHED_PER_READ}`, [[...reached], listedFrom],
+      );
+      for (const { id } of unreached) {
+        let raw: unknown;
+        try {
+          raw = await api.task(id);
+        } catch (err) {
+          if (stopLooking(err)) break;
+          continue;
+        }
+        const t = readTask(raw);
+        if (raw != null && !t) { skips.push({ what: 'task', id }); continue; }
+        if (!t || skipReason(t, now)) drop.push(id);
+        else keep.set(t.id, t);
+      }
+    }
     const prev = await loadPrev(db);
     const cached = await loadNames(db);
+    const projects = await readProjects(api, [...keep.values()], cached, now, PROJECTS_PER_READ, skips);
+    // a video in a project archived (or trashed) in Timeliner is nobody's to edit
+    for (const t of keep.values()) if (inClosedProject(t, projects, cached)) { keep.delete(t.id); drop.push(t.id); }
+    const tasks = [...keep.values()];
     // who is on each brand first: a client's editor is assigned there, and every video without assignees is theirs
     const onBrands = await readBrandMembers(api, tasks, skips, log);
-    const projects = await readProjects(api, tasks, cached, now, PROJECTS_PER_READ, skips);
     const moves = await readMoves(api, tasks, prev, MOVES_PER_READ);
     const names = new Map<string, { name: string }>(cached);
     for (const b of brands) names.set(b.id, { name: b.name });
@@ -872,6 +919,10 @@ export async function applyTaskMessage(ctx: Ctx, api: TimelinerApi | null, m: { 
   const cached = await loadNames(db);
   const names = new Map<string, { name: string }>(cached);
   const projects = await readProjects(api, [t], cached, now, 1);
+  if (inClosedProject(t, projects, cached)) {
+    await write(db, { ...base, rows: [], drop: [t.id], projects });
+    return 'Video removed: its project was archived in Timeliner';
+  }
   for (const [id, p] of projects) if (p) { names.set(id, p); for (const s of p.subFolders) names.set(s.id, s); }
   let brands: { id: string; name: string }[] | undefined;
   if (t.brandId && !names.has(t.brandId)) {
