@@ -19,6 +19,7 @@ import { claudeNotesReader } from './notes-import';
 import { claudeThumbCritic } from './second-look';
 import { claudeBriefHelper } from './brief-ideas';
 import { claudeRoadmapReader } from './roadmaps';
+import { claudeSiteAssistant } from './assistant';
 import { youtubeReader } from './youtube';
 import type { Ctx } from './core';
 
@@ -58,6 +59,8 @@ async function main() {
     briefHelper: config.anthropicApiKey ? claudeBriefHelper() : null,
     // and reads a month's content roadmap from its PDF
     roadmapReader: config.anthropicApiKey ? claudeRoadmapReader() : null,
+    // and answers managers in Ask AI, proposing changes they apply
+    assistant: config.anthropicApiKey ? claudeSiteAssistant() : null,
     // Add past thumbnails reads YouTube itself, with or without YOUTUBE_API_KEY (the key only gives a surer publish date)
     youtube: youtubeReader({ apiKey: config.youtubeApiKey }),
     remindersEnabled: config.remindersEnabled,

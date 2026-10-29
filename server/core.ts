@@ -28,6 +28,8 @@ export interface Ctx {
   thumbCritic?: ThumbCritic | null;
   /** suggests three directions for a new thumbnail brief (Claude); absent when no API key is configured */
   briefHelper?: BriefHelper | null;
+  /** the site's assistant, Ask AI (Claude); absent when no API key is configured */
+  assistant?: import('./assistant').SiteAssistant | null;
   /** reads a content roadmap PDF (Claude); absent when no API key is configured */
   roadmapReader?: import('./roadmaps').RoadmapReader | null;
   /**

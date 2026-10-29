@@ -222,3 +222,78 @@ export function fmtClock(hhmm: string): string {
   const mm = hhmm.slice(3, 5);
   return `${h % 12 || 12}${mm === '00' ? '' : `:${mm}`} ${h < 12 ? 'AM' : 'PM'}`;
 }
+
+// ── changes (made by hand or proposed by the assistant, applied by POST /api/roadmaps/:id/changes) ──
+
+/** A video's fields as a change gives them: a key left out stays as it is; null clears it. */
+export interface RoadmapVideoFields {
+  title?: string; publishDate?: ISODate; publishTime?: string | null; tag?: string | null; format?: string | null; runtime?: string | null;
+  idea?: string | null; why?: string | null; beats?: RoadmapBeat[]; thumbnailText?: string | null; thumbnailConcept?: string | null; prep?: string | null;
+}
+
+/** One change to a roadmap. They're applied in order, in one transaction. */
+export type RoadmapOp =
+  | { op: 'update_roadmap'; title?: string; summary?: string | null; standardTimes?: string | null; defaultTime?: string; workflow?: RoadmapExtras['workflow']; checklist?: string[]; contingency?: string[]; notes?: string[] }
+  /** a new video; its deliverables copy the schedule of `copyScheduleFrom` (by default the closest video before it), moved to its publish day */
+  | ({ op: 'add_video'; title: string; publishDate: ISODate; copyScheduleFrom?: number } & Omit<RoadmapVideoFields, 'title' | 'publishDate'>)
+  /** a new publish day moves its Publish deliverables, and every other deliverable of the video with it unless `moveDeliverables` is false */
+  | ({ op: 'update_video'; videoId: number; moveDeliverables?: boolean } & RoadmapVideoFields)
+  | { op: 'remove_video'; videoId: number }
+  | { op: 'add_task'; videoId: number | null; step: RoadmapStep; title?: string; date: ISODate; time?: string | null; role: RoadmapRole; assigneeId?: number | null }
+  /** `assigneeId` gives this one deliverable to someone; null puts it back with its role's person */
+  | { op: 'update_task'; taskId: number; step?: RoadmapStep; title?: string; date?: ISODate; time?: string | null; role?: RoadmapRole; assigneeId?: number | null }
+  | { op: 'remove_task'; taskId: number }
+  | { op: 'assign_role'; role: RoadmapRole; userId: number | null }
+  /** one video's deliverables of a role (Week 3's scripting) to someone; null puts them back with the role's person */
+  | { op: 'assign_video'; videoId: number; role: RoadmapRole; userId: number | null };
+
+/** What a change does, in plain words, for the roadmap as it stands before it ("Move Week 3 … to Tue, Nov 24, with its 11 deliverables"). */
+export function describeOp(
+  op: RoadmapOp,
+  r: { videos: { id: number; position: number; title: string; publishDate: ISODate }[]; tasks: { id: number; videoId: number | null; title: string; date: ISODate }[] },
+  nameOf: (userId: number) => string,
+): string {
+  const day = (d: ISODate) => new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${d}T00:00:00Z`));
+  const video = (id: number) => { const v = r.videos.find((x) => x.id === id); return v ? `Week ${v.position} “${v.title}”` : 'a video not on this roadmap'; };
+  const task = (id: number) => {
+    const t = r.tasks.find((x) => x.id === id);
+    if (!t) return 'a deliverable not on this roadmap';
+    const v = t.videoId ? r.videos.find((x) => x.id === t.videoId) : undefined;
+    return `“${t.title}”${v ? ` (Week ${v.position})` : ''}`;
+  };
+  switch (op.op) {
+    case 'update_roadmap': {
+      const what = (['title', 'summary', 'standardTimes', 'defaultTime', 'workflow', 'checklist', 'contingency', 'notes'] as const)
+        .filter((k) => op[k] !== undefined).map((k) => ({ title: 'title', summary: 'summary', standardTimes: 'standard times', defaultTime: 'default deadline time', workflow: 'weekly workflow', checklist: 'checklist', contingency: 'if-something-slips notes', notes: 'notes' })[k]);
+      return `Update the roadmap’s ${what.join(', ') || 'details'}`;
+    }
+    case 'add_video': return `Add “${op.title}”, publishing ${day(op.publishDate)}${op.publishTime ? ` at ${fmtClock(op.publishTime)}` : ''}, with its own deliverables`;
+    case 'update_video': {
+      const v = r.videos.find((x) => x.id === op.videoId);
+      const parts: string[] = [];
+      if (op.publishDate && v && op.publishDate !== v.publishDate) {
+        const n = r.tasks.filter((t) => t.videoId === v.id).length;
+        parts.push(`move to ${day(op.publishDate)}${op.moveDeliverables === false ? ' (only its publish day)' : ` with its ${n === 1 ? 'deliverable' : `${n} deliverables`}`}`);
+      }
+      if (op.title && v && op.title !== v.title) parts.push(`rename to “${op.title}”`);
+      const brief = (['idea', 'why', 'beats', 'thumbnailText', 'thumbnailConcept', 'prep', 'format', 'runtime', 'tag', 'publishTime'] as const).filter((k) => op[k] !== undefined);
+      if (brief.length) parts.push(brief.some((k) => ['idea', 'why', 'beats'].includes(k)) ? 'rewrite its brief' : 'update its details');
+      return `${video(op.videoId)}: ${parts.join(', ') || 'no change'}`;
+    }
+    case 'remove_video': return `Remove ${video(op.videoId)} and its deliverables`;
+    case 'add_task': return `Add “${op.title || ROADMAP_STEP_LABEL[op.step]}”${op.videoId ? ` to ${video(op.videoId)}` : ''}, due ${day(op.date)}${op.time ? ` at ${fmtClock(op.time)}` : ''} (${ROADMAP_ROLE_LABEL[op.role].toLowerCase()})`;
+    case 'update_task': {
+      const parts: string[] = [];
+      if (op.date) parts.push(`due ${day(op.date)}${op.time ? ` at ${fmtClock(op.time)}` : ''}`);
+      else if (op.time) parts.push(`due at ${fmtClock(op.time)}`);
+      if (op.role) parts.push(`owned by the ${ROADMAP_ROLE_LABEL[op.role].toLowerCase()}`);
+      if (op.title) parts.push(`renamed “${op.title}”`);
+      if (op.step) parts.push(`counted as ${ROADMAP_STEP_LABEL[op.step].toLowerCase()}`);
+      if (op.assigneeId !== undefined) parts.push(op.assigneeId ? `given to ${nameOf(op.assigneeId)}` : 'back with its role’s person');
+      return `${task(op.taskId)}: ${parts.join(', ') || 'no change'}`;
+    }
+    case 'remove_task': return `Remove ${task(op.taskId)}`;
+    case 'assign_role': return `${ROADMAP_ROLE_LABEL[op.role]} for the month: ${op.userId ? nameOf(op.userId) : 'nobody'}`;
+    case 'assign_video': return `${video(op.videoId)}: the ${ROADMAP_ROLE_LABEL[op.role].toLowerCase()}’s deliverables to ${op.userId ? nameOf(op.userId) : 'the month’s ' + ROADMAP_ROLE_LABEL[op.role].toLowerCase()}`;
+  }
+}

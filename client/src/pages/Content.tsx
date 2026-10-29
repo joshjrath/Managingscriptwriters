@@ -9,14 +9,14 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, m } from 'framer-motion';
 import {
-  AlertTriangle, CalendarRange, Check, CheckCircle2, ChevronRight, Clapperboard, Clock, FileText, Film, LayoutGrid, ListChecks, Rocket, Sparkles,
+  AlertTriangle, CalendarRange, Check, CheckCircle2, ChevronRight, Clapperboard, Clock, FileText, Film, LayoutGrid, ListChecks, Pencil, Rocket, Sparkles,
   Trash2, Upload, UserRound, Users,
 } from 'lucide-react';
 import { api, queryClient, useSave } from '../api';
 import type { RoadmapDetail, RoadmapListItem, RoadmapTask, RoadmapVideo } from '../../../shared/types';
 import {
   fmtClock, ROADMAP_ROLE_LABEL, ROADMAP_STAGE_LABEL, ROADMAP_STAGES, ROADMAP_STEP_LABEL, ROADMAP_STEPS, STEP_STAGE, taskState,
-  type RoadmapStage, type RoadmapTaskState,
+  type RoadmapOp, type RoadmapStage, type RoadmapTaskState,
 } from '../../../shared/roadmap';
 import { addDays, diffDays, eachDay, type ISODate } from '../../../shared/dates';
 import { isManager } from '../../../shared/workflow';
@@ -332,9 +332,12 @@ function TaskDialog({ t, r, rm, onClose, onVideo }: { t: RoadmapTask; r: Roadmap
   const st = rm.state(t);
   const v = t.videoId ? rm.videoOf.get(t.videoId) : undefined;
   const role = rm.roleOf.get(t.role);
+  const [editing, setEditing] = useState(false);
+  if (editing) return <TaskEdit t={t} r={r} onDone={() => setEditing(false)} onGone={onClose} />;
   return (
     <Dialog open onClose={onClose} size="narrow" title={t.title} sub={v ? `Week ${v.position} · ${v.title}` : r.title}
       footer={<div className="form-actions">
+        {rm.manager && <Button variant="ghost" icon={<Pencil aria-hidden />} onClick={() => setEditing(true)} className="left">Change</Button>}
         {v && <Button variant="ghost" icon={<ChevronRight aria-hidden />} onClick={() => onVideo(v.id)}>Open the video’s brief</Button>}
         {rm.canTick(t) && <Button variant={t.doneAt ? '' : 'primary pill'} busy={tick.isPending} icon={t.doneAt ? undefined : <Check aria-hidden />}
           onClick={(e) => { const b = e.currentTarget.getBoundingClientRect(); tick.mutate({ id: t.id, done: !t.doneAt, at: { x: b.left + b.width / 2, y: b.top } }); }}>
@@ -348,6 +351,57 @@ function TaskDialog({ t, r, rm, onClose, onVideo }: { t: RoadmapTask; r: Roadmap
         {role?.responsibility && <div><span>Their part</span><b className="plain">{role.responsibility}</b></div>}
       </div>
       {!rm.canTick(t) && <p className="muted" style={{ fontSize: 13 }}>The person on it, or a manager, ticks it off.</p>}
+    </Dialog>
+  );
+}
+
+/** A manager changes one deliverable by hand: its day, time and who it's for, or removes it. Only what changed is sent. */
+function TaskEdit({ t, r, onDone, onGone }: { t: RoadmapTask; r: RoadmapDetail; onDone: () => void; onGone: () => void }) {
+  const { users } = useBoot();
+  const name = useUserName();
+  const toast = useToast();
+  const roleUser = r.roles.find((x) => x.key === t.role)?.userId ?? null;
+  const [date, setDate] = useState(t.date);
+  const [time, setTime] = useState(t.time ?? '');
+  const [who, setWho] = useState(t.ownAssignee && t.assigneeId ? String(t.assigneeId) : '');
+  const change = useSave((ops: RoadmapOp[]) => api<{ roadmap: RoadmapDetail; lines: string[] }>(`/api/roadmaps/${r.id}/changes`, { body: { ops } }), {
+    onSuccess: (res, ops) => {
+      queryClient.setQueryData(['roadmap', r.id], { roadmap: res.roadmap });
+      toast(res.lines[0] ?? 'Saved');
+      if (ops[0]?.op === 'remove_task') onGone(); else onDone();
+    },
+  });
+  const save = () => {
+    const op: Extract<RoadmapOp, { op: 'update_task' }> = { op: 'update_task', taskId: t.id };
+    if (date !== t.date) op.date = date;
+    if ((time || null) !== (t.time ?? null)) op.time = time || null;
+    const nextWho = who ? Number(who) : null;
+    if (nextWho !== (t.ownAssignee ? t.assigneeId : null)) op.assigneeId = nextWho;
+    if (Object.keys(op).length === 2) { onDone(); return; }
+    change.mutate([op]);
+  };
+  return (
+    <Dialog open onClose={onDone} size="narrow" title={`Change “${t.title}”`} sub="Only this deliverable changes."
+      footer={<div className="form-actions">
+        <Button variant="danger" icon={<Trash2 aria-hidden />} className="left" busy={change.isPending}
+          onClick={() => { if (window.confirm(`Remove “${t.title}” from the roadmap?`)) change.mutate([{ op: 'remove_task', taskId: t.id }]); }}>Remove</Button>
+        <Button variant="ghost" onClick={onDone}>Cancel</Button>
+        <Button variant="primary pill" busy={change.isPending} disabled={!date} onClick={save}>Save</Button>
+      </div>}>
+      <div className="form">
+        <FormError error={change.error} />
+        <div className="row-flex s3" style={{ flexWrap: 'wrap' }}>
+          <label className="field" style={{ flex: 1, minWidth: 150 }}><span>Due</span><input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></label>
+          <label className="field" style={{ flex: 1, minWidth: 130 }}><span>Time</span><input className="input" type="time" value={time} onChange={(e) => setTime(e.target.value)} /></label>
+        </div>
+        <p className="muted" style={{ fontSize: 12.5, marginTop: -6 }}>No time: {fmtClock(r.defaultTime)}, the roadmap’s usual deadline.</p>
+        <label className="field"><span>Who it’s for</span>
+          <select className="select" value={who} onChange={(e) => setWho(e.target.value)}>
+            <option value="">{`The ${ROADMAP_ROLE_LABEL[t.role].toLowerCase()} (${roleUser ? name(roleUser) : 'nobody yet'})`}</option>
+            {users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+          </select>
+        </label>
+      </div>
     </Dialog>
   );
 }

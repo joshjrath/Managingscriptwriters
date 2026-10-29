@@ -216,6 +216,8 @@ export interface Bootstrap {
    * Upload roadmap to managers only when this is true, and it's false while an Admin views as someone
    */
   roadmapImport: boolean;
+  /** Ask AI, the site's assistant, is set up (ANTHROPIC_API_KEY, ctx.assistant): managers only, never while an Admin views as someone */
+  assistant: boolean;
   /** the largest file the server accepts, in MB (UPLOAD_LIMIT_MB) */
   uploadLimitMb: number;
   /** the newest What's new entry this person has opened */
@@ -2239,8 +2241,10 @@ export interface RoadmapVideo {
 }
 export interface RoadmapTask {
   id: number; videoId: number | null; step: RoadmapStep; title: string; date: ISODate; time: string | null; role: RoadmapRole;
-  /** the person on its role now */
+  /** who it's for: the person given this deliverable, else the person on its role */
   assigneeId: number | null;
+  /** given to someone by itself (not just through its role) */
+  ownAssignee: boolean;
   doneAt: string | null; doneByName: string | null;
 }
 export interface RoadmapRoleInfo { key: RoadmapRole; label: string; person: string | null; responsibility: string | null; userId: number | null }
@@ -2250,4 +2254,24 @@ export interface RoadmapDetail {
   /** now in the roadmap's zone, for working out what's overdue */
   now: { date: ISODate; minutes: number };
   roles: RoadmapRoleInfo[]; videos: RoadmapVideo[]; tasks: RoadmapTask[];
+}
+
+// ── the assistant (Ask AI: server/assistant.ts) ──
+
+/**
+ * One change the assistant proposes, in plain words (`lines`), as a request to one of the site's own routes that the
+ * browser sends when the manager presses Apply, or a page to open (`navigate`). Roadmap changes in a row on one
+ * roadmap come as one request (`roadmapId`), applied together.
+ */
+export interface AssistantProposal {
+  lines: string[];
+  request?: { method: 'POST' | 'PATCH' | 'PUT'; path: string; body: unknown };
+  navigate?: string;
+  roadmapId?: number;
+}
+export interface AssistantReply {
+  reply: string;
+  proposals: AssistantProposal[];
+  /** calls that couldn't be used, in plain words */
+  skipped: string[];
 }

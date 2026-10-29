@@ -4025,3 +4025,89 @@ a.live-badge:focus-visible { outline: 2px solid var(--focus); outline-offset: 2p
 .arrange-row .icon-btn.sm { width: 32px; height: 32px; }
 .arrange-row .icon-btn.sm svg { width: 16px; height: 16px; }
 .arrange-row .icon-btn.sm:disabled { opacity: .3; }
+
+/* Ask AI (client/src/components/Assistant.tsx): the button at the top of every page, and the panel on the right that
+   stays open while you move around. On wide screens the page makes room for it. */
+:root { --ai-w: 430px; }
+.ai-btn { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 16px 0 13px; border: 0; border-radius: var(--r-pill); cursor: pointer; font: 700 14px/1 var(--font-ui); color: var(--on-accent);
+  background: linear-gradient(115deg, var(--lavender), var(--pink) 55%, var(--salmon)); background-size: 180% 100%; background-position: 0% 0;
+  box-shadow: 0 10px 26px -12px color-mix(in srgb, var(--lavender) 80%, transparent); transition: background-position 600ms var(--ease-out-quint), transform 160ms var(--ease); }
+.ai-btn:hover { background-position: 100% 0; transform: translateY(-1px); }
+.ai-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+.ai-btn svg { width: 17px; height: 17px; }
+.ai-btn.compact { width: 40px; height: 40px; padding: 0; justify-content: center; }
+@media (min-width: 1280px) {
+  .app.ai-open .page-main { padding-right: calc(var(--ai-w) + 20px); }
+  .app.ai-open .cr-hero { grid-template-columns: minmax(0, 1fr); }
+}
+
+.ai-panel { position: fixed; z-index: 60; top: 12px; right: 12px; bottom: 12px; width: var(--ai-w); max-width: calc(100vw - 24px); display: flex; flex-direction: column;
+  border-radius: var(--r-panel); background: color-mix(in srgb, var(--panel) 96%, transparent); backdrop-filter: blur(18px);
+  box-shadow: var(--shadow-pop), inset 0 0 0 1px color-mix(in srgb, var(--lavender) 22%, transparent); overflow: hidden; }
+.ai-panel::before { content: ""; position: absolute; inset: 0 0 auto; height: 160px; pointer-events: none;
+  background: radial-gradient(120% 100% at 10% 0%, color-mix(in srgb, var(--lavender) 22%, transparent), transparent 70%); }
+.ai-head { position: relative; display: flex; align-items: center; gap: 12px; padding: 18px 14px 14px 20px; }
+.ai-head h2 { font: 800 19px/1.1 var(--font-display); letter-spacing: -0.02em; }
+.ai-head span { font-size: 12px; color: var(--text-2); }
+.ai-mark { display: grid; place-items: center; width: 38px; height: 38px; border-radius: 12px; color: var(--on-accent); flex: none;
+  background: linear-gradient(135deg, var(--lavender), var(--pink), var(--salmon)); background-size: 200% 200%; animation: ai-sheen 6s ease-in-out infinite alternate; }
+.ai-mark svg { width: 19px; height: 19px; }
+@keyframes ai-sheen { from { background-position: 0% 0%; } to { background-position: 100% 100%; } }
+.ai-list { position: relative; flex: 1; overflow-y: auto; padding: 6px 18px 18px; display: flex; flex-direction: column; gap: 14px; scrollbar-width: thin; }
+.ai-hello { margin-top: 8px; padding: 18px; border-radius: var(--r-card); background: var(--panel-2); }
+.ai-hello b { font: 800 20px/1.15 var(--font-display); letter-spacing: -0.02em; }
+.ai-hello p { margin: 8px 0 14px; font-size: 13.5px; line-height: 1.55; color: var(--text-2); }
+.ai-chips { display: flex; flex-direction: column; gap: 8px; }
+.ai-chips button { all: unset; cursor: pointer; padding: 10px 12px; border-radius: 12px; background: var(--row); font-size: 13px; line-height: 1.4; transition: background 160ms var(--ease); }
+.ai-chips button:hover { background: var(--row-hover); }
+.ai-chips button:focus-visible { outline: 2px solid var(--focus); }
+.ai-msg.user { align-self: flex-end; max-width: 88%; }
+.ai-bubble { padding: 10px 14px; border-radius: 18px 18px 6px 18px; background: color-mix(in srgb, var(--lavender) 26%, var(--row)); font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+.ai-msg.assistant { align-self: stretch; }
+.ai-answer { display: flex; flex-direction: column; gap: 10px; }
+.ai-prose { font-size: 14px; line-height: 1.6; }
+.ai-prose p + p, .ai-prose p + ul, .ai-prose ul + p { margin-top: 8px; }
+.ai-prose ul { padding-left: 18px; display: flex; flex-direction: column; gap: 4px; list-style: disc; }
+.ai-prose li::marker { color: var(--lavender); }
+.ai-go { all: unset; cursor: pointer; align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; padding: 8px 12px; border-radius: var(--r-pill); background: var(--row); font-size: 13px; font-weight: 600; }
+.ai-go:hover { background: var(--row-hover); }
+.ai-go svg { width: 15px; height: 15px; }
+.ai-skipped { font-size: 12px; color: var(--text-3); }
+.ai-changes { border-radius: var(--r-card); padding: 14px; background: var(--panel-2); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--yellow) 25%, transparent); }
+.ai-changes.applied { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mint) 35%, transparent); }
+.ai-changes.dismissed { opacity: .6; box-shadow: none; }
+.ai-changes-h { font: 700 11px/1 var(--font-ui); letter-spacing: .12em; text-transform: uppercase; color: var(--text-2); margin-bottom: 10px; }
+.ai-changes.applied .ai-changes-h { color: var(--mint); }
+.ai-changes ol { list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.ai-changes li { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; line-height: 1.45; }
+.ai-changes li > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.ai-changes li .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--yellow); margin-top: 6px; flex: none; }
+.ai-changes li svg { width: 16px; height: 16px; flex: none; margin-top: 2px; }
+.ai-changes li svg.ok { color: var(--mint); }
+.ai-changes li svg.bad { color: var(--red); }
+.ai-changes li.skip { opacity: .55; }
+.ai-changes li .err { color: var(--red); font-size: 12.5px; }
+.ai-changes-act { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 12px; }
+.ai-changes-act .btn svg { width: 15px; height: 15px; }
+.ai-changes-act .muted { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.ai-changes-act .muted svg { width: 15px; height: 15px; animation: spin .9s linear infinite; }
+.ai-thinking { display: inline-flex; align-items: center; gap: 5px; padding: 10px 14px; border-radius: 18px; background: var(--panel-2); font-size: 13px; color: var(--text-2); }
+.ai-thinking i { width: 7px; height: 7px; border-radius: 50%; background: var(--lavender); animation: ai-bob 1s ease-in-out infinite; }
+.ai-thinking i:nth-child(2) { animation-delay: .15s; background: var(--pink); }
+.ai-thinking i:nth-child(3) { animation-delay: .3s; background: var(--salmon); }
+.ai-thinking span { margin-left: 6px; }
+@keyframes ai-bob { 0%, 100% { transform: translateY(0); opacity: .6; } 50% { transform: translateY(-4px); opacity: 1; } }
+.ai-error { display: flex; align-items: center; gap: 8px; margin: 0 18px 8px; padding: 10px 12px; border-radius: 12px; background: color-mix(in srgb, var(--red) 14%, var(--panel-2)); color: #FFB3AD; font-size: 13px; }
+.ai-error svg { width: 16px; height: 16px; flex: none; }
+.ai-compose { display: flex; align-items: flex-end; gap: 8px; margin: 0 12px 12px; padding: 8px 8px 8px 14px; border-radius: 20px; background: var(--panel-2); box-shadow: inset 0 0 0 1px var(--line-soft); }
+.ai-compose:focus-within { box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--lavender) 70%, transparent); }
+.ai-compose textarea { flex: 1; border: 0; background: none; color: var(--text); font: 14px/1.5 var(--font-ui); resize: none; outline: none; padding: 7px 0; max-height: 180px; }
+.ai-send { display: grid; place-items: center; width: 38px; height: 38px; border: 0; border-radius: 12px; cursor: pointer; background: var(--yellow); color: var(--on-accent); flex: none; }
+.ai-send:disabled { background: var(--row); color: var(--text-3); cursor: default; }
+.ai-send svg { width: 17px; height: 17px; }
+.ai-send .spin { animation: spin .9s linear infinite; }
+@media (max-width: 760px) {
+  .ai-panel { inset: 0; width: auto; max-width: none; border-radius: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .ai-mark, .ai-thinking i { animation: none; } }
+:root[data-motion="off"] .ai-mark, :root[data-motion="off"] .ai-thinking i { animation: none; }
