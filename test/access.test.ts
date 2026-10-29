@@ -154,6 +154,9 @@ const ACCESS: Record<string, Access> = {
   'POST /api/roadmaps/import': 'manager',
   'PATCH /api/roadmaps/:id/roles/:key': 'manager',
   'DELETE /api/roadmaps/:id': 'manager',
+  'POST /api/roadmaps/:id/changes': 'manager',
+  // Ask AI: proposes changes the browser applies through the routes above (test/assistant.test.ts)
+  'POST /api/assistant': 'manager',
 
   'GET /api/audit': 'admin',
   'PUT /api/settings/theme': 'admin',

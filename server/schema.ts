@@ -1015,4 +1015,9 @@ create index roadmap_tasks_due_idx on roadmap_tasks (due_date);
   `
 alter table settings add column nav_order jsonb;
 `,
+  // 46 · A roadmap deliverable can be given to someone by itself (Week 3's script to Ben while the writer role is
+  // someone else's); null keeps it with its role's person. Only a nullable column.
+  `
+alter table roadmap_tasks add column assignee_id bigint references users(id);
+`,
 ];

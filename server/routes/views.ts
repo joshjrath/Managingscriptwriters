@@ -184,7 +184,9 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
       // AI brief ideas in New thumbnail, for managers; off while an Admin views as someone, as the route is (it would use their limits)
       briefIdeas: !!ctx.briefHelper && !req.viewingAs,
       // reading a content roadmap's PDF, for managers; off while an Admin views as someone, as the route is
-      roadmapImport: !!ctx.roadmapReader && !req.viewingAs, uploadLimitMb: Math.round(ctx.uploadLimitBytes / 1024 / 1024), whatsNewSeen: seen?.whats_new_seen ?? null,
+      roadmapImport: !!ctx.roadmapReader && !req.viewingAs,
+      // Ask AI, for managers; off while an Admin views as someone, as the route is
+      assistant: !!ctx.assistant && isManager(me.role) && !req.viewingAs, uploadLimitMb: Math.round(ctx.uploadLimitBytes / 1024 / 1024), whatsNewSeen: seen?.whats_new_seen ?? null,
       timezone: { mine: seen?.timezone ?? null, confirmed: !!seen?.timezone_confirmed_at },
       // still on the temporary password someone gave them: ask for their own
       mustChangePassword: !!seen?.temp && !sessionMode(req)?.viewingAs,

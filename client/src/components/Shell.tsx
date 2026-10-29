@@ -23,6 +23,7 @@ import { SPRING, setMotionEnabled, useMotionSetting } from '../motion';
 import { LATEST_CHANGE } from '../../../shared/changelog';
 import { openTimezoneDialog, TimezonePrompt } from './TimezonePrompt';
 import { ArrangeNavDialog, type ArrangeItem } from './ArrangeNav';
+import { AskAIButton, AssistantPanel } from './Assistant';
 
 // ── bootstrap context ────────────────────────────────────────────────────
 
@@ -41,6 +42,9 @@ export function useDisplayTz(): string {
 export const useIsManager = () => isManager(useBoot().me.role);
 
 const NewWorkCtx = createContext<(tab?: NewWorkTab, preset?: NewWorkPreset) => void>(() => {});
+/** Ask AI's panel: whether it's open, and a toggle (null when the assistant isn't set up for this person) */
+const AssistantCtx = createContext<{ open: boolean; toggle: (open?: boolean) => void } | null>(null);
+export const useAssistant = () => useContext(AssistantCtx);
 export const useNewWork = () => useContext(NewWorkCtx);
 
 export function useUserName() {
@@ -60,6 +64,15 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
   const [expanded, setExpanded] = useState(false);
   const [drawer, setDrawer] = useState(false);
   const [newWork, setNewWork] = useState<{ tab: NewWorkTab; preset?: NewWorkPreset } | null>(null);
+  const [askOpen, setAskOpen] = useState(false);
+  const ask = useMemo(() => (boot.assistant ? { open: askOpen, toggle: (o?: boolean) => setAskOpen((v) => o ?? !v) } : null), [boot.assistant, askOpen]);
+  // Ctrl/⌘ J opens and closes Ask AI from anywhere
+  useEffect(() => {
+    if (!boot.assistant) return;
+    const k = (e: KeyboardEvent) => { if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'j') { e.preventDefault(); setAskOpen((v) => !v); } };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [boot.assistant]);
   const loc = useLocation();
   useEffect(() => { setDrawer(false); }, [loc.pathname]);
   useEffect(() => { window.scrollTo(0, 0); }, [loc.pathname]);
@@ -93,9 +106,10 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
 
   return (
     <BootCtx.Provider value={boot}>
+      <AssistantCtx.Provider value={ask}>
       <NewWorkCtx.Provider value={(tab = 'shoot', preset) => setNewWork({ tab, preset })}>
         <a className="skip-link" href="#main" onClick={(e) => { e.preventDefault(); const m = document.getElementById('main'); m?.focus(); m?.scrollIntoView(); }}>Skip to content</a>
-        <div className={`app${collapsed ? ' collapsed' : ''}${expanded ? ' expanded' : ''}${boot.mode?.recording ? ' recording' : ''}`}>
+        <div className={`app${collapsed ? ' collapsed' : ''}${expanded ? ' expanded' : ''}${boot.mode?.recording ? ' recording' : ''}${askOpen && ask ? ' ai-open' : ''}`}>
           <aside className="sidebar" aria-label="Main navigation">
             <Rail onToggle={toggle} collapsed={railCollapsed} />
           </aside>
@@ -114,6 +128,7 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
             })()}
             <span className="wordmark"><span className="full">SCALE</span>&nbsp;<span>Media</span></span>
             <div className="end">
+              {ask && <AskAIButton compact onClick={() => ask.toggle()} />}
               {isManager(boot.me.role) && <button className="icon-btn" onClick={() => setNewWork({ tab: 'shoot' })} aria-label="Create a shoot, batch or client"><Plus /></button>}
               <NotificationsButton />
             </div>
@@ -128,7 +143,9 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
         <FirstPassword />
         <TimezonePrompt />
         <ModeBar />
+        {ask && <AssistantPanel open={ask.open} onClose={() => ask.toggle(false)} userId={boot.me.id} />}
       </NewWorkCtx.Provider>
+      </AssistantCtx.Provider>
     </BootCtx.Provider>
   );
 }
@@ -512,6 +529,7 @@ export function PageHeader({ title, sub, crumbs, children, hideNewWork }: { titl
   const displayTz = useDisplayTz();
   const { me, settings } = useBoot();
   const openNew = useNewWork();
+  const ask = useAssistant();
   useEffect(() => { if (typeof title === 'string') document.title = `${title} · SCALE Media`; }, [title]);
   return (
     <header className="page-head">
@@ -523,6 +541,7 @@ export function PageHeader({ title, sub, crumbs, children, hideNewWork }: { titl
       <div className="head-tools">
         {children}
         <OrgDate tz={displayTz} hq={settings.timezone} />
+        {ask && <AskAIButton onClick={() => ask.toggle()} />}
         {isManager(me.role) && !hideNewWork && <Button variant="primary pill lg" icon={<Plus aria-hidden />} onClick={() => openNew('shoot')}>Create</Button>}
         <NotificationsButton />
       </div>

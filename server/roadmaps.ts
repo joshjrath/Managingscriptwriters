@@ -19,12 +19,12 @@ import { loadSettings, loadUsers, logActivity, notify, type Ctx } from './core';
 import { requireManager, requireUser } from './auth';
 import { forbidden, HttpError, notFound, parse, zs } from './http';
 import { spool, storedFileName, type UploadedFile } from './files';
-import { nowInZone, type ISODate } from '../shared/dates';
+import { addDays, diffDays, nowInZone, type ISODate } from '../shared/dates';
 import { fmtDate, plural } from '../shared/format';
 import { isManager } from '../shared/workflow';
 import {
-  autoAssign, ROADMAP_ROLES, ROADMAP_STEPS, taskState, tidyRoadmap,
-  type AssignCandidate, type RoadmapDraft, type RoadmapExtras, type RoadmapRole, type RoadmapStep,
+  autoAssign, clockTime, cut, describeOp, ROADMAP_LIMITS, ROADMAP_ROLE_LABEL, ROADMAP_ROLES, ROADMAP_STEP_LABEL, ROADMAP_STEPS, taskState, tidyRoadmap,
+  type AssignCandidate, type RoadmapDraft, type RoadmapExtras, type RoadmapOp, type RoadmapRole, type RoadmapStep,
 } from '../shared/roadmap';
 import type { CalendarEvent, Me, RoadmapDetail, RoadmapListItem, RoadmapTask } from '../shared/types';
 
@@ -148,8 +148,9 @@ async function candidates(db: Db): Promise<AssignCandidate[]> {
   for (const r of await db.query<{ uid: number; n: number }>(
     `select assignee_id as uid, count(*)::int as n from scripts where removed_at is null and assignee_id is not null and status not in ('approved', 'delivered') group by assignee_id
      union all
-     select r.user_id as uid, count(*)::int as n from roadmap_tasks t join roadmaps m on m.id = t.roadmap_id and m.removed_at is null
-       join roadmap_roles r on r.roadmap_id = t.roadmap_id and r.key = t.role where t.done_at is null and r.user_id is not null group by r.user_id`,
+     select coalesce(t.assignee_id, r.user_id) as uid, count(*)::int as n from roadmap_tasks t join roadmaps m on m.id = t.roadmap_id and m.removed_at is null
+       left join roadmap_roles r on r.roadmap_id = t.roadmap_id and r.key = t.role
+      where t.done_at is null and coalesce(t.assignee_id, r.user_id) is not null group by coalesce(t.assignee_id, r.user_id)`,
   )) load.set(Number(r.uid), (load.get(Number(r.uid)) ?? 0) + Number(r.n));
   return users.map((u) => ({ id: u.id, name: u.name, role: u.role, editorKind: u.editorKind, active: u.active, removed: u.removed, load: load.get(u.id) ?? 0 }));
 }
@@ -197,11 +198,12 @@ export async function saveRoadmap(db: Db, draft: RoadmapDraft, opts: { me: Me | 
 /** Tells each person on the roadmap what they own (one notification per person per roadmap, refreshed on a change). */
 async function tellAssigned(db: Db, roadmapId: number, exceptUserId?: number, only?: number) {
   const rows = await db.query<{ user_id: number; title: string; n: number; first: string | null }>(
-    `select r.user_id, m.title, count(t.id)::int as n, min(t.due_date) filter (where t.done_at is null)::text as first
-       from roadmap_roles r join roadmaps m on m.id = r.roadmap_id
-       join roadmap_tasks t on t.roadmap_id = r.roadmap_id and t.role = r.key
-      where r.roadmap_id = $1 and r.user_id is not null ${only ? 'and r.user_id = $2' : ''}
-      group by r.user_id, m.title`, only ? [roadmapId, only] : [roadmapId],
+    `select x.user_id, m.title, count(*)::int as n, min(x.due_date) filter (where x.done_at is null)::text as first
+       from (select coalesce(t.assignee_id, r.user_id) as user_id, t.due_date, t.done_at from roadmap_tasks t
+               left join roadmap_roles r on r.roadmap_id = t.roadmap_id and r.key = t.role where t.roadmap_id = $1) x
+       join roadmaps m on m.id = $1
+      where x.user_id is not null ${only ? 'and x.user_id = $2' : ''}
+      group by x.user_id, m.title`, only ? [roadmapId, only] : [roadmapId],
   );
   for (const r of rows) {
     await notify(db, [Number(r.user_id)], {
@@ -235,8 +237,8 @@ export async function loadRoadmap(db: Db, id: number, now: Date): Promise<Roadma
     idea: string | null; why: string | null; beats: unknown; thumbnail_text: string | null; thumbnail_concept: string | null; prep: string | null;
   }>(`select id, position, title, publish_date::text as publish_date, publish_time, tag, format, runtime, idea, why, beats, thumbnail_text, thumbnail_concept, prep
         from roadmap_videos where roadmap_id = $1 order by position, id`, [id]);
-  const tasks = await db.query<{ id: number; video_id: number | null; step: RoadmapStep; title: string; due_date: string; due_time: string | null; role: RoadmapRole; done_at: string | null; done_by_name: string | null }>(
-    `select t.id, t.video_id, t.step, t.title, t.due_date::text as due_date, t.due_time, t.role, t.done_at, u.name as done_by_name
+  const tasks = await db.query<{ id: number; video_id: number | null; step: RoadmapStep; title: string; due_date: string; due_time: string | null; role: RoadmapRole; assignee_id: number | null; done_at: string | null; done_by_name: string | null }>(
+    `select t.id, t.video_id, t.step, t.title, t.due_date::text as due_date, t.due_time, t.role, t.assignee_id, t.done_at, u.name as done_by_name
        from roadmap_tasks t left join users u on u.id = t.done_by where t.roadmap_id = $1 order by t.due_date, coalesce(t.due_time, '17:00'), t.id`, [id],
   );
   const byRole = new Map(roles.map((x) => [x.key, x.user_id == null ? null : Number(x.user_id)]));
@@ -255,7 +257,7 @@ export async function loadRoadmap(db: Db, id: number, now: Date): Promise<Roadma
     })),
     tasks: tasks.map((t): RoadmapTask => ({
       id: Number(t.id), videoId: t.video_id == null ? null : Number(t.video_id), step: t.step, title: t.title, date: t.due_date, time: t.due_time, role: t.role,
-      assigneeId: byRole.get(t.role) ?? null, doneAt: t.done_at ? new Date(t.done_at).toISOString() : null, doneByName: t.done_by_name,
+      assigneeId: t.assignee_id != null ? Number(t.assignee_id) : byRole.get(t.role) ?? null, ownAssignee: t.assignee_id != null, doneAt: t.done_at ? new Date(t.done_at).toISOString() : null, doneByName: t.done_by_name,
     })),
   };
 }
@@ -271,11 +273,11 @@ export async function roadmapEvents(db: Db, from: ISODate, to: ISODate, now: Dat
     video_title: string | null; brand: string | null; timezone: string; default_time: string; user_id: number | null; user_name: string | null;
   }>(
     `select t.id, t.roadmap_id, t.step, t.title, t.due_date::text as due_date, t.due_time, t.done_at, v.title as video_title, m.brand, m.timezone, m.default_time,
-            r.user_id, u.name as user_name
+            coalesce(t.assignee_id, r.user_id) as user_id, u.name as user_name
        from roadmap_tasks t join roadmaps m on m.id = t.roadmap_id and m.removed_at is null
        left join roadmap_videos v on v.id = t.video_id
        left join roadmap_roles r on r.roadmap_id = t.roadmap_id and r.key = t.role
-       left join users u on u.id = r.user_id
+       left join users u on u.id = coalesce(t.assignee_id, r.user_id)
       where t.due_date between $1 and $2 order by t.due_date, coalesce(t.due_time, m.default_time), t.id`, [from, to],
   );
   return rows
@@ -289,6 +291,203 @@ export async function roadmapEvents(db: Db, from: ISODate, to: ISODate, now: Dat
         content: { roadmapId: Number(t.roadmap_id), taskId: Number(t.id), step: t.step, time: t.due_time ?? (t.step === 'publish' ? null : t.default_time), assigneeName: t.user_name },
       };
     });
+}
+
+// ── changes (by hand, or the assistant's once a manager applies them) ────
+
+const opId = z.number().int().positive();
+const hhmm = z.string().regex(/^([01]?\d|2[0-3]):[0-5]\d$/, 'Use a time like 17:00');
+const longText = z.string().max(6000).nullable();
+const list = z.array(z.string().max(1000)).max(20);
+const brief = {
+  publishTime: hhmm.nullable().optional(), tag: z.string().max(200).nullable().optional(), format: z.string().max(300).nullable().optional(),
+  runtime: z.string().max(100).nullable().optional(), idea: longText.optional(), why: longText.optional(),
+  beats: z.array(z.object({ title: z.string().max(300), body: z.string().max(2000) })).max(12).optional(),
+  thumbnailText: z.string().max(200).nullable().optional(), thumbnailConcept: longText.optional(), prep: longText.optional(),
+};
+
+/** Each change's fields (without `op`): the changes route takes them, and the assistant's tools are made from them. */
+export const ROADMAP_OP_SHAPES = {
+  update_roadmap: z.object({
+    title: z.string().trim().min(1).max(300).optional(), summary: longText.optional(), standardTimes: longText.optional(), defaultTime: hhmm.optional(),
+    workflow: z.array(z.object({ when: z.string().max(200), what: z.string().max(2000) })).max(20).optional(),
+    checklist: list.optional(), contingency: list.optional(), notes: list.optional(),
+  }),
+  add_video: z.object({ title: z.string().trim().min(1).max(300), publishDate: zs.date, ...brief, copyScheduleFrom: opId.optional() }),
+  update_video: z.object({ videoId: opId, title: z.string().trim().min(1).max(300).optional(), publishDate: zs.date.optional(), ...brief, moveDeliverables: z.boolean().optional() }),
+  remove_video: z.object({ videoId: opId }),
+  add_task: z.object({ videoId: opId.nullable(), step: z.enum(ROADMAP_STEPS), title: z.string().max(300).optional(), date: zs.date, time: hhmm.nullable().optional(), role: z.enum(ROADMAP_ROLES), assigneeId: opId.nullable().optional() }),
+  update_task: z.object({ taskId: opId, step: z.enum(ROADMAP_STEPS).optional(), title: z.string().trim().min(1).max(300).optional(), date: zs.date.optional(), time: hhmm.nullable().optional(), role: z.enum(ROADMAP_ROLES).optional(), assigneeId: opId.nullable().optional() }),
+  remove_task: z.object({ taskId: opId }),
+  assign_role: z.object({ role: z.enum(ROADMAP_ROLES), userId: opId.nullable() }),
+  assign_video: z.object({ videoId: opId, role: z.enum(ROADMAP_ROLES), userId: opId.nullable() }),
+} as const;
+export type RoadmapOpName = keyof typeof ROADMAP_OP_SHAPES;
+
+export const ROADMAP_OP = z.discriminatedUnion('op', [
+  ROADMAP_OP_SHAPES.update_roadmap.extend({ op: z.literal('update_roadmap') }),
+  ROADMAP_OP_SHAPES.add_video.extend({ op: z.literal('add_video') }),
+  ROADMAP_OP_SHAPES.update_video.extend({ op: z.literal('update_video') }),
+  ROADMAP_OP_SHAPES.remove_video.extend({ op: z.literal('remove_video') }),
+  ROADMAP_OP_SHAPES.add_task.extend({ op: z.literal('add_task') }),
+  ROADMAP_OP_SHAPES.update_task.extend({ op: z.literal('update_task') }),
+  ROADMAP_OP_SHAPES.remove_task.extend({ op: z.literal('remove_task') }),
+  ROADMAP_OP_SHAPES.assign_role.extend({ op: z.literal('assign_role') }),
+  ROADMAP_OP_SHAPES.assign_video.extend({ op: z.literal('assign_video') }),
+]);
+
+const L = ROADMAP_LIMITS;
+/** a text change: undefined keeps it, anything else is tidied (empty is null) */
+const tidied = (v: string | null | undefined, max: number) => (v === undefined ? undefined : cut(v, max));
+
+/**
+ * Applies changes to a roadmap in order, in the caller's transaction: the roadmap row is locked first. A change naming
+ * a video or deliverable that isn't on this roadmap, or someone who isn't on the team, is 400 and nothing is kept.
+ * Returns each change in plain words and who was given work (to tell them).
+ */
+export async function applyRoadmapOps(t: Db, me: Me, roadmapId: number, ops: RoadmapOp[], now: Date): Promise<{ lines: string[]; given: number[] }> {
+  const m = await t.one<{ title: string; extras: RoadmapExtras | string }>(`select title, extras from roadmaps where id = $1 and removed_at is null for update`, [roadmapId]);
+  if (!m) throw notFound('Roadmap');
+  const users = await loadUsers(t);
+  const nameOf = (id: number) => users.find((u) => u.id === id)?.name ?? 'someone';
+  const lines: string[] = [];
+  const given = new Set<number>();
+  const bad = (i: number, msg: string): never => { throw new HttpError(400, ops.length > 1 ? `Change ${i + 1}: ${msg}` : msg); };
+  const person = (i: number, id: number | null | undefined) => {
+    if (id == null) return;
+    if (!users.some((u) => u.id === id && u.active)) bad(i, 'that person isn’t on the team');
+    given.add(id);
+  };
+  const ensureRole = (key: RoadmapRole) => t.query(`insert into roadmap_roles (roadmap_id, key, label) values ($1, $2, $3) on conflict do nothing`, [roadmapId, key, ROADMAP_ROLE_LABEL[key]]);
+  const video = async (i: number, id: number) => {
+    const v = await t.one<{ id: number; publish_date: string; publish_time: string | null; title: string }>(
+      `select id, publish_date::text as publish_date, publish_time, title from roadmap_videos where id = $1 and roadmap_id = $2`, [id, roadmapId]);
+    return v ?? bad(i, 'that video isn’t on this roadmap');
+  };
+  const task = async (i: number, id: number) => {
+    const k = await t.one<{ id: number; video_id: number | null }>(`select id, video_id from roadmap_tasks where id = $1 and roadmap_id = $2`, [id, roadmapId]);
+    return k ?? bad(i, 'that deliverable isn’t on this roadmap');
+  };
+  const set = async (table: string, id: number, fields: Record<string, unknown>) => {
+    const keys = Object.keys(fields).filter((k) => fields[k] !== undefined);
+    if (keys.length) await t.query(`update ${table} set ${keys.map((k, n) => `${k} = $${n + 2}`).join(', ')} where id = $1`, [id, ...keys.map((k) => fields[k])]);
+  };
+  const briefCols = (op: Partial<Record<keyof typeof brief, unknown>> & { publishTime?: string | null }) => ({
+    tag: tidied(op.tag as string | null | undefined, 40), format: tidied(op.format as string | null | undefined, L.short), runtime: tidied(op.runtime as string | null | undefined, 60),
+    idea: tidied(op.idea as string | null | undefined, L.text), why: tidied(op.why as string | null | undefined, L.text),
+    beats: op.beats === undefined ? undefined : JSON.stringify((op.beats as { title: string; body: string }[]).map((b) => ({ title: cut(b.title, L.short) ?? '', body: cut(b.body, L.item) ?? '' })).filter((b) => b.title || b.body).slice(0, L.beats)),
+    thumbnail_text: tidied(op.thumbnailText as string | null | undefined, 80), thumbnail_concept: tidied(op.thumbnailConcept as string | null | undefined, L.text),
+    prep: tidied(op.prep as string | null | undefined, L.text),
+  });
+
+  for (const [i, op] of ops.entries()) {
+    const before = await loadRoadmap(t, roadmapId, now);
+    lines.push(describeOp(op, before!, nameOf));
+    switch (op.op) {
+      case 'update_roadmap': {
+        const extras = asJson<RoadmapExtras>(m.extras);
+        const items = (v: string[] | undefined) => v?.map((x) => cut(x, L.item)).filter((x): x is string => !!x).slice(0, L.list);
+        const next: RoadmapExtras = {
+          standardTimes: op.standardTimes === undefined ? extras.standardTimes ?? null : cut(op.standardTimes, L.text),
+          workflow: op.workflow ? op.workflow.map((w) => ({ when: cut(w.when, 80) ?? '', what: cut(w.what, L.item) ?? '' })).filter((w) => w.what).slice(0, L.list) : extras.workflow ?? [],
+          checklist: items(op.checklist) ?? extras.checklist ?? [], contingency: items(op.contingency) ?? extras.contingency ?? [], notes: items(op.notes) ?? extras.notes ?? [],
+        };
+        m.extras = next;
+        await set('roadmaps', roadmapId, { title: op.title === undefined ? undefined : cut(op.title, L.title), summary: tidied(op.summary, L.text), default_time: op.defaultTime ? clockTime(op.defaultTime) : undefined });
+        await t.query(`update roadmaps set extras = $2::jsonb where id = $1`, [roadmapId, JSON.stringify(next)]);
+        break;
+      }
+      case 'add_video': {
+        const publishTime = op.publishTime ? clockTime(op.publishTime) : null;
+        const row = await t.one<{ id: number }>(
+          `insert into roadmap_videos (roadmap_id, position, title, publish_date, publish_time) values ($1, 0, $2, $3, $4) returning id`,
+          [roadmapId, cut(op.title, L.title), op.publishDate, publishTime],
+        );
+        const vid = Number(row!.id);
+        await set('roadmap_videos', vid, briefCols(op));
+        // its schedule: another video's deliverables, each the same days from its publish day
+        const src = op.copyScheduleFrom
+          ? await video(i, op.copyScheduleFrom)
+          : await t.one<{ id: number; publish_date: string; publish_time: string | null; title: string }>(
+            `select id, publish_date::text as publish_date, publish_time, title from roadmap_videos where roadmap_id = $1 and id <> $2
+              order by (publish_date > $3::date), abs(publish_date - $3::date), id desc limit 1`, [roadmapId, vid, op.publishDate]);
+        const pattern = src ? await t.query<{ step: RoadmapStep; title: string; due_date: string; due_time: string | null; role: RoadmapRole }>(
+          `select step, title, due_date::text as due_date, due_time, role from roadmap_tasks where video_id = $1 order by due_date, id`, [src.id]) : [];
+        if (!pattern.some((p) => p.step === 'publish')) pattern.push({ step: 'publish', title: 'Publish', due_date: src?.publish_date ?? op.publishDate, due_time: publishTime, role: 'approver' });
+        for (const p of pattern) {
+          await ensureRole(p.role);
+          const date = src ? addDays(op.publishDate, diffDays(p.due_date, src.publish_date)) : op.publishDate;
+          await t.query(`insert into roadmap_tasks (roadmap_id, video_id, step, title, due_date, due_time, role) values ($1,$2,$3,$4,$5,$6,$7)`,
+            [roadmapId, vid, p.step, p.title, p.step === 'publish' ? op.publishDate : date, p.step === 'publish' ? publishTime ?? p.due_time : p.due_time, p.role]);
+        }
+        break;
+      }
+      case 'update_video': {
+        const v = await video(i, op.videoId);
+        await set('roadmap_videos', v.id, {
+          title: op.title === undefined ? undefined : cut(op.title, L.title), publish_date: op.publishDate,
+          publish_time: op.publishTime === undefined ? undefined : op.publishTime ? clockTime(op.publishTime) : null, ...briefCols(op),
+        });
+        if (op.publishDate && op.publishDate !== v.publish_date) {
+          if (op.moveDeliverables !== false) {
+            await t.query(`update roadmap_tasks set due_date = due_date + $2::int where video_id = $1 and step <> 'publish'`, [v.id, diffDays(op.publishDate, v.publish_date)]);
+          }
+          await t.query(`update roadmap_tasks set due_date = $2 where video_id = $1 and step = 'publish'`, [v.id, op.publishDate]);
+        }
+        if (op.publishTime !== undefined) await t.query(`update roadmap_tasks set due_time = $2 where video_id = $1 and step = 'publish'`, [v.id, op.publishTime ? clockTime(op.publishTime) : null]);
+        break;
+      }
+      case 'remove_video': {
+        const v = await video(i, op.videoId);
+        await t.query(`delete from roadmap_tasks where video_id = $1`, [v.id]);
+        await t.query(`delete from roadmap_videos where id = $1`, [v.id]);
+        break;
+      }
+      case 'add_task': {
+        if (op.videoId != null) await video(i, op.videoId);
+        person(i, op.assigneeId);
+        await ensureRole(op.role);
+        await t.query(`insert into roadmap_tasks (roadmap_id, video_id, step, title, due_date, due_time, role, assignee_id) values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [roadmapId, op.videoId, op.step, cut(op.title, L.short) ?? ROADMAP_STEP_LABEL[op.step], op.date, op.time ? clockTime(op.time) : null, op.role, op.assigneeId ?? null]);
+        break;
+      }
+      case 'update_task': {
+        const k = await task(i, op.taskId);
+        person(i, op.assigneeId);
+        if (op.role) await ensureRole(op.role);
+        await set('roadmap_tasks', k.id, {
+          step: op.step, title: op.title === undefined ? undefined : cut(op.title, L.short), due_date: op.date,
+          due_time: op.time === undefined ? undefined : op.time ? clockTime(op.time) : null, role: op.role, assignee_id: op.assigneeId,
+        });
+        break;
+      }
+      case 'remove_task': {
+        const k = await task(i, op.taskId);
+        await t.query(`delete from roadmap_tasks where id = $1`, [k.id]);
+        break;
+      }
+      case 'assign_role': {
+        person(i, op.userId);
+        await ensureRole(op.role);
+        await t.query(`update roadmap_roles set user_id = $3 where roadmap_id = $1 and key = $2`, [roadmapId, op.role, op.userId]);
+        break;
+      }
+      case 'assign_video': {
+        const v = await video(i, op.videoId);
+        person(i, op.userId);
+        const n = await t.query(`update roadmap_tasks set assignee_id = $3 where video_id = $1 and role = $2 returning id`, [v.id, op.role, op.userId]);
+        if (!n.length) bad(i, `“${v.title}” has no ${ROADMAP_ROLE_LABEL[op.role].toLowerCase()} deliverables`);
+        break;
+      }
+    }
+  }
+  // weeks follow the publish days
+  await t.query(
+    `update roadmap_videos v set position = x.rn from (select id, row_number() over (order by publish_date, id) as rn from roadmap_videos where roadmap_id = $1) x where v.id = x.id`,
+    [roadmapId],
+  );
+  await logActivity(t, { actor: me, action: 'roadmap.changed', entityType: 'roadmap', entityId: roadmapId, summary: `Changed the content roadmap “${m.title}”: ${lines.join('; ')}`.slice(0, 2000) });
+  return { lines, given: [...given].filter((id) => id !== me.id) };
 }
 
 // ── routes ───────────────────────────────────────────────────────────────
@@ -395,7 +594,7 @@ export function registerRoadmapRoutes(app: FastifyInstance, ctx: Ctx) {
     const { id } = parse(z.object({ id: zs.id }), req.params);
     const { done } = parse(z.object({ done: z.boolean() }), req.body);
     const t = await db.one<{ roadmap_id: number; title: string; user_id: number | null }>(
-      `select t.roadmap_id, t.title, r.user_id from roadmap_tasks t join roadmaps m on m.id = t.roadmap_id and m.removed_at is null
+      `select t.roadmap_id, t.title, coalesce(t.assignee_id, r.user_id) as user_id from roadmap_tasks t join roadmaps m on m.id = t.roadmap_id and m.removed_at is null
          left join roadmap_roles r on r.roadmap_id = t.roadmap_id and r.key = t.role where t.id = $1`, [id],
     );
     if (!t) throw notFound('Deliverable');
@@ -405,6 +604,16 @@ export function registerRoadmapRoutes(app: FastifyInstance, ctx: Ctx) {
       [id, done, me.id],
     );
     return detail(Number(t.roadmap_id));
+  });
+
+  // changes by hand, or the assistant's proposal a manager applied: all of them or none
+  app.post('/api/roadmaps/:id/changes', async (req) => {
+    const me = requireManager(req);
+    const { id } = parse(z.object({ id: zs.id }), req.params);
+    const { ops } = parse(z.object({ ops: z.array(ROADMAP_OP).min(1, 'Nothing to change').max(40) }), req.body);
+    const out = await db.tx((t) => applyRoadmapOps(t, me, id, ops, ctx.now()));
+    for (const uid of out.given) await tellAssigned(db, id, me.id, uid);
+    return { ...(await detail(id)), lines: out.lines };
   });
 
   app.delete('/api/roadmaps/:id', async (req) => {

@@ -20,7 +20,7 @@ export function audienceOf(p: KindOf): Audience {
 
 /** Updates that only matter to some people (Admins count as managers). */
 export const ONLY_FOR: Record<string, Audience[]> = {
-  '2026-10-28-content-roadmap-upload-fix': ['managers'], '2026-10-28-delete-batch': ['managers'],
+  '2026-10-29-ask-ai': ['managers'], '2026-10-28-content-roadmap-upload-fix': ['managers'], '2026-10-28-delete-batch': ['managers'],
   '2026-10-26-thumbnails-from-youtube': ['managers', 'designers'],
   '2026-10-26-thumbnail-portfolio': ['managers', 'designers'], '2026-10-26-thumbnail-went-live': ['managers', 'designers'],
   '2026-10-25-editors-add-from-timeliner': ['managers'], '2026-10-25-thumbnails-always-in-menu': ['managers'], '2026-10-25-thumbnail-studio': ['managers', 'designers'],
@@ -53,6 +53,18 @@ export interface ChangelogEntry {
 }
 
 export const CHANGELOG: ChangelogEntry[] = [
+  {
+    id: '2026-10-29-ask-ai',
+    date: '2026-10-29',
+    title: 'Ask AI: tell the site what to change',
+    summary: 'Managers have Ask AI at the top of every page. Say what you want in your own words and it proposes the changes, in plain words, for you to apply. It also writes video briefs from your ideas.',
+    changes: [
+      { tag: 'new', text: 'Ask AI is beside the date at the top of every page (Ctrl J, or ⌘ J, opens it too). It knows the page you’re on, so “this batch” or “the 3rd video” means what you’re looking at, and it can see the rest of the workspace: clients, batches, shoots, the team and the content roadmap.' },
+      { tag: 'new', text: 'Ask it to move a shoot, change a batch’s deadlines or priority, give scripts to a writer, flag or clear a blocker, give someone a to-do, update a client’s guidance, or take you to a page. Nothing changes until you press Apply, and every change goes through the same checks as doing it by hand.' },
+      { tag: 'new', text: 'On the content roadmap it moves videos (with their deliverables), adds and removes videos and deliverables, changes dates and owners, and rewrites a video around your idea: a specific, creative brief with the idea, why owners would watch, the beats, the thumbnail and what to prepare. Say “give the scripting to Ben” and only that video’s writing goes to Ben.' },
+      { tag: 'improved', text: 'Content: a deliverable can now be given to one person on its own, and managers can change a deliverable’s day, time and owner, or remove it, with Change in its window. Uploading a new PDF is only needed for a new month.' },
+    ],
+  },
   {
     id: '2026-10-28-delete-batch',
     date: '2026-10-28',
