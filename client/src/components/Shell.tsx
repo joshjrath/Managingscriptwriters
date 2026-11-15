@@ -15,7 +15,7 @@ import { api, queryClient, useSave } from '../api';
 import type { Bootstrap, Notification, SearchResults, ThumbnailNotification } from '../../../shared/types';
 import { fmtDate, fmtStamp, fmtTimeZoneAbbr } from '../../../shared/format';
 import { nowInZone } from '../../../shared/dates';
-import { Avatar, Button, Dialog, Field, FormError, inputProps, setToastTag, useFieldId, useToast } from './ui';
+import { Avatar, Button, ClosingNotice, Dialog, Field, FormError, inputProps, setToastTag, useFieldId, useToast } from './ui';
 import { NewWorkDialog, type NewWorkTab, type NewWorkPreset } from './NewWork';
 import { MomentsHost } from './Moments';
 import { ModeBar, RecordingDialog, RecordingOffDialog, ViewAsDialog } from './ModeBar';
@@ -135,6 +135,7 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
           </div>
           {drawer && <MobileNav onClose={() => setDrawer(false)} />}
           <main className="page-main" id="main" tabIndex={-1}>
+            <ClosingNotice />
             <div key={loc.pathname} className="page-enter"><Outlet /></div>
           </main>
         </div>

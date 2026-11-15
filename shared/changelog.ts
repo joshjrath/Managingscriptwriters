@@ -55,6 +55,15 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-15-site-closing-timeliner',
+    date: '2026-11-15',
+    title: 'This website is closing: submit everything through Timeliner',
+    summary: 'This website will no longer be active. All submissions now go through Timeliner.',
+    changes: [
+      { tag: 'new', text: 'A large notice at the top of every page, and on the sign-in page, says the site is closing and that all submissions go through Timeliner.' },
+    ],
+  },
+  {
     id: '2026-10-29-archived-videos-leave',
     date: '2026-10-29',
     title: 'Videos archived in Timeliner leave the editors’ lists',

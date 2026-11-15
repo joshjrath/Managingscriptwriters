@@ -24,6 +24,19 @@ export const Button = forwardRef<HTMLButtonElement, BtnProps>(function Button({ 
 
 // ── chips ────────────────────────────────────────────────────────────────
 
+/** Site-wide notice that this site is closing and all submissions move to Timeliner. Shown at the top of every page and on sign-in. */
+export function ClosingNotice() {
+  return (
+    <div className="closing-notice" role="alert">
+      <AlertTriangle size={36} aria-hidden />
+      <div>
+        <h2>This website is closing</h2>
+        <p>From now on, <b>all submissions go through Timeliner.</b> Please don’t submit anything here. Anything sent here may not be seen.</p>
+      </div>
+    </div>
+  );
+}
+
 export function Chip({ color = 'neutral', icon, dot, solid, children, title }: { color?: string; icon?: ReactNode; dot?: boolean; solid?: boolean; children: ReactNode; title?: string }) {
   return (
     <span className={`chip ${color}${solid ? ' solid' : ''}`} title={title}>
