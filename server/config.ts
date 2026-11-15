@@ -37,6 +37,8 @@ export interface Config {
   timelinerSyncMinutes: number;
   /** the built client; an empty STATIC_DIR (the dev runner) serves no client */
   staticDir: string | undefined;
+  /** VIEW_ONLY (on unless set to off): the site is closing and submissions go through Timeliner, so only Admins can change anything and writers see only their due work and the calendar */
+  viewOnly: boolean;
   remindersEnabled: boolean;
   reminderIntervalMinutes: number;
   /** synced calendars are re-read on a timer (CALENDAR_SYNC=off turns it off) */
@@ -119,6 +121,7 @@ export function loadConfig(
     timelinerSyncEnabled: flag('TIMELINER_SYNC', true),
     timelinerSyncMinutes: number('TIMELINER_SYNC_MINUTES', 5, 1, 24 * 60),
     staticDir: env.STATIC_DIR !== undefined ? env.STATIC_DIR || undefined : defaults.staticDir,
+    viewOnly: flag('VIEW_ONLY', true),
     remindersEnabled: flag('REMINDERS', true),
     reminderIntervalMinutes: number('REMINDER_INTERVAL_MINUTES', 10, 1, 24 * 60),
     calendarSyncEnabled: flag('CALENDAR_SYNC', true),

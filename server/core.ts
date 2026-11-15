@@ -50,6 +50,8 @@ export interface Ctx {
   realDb?: Db;
   /** the database this request is using right now (for work that outlives the handler, like streaming a file) */
   dbNow?: () => Db;
+  /** the site is view-only: anyone but an Admin can only look, and writers see only their due work and the calendar (VIEW_ONLY in loadConfig; off unless set, so tests opt in) */
+  viewOnly?: boolean;
   /** whether this server sends reminders (REMINDERS in loadConfig); on unless set */
   remindersEnabled?: boolean;
   /** synced calendars may point at private addresses (CALENDAR_ALLOW_PRIVATE, for local testing only) */

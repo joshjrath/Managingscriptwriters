@@ -22,8 +22,8 @@ import { requireUser, SESSION_COOKIE, sha, userForToken } from './auth';
 import { auditEvent } from './audit';
 import { HttpError, isApiRequest, parse, requestPath, zs } from './http';
 import type { Ctx } from './core';
-import { RECORDING_ENDED, RECORDING_HEADER, type Me, type SessionMode } from '../shared/types';
-import { isAdmin, personLabel } from '../shared/workflow';
+import { RECORDING_ENDED, RECORDING_HEADER, VIEW_ONLY, type Me, type SessionMode } from '../shared/types';
+import { isAdmin, isViewOnly, personLabel } from '../shared/workflow';
 
 const IDLE_MS = 6 * 3600_000;
 const MAX_SANDBOXES = 2;
@@ -206,6 +206,13 @@ export function registerRecording(app: FastifyInstance, ctx: Ctx, realDb: Db, al
       if (!path.startsWith('/api/admin/') && !path.startsWith('/api/auth/')) {
         throw new HttpError(409, 'Recording mode has ended (the practice copy was closed), so nothing was saved. Reload the page to carry on.', undefined, RECORDING_ENDED);
       }
+    }
+    // The site is closing and submissions go through Timeliner: anyone but an Admin can only look.
+    // Signing in and out, their own password and time zone, and marking things read still work.
+    if (ctx.viewOnly && isViewOnly(real.role) && req.method !== 'GET' && req.method !== 'HEAD') {
+      const path = requestPath(req);
+      if (path.startsWith('/api/auth/') || path === '/api/me/password' || path === '/api/me/timezone' || path in QUIET || /^\/api\/messages\/\d+\/read$/.test(path)) return;
+      throw new HttpError(403, 'This website is now view-only. All submissions go through Timeliner.', undefined, VIEW_ONLY);
     }
     if (!m) return;
     if (m.sandbox) {

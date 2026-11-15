@@ -1,5 +1,5 @@
 import { StrictMode, useEffect, type ReactElement } from 'react';
-import { homePath, isEditor, isManager, isThumbnailDesigner, isVideoEditor } from '../../shared/workflow';
+import { homePath, isEditor, isManager, isThumbnailDesigner, isVideoEditor, isWriterOnly } from '../../shared/workflow';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { QueryClientProvider, useQuery } from '@tanstack/react-query';
@@ -76,6 +76,8 @@ function Gate() {
   const home = homePath(me);
   // editors (video editors and thumbnail designers) only have their own pages; anything else takes them home
   const only = (el: ReactElement) => (isEditor(role) ? <Navigate to={home} replace /> : el);
+  // while the site is view-only, writers have only their due work (My work and its batches) and the calendar; anything else takes them home
+  const notWriters = (el: ReactElement) => (boot.data!.viewOnly && isWriterOnly(role) ? <Navigate to={home} replace /> : el);
   // the review queue (other writers' feedback), the team page and the thumbnail board are for managers
   const managers = (el: ReactElement) => (isManager(role) ? el : <Navigate to={home} replace />);
   // a thumbnail designer's Studio and briefs; managers open any designer's, read-only
@@ -93,22 +95,22 @@ function Gate() {
         <Route path="/studio/refs" element={isThumbnailDesigner(me) ? <StudioRefsPage /> : <Navigate to={isManager(role) ? '/studio' : home} replace />} />
         <Route path="/thumbnails" element={managers(<ThumbnailsPage />)} />
         <Route path="/thumbnails/:id" element={managers(<ThumbBriefPage />)} />
-        <Route path="/overview" element={only(<Overview />)} />
+        <Route path="/overview" element={notWriters(only(<Overview />))} />
         <Route path="/my-work" element={only(<MyWorkPage />)} />
-        <Route path="/production" element={only(<Production />)} />
+        <Route path="/production" element={notWriters(only(<Production />))} />
         <Route path="/calendar" element={<CalendarPage />} />
-        {/* the long-form content roadmap: everyone reads it */}
-        <Route path="/content" element={<ContentPage />} />
-        <Route path="/content/:id" element={<ContentPage />} />
-        <Route path="/clients" element={<ClientsPage />} />
-        <Route path="/clients/:id" element={<ClientPage />} />
+        {/* the long-form content roadmap: everyone but writers reads it */}
+        <Route path="/content" element={notWriters(<ContentPage />)} />
+        <Route path="/content/:id" element={notWriters(<ContentPage />)} />
+        <Route path="/clients" element={notWriters(<ClientsPage />)} />
+        <Route path="/clients/:id" element={notWriters(<ClientPage />)} />
         <Route path="/batches/:id" element={only(<BatchPage />)} />
         <Route path="/review" element={managers(<ReviewPage />)} />
-        <Route path="/resources" element={<ResourcesPage />} />
-        <Route path="/scripts" element={<ScriptBankPage />} />
+        <Route path="/resources" element={notWriters(<ResourcesPage />)} />
+        <Route path="/scripts" element={notWriters(<ScriptBankPage />)} />
         <Route path="/writers" element={managers(<WritersPage />)} />
         <Route path="/editors" element={managers(<EditorsPage />)} />
-        <Route path="/settings" element={only(<SettingsPage />)} />
+        <Route path="/settings" element={notWriters(only(<SettingsPage />))} />
         <Route path="/log" element={only(<MasterLogPage />)} />
         <Route path="/whats-new" element={<WhatsNewPage />} />
         <Route path="*" element={<NotFound />} />

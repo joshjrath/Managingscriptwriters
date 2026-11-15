@@ -196,6 +196,8 @@ export interface SessionMode {
 
 /** The error code when a page in Recording mode tries a change after its practice copy is gone (a restart, or the copy was closed). */
 export const RECORDING_ENDED = 'recording_ended';
+/** The error code when anyone but an Admin tries a change: the site is view-only now that submissions go through Timeliner. */
+export const VIEW_ONLY = 'view_only';
 
 export interface Bootstrap {
   /** who the site is showing (the viewed person while viewing as someone) */
@@ -205,6 +207,8 @@ export interface Bootstrap {
   notesImport: boolean;
   /** a thumbnail option's AI second look is set up on the server (ANTHROPIC_API_KEY): the button shows on a designer's own options (never while an Admin is viewing as them) */
   secondLook: boolean;
+  /** the site is closing (submissions go through Timeliner): anyone but an Admin can only look, and writers see only My work and the calendar */
+  viewOnly: boolean;
   /**
    * AI brief ideas are set up on the server (ANTHROPIC_API_KEY, ctx.briefHelper): New thumbnail offers "Suggest
    * ideas" to managers only when this is true (POST /api/thumbnails/suggest), and it's false while an Admin views as

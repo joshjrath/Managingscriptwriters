@@ -199,6 +199,10 @@ export function newlyAdded<T extends { status: ScriptStatus; assignedAt: string 
 export const isManager = (role: Role) => role === 'manager' || role === 'owner';
 /** Admin-only features: Master log, View as, Recording mode, Settings → Editors, the colour palette. */
 export const isAdmin = (role: Role) => role === 'owner';
+/** The site is closing (submissions moved to Timeliner): only Admins can change anything; everyone else can only look. */
+export const isViewOnly = (role: Role) => !isAdmin(role);
+/** Writers (not managers or editors) see only their due work (My work, and the batches it links to) and the calendar. */
+export const isWriterOnly = (role: Role) => !isManager(role) && !isEditor(role);
 /** Editors cut the videos: they see the calendar, finished scripts, clients and resources, read-only. */
 export const isEditor = (role: Role) => role === 'editor';
 /** Who can be given scripts to write. */

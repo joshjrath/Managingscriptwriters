@@ -3,7 +3,7 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { applyNavOrder, homePath, isAdmin, isEditor, isManager, isThumbnailDesigner, isVideoEditor, NAV_PATHS, personLabel } from '../../../shared/workflow';
+import { applyNavOrder, homePath, isAdmin, isEditor, isManager, isThumbnailDesigner, isVideoEditor, isViewOnly, NAV_PATHS, personLabel } from '../../../shared/workflow';
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -79,7 +79,9 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
   // every confirmation in Recording mode says it isn't kept
   useEffect(() => { setToastTag(boot.mode?.recording ? 'Practice copy · not kept' : null); }, [boot.mode?.recording]);
   // View as is look-only: dialog save buttons say so up front instead of failing after the form is filled in
-  const viewOnly = !!boot.mode?.viewingAs && !boot.mode?.recording;
+  // and now the site is closing, everyone but an Admin is look-only too (the server refuses their changes)
+  const closed = boot.viewOnly && !boot.mode?.viewingAs && isViewOnly(boot.me.role);
+  const viewOnly = closed || (!!boot.mode?.viewingAs && !boot.mode?.recording);
   const toastVO = useToast();
   useEffect(() => {
     document.body.classList.toggle('view-only', viewOnly);
@@ -88,11 +90,11 @@ export function AppShell({ boot }: { boot: Bootstrap }) {
       const b = (e.target as HTMLElement).closest('.form-actions:not(.mode-ok) .btn.primary, .form-actions:not(.mode-ok) button[type=submit], .wc-task-actions .btn.primary');
       if (!b) return;
       e.preventDefault(); e.stopPropagation();
-      toastVO('View as is look-only. Turn on Recording mode to try changes.', 'error');
+      toastVO(closed ? 'This website is now view-only. All submissions go through Timeliner.' : 'View as is look-only. Turn on Recording mode to try changes.', 'error');
     };
     document.addEventListener('click', stop, true);
     return () => { document.removeEventListener('click', stop, true); document.body.classList.remove('view-only'); };
-  }, [viewOnly, toastVO]);
+  }, [viewOnly, closed, toastVO]);
 
   const toggle = () => {
     // at medium widths the rail starts collapsed; the toggle expands it instead
@@ -186,6 +188,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
   ];
   // writers: their own work first, then their Overview and the Production board, then where to find things
+  // (while the site is view-only, only their due work and the calendar)
   const writerItems = [
     { to: '/my-work', label: 'My work', icon: <PenLine />, count: counts.myOpenScripts || undefined, fresh: counts.myNewWork > 0 },
     { to: '/content', label: 'Content', icon: <Film /> },
@@ -195,7 +198,7 @@ function Rail({ onToggle, collapsed, mobile }: { onToggle?: () => void; collapse
     { to: '/scripts', label: 'Script bank', icon: <Library /> },
     { to: '/resources', label: 'Resources', icon: <FolderOpen /> },
     { to: '/clients', label: 'Clients', icon: <Building2 /> },
-  ];
+  ].filter((x) => !boot.viewOnly || x.to === '/my-work' || x.to === '/calendar');
   const own: { to: string; label: string; icon: ReactNode; count?: number; hot?: boolean; fresh?: boolean; show?: boolean; not?: string[] }[] = isThumbnailDesigner(me) ? designerItems : isEditor(me.role) ? editorItems : !manager ? writerItems : [
     { to: '/overview', label: 'Overview', icon: <LayoutDashboard />, count: counts.attention || undefined, hot: counts.attention > 0 },
     { to: '/content', label: 'Content', icon: <Film /> },
