@@ -180,7 +180,7 @@ export function registerViewRoutes(app: FastifyInstance, ctx: Ctx) {
     const seen = await db.one<{ whats_new_seen: string | null; timezone: string | null; timezone_confirmed_at: string | null; temp: boolean }>(
       `select whats_new_seen, timezone, timezone_confirmed_at, temp_password is not null as temp from users where id = $1`, [me.id]);
     return {
-      me, mode: sessionMode(req), notesImport: !!ctx.notesReader, secondLook: !!ctx.thumbCritic && !req.viewingAs,
+      me, mode: sessionMode(req), notesImport: !!ctx.notesReader, secondLook: !!ctx.thumbCritic && !req.viewingAs, viewOnly: !!ctx.viewOnly,
       // AI brief ideas in New thumbnail, for managers; off while an Admin views as someone, as the route is (it would use their limits)
       briefIdeas: !!ctx.briefHelper && !req.viewingAs,
       // reading a content roadmap's PDF, for managers; off while an Admin views as someone, as the route is

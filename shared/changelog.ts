@@ -55,6 +55,17 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-15-view-only',
+    date: '2026-11-15',
+    title: 'The website is now view-only',
+    summary: 'Now that all submissions go through Timeliner, only Admins can change anything here. Everyone else can still look.',
+    changes: [
+      { tag: 'improved', text: 'Managers, writers and editors can no longer add, edit, send or delete anything here. Trying to says to use Timeliner instead.' },
+      { tag: 'improved', text: 'Writers now see just two pages: My work (the work they have due) and the Calendar.' },
+      { tag: 'improved', text: 'You can still sign in and out, change your password and mark notifications read.' },
+    ],
+  },
+  {
     id: '2026-11-15-site-closing-timeliner',
     date: '2026-11-15',
     title: 'This website is closing: submit everything through Timeliner',
