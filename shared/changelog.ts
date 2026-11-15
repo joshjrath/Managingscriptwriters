@@ -55,6 +55,16 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    id: '2026-11-15-site-gone',
+    date: '2026-11-15',
+    title: 'This website is gone: everything has moved to Timeliner',
+    summary: 'Visitors now see a page saying the website is gone and everything has moved to Timeliner. Only the owner can still sign in.',
+    changes: [
+      { tag: 'improved', text: 'The sign-in page is replaced by a notice that everything has moved to Timeliner.' },
+      { tag: 'improved', text: 'Only the owner’s account can sign in; everyone else is signed out.' },
+    ],
+  },
+  {
     id: '2026-11-15-view-only',
     date: '2026-11-15',
     title: 'The website is now view-only',

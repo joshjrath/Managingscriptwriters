@@ -6,9 +6,29 @@ import { timeZoneList } from '../../../shared/cities';
 import { api, type ApiError } from '../api';
 import { Button, ClosingNotice, Field, FormError, inputProps, useFieldId } from '../components/ui';
 
-export interface AuthStatus { signedIn: boolean; needsSetup: boolean; setupAllowed: boolean; setupHint: string | null; demo: boolean; orgName: string; theme?: WorkspaceTheme | null }
+export interface AuthStatus { signedIn: boolean; closed?: boolean; needsSetup: boolean; setupAllowed: boolean; setupHint: string | null; demo: boolean; orgName: string; theme?: WorkspaceTheme | null }
 
 export function Login({ status, onDone, signedOut }: { status: AuthStatus; onDone: () => void; signedOut?: boolean }) {
+  const [reveal, setReveal] = useState(false);
+  if (status.closed && !reveal) return <Gone onSignIn={() => setReveal(true)} />;
+  return <LoginForm status={status} onDone={onDone} signedOut={signedOut} />;
+}
+
+/** The site has moved to Timeliner: this is all anyone sees, with a small sign-in link in the corner for the owner. */
+function Gone({ onSignIn }: { onSignIn: () => void }) {
+  return (
+    <main className="login gone">
+      <div className="login-card">
+        <div className="wordmark"><span className="full" style={{ color: '#fff' }}>SCALE</span>&nbsp;<span>Media</span></div>
+        <h1>This website is gone</h1>
+        <p className="sub">Everything has moved to <b>Timeliner</b>. Please use Timeliner for all scripts, submissions and deadlines from now on.</p>
+      </div>
+      <button type="button" className="gone-signin" onClick={onSignIn}>Sign in</button>
+    </main>
+  );
+}
+
+function LoginForm({ status, onDone, signedOut }: { status: AuthStatus; onDone: () => void; signedOut?: boolean }) {
   const setup = status.needsSetup;
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');

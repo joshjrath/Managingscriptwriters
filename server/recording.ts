@@ -186,7 +186,9 @@ export function registerRecording(app: FastifyInstance, ctx: Ctx, realDb: Db, al
   app.addHook('onRequest', async (req: FastifyRequest, reply: FastifyReply) => {
     if (!isApiRequest(req)) return;
     const token = req.cookies[SESSION_COOKIE];
-    const real = await userForToken(realDb, token);
+    const found = await userForToken(realDb, token);
+    // the site has moved to Timeliner: anyone else's session counts as signed out
+    const real = found && ctx.onlySignIn && found.email.toLowerCase() !== ctx.onlySignIn ? null : found;
     req.user = real;
     req.realUser = real;
     req.viewingAs = null;

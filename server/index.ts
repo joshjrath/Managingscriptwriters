@@ -64,6 +64,7 @@ async function main() {
     // Add past thumbnails reads YouTube itself, with or without YOUTUBE_API_KEY (the key only gives a surer publish date)
     youtube: youtubeReader({ apiKey: config.youtubeApiKey }),
     viewOnly: config.viewOnly,
+    onlySignIn: config.onlySignIn,
     remindersEnabled: config.remindersEnabled,
     calendarAllowPrivate: config.calendarAllowPrivate,
     // the editors' videos are read from Timeliner, and a script document uploaded there marks its batch delivered

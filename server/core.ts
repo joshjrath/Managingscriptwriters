@@ -52,6 +52,8 @@ export interface Ctx {
   dbNow?: () => Db;
   /** the site is view-only: anyone but an Admin can only look, and writers see only their due work and the calendar (VIEW_ONLY in loadConfig; off unless set, so tests opt in) */
   viewOnly?: boolean;
+  /** the one email that may sign in or stay signed in (ONLY_SIGN_IN in loadConfig); absent lets everyone in */
+  onlySignIn?: string;
   /** whether this server sends reminders (REMINDERS in loadConfig); on unless set */
   remindersEnabled?: boolean;
   /** synced calendars may point at private addresses (CALENDAR_ALLOW_PRIVATE, for local testing only) */
