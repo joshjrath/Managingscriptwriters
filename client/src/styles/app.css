@@ -4118,3 +4118,8 @@ a.live-badge:focus-visible { outline: 2px solid var(--focus); outline-offset: 2p
 .closing-notice h2 { margin: 0 0 6px; font-size: 26px; line-height: 1.2; }
 .closing-notice p { margin: 0; font-size: 17px; line-height: 1.45; }
 @media (max-width: 600px) { .closing-notice { padding: 16px; } .closing-notice h2 { font-size: 21px; } .closing-notice p { font-size: 15px; } }
+
+/* the site has moved to Timeliner: a small sign-in link tucked in the corner */
+.gone { position: relative; }
+.gone-signin { position: fixed; right: 12px; bottom: 10px; background: none; border: 0; padding: 4px 6px; font-size: 11px; color: var(--text-3, var(--text-2)); opacity: 0.45; cursor: pointer; }
+.gone-signin:hover, .gone-signin:focus-visible { opacity: 1; text-decoration: underline; }

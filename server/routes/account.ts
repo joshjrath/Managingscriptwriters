@@ -33,6 +33,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
     const settings = await loadSettings(db);
     return {
       signedIn: !!req.user,
+      closed: !!ctx.onlySignIn,
       needsSetup: (users?.n ?? 0) === 0,
       setupAllowed: ctx.allowSetup,
       setupHint: ctx.setupHint ?? null,
@@ -44,6 +45,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
 
   app.post('/api/auth/login', async (req, reply) => {
     const input = parse(z.object({ email, password }), req.body);
+    if (ctx.onlySignIn && input.email !== ctx.onlySignIn) throw new HttpError(403, 'This website is gone. Everything has moved to Timeliner.');
     checkThrottle(req.ip, input.email);
     const u = await db.one<{ id: number; password_hash: string; active: boolean }>(`select id, password_hash, active and removed_at is null as active from users where lower(email) = $1`, [input.email]);
     const ok = u ? await verifyPassword(input.password, u.password_hash) : await verifyPassword(input.password, 'scrypt$AAAA$AAAA');
@@ -74,6 +76,7 @@ export function registerAccountRoutes(app: FastifyInstance, ctx: Ctx) {
 
   // First run only: creates the first manager when there are no users yet.
   app.post('/api/auth/setup', async (req, reply) => {
+    if (ctx.onlySignIn) throw new HttpError(403, 'This website is gone. Everything has moved to Timeliner.');
     if (!ctx.allowSetup) throw new HttpError(403, 'Setup from the browser is disabled here. Set MANAGER_EMAIL and MANAGER_PASSWORD on the server instead.');
     const input = parse(z.object({
       name: zs.name('Name', 120), email, password,

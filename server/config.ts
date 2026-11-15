@@ -39,6 +39,8 @@ export interface Config {
   staticDir: string | undefined;
   /** VIEW_ONLY (on unless set to off): the site is closing and submissions go through Timeliner, so only Admins can change anything and writers see only their due work and the calendar */
   viewOnly: boolean;
+  /** ONLY_SIGN_IN: the one email that may sign in (the site has moved to Timeliner); on hosts it defaults to the owner, `off` lets everyone in again; locally off */
+  onlySignIn: string | undefined;
   remindersEnabled: boolean;
   reminderIntervalMinutes: number;
   /** synced calendars are re-read on a timer (CALENDAR_SYNC=off turns it off) */
@@ -122,6 +124,7 @@ export function loadConfig(
     timelinerSyncMinutes: number('TIMELINER_SYNC_MINUTES', 5, 1, 24 * 60),
     staticDir: env.STATIC_DIR !== undefined ? env.STATIC_DIR || undefined : defaults.staticDir,
     viewOnly: flag('VIEW_ONLY', true),
+    onlySignIn: onlySignIn(set(env.ONLY_SIGN_IN), production),
     remindersEnabled: flag('REMINDERS', true),
     reminderIntervalMinutes: number('REMINDER_INTERVAL_MINUTES', 10, 1, 24 * 60),
     calendarSyncEnabled: flag('CALENDAR_SYNC', true),
@@ -147,4 +150,11 @@ function trustProxy(raw: string | undefined, warn: (msg: string) => void): boole
   if (Number.isInteger(hops) && hops >= 0 && hops <= 10) return hops;
   warn(`TRUST_PROXY=${JSON.stringify(raw)} is not true, false or a number of proxy hops; trusting every hop`);
   return true;
+}
+
+/** ONLY_SIGN_IN: an email, or off; unset means the owner on a host and nobody locally. */
+export function onlySignIn(raw: string | undefined, production: boolean): string | undefined {
+  if (raw === undefined) return production ? 'joshrath@scalemedia.com' : undefined;
+  const v = raw.trim().toLowerCase();
+  return OFF.has(v) || !v ? undefined : v;
 }

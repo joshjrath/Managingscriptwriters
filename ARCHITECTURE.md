@@ -121,6 +121,7 @@ Roles are **Admin** (`owner` in code), **Manager**, **Writer** and **Editor** (r
 ## Access
 
 - **View-only site** (`VIEW_ONLY`, on unless set to `off`; `Ctx.viewOnly`): the site is closing and submissions go through Timeliner. In `recording.ts`, any change (not GET or HEAD) by someone signed in who isn't an Admin (`isViewOnly`) is refused with 403 `view_only`, except `/api/auth/*`, their own password and time zone, and marking things read. `Bootstrap.viewOnly` tells the page: the toast replaces failed saves, and writers (`isWriterOnly`) get only My work (and the batches it links to) and the Calendar in the menu and routes. Tests build `Ctx` without it, so it's off there unless a test turns it on (`test/view-only.test.ts`).
+- **Only one sign-in** (`ONLY_SIGN_IN`; on hosts defaults to joshrath@scalemedia.com, `off` disables; `Ctx.onlySignIn`): the site has moved to Timeliner. Login and setup refuse any other email, `recording.ts` treats anyone else's session as signed out, and `/api/auth/status` returns `closed`, so the page shows "This website is gone" with a small Sign in link in the corner (`test/only-sign-in.test.ts`).
 - **Guards** (`server/auth.ts`):
 
   | Guard | Who passes |
