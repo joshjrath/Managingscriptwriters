@@ -4111,3 +4111,10 @@ a.live-badge:focus-visible { outline: 2px solid var(--focus); outline-offset: 2p
 }
 @media (prefers-reduced-motion: reduce) { .ai-mark, .ai-thinking i { animation: none; } }
 :root[data-motion="off"] .ai-mark, :root[data-motion="off"] .ai-thinking i { animation: none; }
+
+/* site closing notice: large and impossible to miss, on every page and on sign-in */
+.closing-notice { display: flex; gap: 16px; align-items: flex-start; margin: 0 0 24px; padding: 20px 24px; border-radius: 16px; background: color-mix(in srgb, var(--red) 16%, transparent); border: 2px solid var(--red); color: var(--text); }
+.closing-notice svg { flex: none; color: var(--red); }
+.closing-notice h2 { margin: 0 0 6px; font-size: 26px; line-height: 1.2; }
+.closing-notice p { margin: 0; font-size: 17px; line-height: 1.45; }
+@media (max-width: 600px) { .closing-notice { padding: 16px; } .closing-notice h2 { font-size: 21px; } .closing-notice p { font-size: 15px; } }

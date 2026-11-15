@@ -4,7 +4,7 @@ import type { WorkspaceTheme } from '../../../shared/palettes';
 import { useMemo, useState } from 'react';
 import { timeZoneList } from '../../../shared/cities';
 import { api, type ApiError } from '../api';
-import { Button, Field, FormError, inputProps, useFieldId } from '../components/ui';
+import { Button, ClosingNotice, Field, FormError, inputProps, useFieldId } from '../components/ui';
 
 export interface AuthStatus { signedIn: boolean; needsSetup: boolean; setupAllowed: boolean; setupHint: string | null; demo: boolean; orgName: string; theme?: WorkspaceTheme | null }
 
@@ -47,6 +47,7 @@ export function Login({ status, onDone, signedOut }: { status: AuthStatus; onDon
     <main className="login">
       <div className="login-card">
         <div className="wordmark"><span className="full" style={{ color: '#fff' }}>SCALE</span>&nbsp;<span>Media</span></div>
+        <ClosingNotice />
         <h1>{setup ? 'Set up your workspace' : 'Sign in'}</h1>
         <p className="sub">{setup ? 'Create the first admin account. You can add managers and writers afterwards.' : 'Script production for the SCALE Media team.'}</p>
         {signedOut && !setup && <div className="banner" role="status" style={{ marginBottom: 14 }}><div className="txt"><b>You were signed out</b><span>If an admin or manager reset your password, use the new one they sent you.</span></div></div>}
